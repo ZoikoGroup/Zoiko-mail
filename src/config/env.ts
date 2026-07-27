@@ -29,13 +29,18 @@ const envSchema = z.object({
   ATTACHMENT_MAX_SIZE_BYTES: z.coerce.number().int().positive().max(25 * 1024 * 1024).default(10 * 1024 * 1024),
   MAIL_SEND_WINDOW_MS: z.coerce.number().int().min(60_000).default(3_600_000),
   MAIL_MAX_RECIPIENTS_PER_WINDOW: z.coerce.number().int().positive().default(100),
+  MAIL_SCHEDULER_INTERVAL_MS: z.coerce.number().int().min(1_000).default(15_000),
+  MAIL_SCHEDULE_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
+  JOB_WORKER_INTERVAL_MS: z.coerce.number().int().min(1_000).default(10_000),
+  EXPORT_STORAGE_PATH: z.string().min(1).default("storage/exports"),
+  OPERATIONS_KEY: z.string().min(32).default("change-me-operations-key-min-32-chars"),
   BCRYPT_ROUNDS: z.coerce.number().int().min(10).max(15).default(12),
 }).superRefine((value, context) => {
   if (value.JWT_ACCESS_SECRET === value.JWT_REFRESH_SECRET) {
     context.addIssue({ code: "custom", path: ["JWT_REFRESH_SECRET"], message: "must differ from JWT_ACCESS_SECRET" });
   }
   if (value.NODE_ENV === "production") {
-    for (const key of ["JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET"] as const) {
+    for (const key of ["JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET", "OPERATIONS_KEY"] as const) {
       if (/change-me|example|development|test-secret/i.test(value[key])) {
         context.addIssue({ code: "custom", path: [key], message: "must be a production secret" });
       }

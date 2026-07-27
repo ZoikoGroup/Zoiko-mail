@@ -36,6 +36,9 @@ model Tenant {
   integrationLinks IntegrationLink[]
   backgroundJobs BackgroundJob[]
   lifecycleRequests DataLifecycleRequest[]
+  supportAccessGrants SupportAccessGrant[]
+  mailLabels     MailLabel[]
+  messageLabels  MailboxMessageLabel[]
 
   @@map("tenants")
 }
@@ -64,6 +67,7 @@ model AppUser {
   createdIntegrationLinks IntegrationLink[] @relation("IntegrationCreator")
   createdJobs BackgroundJob[] @relation("JobCreator")
   lifecycleRequests DataLifecycleRequest[] @relation("LifecycleRequester")
+  approvedSupportGrants SupportAccessGrant[] @relation("SupportApprover")
 
   @@map("app_users")
 }
@@ -82,6 +86,7 @@ model TenantMembership {
   user            AppUser          @relation(fields: [userId], references: [id], onDelete: Cascade)
   mailbox         Mailbox?
   receivedMessages MessageRecipient[]
+  supportAccessGrants SupportAccessGrant[]
 
   @@unique([tenantId, userId])
   @@index([userId])
@@ -161,6 +166,7 @@ model Mailbox {
   tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   membership   TenantMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
   items        MailboxMessage[]
+  labels       MailLabel[]
 
   @@unique([tenantId, address])
   @@index([tenantId, membershipId])
@@ -177,6 +183,9 @@ model EmailMessage {
   htmlBody     String?         @map("html_body")
   status       MessageStatus   @default(DRAFT)
   sentAt       DateTime?       @map("sent_at")
+  scheduledAt  DateTime?       @map("scheduled_at")
+  scheduleAttempts Int         @default(0) @map("schedule_attempts")
+  scheduleLastError String?    @map("schedule_last_error")
   createdAt    DateTime        @default(now()) @map("created_at")
   updatedAt    DateTime        @updatedAt @map("updated_at")
   tenant       Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -233,14 +242,48 @@ model MailboxMessage {
   messageId String        @map("message_id") @db.Uuid
   folder    MailFolder
   isRead    Boolean       @default(false) @map("is_read")
+  isStarred Boolean       @default(false) @map("is_starred")
   createdAt DateTime      @default(now()) @map("created_at")
   updatedAt DateTime      @updatedAt @map("updated_at")
   mailbox   Mailbox       @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
   message   EmailMessage  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  labels    MailboxMessageLabel[]
 
   @@unique([mailboxId, messageId])
   @@index([tenantId, mailboxId, folder, createdAt])
   @@map("mailbox_messages")
+}
+
+model MailLabel {
+  id             String                @id @default(uuid()) @db.Uuid
+  tenantId       String                @map("tenant_id") @db.Uuid
+  mailboxId      String                @map("mailbox_id") @db.Uuid
+  name           String
+  normalizedName String                @map("normalized_name")
+  color          String
+  createdAt      DateTime              @default(now()) @map("created_at")
+  updatedAt      DateTime              @updatedAt @map("updated_at")
+  tenant         Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  mailbox        Mailbox               @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  messages       MailboxMessageLabel[]
+
+  @@unique([mailboxId, normalizedName])
+  @@index([tenantId, mailboxId])
+  @@map("mail_labels")
+}
+
+model MailboxMessageLabel {
+  tenantId        String         @map("tenant_id") @db.Uuid
+  mailboxMessageId String        @map("mailbox_message_id") @db.Uuid
+  labelId         String         @map("label_id") @db.Uuid
+  createdAt       DateTime       @default(now()) @map("created_at")
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  mailboxMessage  MailboxMessage @relation(fields: [mailboxMessageId], references: [id], onDelete: Cascade)
+  label           MailLabel      @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([mailboxMessageId, labelId])
+  @@index([tenantId, labelId])
+  @@map("mailbox_message_labels")
 }
 
 model MessageAttachment {
@@ -425,6 +468,37 @@ model DataLifecycleRequest {
   @@map("data_lifecycle_requests")
 }
 
+model SupportAccessGrant {
+  id                  String           @id @default(uuid()) @db.Uuid
+  tenantId            String           @map("tenant_id") @db.Uuid
+  supportMembershipId String           @map("support_membership_id") @db.Uuid
+  approvedByUserId    String           @map("approved_by_user_id") @db.Uuid
+  reason              String
+  scopes              SupportScope[]
+  expiresAt           DateTime         @map("expires_at")
+  revokedAt           DateTime?        @map("revoked_at")
+  createdAt           DateTime         @default(now()) @map("created_at")
+  tenant              Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supportMembership   TenantMembership @relation(fields: [supportMembershipId], references: [id], onDelete: Cascade)
+  approvedBy          AppUser          @relation("SupportApprover", fields: [approvedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, supportMembershipId, expiresAt])
+  @@map("support_access_grants")
+}
+
+model TenantDeletionReceipt {
+  id                    String   @id @default(uuid()) @db.Uuid
+  tenantId              String   @map("tenant_id") @db.Uuid
+  requestId             String   @unique @map("request_id") @db.Uuid
+  requestedByUserId     String   @map("requested_by_user_id") @db.Uuid
+  tenantNameHash        String   @map("tenant_name_hash")
+  deletedRecordCounts   Json     @map("deleted_record_counts")
+  deletedAt             DateTime @default(now()) @map("deleted_at")
+
+  @@index([tenantId, deletedAt])
+  @@map("tenant_deletion_receipts")
+}
+
 enum TenantStatus {
   ACTIVE
   SUSPENDED
@@ -465,7 +539,10 @@ enum PolicyStatus {
 
 enum MessageStatus {
   DRAFT
+  SCHEDULED
+  SENDING
   SENT
+  FAILED
 }
 
 enum RecipientType {
@@ -484,6 +561,7 @@ enum DeliveryStatus {
 enum MailFolder {
   DRAFTS
   INBOX
+  ARCHIVE
   SENT
   TRASH
 }
@@ -588,4 +666,10 @@ enum LifecycleStatus {
   COMPLETED
   REJECTED
   CANCELLED
+}
+enum SupportScope {
+  TENANT_DIAGNOSTICS
+  DNS_DIAGNOSTICS
+  DELIVERY_DIAGNOSTICS
+  AUDIT_READ
 }

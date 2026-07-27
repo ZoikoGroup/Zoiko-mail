@@ -16,6 +16,17 @@ import { apiRouter } from "./routes/index.js";
 import { openApiDocument } from "./config/openapi.js";
 import { prisma } from "./config/prisma.js";
 import { asyncHandler } from "./common/middleware/asyncHandler.js";
+import { attachmentStorage } from "./modules/mail/attachment.storage.js";
+import { exportStorage } from "./modules/lifecycle/export.storage.js";
+import { operationalMetrics } from "./config/operationalMetrics.js";
+import { timingSafeEqual } from "node:crypto";
+
+function operationsKeyValid(value: string | undefined) {
+  if (!value) return false;
+  const supplied = Buffer.from(value);
+  const expected = Buffer.from(env.OPERATIONS_KEY);
+  return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+}
 
 export function createApp() {
   const app = express();
@@ -76,11 +87,41 @@ export function createApp() {
   app.get(
     "/api/ready",
     asyncHandler(async (_req, res) => {
-      await prisma.$queryRaw`SELECT 1`;
+      await Promise.all([
+        prisma.$queryRaw`SELECT 1`,
+        attachmentStorage.check(),
+        exportStorage.check(),
+      ]);
       res.status(200).json({
         success: true,
-        data: { status: "READY", database: "UP", timestamp: new Date().toISOString() },
+        data: {
+          status: "READY",
+          database: "UP",
+          attachmentStorage: "UP",
+          exportStorage: "UP",
+          timestamp: new Date().toISOString(),
+        },
       });
+    })
+  );
+
+  app.get(
+    "/api/metrics",
+    asyncHandler(async (req, res) => {
+      if (!operationsKeyValid(req.header("x-operations-key"))) {
+        res.status(401).json({
+          success: false,
+          error: { code: "UNAUTHORIZED", message: "Operations authentication required" },
+          requestId: req.requestId,
+        });
+        return;
+      }
+      const [pendingJobs, dueScheduledMail] = await prisma.$transaction([
+        prisma.backgroundJob.count({ where: { status: { in: ["PENDING", "RETRY"] } } }),
+        prisma.emailMessage.count({ where: { status: "SCHEDULED", scheduledAt: { lte: new Date() } } }),
+      ]);
+      res.type("text/plain; version=0.0.4").status(200)
+        .send(operationalMetrics.render({ pendingJobs, dueScheduledMail }));
     })
   );
 

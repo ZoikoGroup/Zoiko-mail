@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
 import { policyService } from "./policy.service.js";
+import { retentionService } from "./retention.service.js";
 
 function context(req: Request) {
   const tenant = req.tenantContext!;
@@ -22,4 +23,10 @@ export const activate = asyncHandler(async (req: Request, res: Response) => {
 });
 export const evaluate = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await policyService.evaluate(req.body, context(req)), req.requestId);
+});
+export const previewRetention = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await retentionService.preview(req.body.asOf, context(req)), req.requestId);
+});
+export const executeRetention = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await retentionService.execute(req.body.asOf, context(req)), req.requestId);
 });

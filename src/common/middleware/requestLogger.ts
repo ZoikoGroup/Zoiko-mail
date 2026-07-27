@@ -1,11 +1,14 @@
 import type { NextFunction, Request, Response } from "express";
 import { logger } from "../../config/logger.js";
+import { operationalMetrics } from "../../config/operationalMetrics.js";
 
 export function requestLogger(req: Request, res: Response, next: NextFunction): void {
   const startedAt = process.hrtime.bigint();
+  operationalMetrics.requestStarted();
 
   res.on("finish", () => {
     const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+    operationalMetrics.requestFinished(res.statusCode, durationMs);
     const details = {
       requestId: req.requestId,
       method: req.method,

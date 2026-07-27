@@ -23,8 +23,17 @@ export const createDraft = asyncHandler(async (req: Request, res: Response) => {
 export const updateDraft = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await mailService.updateDraft(String(req.params.messageId), req.body, context(req)), req.requestId);
 });
+export const deleteDraft = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailService.deleteDraft(String(req.params.messageId), context(req)), req.requestId);
+});
 export const send = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await mailService.send(String(req.params.messageId), context(req)), req.requestId);
+});
+export const schedule = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 202, await mailService.schedule(String(req.params.messageId), req.body.scheduledAt, context(req)), req.requestId);
+});
+export const cancelSchedule = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailService.cancelSchedule(String(req.params.messageId), context(req)), req.requestId);
 });
 export const list = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await mailService.list(req.query as never, context(req)), req.requestId);
@@ -34,6 +43,33 @@ export const get = asyncHandler(async (req: Request, res: Response) => {
 });
 export const updateMailboxItem = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await mailService.updateMailboxItem(String(req.params.messageId), req.body, context(req)), req.requestId);
+});
+export const permanentlyDelete = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailService.permanentlyDelete(String(req.params.messageId), context(req)), req.requestId);
+});
+export const emptyTrash = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailService.emptyTrash(context(req)), req.requestId);
+});
+export const bulkAction = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailService.bulkAction(req.body, context(req)), req.requestId);
+});
+export const listLabels = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, { labels: await mailService.listLabels(context(req)) }, req.requestId);
+});
+export const createLabel = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 201, await mailService.createLabel(req.body, context(req)), req.requestId);
+});
+export const updateLabel = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailService.updateLabel(String(req.params.labelId), req.body, context(req)), req.requestId);
+});
+export const deleteLabel = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailService.deleteLabel(String(req.params.labelId), context(req)), req.requestId);
+});
+export const assignLabel = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailService.assignLabel(String(req.params.messageId), String(req.params.labelId), context(req)), req.requestId);
+});
+export const removeLabel = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailService.removeLabel(String(req.params.messageId), String(req.params.labelId), context(req)), req.requestId);
 });
 export const addAttachment = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(
@@ -84,4 +120,13 @@ export const updateSendingStatus = asyncHandler(async (req: Request, res: Respon
     await mailService.updateSendingStatus(String(req.params.mailboxId), req.body, context(req)),
     req.requestId
   );
+});
+export const reply = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 201, await mailService.createReply(String(req.params.messageId), req.body, false, context(req)), req.requestId);
+});
+export const replyAll = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 201, await mailService.createReply(String(req.params.messageId), req.body, true, context(req)), req.requestId);
+});
+export const forward = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 201, await mailService.createForward(String(req.params.messageId), req.body, context(req)), req.requestId);
 });

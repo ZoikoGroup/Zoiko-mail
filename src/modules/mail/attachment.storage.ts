@@ -1,4 +1,5 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
 import { isAbsolute, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { env } from "../../config/env.js";
@@ -7,6 +8,7 @@ export interface AttachmentStorage {
   save(data: Buffer): Promise<string>;
   read(storageKey: string): Promise<Buffer>;
   delete(storageKey: string): Promise<void>;
+  check(): Promise<void>;
 }
 
 export class LocalAttachmentStorage implements AttachmentStorage {
@@ -37,6 +39,11 @@ export class LocalAttachmentStorage implements AttachmentStorage {
 
   async delete(storageKey: string) {
     await rm(this.path(storageKey), { force: true });
+  }
+
+  async check() {
+    await mkdir(this.root, { recursive: true });
+    await access(this.root, constants.R_OK | constants.W_OK);
   }
 }
 

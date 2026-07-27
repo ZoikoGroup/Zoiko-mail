@@ -14,10 +14,10 @@ process.env.JWT_ACCESS_EXPIRES_IN ??= "15m";
 process.env.JWT_REFRESH_EXPIRES_IN ??= "7d";
 process.env.BCRYPT_ROUNDS ??= "4";
 process.env.CORS_ORIGIN ??= "http://localhost:3000";
-process.env.RATE_LIMIT_MAX ??= "1000";
-process.env.REGISTER_RATE_LIMIT_MAX ??= "1000";
-process.env.LOGIN_RATE_LIMIT_MAX ??= "1000";
-process.env.REFRESH_RATE_LIMIT_MAX ??= "1000";
+process.env.RATE_LIMIT_MAX = "10000";
+process.env.REGISTER_RATE_LIMIT_MAX = "10000";
+process.env.LOGIN_RATE_LIMIT_MAX = "10000";
+process.env.REFRESH_RATE_LIMIT_MAX = "10000";
 
 if (process.env.TEST_DATABASE_URL) {
   process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
@@ -45,7 +45,9 @@ beforeEach(async () => {
   const { prisma } = await import("../src/config/prisma.js");
 
   await prisma.refreshToken.deleteMany();
+  await prisma.tenantDeletionReceipt.deleteMany();
   await prisma.auditEvent.deleteMany();
+  await prisma.supportAccessGrant.deleteMany();
   await prisma.integrationLink.deleteMany();
   await prisma.dataLifecycleRequest.deleteMany();
   await prisma.backgroundJob.deleteMany();

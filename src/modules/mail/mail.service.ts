@@ -1,4 +1,4 @@
-import { Prisma, type MailFolder, type MembershipRole, type RecipientType } from "@prisma/client";
+import { Prisma, type MailFolder, type MembershipRole, type MessageStatus, type RecipientType } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 import { env } from "../../config/env.js";
 import { AppError } from "../../common/errors/AppError.js";
@@ -7,7 +7,7 @@ import { auditService } from "../audit/audit.service.js";
 import { policyService } from "../policy/policy.service.js";
 import { attachmentStorage } from "./attachment.storage.js";
 import { normalizeSubject, uniqueParticipants } from "../message/message.utils.js";
-import type { CreateDraftInput, ListMailInput, UpdateDraftInput, UpdateMailboxItemInput } from "./mail.schema.js";
+import type { BulkMailboxActionInput, CreateDraftInput, CreateLabelInput, ListMailInput, UpdateDraftInput, UpdateLabelInput, UpdateMailboxItemInput } from "./mail.schema.js";
 
 interface MailContext {
   tenantId: string;
@@ -39,6 +39,12 @@ function recipientRows(input: CreateDraftInput | UpdateDraftInput) {
       return [{ email, type: key.toUpperCase() as RecipientType }];
     })
   );
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[character]!);
 }
 
 export class MailService {
@@ -137,9 +143,198 @@ export class MailService {
     });
   }
 
-  async send(messageId: string, context: MailContext) {
+  async deleteDraft(messageId: string, context: MailContext) {
+    const mailbox = await this.mailbox(context);
     const draft = await prisma.emailMessage.findFirst({
-      where: { id: messageId, tenantId: context.tenantId, authorUserId: context.userId, status: "DRAFT" },
+      where: {
+        id: messageId,
+        tenantId: context.tenantId,
+        authorUserId: context.userId,
+        status: "DRAFT",
+        mailboxItems: { some: { tenantId: context.tenantId, mailboxId: mailbox.id, folder: "DRAFTS" } },
+      },
+      include: { attachments: { select: { storageKey: true, sizeBytes: true } } },
+    });
+    if (!draft) throw new AppError("Draft not found", 404, ErrorCodes.NOT_FOUND);
+
+    const attachmentBytes = draft.attachments.reduce((total, attachment) => total + attachment.sizeBytes, 0);
+    await prisma.$transaction(async (tx) => {
+      await this.audit(tx, context, "MAIL_DRAFT_DELETED", draft.id);
+      await tx.emailMessage.delete({ where: { id: draft.id, tenantId: context.tenantId } });
+      if (attachmentBytes > 0) {
+        await tx.mailbox.update({
+          where: { id: mailbox.id, tenantId: context.tenantId },
+          data: { storageUsed: { decrement: attachmentBytes } },
+        });
+      }
+      if (draft.threadId) {
+        const remaining = await tx.emailMessage.count({
+          where: { tenantId: context.tenantId, threadId: draft.threadId },
+        });
+        if (remaining === 0) {
+          await tx.messageThread.delete({ where: { id: draft.threadId, tenantId: context.tenantId } });
+        } else {
+          await tx.messageThread.update({
+            where: { id: draft.threadId, tenantId: context.tenantId },
+            data: { messageCount: remaining },
+          });
+        }
+      }
+    });
+    await Promise.all(draft.attachments.map((attachment) => attachmentStorage.delete(attachment.storageKey)));
+    return { deleted: true };
+  }
+
+  private async accessibleMessage(messageId: string, context: MailContext) {
+    const mailbox = await this.mailbox(context);
+    const item = await prisma.mailboxMessage.findFirst({
+      where: { tenantId: context.tenantId, mailboxId: mailbox.id, messageId },
+      include: { message: { include: { recipients: true, author: { select: { email: true } }, thread: { select: { participants: true } } } } },
+    });
+    if (!item) throw new AppError("Message not found", 404, ErrorCodes.NOT_FOUND);
+    return { mailbox, message: item.message };
+  }
+
+  async createReply(
+    messageId: string,
+    input: { textBody?: string | null; htmlBody?: string | null },
+    replyAll: boolean,
+    context: MailContext
+  ) {
+    const { mailbox, message: source } = await this.accessibleMessage(messageId, context);
+    if (!source.threadId) throw new AppError("Source message has no thread", 409, ErrorCodes.CONFLICT);
+    const self = context.email.toLowerCase();
+    const author = source.author.email.toLowerCase();
+    const to = new Set<string>();
+    const cc = new Set<string>();
+    if (author !== self) to.add(author);
+    if (replyAll) {
+      for (const recipient of source.recipients) {
+        const email = recipient.email.toLowerCase();
+        if (email === self || recipient.type === "BCC") continue;
+        if (recipient.type === "CC") cc.add(email);
+        else to.add(email);
+      }
+    }
+    for (const email of to) cc.delete(email);
+    if (to.size === 0) throw new AppError("Reply has no eligible recipient", 400, ErrorCodes.VALIDATION_ERROR);
+    const subject = /^re:/i.test(source.subject) ? source.subject : `Re: ${source.subject}`;
+    const textBody = `${input.textBody ?? ""}\n\n--- Original message ---\n${source.textBody ?? ""}`.trim();
+    const htmlBody = input.htmlBody
+      ? `${input.htmlBody}<hr><blockquote>${escapeHtml(source.textBody ?? "")}</blockquote>`
+      : null;
+
+    return prisma.$transaction(async (tx) => {
+      const draft = await tx.emailMessage.create({
+        data: {
+          tenantId: context.tenantId,
+          authorUserId: context.userId,
+          threadId: source.threadId,
+          subject,
+          textBody,
+          htmlBody,
+          recipients: {
+            create: [
+              ...[...to].map((email) => ({ tenantId: context.tenantId, email, type: "TO" as const })),
+              ...[...cc].map((email) => ({ tenantId: context.tenantId, email, type: "CC" as const })),
+            ],
+          },
+          mailboxItems: { create: { tenantId: context.tenantId, mailboxId: mailbox.id, folder: "DRAFTS", isRead: true } },
+        },
+        include: messageInclude,
+      });
+      await tx.messageThread.update({
+        where: { id: source.threadId!, tenantId: context.tenantId },
+        data: {
+          messageCount: { increment: 1 },
+          participants: uniqueParticipants([
+            ...(Array.isArray(source.thread?.participants) ? source.thread.participants.filter((value): value is string => typeof value === "string") : []),
+            context.email,
+            ...to,
+            ...cc,
+          ]),
+        },
+      });
+      await this.audit(tx, context, replyAll ? "MAIL_REPLY_ALL_DRAFT_CREATED" : "MAIL_REPLY_DRAFT_CREATED", draft.id, { sourceMessageId: source.id, threadId: source.threadId });
+      return draft;
+    });
+  }
+
+  async createForward(
+    messageId: string,
+    input: Omit<CreateDraftInput, "subject">,
+    context: MailContext
+  ) {
+    const { message: source } = await this.accessibleMessage(messageId, context);
+    const subject = /^fwd:/i.test(source.subject) ? source.subject : `Fwd: ${source.subject}`;
+    const textBody = `${input.textBody ?? ""}\n\n--- Forwarded message ---\nFrom: ${source.author.email}\nSubject: ${source.subject}\n\n${source.textBody ?? ""}`.trim();
+    const draft = await this.createDraft({ ...input, subject, textBody, htmlBody: input.htmlBody ?? null }, context);
+    await auditService.record({
+      tenantId: context.tenantId,
+      actorUserId: context.userId,
+      eventType: "MAIL_FORWARD_DRAFT_CREATED",
+      targetType: "EmailMessage",
+      targetId: draft.id,
+      requestId: context.requestId,
+      metadata: { sourceMessageId: source.id },
+    });
+    return draft;
+  }
+
+  async schedule(messageId: string, scheduledAt: Date, context: MailContext) {
+    const mailbox = await this.mailbox(context);
+    const draft = await prisma.emailMessage.findFirst({
+      where: {
+        id: messageId,
+        tenantId: context.tenantId,
+        authorUserId: context.userId,
+        status: "DRAFT",
+        mailboxItems: { some: { tenantId: context.tenantId, mailboxId: mailbox.id, folder: "DRAFTS" } },
+        recipients: { some: { tenantId: context.tenantId, type: "TO" } },
+      },
+      select: { id: true },
+    });
+    if (!draft) throw new AppError("Sendable draft not found", 404, ErrorCodes.NOT_FOUND);
+    return prisma.$transaction(async (tx) => {
+      const scheduled = await tx.emailMessage.update({
+        where: { id: draft.id, tenantId: context.tenantId },
+        data: { status: "SCHEDULED", scheduledAt, scheduleAttempts: 0, scheduleLastError: null },
+        include: messageInclude,
+      });
+      await this.audit(tx, context, "MAIL_SEND_SCHEDULED", draft.id, { scheduledAt: scheduledAt.toISOString() });
+      return scheduled;
+    });
+  }
+
+  async cancelSchedule(messageId: string, context: MailContext) {
+    const scheduled = await prisma.emailMessage.findFirst({
+      where: { id: messageId, tenantId: context.tenantId, authorUserId: context.userId, status: "SCHEDULED" },
+      select: { id: true },
+    });
+    if (!scheduled) throw new AppError("Scheduled message not found", 404, ErrorCodes.NOT_FOUND);
+    return prisma.$transaction(async (tx) => {
+      const draft = await tx.emailMessage.update({
+        where: { id: scheduled.id, tenantId: context.tenantId },
+        data: { status: "DRAFT", scheduledAt: null, scheduleAttempts: 0, scheduleLastError: null },
+        include: messageInclude,
+      });
+      await this.audit(tx, context, "MAIL_SEND_SCHEDULE_CANCELLED", scheduled.id);
+      return draft;
+    });
+  }
+
+  send(messageId: string, context: MailContext) {
+    return this.deliver(messageId, context, ["DRAFT"]);
+  }
+
+  private async deliver(messageId: string, context: MailContext, allowedStatuses: MessageStatus[]) {
+    const draft = await prisma.emailMessage.findFirst({
+      where: {
+        id: messageId,
+        tenantId: context.tenantId,
+        authorUserId: context.userId,
+        status: { in: allowedStatuses },
+      },
       include: { recipients: true },
     });
     if (!draft) throw new AppError("Draft not found", 404, ErrorCodes.NOT_FOUND);
@@ -297,7 +492,7 @@ export class MailService {
       });
       const message = await tx.emailMessage.update({
         where: { id: messageId, tenantId: context.tenantId },
-        data: { status: "SENT", sentAt },
+        data: { status: "SENT", sentAt, scheduledAt: null, scheduleLastError: null },
         include: messageInclude,
       });
       if (message.threadId) {
@@ -322,6 +517,85 @@ export class MailService {
       });
       throw error;
     }
+  }
+
+  async processDueScheduled(limit = 25) {
+    const due = await prisma.emailMessage.findMany({
+      where: { status: "SCHEDULED", scheduledAt: { lte: new Date() } },
+      select: { id: true, tenantId: true, authorUserId: true },
+      orderBy: { scheduledAt: "asc" },
+      take: Math.min(Math.max(limit, 1), 100),
+    });
+    let sent = 0;
+    let failed = 0;
+    for (const candidate of due) {
+      const claimed = await prisma.emailMessage.updateMany({
+        where: {
+          id: candidate.id,
+          tenantId: candidate.tenantId,
+          status: "SCHEDULED",
+          scheduledAt: { lte: new Date() },
+        },
+        data: { status: "SENDING", scheduleAttempts: { increment: 1 } },
+      });
+      if (claimed.count === 0) continue;
+
+      const membership = await prisma.tenantMembership.findFirst({
+        where: {
+          tenantId: candidate.tenantId,
+          userId: candidate.authorUserId,
+          status: "ACTIVE",
+          tenant: { status: "ACTIVE" },
+          user: { status: "ACTIVE" },
+        },
+        include: { user: { select: { email: true } } },
+      });
+      if (!membership) {
+        await prisma.emailMessage.update({
+          where: { id: candidate.id, tenantId: candidate.tenantId },
+          data: { status: "FAILED", scheduleLastError: "Sender membership is inactive" },
+        });
+        failed += 1;
+        continue;
+      }
+
+      const workerContext: MailContext = {
+        tenantId: candidate.tenantId,
+        userId: candidate.authorUserId,
+        membershipId: membership.id,
+        role: membership.role,
+        email: membership.user.email,
+      };
+      try {
+        await this.deliver(candidate.id, workerContext, ["SENDING"]);
+        sent += 1;
+      } catch (error) {
+        const current = await prisma.emailMessage.findFirst({
+          where: { id: candidate.id, tenantId: candidate.tenantId },
+          select: { scheduleAttempts: true },
+        });
+        const terminal = (current?.scheduleAttempts ?? env.MAIL_SCHEDULE_MAX_ATTEMPTS) >= env.MAIL_SCHEDULE_MAX_ATTEMPTS;
+        const message = error instanceof Error ? error.message.slice(0, 1000) : "Scheduled send failed";
+        await prisma.emailMessage.update({
+          where: { id: candidate.id, tenantId: candidate.tenantId },
+          data: {
+            status: terminal ? "FAILED" : "SCHEDULED",
+            scheduledAt: terminal ? null : new Date(Date.now() + 30_000),
+            scheduleLastError: message,
+          },
+        });
+        await auditService.record({
+          tenantId: candidate.tenantId,
+          actorUserId: candidate.authorUserId,
+          eventType: terminal ? "MAIL_SCHEDULE_FAILED" : "MAIL_SCHEDULE_RETRY",
+          targetType: "EmailMessage",
+          targetId: candidate.id,
+          metadata: { error: message, attempt: current?.scheduleAttempts ?? null },
+        });
+        failed += 1;
+      }
+    }
+    return { claimed: due.length, sent, failed };
   }
 
   async listDeliveryEvents(messageId: string, context: MailContext) {
@@ -378,11 +652,22 @@ export class MailService {
 
   async list(filters: ListMailInput, context: MailContext) {
     const mailbox = await this.mailbox(context);
-    const where = { tenantId: context.tenantId, mailboxId: mailbox.id, folder: filters.folder };
+    const where = {
+      tenantId: context.tenantId,
+      mailboxId: mailbox.id,
+      folder: filters.folder,
+      ...(filters.starredOnly ? { isStarred: true } : {}),
+      ...(filters.labelId ? {
+        labels: { some: { tenantId: context.tenantId, labelId: filters.labelId } },
+      } : {}),
+    };
     const [items, total] = await prisma.$transaction([
       prisma.mailboxMessage.findMany({
         where,
-        include: { message: { include: messageInclude } },
+        include: {
+          message: { include: messageInclude },
+          labels: { include: { label: true }, orderBy: { label: { name: "asc" } } },
+        },
         orderBy: { createdAt: "desc" },
         skip: (filters.page - 1) * filters.limit,
         take: filters.limit,
@@ -392,6 +677,7 @@ export class MailService {
     return {
       items: items.map((item) => ({
         ...item,
+        labels: item.labels.map((entry) => entry.label),
         message: {
           ...item.message,
           recipients: item.message.authorUserId === context.userId
@@ -407,11 +693,15 @@ export class MailService {
     const mailbox = await this.mailbox(context);
     const item = await prisma.mailboxMessage.findFirst({
       where: { tenantId: context.tenantId, mailboxId: mailbox.id, messageId },
-      include: { message: { include: messageInclude } },
+      include: {
+        message: { include: messageInclude },
+        labels: { include: { label: true }, orderBy: { label: { name: "asc" } } },
+      },
     });
     if (!item) throw new AppError("Message not found", 404, ErrorCodes.NOT_FOUND);
     return {
       ...item,
+      labels: item.labels.map((entry) => entry.label),
       message: {
         ...item.message,
         recipients: item.message.authorUserId === context.userId
@@ -427,12 +717,227 @@ export class MailService {
       where: { tenantId: context.tenantId, mailboxId: mailbox.id, messageId },
     });
     if (!item) throw new AppError("Message not found", 404, ErrorCodes.NOT_FOUND);
-    if (input.folder === "INBOX" && !["INBOX", "TRASH"].includes(item.folder)) {
-      throw new AppError("Only inbox messages can be restored", 400, ErrorCodes.VALIDATION_ERROR);
+    if (input.folder === "INBOX" && !["INBOX", "ARCHIVE", "TRASH"].includes(item.folder)) {
+      throw new AppError("Only archived or trashed inbox messages can be restored", 400, ErrorCodes.VALIDATION_ERROR);
     }
-    return prisma.mailboxMessage.update({
-      where: { id: item.id, tenantId: context.tenantId },
-      data: { isRead: input.isRead, folder: input.folder as MailFolder | undefined },
+    if (input.folder === "ARCHIVE" && !["INBOX", "ARCHIVE"].includes(item.folder)) {
+      throw new AppError("Only inbox messages can be archived", 400, ErrorCodes.VALIDATION_ERROR);
+    }
+    if (input.folder === "TRASH" && item.folder === "DRAFTS") {
+      throw new AppError("Drafts must be deleted using the draft endpoint", 400, ErrorCodes.VALIDATION_ERROR);
+    }
+    return prisma.$transaction(async (tx) => {
+      const updated = await tx.mailboxMessage.update({
+        where: { id: item.id, tenantId: context.tenantId },
+        data: {
+          isRead: input.isRead,
+          isStarred: input.isStarred,
+          folder: input.folder as MailFolder | undefined,
+        },
+      });
+      await this.audit(tx, context, "MAILBOX_ITEM_UPDATED", messageId, {
+        ...(input.isRead !== undefined ? { isRead: input.isRead } : {}),
+        ...(input.isStarred !== undefined ? { isStarred: input.isStarred } : {}),
+        ...(input.folder !== undefined ? { folder: input.folder } : {}),
+      });
+      return updated;
+    });
+  }
+
+  async bulkAction(input: BulkMailboxActionInput, context: MailContext) {
+    const mailbox = await this.mailbox(context);
+    const items = await prisma.mailboxMessage.findMany({
+      where: {
+        tenantId: context.tenantId,
+        mailboxId: mailbox.id,
+        messageId: { in: input.messageIds },
+      },
+      select: { id: true, messageId: true, folder: true },
+    });
+    if (items.length !== input.messageIds.length) {
+      throw new AppError("One or more messages were not found", 404, ErrorCodes.NOT_FOUND);
+    }
+
+    const invalid = items.some((item) => {
+      if (input.action === "ARCHIVE") return item.folder !== "INBOX" && item.folder !== "ARCHIVE";
+      if (input.action === "RESTORE") return item.folder !== "TRASH" && item.folder !== "ARCHIVE";
+      if (input.action === "TRASH") return item.folder === "DRAFTS";
+      return false;
+    });
+    if (invalid) {
+      throw new AppError("Bulk action is not valid for one or more message folders", 400, ErrorCodes.VALIDATION_ERROR);
+    }
+
+    const data: Prisma.MailboxMessageUpdateManyMutationInput =
+      input.action === "MARK_READ" ? { isRead: true }
+      : input.action === "MARK_UNREAD" ? { isRead: false }
+      : input.action === "STAR" ? { isStarred: true }
+      : input.action === "UNSTAR" ? { isStarred: false }
+      : input.action === "ARCHIVE" ? { folder: "ARCHIVE" }
+      : input.action === "TRASH" ? { folder: "TRASH" }
+      : { folder: "INBOX" };
+
+    return prisma.$transaction(async (tx) => {
+      const result = await tx.mailboxMessage.updateMany({
+        where: {
+          tenantId: context.tenantId,
+          mailboxId: mailbox.id,
+          messageId: { in: input.messageIds },
+        },
+        data,
+      });
+      await this.audit(tx, context, "MAILBOX_BULK_ACTION_COMPLETED", mailbox.id, {
+        action: input.action,
+        affectedCount: result.count,
+        messageIds: input.messageIds,
+      });
+      return { action: input.action, affectedCount: result.count };
+    });
+  }
+
+  async listLabels(context: MailContext) {
+    const mailbox = await this.mailbox(context);
+    return prisma.mailLabel.findMany({
+      where: { tenantId: context.tenantId, mailboxId: mailbox.id },
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+      include: { _count: { select: { messages: true } } },
+    });
+  }
+
+  async createLabel(input: CreateLabelInput, context: MailContext) {
+    const mailbox = await this.mailbox(context);
+    const normalizedName = input.name.toLocaleLowerCase();
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const label = await tx.mailLabel.create({
+          data: {
+            tenantId: context.tenantId,
+            mailboxId: mailbox.id,
+            name: input.name,
+            normalizedName,
+            color: input.color,
+          },
+        });
+        await this.audit(tx, context, "MAIL_LABEL_CREATED", label.id, { name: label.name });
+        return label;
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new AppError("A label with this name already exists", 409, ErrorCodes.CONFLICT);
+      }
+      throw error;
+    }
+  }
+
+  async updateLabel(labelId: string, input: UpdateLabelInput, context: MailContext) {
+    const mailbox = await this.mailbox(context);
+    const label = await prisma.mailLabel.findFirst({
+      where: { id: labelId, tenantId: context.tenantId, mailboxId: mailbox.id },
+    });
+    if (!label) throw new AppError("Label not found", 404, ErrorCodes.NOT_FOUND);
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const updated = await tx.mailLabel.update({
+          where: { id: label.id, tenantId: context.tenantId },
+          data: {
+            name: input.name,
+            normalizedName: input.name?.toLocaleLowerCase(),
+            color: input.color,
+          },
+        });
+        await this.audit(tx, context, "MAIL_LABEL_UPDATED", label.id);
+        return updated;
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new AppError("A label with this name already exists", 409, ErrorCodes.CONFLICT);
+      }
+      throw error;
+    }
+  }
+
+  async deleteLabel(labelId: string, context: MailContext) {
+    const mailbox = await this.mailbox(context);
+    const label = await prisma.mailLabel.findFirst({
+      where: { id: labelId, tenantId: context.tenantId, mailboxId: mailbox.id },
+    });
+    if (!label) throw new AppError("Label not found", 404, ErrorCodes.NOT_FOUND);
+    await prisma.$transaction(async (tx) => {
+      await tx.mailLabel.delete({ where: { id: label.id, tenantId: context.tenantId } });
+      await this.audit(tx, context, "MAIL_LABEL_DELETED", label.id, { name: label.name });
+    });
+    return { deleted: true };
+  }
+
+  async assignLabel(messageId: string, labelId: string, context: MailContext) {
+    const mailbox = await this.mailbox(context);
+    const [item, label] = await prisma.$transaction([
+      prisma.mailboxMessage.findFirst({
+        where: { tenantId: context.tenantId, mailboxId: mailbox.id, messageId },
+        select: { id: true },
+      }),
+      prisma.mailLabel.findFirst({
+        where: { id: labelId, tenantId: context.tenantId, mailboxId: mailbox.id },
+        select: { id: true },
+      }),
+    ]);
+    if (!item || !label) throw new AppError("Message or label not found", 404, ErrorCodes.NOT_FOUND);
+    return prisma.$transaction(async (tx) => {
+      await tx.mailboxMessageLabel.upsert({
+        where: { mailboxMessageId_labelId: { mailboxMessageId: item.id, labelId: label.id } },
+        create: { tenantId: context.tenantId, mailboxMessageId: item.id, labelId: label.id },
+        update: {},
+      });
+      await this.audit(tx, context, "MAIL_LABEL_ASSIGNED", messageId, { labelId });
+      return { assigned: true };
+    });
+  }
+
+  async removeLabel(messageId: string, labelId: string, context: MailContext) {
+    const mailbox = await this.mailbox(context);
+    const item = await prisma.mailboxMessage.findFirst({
+      where: { tenantId: context.tenantId, mailboxId: mailbox.id, messageId },
+      select: { id: true },
+    });
+    if (!item) throw new AppError("Message not found", 404, ErrorCodes.NOT_FOUND);
+    const result = await prisma.$transaction(async (tx) => {
+      const deleted = await tx.mailboxMessageLabel.deleteMany({
+        where: {
+          tenantId: context.tenantId,
+          mailboxMessageId: item.id,
+          labelId,
+          label: { tenantId: context.tenantId, mailboxId: mailbox.id },
+        },
+      });
+      if (deleted.count === 0) throw new AppError("Label assignment not found", 404, ErrorCodes.NOT_FOUND);
+      await this.audit(tx, context, "MAIL_LABEL_REMOVED", messageId, { labelId });
+      return deleted;
+    });
+    return { removed: result.count === 1 };
+  }
+
+  async permanentlyDelete(messageId: string, context: MailContext) {
+    const mailbox = await this.mailbox(context);
+    const item = await prisma.mailboxMessage.findFirst({
+      where: { tenantId: context.tenantId, mailboxId: mailbox.id, messageId, folder: "TRASH" },
+    });
+    if (!item) throw new AppError("Trashed message not found", 404, ErrorCodes.NOT_FOUND);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.mailboxMessage.delete({ where: { id: item.id, tenantId: context.tenantId } });
+      await this.audit(tx, context, "MAIL_TRASH_MESSAGE_DELETED", messageId, { mailboxId: mailbox.id });
+    });
+    return { deleted: true };
+  }
+
+  async emptyTrash(context: MailContext) {
+    const mailbox = await this.mailbox(context);
+    return prisma.$transaction(async (tx) => {
+      const result = await tx.mailboxMessage.deleteMany({
+        where: { tenantId: context.tenantId, mailboxId: mailbox.id, folder: "TRASH" },
+      });
+      await this.audit(tx, context, "MAIL_TRASH_EMPTIED", mailbox.id, { deletedCount: result.count });
+      return { deletedCount: result.count };
     });
   }
 

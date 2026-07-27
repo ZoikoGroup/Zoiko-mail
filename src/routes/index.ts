@@ -14,6 +14,7 @@ import { notificationRouter } from "../modules/notification/notification.routes.
 import { integrationRouter } from "../modules/integration/integration.routes.js";
 import { jobRouter } from "../modules/job/job.routes.js";
 import { lifecycleRouter } from "../modules/lifecycle/lifecycle.routes.js";
+import { supportRouter } from "../modules/support/support.routes.js";
 
 const apiRouter = Router();
 
@@ -33,5 +34,6 @@ apiRouter.use("/notifications", notificationRouter);
 apiRouter.use("/integrations", integrationRouter);
 apiRouter.use("/jobs", jobRouter);
 apiRouter.use("/lifecycle", lifecycleRouter);
+apiRouter.use("/support", supportRouter);
 
 export { apiRouter };

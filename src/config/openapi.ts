@@ -10,13 +10,19 @@ export const openApiDocument = {
     description: "Multi-tenant Zoiko Mail API. Tenant context is always derived from the verified access token.",
   },
   servers: [{ url: "http://localhost:5000", description: "Local development" }],
-  tags: ["System", "Authentication", "Users", "Tenants", "Memberships", "Policies", "Mail", "Messages", "Threads", "Domains", "AI", "Actions", "Notifications", "Integrations", "Audit"].map((name) => ({ name })),
+  tags: ["System", "Authentication", "Users", "Tenants", "Memberships", "Policies", "Mail", "Messages", "Threads", "Domains", "AI", "Actions", "Notifications", "Integrations", "Lifecycle", "Support", "Audit"].map((name) => ({ name })),
   paths: {
     "/api/health": {
       get: { tags: ["System"], summary: "Health check", responses: { "200": ok("API is healthy") } },
     },
     "/api/ready": {
-      get: { tags: ["System"], summary: "Database readiness check", responses: { "200": ok("API and database are ready"), "500": ok("Database unavailable") } },
+      get: { tags: ["System"], summary: "Database and local-storage readiness check", responses: { "200": ok("API dependencies are ready"), "500": ok("A required dependency is unavailable") } },
+    },
+    "/api/metrics": {
+      get: {
+        tags: ["System"], summary: "Prometheus metrics protected by x-operations-key",
+        responses: { "200": { description: "Prometheus text exposition" }, "401": { description: "Operations authentication required" } },
+      },
     },
     "/api/v1/auth/register": {
       post: {
@@ -144,6 +150,18 @@ export const openApiDocument = {
         responses: { "200": ok("ALLOW or DENY decision returned") },
       },
     },
+    "/api/v1/policies/retention/preview": {
+      post: {
+        tags: ["Policies"], summary: "Preview messages eligible under the active retention policy (OWNER)", security: bearer,
+        responses: { "200": ok("Retention preview returned"), "409": { $ref: "#/components/responses/Conflict" } },
+      },
+    },
+    "/api/v1/policies/retention/execute": {
+      post: {
+        tags: ["Policies"], summary: "Delete one preview-sized batch of retention-eligible messages (OWNER)", security: bearer,
+        responses: { "200": ok("Retention cleanup completed"), "409": { $ref: "#/components/responses/Conflict" } },
+      },
+    },
     "/api/v1/policies/{policyId}": {
       get: {
         tags: ["Policies"], summary: "Get one tenant policy", security: bearer,
@@ -162,7 +180,9 @@ export const openApiDocument = {
       get: {
         tags: ["Mail"], summary: "List the current user's mailbox folder", security: bearer,
         parameters: [
-          { name: "folder", in: "query", schema: { type: "string", enum: ["DRAFTS", "INBOX", "SENT", "TRASH"], default: "INBOX" } },
+          { name: "folder", in: "query", schema: { type: "string", enum: ["DRAFTS", "INBOX", "ARCHIVE", "SENT", "TRASH"], default: "INBOX" } },
+          { name: "starredOnly", in: "query", schema: { type: "boolean", default: false } },
+          { name: "labelId", in: "query", schema: { type: "string", format: "uuid" } },
           { name: "page", in: "query", schema: { type: "integer", minimum: 1, default: 1 } },
           { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 25 } },
         ],
@@ -173,7 +193,7 @@ export const openApiDocument = {
       get: {
         tags: ["Messages"], summary: "List and search messages accessible to the current mailbox", security: bearer,
         parameters: [
-          { name: "folder", in: "query", schema: { type: "string", enum: ["DRAFTS", "INBOX", "SENT", "TRASH"] } },
+          { name: "folder", in: "query", schema: { type: "string", enum: ["DRAFTS", "INBOX", "ARCHIVE", "SENT", "TRASH"] } },
           { name: "q", in: "query", schema: { type: "string", maxLength: 200 } },
           { name: "unreadOnly", in: "query", schema: { type: "boolean", default: false } },
           { name: "page", in: "query", schema: { type: "integer", minimum: 1, default: 1 } },
@@ -225,9 +245,53 @@ export const openApiDocument = {
     "/api/v1/notifications": {
       get: { tags: ["Notifications"], summary: "List in-app notifications", security: bearer, responses: { "200": ok("Notifications returned") } },
     },
+    "/api/v1/notifications/digests": {
+      post: {
+        tags: ["Notifications"], summary: "Queue an idempotent notification digest for the current user", security: bearer,
+        responses: { "202": ok("Digest job queued") },
+      },
+    },
+    "/api/v1/lifecycle/exports": {
+      post: {
+        tags: ["Lifecycle"], summary: "Queue an idempotent tenant data export (OWNER)", security: bearer,
+        responses: { "202": ok("Export job queued") },
+      },
+    },
+    "/api/v1/lifecycle/exports/{requestId}/download": {
+      get: {
+        tags: ["Lifecycle"], summary: "Download a completed tenant export (OWNER)", security: bearer,
+        parameters: [{ name: "requestId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: { "200": { description: "Tenant export JSON file" }, "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/lifecycle/deletions": {
+      post: {
+        tags: ["Lifecycle"], summary: "Request approval-gated tenant deletion (OWNER)", security: bearer,
+        responses: { "202": ok("Deletion requested") },
+      },
+    },
+    "/api/v1/lifecycle/{requestId}/confirm-deletion": {
+      post: {
+        tags: ["Lifecycle"], summary: "Finally confirm permanent tenant deletion using the exact tenant name (OWNER)", security: bearer,
+        responses: { "202": ok("Deletion confirmed"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/lifecycle/{requestId}/cancel": {
+      post: {
+        tags: ["Lifecycle"], summary: "Cancel an unconfirmed tenant deletion request (OWNER)", security: bearer,
+        responses: { "200": ok("Deletion cancelled"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
     "/api/v1/integrations": {
       get: { tags: ["Integrations"], summary: "List source-linked integration records", security: bearer, responses: { "200": ok("Integration links returned") } },
       post: { tags: ["Integrations"], summary: "Create a pending Zoiko integration link without external calls", security: bearer, responses: { "201": ok("Integration link created") } },
+    },
+    "/api/v1/support/access-grants": {
+      get: { tags: ["Support"], summary: "List support access grants (OWNER)", security: bearer, responses: { "200": ok("Grants returned") } },
+      post: { tags: ["Support"], summary: "Create a time-limited support grant (OWNER)", security: bearer, responses: { "201": ok("Grant created") } },
+    },
+    "/api/v1/support/diagnostics": {
+      get: { tags: ["Support"], summary: "Access scoped diagnostics using x-support-grant-id", security: bearer, responses: { "200": ok("Scoped diagnostics returned"), "403": { $ref: "#/components/responses/Forbidden" } } },
     },
     "/api/v1/mail/drafts": {
       post: {
@@ -243,12 +307,92 @@ export const openApiDocument = {
         requestBody: jsonBody({ $ref: "#/components/schemas/CreateDraftRequest" }),
         responses: { "200": ok("Draft updated"), "404": { $ref: "#/components/responses/NotFound" } },
       },
+      delete: {
+        tags: ["Mail"], summary: "Delete an owned draft and its stored attachments", security: bearer,
+        parameters: [{ name: "messageId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: { "200": ok("Draft deleted"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/mail/trash": {
+      delete: {
+        tags: ["Mail"], summary: "Permanently remove all messages from the current mailbox Trash", security: bearer,
+        responses: { "200": ok("Trash emptied") },
+      },
+    },
+    "/api/v1/mail/bulk": {
+      patch: {
+        tags: ["Mail"], summary: "Apply a mailbox action to up to 100 authorized messages", security: bearer,
+        requestBody: jsonBody({
+          type: "object",
+          required: ["messageIds", "action"],
+          properties: {
+            messageIds: { type: "array", minItems: 1, maxItems: 100, items: { type: "string", format: "uuid" } },
+            action: { type: "string", enum: ["MARK_READ", "MARK_UNREAD", "STAR", "UNSTAR", "ARCHIVE", "TRASH", "RESTORE"] },
+          },
+        }),
+        responses: { "200": ok("Bulk action completed"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/mail/labels": {
+      get: {
+        tags: ["Mail"], summary: "List labels belonging to the current mailbox", security: bearer,
+        responses: { "200": ok("Labels returned") },
+      },
+      post: {
+        tags: ["Mail"], summary: "Create a custom mailbox label", security: bearer,
+        requestBody: jsonBody({
+          type: "object", required: ["name", "color"],
+          properties: {
+            name: { type: "string", minLength: 1, maxLength: 50 },
+            color: { type: "string", pattern: "^#[0-9a-fA-F]{6}$" },
+          },
+        }),
+        responses: { "201": ok("Label created"), "409": { $ref: "#/components/responses/Conflict" } },
+      },
+    },
+    "/api/v1/mail/labels/{labelId}": {
+      patch: {
+        tags: ["Mail"], summary: "Update a label belonging to the current mailbox", security: bearer,
+        parameters: [{ name: "labelId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: { "200": ok("Label updated"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+      delete: {
+        tags: ["Mail"], summary: "Delete a label and remove its message assignments", security: bearer,
+        parameters: [{ name: "labelId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: { "200": ok("Label deleted"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/mail/{messageId}/labels/{labelId}": {
+      put: {
+        tags: ["Mail"], summary: "Assign a mailbox label to an authorized message", security: bearer,
+        responses: { "200": ok("Label assigned"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+      delete: {
+        tags: ["Mail"], summary: "Remove a mailbox label from an authorized message", security: bearer,
+        responses: { "200": ok("Label removed"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
     },
     "/api/v1/mail/drafts/{messageId}/send": {
       post: {
         tags: ["Mail"], summary: "Send a draft after tenant policy evaluation", security: bearer,
         parameters: [{ name: "messageId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
         responses: { "200": ok("Internal recipients delivered and external recipients queued"), "403": { $ref: "#/components/responses/Forbidden" } },
+      },
+    },
+    "/api/v1/mail/drafts/{messageId}/schedule": {
+      post: {
+        tags: ["Mail"], summary: "Schedule an owned draft for policy-checked delivery", security: bearer,
+        parameters: [{ name: "messageId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        requestBody: jsonBody({
+          type: "object", required: ["scheduledAt"],
+          properties: { scheduledAt: { type: "string", format: "date-time" } },
+        }),
+        responses: { "202": ok("Draft scheduled"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+      delete: {
+        tags: ["Mail"], summary: "Cancel scheduled delivery and return the message to draft state", security: bearer,
+        parameters: [{ name: "messageId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: { "200": ok("Schedule cancelled"), "404": { $ref: "#/components/responses/NotFound" } },
       },
     },
     "/api/v1/mail/drafts/{messageId}/attachments": {
@@ -324,11 +468,25 @@ export const openApiDocument = {
         responses: { "200": ok("Message returned"), "404": { $ref: "#/components/responses/NotFound" } },
       },
       patch: {
-        tags: ["Mail"], summary: "Mark read, move to trash, or restore an inbox message", security: bearer,
+        tags: ["Mail"], summary: "Mark read/starred, archive, trash, or restore a mailbox message", security: bearer,
         parameters: [{ name: "messageId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
         requestBody: jsonBody({ $ref: "#/components/schemas/UpdateMailboxItemRequest" }),
         responses: { "200": ok("Mailbox item updated") },
       },
+      delete: {
+        tags: ["Mail"], summary: "Permanently remove a trashed message from the current mailbox", security: bearer,
+        parameters: [{ name: "messageId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: { "200": ok("Trashed message deleted"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/mail/{messageId}/reply": {
+      post: { tags: ["Mail"], summary: "Create a reply draft in the existing thread", security: bearer, responses: { "201": ok("Reply draft created"), "404": { $ref: "#/components/responses/NotFound" } } },
+    },
+    "/api/v1/mail/{messageId}/reply-all": {
+      post: { tags: ["Mail"], summary: "Create a reply-all draft without BCC disclosure", security: bearer, responses: { "201": ok("Reply-all draft created"), "404": { $ref: "#/components/responses/NotFound" } } },
+    },
+    "/api/v1/mail/{messageId}/forward": {
+      post: { tags: ["Mail"], summary: "Create a forwarded-message draft in a new thread", security: bearer, responses: { "201": ok("Forward draft created"), "404": { $ref: "#/components/responses/NotFound" } } },
     },
     "/api/v1/audit/events/{eventId}": {
       get: {

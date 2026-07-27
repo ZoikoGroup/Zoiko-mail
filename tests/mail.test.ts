@@ -4,6 +4,7 @@ import { createApp } from "../src/app.js";
 import { authHeader, registerUser } from "./helpers.js";
 import { prisma } from "../src/config/prisma.js";
 import { env } from "../src/config/env.js";
+import { mailService } from "../src/modules/mail/mail.service.js";
 
 const app = createApp();
 
@@ -250,5 +251,209 @@ describe("Mail module", () => {
       "MAIL_SEND_SUSPENDED_DENIED",
       "MAILBOX_SENDING_RESUMED",
     ]));
+  });
+
+  it("creates secure reply, reply-all and forward drafts", async () => {
+    const owner = await registerUser(app, { email: "conversation-owner@zoiko.test" });
+    const member = await registerUser(app, { email: "conversation-member@zoiko.test" });
+    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+      .send({ email: member.email, role: "MEMBER" }).expect(201);
+    const login = await request(app).post("/api/v1/auth/login")
+      .send({ email: member.email, password: member.password, tenantId: owner.tenantId }).expect(200);
+    const memberToken = login.body.data.accessToken;
+    await activateAllowSendingPolicy(owner.accessToken);
+    const original = await request(app).post("/api/v1/mail/drafts").set(authHeader(owner.accessToken))
+      .send({ subject: "Project update", textBody: "Original body", recipients: { to: [member.email], cc: ["copy@example.com"], bcc: ["hidden@example.com"] } }).expect(201);
+    await request(app).post(`/api/v1/mail/drafts/${original.body.data.id}/send`)
+      .set(authHeader(owner.accessToken)).expect(200);
+
+    const replyAll = await request(app).post(`/api/v1/mail/${original.body.data.id}/reply-all`)
+      .set(authHeader(memberToken)).send({ textBody: "Thanks" }).expect(201);
+    expect(replyAll.body.data.threadId).toBe(original.body.data.threadId);
+    expect(replyAll.body.data.subject).toBe("Re: Project update");
+    expect(replyAll.body.data.recipients).toEqual(expect.arrayContaining([
+      expect.objectContaining({ email: owner.email, type: "TO" }),
+      expect.objectContaining({ email: "copy@example.com", type: "CC" }),
+    ]));
+    expect(replyAll.body.data.recipients.some((recipient: { email: string }) => recipient.email === "hidden@example.com")).toBe(false);
+
+    const forwarded = await request(app).post(`/api/v1/mail/${original.body.data.id}/forward`)
+      .set(authHeader(memberToken)).send({ textBody: "Please review", recipients: { to: ["forward@example.com"] } }).expect(201);
+    expect(forwarded.body.data.subject).toBe("Fwd: Project update");
+    expect(forwarded.body.data.threadId).not.toBe(original.body.data.threadId);
+
+    const outsider = await registerUser(app, { email: "conversation-outsider@zoiko.test" });
+    await request(app).post(`/api/v1/mail/${original.body.data.id}/reply`)
+      .set(authHeader(outsider.accessToken)).send({ textBody: "Unauthorized" }).expect(404);
+  });
+
+  it("deletes owned drafts and permanently cleans only the current mailbox trash", async () => {
+    const owner = await registerUser(app, { email: "cleanup-owner@zoiko.test" });
+    const member = await registerUser(app, { email: "cleanup-member@zoiko.test" });
+    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+      .send({ email: member.email, role: "MEMBER" }).expect(201);
+    const memberLogin = await request(app).post("/api/v1/auth/login")
+      .send({ email: member.email, password: member.password, tenantId: owner.tenantId }).expect(200);
+    const memberToken = memberLogin.body.data.accessToken;
+
+    const unusedDraft = await request(app).post("/api/v1/mail/drafts").set(authHeader(owner.accessToken))
+      .send({ subject: "Unused", recipients: { to: ["outside@example.com"] } }).expect(201);
+    await request(app).delete(`/api/v1/mail/drafts/${unusedDraft.body.data.id}`)
+      .set(authHeader(memberToken)).expect(404);
+    await request(app).delete(`/api/v1/mail/drafts/${unusedDraft.body.data.id}`)
+      .set(authHeader(owner.accessToken)).expect(200);
+    await request(app).get(`/api/v1/mail/${unusedDraft.body.data.id}`)
+      .set(authHeader(owner.accessToken)).expect(404);
+
+    await activateAllowSendingPolicy(owner.accessToken);
+    const sentIds: string[] = [];
+    for (const subject of ["Trash one", "Trash two"]) {
+      const draft = await request(app).post("/api/v1/mail/drafts").set(authHeader(owner.accessToken))
+        .send({ subject, recipients: { to: [member.email] } }).expect(201);
+      await request(app).post(`/api/v1/mail/drafts/${draft.body.data.id}/send`)
+        .set(authHeader(owner.accessToken)).expect(200);
+      sentIds.push(draft.body.data.id);
+      await request(app).patch(`/api/v1/mail/${draft.body.data.id}`).set(authHeader(memberToken))
+        .send({ folder: "TRASH" }).expect(200);
+    }
+
+    await request(app).delete(`/api/v1/mail/${sentIds[0]}`).set(authHeader(memberToken)).expect(200);
+    await request(app).delete(`/api/v1/mail/${sentIds[0]}`).set(authHeader(memberToken)).expect(404);
+    const emptied = await request(app).delete("/api/v1/mail/trash").set(authHeader(memberToken)).expect(200);
+    expect(emptied.body.data.deletedCount).toBe(1);
+    const trash = await request(app).get("/api/v1/mail?folder=TRASH").set(authHeader(memberToken)).expect(200);
+    expect(trash.body.data.items).toHaveLength(0);
+
+    await request(app).get(`/api/v1/mail/${sentIds[0]}`).set(authHeader(owner.accessToken)).expect(200);
+  });
+
+  it("supports starred, archived and tenant-safe bulk mailbox actions", async () => {
+    const owner = await registerUser(app, { email: "bulk-owner@zoiko.test" });
+    const member = await registerUser(app, { email: "bulk-member@zoiko.test" });
+    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+      .send({ email: member.email, role: "MEMBER" }).expect(201);
+    const login = await request(app).post("/api/v1/auth/login")
+      .send({ email: member.email, password: member.password, tenantId: owner.tenantId }).expect(200);
+    const memberToken = login.body.data.accessToken;
+    await activateAllowSendingPolicy(owner.accessToken);
+
+    const messageIds: string[] = [];
+    for (const subject of ["Bulk first", "Bulk second"]) {
+      const draft = await request(app).post("/api/v1/mail/drafts").set(authHeader(owner.accessToken))
+        .send({ subject, recipients: { to: [member.email] } }).expect(201);
+      await request(app).post(`/api/v1/mail/drafts/${draft.body.data.id}/send`)
+        .set(authHeader(owner.accessToken)).expect(200);
+      messageIds.push(draft.body.data.id);
+    }
+
+    await request(app).patch("/api/v1/mail/bulk").set(authHeader(memberToken))
+      .send({ messageIds, action: "MARK_READ" }).expect(200);
+    await request(app).patch("/api/v1/mail/bulk").set(authHeader(memberToken))
+      .send({ messageIds, action: "STAR" }).expect(200);
+    const archived = await request(app).patch("/api/v1/mail/bulk").set(authHeader(memberToken))
+      .send({ messageIds, action: "ARCHIVE" }).expect(200);
+    expect(archived.body.data.affectedCount).toBe(2);
+
+    const starredArchive = await request(app).get("/api/v1/mail?folder=ARCHIVE&starredOnly=true")
+      .set(authHeader(memberToken)).expect(200);
+    expect(starredArchive.body.data.items).toHaveLength(2);
+    expect(starredArchive.body.data.items.every((item: { isRead: boolean; isStarred: boolean }) =>
+      item.isRead && item.isStarred)).toBe(true);
+
+    const outsider = await registerUser(app, { email: "bulk-outsider@zoiko.test" });
+    const outsiderDraft = await request(app).post("/api/v1/mail/drafts").set(authHeader(outsider.accessToken))
+      .send({ subject: "Other tenant", recipients: { to: ["outside@example.com"] } }).expect(201);
+    await request(app).patch("/api/v1/mail/bulk").set(authHeader(memberToken))
+      .send({ messageIds: [messageIds[0], outsiderDraft.body.data.id], action: "TRASH" }).expect(404);
+
+    const unchanged = await request(app).get("/api/v1/mail?folder=ARCHIVE")
+      .set(authHeader(memberToken)).expect(200);
+    expect(unchanged.body.data.items).toHaveLength(2);
+    await request(app).patch("/api/v1/mail/bulk").set(authHeader(memberToken))
+      .send({ messageIds, action: "RESTORE" }).expect(200);
+    const inbox = await request(app).get("/api/v1/mail?folder=INBOX")
+      .set(authHeader(memberToken)).expect(200);
+    expect(inbox.body.data.items).toHaveLength(2);
+  });
+
+  it("manages mailbox-private labels and filters labeled messages", async () => {
+    const owner = await registerUser(app, { email: "label-owner@zoiko.test" });
+    const member = await registerUser(app, { email: "label-member@zoiko.test" });
+    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+      .send({ email: member.email, role: "MEMBER" }).expect(201);
+    const login = await request(app).post("/api/v1/auth/login")
+      .send({ email: member.email, password: member.password, tenantId: owner.tenantId }).expect(200);
+    const memberToken = login.body.data.accessToken;
+    await activateAllowSendingPolicy(owner.accessToken);
+    const draft = await request(app).post("/api/v1/mail/drafts").set(authHeader(owner.accessToken))
+      .send({ subject: "Label target", recipients: { to: [member.email] } }).expect(201);
+    await request(app).post(`/api/v1/mail/drafts/${draft.body.data.id}/send`)
+      .set(authHeader(owner.accessToken)).expect(200);
+
+    const created = await request(app).post("/api/v1/mail/labels").set(authHeader(memberToken))
+      .send({ name: "Important", color: "#ff8800" }).expect(201);
+    expect(created.body.data.color).toBe("#FF8800");
+    const labelId = created.body.data.id;
+    await request(app).post("/api/v1/mail/labels").set(authHeader(memberToken))
+      .send({ name: "important", color: "#000000" }).expect(409);
+    await request(app).put(`/api/v1/mail/${draft.body.data.id}/labels/${labelId}`)
+      .set(authHeader(memberToken)).expect(200);
+
+    const filtered = await request(app).get(`/api/v1/mail?folder=INBOX&labelId=${labelId}`)
+      .set(authHeader(memberToken)).expect(200);
+    expect(filtered.body.data.items).toHaveLength(1);
+    expect(filtered.body.data.items[0].labels).toEqual([
+      expect.objectContaining({ id: labelId, name: "Important" }),
+    ]);
+    await request(app).patch(`/api/v1/mail/labels/${labelId}`).set(authHeader(owner.accessToken))
+      .send({ name: "Unauthorized" }).expect(404);
+
+    await request(app).delete(`/api/v1/mail/${draft.body.data.id}/labels/${labelId}`)
+      .set(authHeader(memberToken)).expect(200);
+    const noMatches = await request(app).get(`/api/v1/mail?folder=INBOX&labelId=${labelId}`)
+      .set(authHeader(memberToken)).expect(200);
+    expect(noMatches.body.data.items).toHaveLength(0);
+    await request(app).delete(`/api/v1/mail/labels/${labelId}`).set(authHeader(memberToken)).expect(200);
+  });
+
+  it("schedules, cancels and safely processes due messages", async () => {
+    const owner = await registerUser(app, { email: "schedule-owner@zoiko.test" });
+    const member = await registerUser(app, { email: "schedule-member@zoiko.test" });
+    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+      .send({ email: member.email, role: "MEMBER" }).expect(201);
+    const login = await request(app).post("/api/v1/auth/login")
+      .send({ email: member.email, password: member.password, tenantId: owner.tenantId }).expect(200);
+    await activateAllowSendingPolicy(owner.accessToken);
+
+    const create = async (subject: string) => request(app).post("/api/v1/mail/drafts")
+      .set(authHeader(owner.accessToken))
+      .send({ subject, recipients: { to: [member.email] } }).expect(201);
+    const cancelledDraft = await create("Cancel schedule");
+    const future = new Date(Date.now() + 120_000).toISOString();
+    await request(app).post(`/api/v1/mail/drafts/${cancelledDraft.body.data.id}/schedule`)
+      .set(authHeader(owner.accessToken)).send({ scheduledAt: future }).expect(202);
+    await request(app).delete(`/api/v1/mail/drafts/${cancelledDraft.body.data.id}/schedule`)
+      .set(authHeader(owner.accessToken)).expect(200);
+    expect((await prisma.emailMessage.findUniqueOrThrow({
+      where: { id: cancelledDraft.body.data.id },
+    })).status).toBe("DRAFT");
+
+    const dueDraft = await create("Due schedule");
+    await request(app).post(`/api/v1/mail/drafts/${dueDraft.body.data.id}/schedule`)
+      .set(authHeader(owner.accessToken)).send({ scheduledAt: future }).expect(202);
+    await prisma.emailMessage.update({
+      where: { id: dueDraft.body.data.id },
+      data: { scheduledAt: new Date(Date.now() - 1_000) },
+    });
+    const processed = await mailService.processDueScheduled();
+    expect(processed.sent).toBe(1);
+    const sent = await prisma.emailMessage.findUniqueOrThrow({ where: { id: dueDraft.body.data.id } });
+    expect(sent.status).toBe("SENT");
+    expect(sent.sentAt).not.toBeNull();
+    const inbox = await request(app).get("/api/v1/mail?folder=INBOX")
+      .set(authHeader(login.body.data.accessToken)).expect(200);
+    expect(inbox.body.data.items).toEqual([
+      expect.objectContaining({ message: expect.objectContaining({ subject: "Due schedule" }) }),
+    ]);
   });
 });

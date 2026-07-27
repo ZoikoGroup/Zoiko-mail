@@ -32,6 +32,13 @@ export const evaluatePolicySchema = z.object({
   type: policyTypeSchema,
   context: z.record(z.string(), z.unknown()),
 });
+export const retentionPreviewSchema = z.object({
+  asOf: z.coerce.date().refine((value) => value.getTime() <= Date.now(), "asOf cannot be in the future")
+    .default(() => new Date()),
+});
+export const retentionExecuteSchema = retentionPreviewSchema.extend({
+  confirmation: z.literal("DELETE_ELIGIBLE_MESSAGES"),
+});
 
 export type CreatePolicyInput = z.infer<typeof createPolicySchema>;
 export type EvaluatePolicyInput = z.infer<typeof evaluatePolicySchema>;

@@ -10,7 +10,7 @@ const paginationSchema = {
 
 export const listMessagesSchema = z.object({
   ...paginationSchema,
-  folder: z.enum(["DRAFTS", "INBOX", "SENT", "TRASH"]).optional(),
+  folder: z.enum(["DRAFTS", "INBOX", "ARCHIVE", "SENT", "TRASH"]).optional(),
   q: z.string().trim().min(1).max(200).optional(),
   unreadOnly: z.stringbool().default(false),
 });
