@@ -10,7 +10,7 @@ export const openApiDocument = {
     description: "Multi-tenant Zoiko Mail API. Tenant context is always derived from the verified access token.",
   },
   servers: [{ url: "http://localhost:5000", description: "Local development" }],
-  tags: ["System", "Authentication", "Users", "Tenants", "Memberships", "Policies", "Mail", "Messages", "Threads", "Domains", "AI", "Actions", "Notifications", "Integrations", "Lifecycle", "Support", "Audit"].map((name) => ({ name })),
+  tags: ["System", "Authentication", "Users", "Tenants", "Memberships", "Policies", "Mail", "Messages", "Threads", "Domains", "AI", "Actions", "Notifications", "Integrations", "Connectors", "Delivery Protection", "Lifecycle", "Support", "Audit"].map((name) => ({ name })),
   paths: {
     "/api/health": {
       get: { tags: ["System"], summary: "Health check", responses: { "200": ok("API is healthy") } },
@@ -22,6 +22,23 @@ export const openApiDocument = {
       get: {
         tags: ["System"], summary: "Prometheus metrics protected by x-operations-key",
         responses: { "200": { description: "Prometheus text exposition" }, "401": { description: "Operations authentication required" } },
+      },
+    },
+    "/api/provider-mail/health": {
+      get: {
+        tags: ["System"], summary: "Inspect or probe IMAP/SMTP connectivity using x-operations-key",
+        parameters: [
+          { name: "x-operations-key", in: "header", required: true, schema: { type: "string" } },
+          { name: "probe", in: "query", schema: { type: "boolean", default: false } },
+        ],
+        responses: { "200": ok("Safe provider status returned"), "401": { description: "Operations authentication required" }, "503": { description: "Provider is unconfigured or unavailable" } },
+      },
+    },
+    "/api/provider-mail/sync": {
+      post: {
+        tags: ["System"], summary: "Queue an idempotent IMAP metadata sync for the configured tenant",
+        parameters: [{ in: "header", name: "x-operations-key", required: true, schema: { type: "string" } }],
+        responses: { "202": { description: "Sync queued" }, "401": { $ref: "#/components/responses/Unauthorized" } },
       },
     },
     "/api/v1/auth/register": {
@@ -180,7 +197,7 @@ export const openApiDocument = {
       get: {
         tags: ["Mail"], summary: "List the current user's mailbox folder", security: bearer,
         parameters: [
-          { name: "folder", in: "query", schema: { type: "string", enum: ["DRAFTS", "INBOX", "ARCHIVE", "SENT", "TRASH"], default: "INBOX" } },
+          { name: "folder", in: "query", schema: { type: "string", enum: ["DRAFTS", "INBOX", "ARCHIVE", "SENT", "TRASH", "QUARANTINE"], default: "INBOX" } },
           { name: "starredOnly", in: "query", schema: { type: "boolean", default: false } },
           { name: "labelId", in: "query", schema: { type: "string", format: "uuid" } },
           { name: "page", in: "query", schema: { type: "integer", minimum: 1, default: 1 } },
@@ -232,7 +249,13 @@ export const openApiDocument = {
       post: { tags: ["Domains"], summary: "Add a custom domain", security: bearer, responses: { "201": ok("Domain and verification record created") } },
     },
     "/api/v1/domains/{domainId}/diagnostics": {
-      post: { tags: ["Domains"], summary: "Verify TXT, MX, SPF, DKIM and DMARC records", security: bearer, responses: { "200": ok("DNS diagnostics returned") } },
+      post: { tags: ["Domains"], summary: "Retry TXT, MX, SPF, DKIM and DMARC checks and store history", security: bearer, responses: { "200": ok("DNS diagnostics returned") } },
+    },
+    "/api/v1/domains/{domainId}/checks": {
+      get: { tags: ["Domains"], summary: "List tenant-scoped DNS check history", security: bearer, responses: { "200": ok("DNS check history returned"), "404": { $ref: "#/components/responses/NotFound" } } },
+    },
+    "/api/v1/domains/{domainId}/activate": {
+      post: { tags: ["Domains"], summary: "Enable sending after TXT, SPF, DKIM and DMARC pass", security: bearer, responses: { "200": ok("Domain sending activated"), "409": { $ref: "#/components/responses/Conflict" } } },
     },
     "/api/v1/ai/actions": {
       get: { tags: ["AI"], summary: "List the user's governed AI actions", security: bearer, responses: { "200": ok("AI actions returned") } },
@@ -285,6 +308,111 @@ export const openApiDocument = {
     "/api/v1/integrations": {
       get: { tags: ["Integrations"], summary: "List source-linked integration records", security: bearer, responses: { "200": ok("Integration links returned") } },
       post: { tags: ["Integrations"], summary: "Create a pending Zoiko integration link without external calls", security: bearer, responses: { "201": ok("Integration link created") } },
+    },
+    "/api/v1/connectors": {
+      get: {
+        tags: ["Connectors"], summary: "List the current member's read-only provider accounts",
+        security: bearer, responses: { "200": ok("Connected accounts returned") },
+      },
+      post: {
+        tags: ["Connectors"], summary: "Register a provider account mapping with approved read-only scopes",
+        security: bearer,
+        requestBody: jsonBody({
+          type: "object", required: ["provider", "providerAccountId", "email", "scopes"],
+          properties: {
+            provider: { type: "string", enum: ["GMAIL", "MICROSOFT_365"] },
+            providerAccountId: { type: "string", maxLength: 255 },
+            email: { type: "string", format: "email" },
+            scopes: { type: "array", minItems: 1, maxItems: 10, items: { type: "string" } },
+          },
+        }),
+        responses: { "201": ok("Connected account mapping created"), "409": { $ref: "#/components/responses/Conflict" } },
+      },
+    },
+    "/api/v1/connectors/{accountId}": {
+      delete: {
+        tags: ["Connectors"], summary: "Disconnect the current member's provider account",
+        security: bearer,
+        parameters: [{ name: "accountId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: { "200": ok("Account disconnected"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/connectors/{accountId}/events": {
+      get: {
+        tags: ["Connectors"], summary: "List sanitized normalized events for an owned account",
+        security: bearer,
+        parameters: [{ name: "accountId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: { "200": ok("Provider events returned"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/connectors/health": {
+      get: {
+        tags: ["Connectors"], summary: "Get tenant provider account and event health (OWNER/ADMIN)",
+        security: bearer, responses: { "200": ok("Provider health returned") },
+      },
+    },
+    "/api/v1/connectors/dead-letter": {
+      get: {
+        tags: ["Connectors"], summary: "List failed provider events requiring intervention (OWNER/ADMIN)",
+        security: bearer, responses: { "200": ok("Dead-letter events returned") },
+      },
+    },
+    "/api/v1/connectors/dead-letter/{eventId}/replay": {
+      post: {
+        tags: ["Connectors"], summary: "Replay a dead-letter provider event (OWNER/ADMIN)",
+        security: bearer,
+        parameters: [{ name: "eventId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: { "200": ok("Event queued for replay"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/connectors/callbacks/{provider}": {
+      post: {
+        tags: ["Connectors"], summary: "Receive a signed, rate-limited provider event callback",
+        parameters: [
+          { name: "provider", in: "path", required: true, schema: { type: "string", enum: ["GMAIL", "MICROSOFT_365"] } },
+          { name: "x-provider-signature", in: "header", required: true, schema: { type: "string" } },
+        ],
+        responses: { "202": ok("Sanitized event accepted"), "200": ok("Duplicate event acknowledged"), "401": { $ref: "#/components/responses/Unauthorized" } },
+      },
+    },
+    "/api/v1/delivery-protection/suppressions": {
+      get: {
+        tags: ["Delivery Protection"], summary: "List active hashed recipient suppressions (OWNER/ADMIN)",
+        security: bearer, responses: { "200": ok("Suppressions returned") },
+      },
+      post: {
+        tags: ["Delivery Protection"], summary: "Add an administrative recipient suppression (OWNER/ADMIN)",
+        security: bearer,
+        requestBody: jsonBody({
+          type: "object", required: ["email"],
+          properties: { email: { type: "string", format: "email" }, reason: { type: "string", enum: ["ADMIN"], default: "ADMIN" } },
+        }),
+        responses: { "201": ok("Hashed suppression created") },
+      },
+    },
+    "/api/v1/delivery-protection/suppressions/{suppressionId}": {
+      delete: {
+        tags: ["Delivery Protection"], summary: "Deactivate a recipient suppression (OWNER/ADMIN)",
+        security: bearer,
+        parameters: [{ name: "suppressionId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: { "200": ok("Suppression deactivated"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/delivery-protection/mailboxes/{mailboxId}/warmup": {
+      get: {
+        tags: ["Delivery Protection"], summary: "Get mailbox warm-up stage, cap and reputation rates",
+        security: bearer,
+        parameters: [{ name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: { "200": ok("Warm-up status returned"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/delivery-protection/mailboxes/{mailboxId}/warmup/evaluate": {
+      post: {
+        tags: ["Delivery Protection"], summary: "Promote a mailbox that meets clean-sending thresholds",
+        security: bearer,
+        parameters: [{ name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: { "200": ok("Mailbox promoted"), "409": { $ref: "#/components/responses/Conflict" } },
+      },
     },
     "/api/v1/support/access-grants": {
       get: { tags: ["Support"], summary: "List support access grants (OWNER)", security: bearer, responses: { "200": ok("Grants returned") } },

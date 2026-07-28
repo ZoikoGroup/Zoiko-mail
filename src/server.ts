@@ -5,6 +5,8 @@ import { logger } from "./config/logger.js";
 import { mailService } from "./modules/mail/mail.service.js";
 import { jobService } from "./modules/job/job.service.js";
 import { operationalMetrics } from "./config/operationalMetrics.js";
+import { connectorService } from "./modules/connector/connector.service.js";
+import { providerMailService } from "./modules/provider-mail/provider-mail.service.js";
 
 const app = createApp();
 const PORT = env.PORT;
@@ -51,6 +53,42 @@ const jobWorker = setInterval(() => {
 }, env.JOB_WORKER_INTERVAL_MS);
 jobWorker.unref();
 
+let providerEventWorkerRunning = false;
+const providerEventWorker = setInterval(() => {
+  if (providerEventWorkerRunning) return;
+  providerEventWorkerRunning = true;
+  void connectorService.processNextEvent()
+    .then((result) => {
+      operationalMetrics.providerEventRun(!("status" in result) || result.status !== "DEAD_LETTER");
+      if (result.processed) logger.info(result, "Provider event processing completed");
+    })
+    .catch((error: unknown) => {
+      operationalMetrics.providerEventRun(false);
+      logger.error({ error }, "Provider event processing failed");
+    })
+    .finally(() => {
+      providerEventWorkerRunning = false;
+    });
+}, env.PROVIDER_EVENT_WORKER_INTERVAL_MS);
+providerEventWorker.unref();
+
+let providerSyncRunning = false;
+const providerSync = setInterval(() => {
+  if (!env.MAIL_PROVIDER_ENABLED || providerSyncRunning) return;
+  providerSyncRunning = true;
+  void providerMailService.enqueueSync()
+    .catch((error: unknown) => logger.error({ error }, "IMAP sync scheduling failed"))
+    .finally(() => {
+      providerSyncRunning = false;
+    });
+}, env.MAIL_PROVIDER_SYNC_INTERVAL_MS);
+providerSync.unref();
+
+if (env.MAIL_PROVIDER_ENABLED) {
+  void providerMailService.enqueueSync()
+    .catch((error: unknown) => logger.error({ error }, "Initial IMAP sync scheduling failed"));
+}
+
 server.requestTimeout = env.HTTP_REQUEST_TIMEOUT_MS;
 server.headersTimeout = env.HTTP_HEADERS_TIMEOUT_MS;
 server.keepAliveTimeout = env.HTTP_KEEP_ALIVE_TIMEOUT_MS;
@@ -59,6 +97,8 @@ async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, "Graceful shutdown started");
   clearInterval(scheduler);
   clearInterval(jobWorker);
+  clearInterval(providerEventWorker);
+  clearInterval(providerSync);
 
   server.close(async () => {
     await disconnectPrisma();

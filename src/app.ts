@@ -20,6 +20,8 @@ import { attachmentStorage } from "./modules/mail/attachment.storage.js";
 import { exportStorage } from "./modules/lifecycle/export.storage.js";
 import { operationalMetrics } from "./config/operationalMetrics.js";
 import { timingSafeEqual } from "node:crypto";
+import { imapSmtpAdapter } from "./modules/provider-mail/imap-smtp.adapter.js";
+import { providerMailService } from "./modules/provider-mail/provider-mail.service.js";
 
 function operationsKeyValid(value: string | undefined) {
   if (!value) return false;
@@ -116,12 +118,53 @@ export function createApp() {
         });
         return;
       }
-      const [pendingJobs, dueScheduledMail] = await prisma.$transaction([
+      const [pendingJobs, dueScheduledMail, pendingProviderEvents, deadLetterProviderEvents] = await prisma.$transaction([
         prisma.backgroundJob.count({ where: { status: { in: ["PENDING", "RETRY"] } } }),
         prisma.emailMessage.count({ where: { status: "SCHEDULED", scheduledAt: { lte: new Date() } } }),
+        prisma.providerEvent.count({ where: { processingStatus: { in: ["RECEIVED", "RETRY"] } } }),
+        prisma.providerEvent.count({ where: { processingStatus: "DEAD_LETTER" } }),
       ]);
       res.type("text/plain; version=0.0.4").status(200)
-        .send(operationalMetrics.render({ pendingJobs, dueScheduledMail }));
+        .send(operationalMetrics.render({ pendingJobs, dueScheduledMail, pendingProviderEvents, deadLetterProviderEvents }));
+    })
+  );
+
+  app.get(
+    "/api/provider-mail/health",
+    asyncHandler(async (req, res) => {
+      if (!operationsKeyValid(req.header("x-operations-key"))) {
+        res.status(401).json({
+          success: false,
+          error: { code: "UNAUTHORIZED", message: "Operations authentication required" },
+          requestId: req.requestId,
+        });
+        return;
+      }
+      const status = imapSmtpAdapter.status();
+      const data = req.query.probe === "true" && status.configured
+        ? { ...status, connectivity: await imapSmtpAdapter.verify() }
+        : status;
+      res.status(200).json({ success: true, data, requestId: req.requestId });
+    })
+  );
+
+  app.post(
+    "/api/provider-mail/sync",
+    asyncHandler(async (req, res) => {
+      if (!operationsKeyValid(req.header("x-operations-key"))) {
+        res.status(401).json({
+          success: false,
+          error: { code: "UNAUTHORIZED", message: "Operations authentication required" },
+          requestId: req.requestId,
+        });
+        return;
+      }
+      const job = await providerMailService.enqueueSync();
+      res.status(202).json({
+        success: true,
+        data: { jobId: job.id, status: job.status },
+        requestId: req.requestId,
+      });
     })
   );
 

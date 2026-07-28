@@ -7,6 +7,8 @@ import { auditService } from "../audit/audit.service.js";
 import { policyService } from "../policy/policy.service.js";
 import { attachmentStorage } from "./attachment.storage.js";
 import { normalizeSubject, uniqueParticipants } from "../message/message.utils.js";
+import { deliveryProtectionService } from "../delivery-protection/delivery-protection.service.js";
+import { jobService } from "../job/job.service.js";
 import type { BulkMailboxActionInput, CreateDraftInput, CreateLabelInput, ListMailInput, UpdateDraftInput, UpdateLabelInput, UpdateMailboxItemInput } from "./mail.schema.js";
 
 interface MailContext {
@@ -341,7 +343,31 @@ export class MailService {
     if (!draft.recipients.some((recipient) => recipient.type === "TO")) {
       throw new AppError("At least one TO recipient is required", 400, ErrorCodes.VALIDATION_ERROR);
     }
+    const senderDomain = context.email.split("@")[1]?.toLowerCase();
+    if (senderDomain) {
+      const configuredDomain = await prisma.mailDomain.findFirst({
+        where: { tenantId: context.tenantId, domainName: senderDomain, type: "CUSTOM" },
+        select: { id: true, sendingEnabled: true },
+      });
+      if (configuredDomain && !configuredDomain.sendingEnabled) {
+        await auditService.record({
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          eventType: "DOMAIN_SEND_BLOCKED",
+          targetType: "MailDomain",
+          targetId: configuredDomain.id,
+          requestId: context.requestId,
+          metadata: { reason: "DNS_AUTHENTICATION_INCOMPLETE" },
+        });
+        throw new AppError(
+          "Custom-domain sending is blocked until TXT, SPF, DKIM and DMARC checks pass",
+          403,
+          ErrorCodes.FORBIDDEN
+        );
+      }
+    }
 
+    const externalEmails: string[] = [];
     for (const recipient of draft.recipients) {
       const internal = await prisma.tenantMembership.findFirst({
         where: {
@@ -351,6 +377,7 @@ export class MailService {
         },
         select: { id: true },
       });
+      if (!internal) externalEmails.push(recipient.email);
       const decision = await policyService.evaluate({
         type: "SENDING",
         context: { recipient: { email: recipient.email, external: !internal }, sender: { role: context.role } },
@@ -370,8 +397,28 @@ export class MailService {
         throw new AppError(`Sending denied by tenant policy (${decision.reason})`, 403, ErrorCodes.FORBIDDEN);
       }
     }
+    await deliveryProtectionService.assertRecipientsAllowed(context.tenantId, externalEmails);
 
     const senderMailbox = await this.mailbox(context);
+    const warmupReserved = senderMailbox.sendSuspendedAt
+      ? true
+      : await deliveryProtectionService.reserveWarmup(
+          senderMailbox.id,
+          context.tenantId,
+          externalEmails.length
+        );
+    if (!warmupReserved) {
+      await auditService.record({
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        eventType: "MAIL_WARMUP_THROTTLED",
+        targetType: "Mailbox",
+        targetId: senderMailbox.id,
+        requestId: context.requestId,
+        metadata: { externalRecipientCount: externalEmails.length },
+      });
+      throw new AppError("Mailbox warm-up daily limit exceeded", 429, ErrorCodes.RATE_LIMIT_EXCEEDED);
+    }
     const reservation = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
       UPDATE "mailboxes"
       SET "send_recipient_count" = CASE
@@ -500,6 +547,23 @@ export class MailService {
           where: { id: message.threadId, tenantId: context.tenantId },
           data: { lastMessageAt: sentAt },
         });
+      }
+      const hasExternalRecipients = await tx.messageRecipient.count({
+        where: { tenantId: context.tenantId, messageId, recipientMembershipId: null },
+      }) > 0;
+      if (
+        hasExternalRecipients
+        && env.MAIL_PROVIDER_ENABLED
+        && context.tenantId === env.MAIL_PROVIDER_TENANT_ID
+        && context.membershipId === env.MAIL_PROVIDER_MEMBERSHIP_ID
+      ) {
+        await jobService.enqueue({
+          tenantId: context.tenantId,
+          userId: context.userId,
+          type: "SMTP_SEND",
+          payload: { messageId },
+          idempotencyKey: `smtp-send:${messageId}`,
+        }, tx);
       }
       await this.audit(tx, context, "MAIL_SENT", message.id, { recipientCount: recipients.length });
       return message;
@@ -1009,8 +1073,13 @@ export class MailService {
           mailboxItems: { some: { tenantId: context.tenantId, mailboxId: mailbox.id } },
         },
       },
+      include: { message: { select: { authorUserId: true, quarantinedAt: true } } },
     });
     if (!attachment) throw new AppError("Attachment not found", 404, ErrorCodes.NOT_FOUND);
+    if (attachment.scanStatus === "BLOCKED" ||
+        (attachment.message.quarantinedAt && attachment.message.authorUserId !== context.userId)) {
+      throw new AppError("Attachment is blocked by security controls", 403, ErrorCodes.FORBIDDEN);
+    }
     return {
       data: await attachmentStorage.read(attachment.storageKey),
       fileName: attachment.fileName,

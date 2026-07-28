@@ -6,6 +6,7 @@ import { auditService } from "../audit/audit.service.js";
 import { exportStorage } from "../lifecycle/export.storage.js";
 import { attachmentStorage } from "../mail/attachment.storage.js";
 import { createHash } from "node:crypto";
+import { providerMailService } from "../provider-mail/provider-mail.service.js";
 export class JobService {
   enqueue(input: { tenantId: string; userId: string; type: JobType; payload: Prisma.InputJsonValue; idempotencyKey: string }, tx: Prisma.TransactionClient = prisma) {
     return tx.backgroundJob.upsert({
@@ -35,7 +36,7 @@ export class JobService {
       "attempts"="attempts"+1,"updated_at"=CURRENT_TIMESTAMP
       WHERE "id"=(SELECT "id" FROM "background_jobs" WHERE "status" IN ('PENDING','RETRY')
       AND (
-        "type" IN ('DATA_EXPORT','NOTIFICATION_DIGEST')
+        "type" IN ('DATA_EXPORT','NOTIFICATION_DIGEST','IMAP_SYNC','SMTP_SEND')
         OR ("type"='DATA_DELETION' AND "payload"->>'confirmed'='true')
       )
       AND "run_at"<=CURRENT_TIMESTAMP ORDER BY "run_at" FOR UPDATE SKIP LOCKED LIMIT 1)
@@ -61,6 +62,19 @@ export class JobService {
       }
       if (job.type === "DATA_DELETION") {
         const result = await this.processDeletion(job.id, job.tenantId, job.createdByUserId, job.payload);
+        return { processed: true, jobId: job.id, type: job.type, result };
+      }
+      if (job.type === "IMAP_SYNC") {
+        const result = await providerMailService.syncInbox();
+        await this.complete(job.id, job.tenantId, result);
+        return { processed: true, jobId: job.id, type: job.type, result };
+      }
+      if (job.type === "SMTP_SEND") {
+        const messageId = typeof job.payload === "object" && job.payload !== null && !Array.isArray(job.payload)
+          && typeof job.payload.messageId === "string" ? job.payload.messageId : null;
+        if (!messageId) throw new Error("SMTP job has no message id");
+        const result = await providerMailService.sendMessage(messageId, job.tenantId);
+        await this.complete(job.id, job.tenantId, result);
         return { processed: true, jobId: job.id, type: job.type, result };
       }
       const result = await this.processDigest(job.id, job.tenantId, job.createdByUserId, job.payload);

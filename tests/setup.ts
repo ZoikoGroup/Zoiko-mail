@@ -18,6 +18,8 @@ process.env.RATE_LIMIT_MAX = "10000";
 process.env.REGISTER_RATE_LIMIT_MAX = "10000";
 process.env.LOGIN_RATE_LIMIT_MAX = "10000";
 process.env.REFRESH_RATE_LIMIT_MAX = "10000";
+process.env.PROVIDER_CALLBACK_SECRET =
+  "test-provider-callback-secret-minimum-32";
 
 if (process.env.TEST_DATABASE_URL) {
   process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
@@ -49,6 +51,8 @@ beforeEach(async () => {
   await prisma.auditEvent.deleteMany();
   await prisma.supportAccessGrant.deleteMany();
   await prisma.integrationLink.deleteMany();
+  await prisma.providerEvent.deleteMany();
+  await prisma.connectedAccount.deleteMany();
   await prisma.dataLifecycleRequest.deleteMany();
   await prisma.backgroundJob.deleteMany();
   await prisma.notification.deleteMany();
