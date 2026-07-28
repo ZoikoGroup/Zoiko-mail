@@ -15,6 +15,8 @@ import { integrationRouter } from "../modules/integration/integration.routes.js"
 import { jobRouter } from "../modules/job/job.routes.js";
 import { lifecycleRouter } from "../modules/lifecycle/lifecycle.routes.js";
 import { supportRouter } from "../modules/support/support.routes.js";
+import { connectorRouter } from "../modules/connector/connector.routes.js";
+import { deliveryProtectionRouter } from "../modules/delivery-protection/delivery-protection.routes.js";
 
 const apiRouter = Router();
 
@@ -35,5 +37,7 @@ apiRouter.use("/integrations", integrationRouter);
 apiRouter.use("/jobs", jobRouter);
 apiRouter.use("/lifecycle", lifecycleRouter);
 apiRouter.use("/support", supportRouter);
+apiRouter.use("/connectors", connectorRouter);
+apiRouter.use("/delivery-protection", deliveryProtectionRouter);
 
 export { apiRouter };

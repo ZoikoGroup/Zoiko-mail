@@ -26,7 +26,12 @@
     { "key": "jobId", "value": "" },
     { "key": "lifecycleRequestId", "value": "" },
     { "key": "supportGrantId", "value": "" },
-    { "key": "operationsKey", "value": "" }
+    { "key": "operationsKey", "value": "" },
+    { "key": "connectedAccountId", "value": "" },
+    { "key": "providerCallbackSecret", "value": "" },
+    { "key": "providerEventId", "value": "" },
+    { "key": "mailboxId", "value": "" },
+    { "key": "suppressionId", "value": "" }
   ],
   "item": [
     {
@@ -35,6 +40,7 @@
         { "name": "Health", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}/api/health" } },
         { "name": "Readiness", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}/api/ready" } },
         { "name": "Metrics", "request": { "auth": { "type": "noauth" }, "method": "GET", "header": [{ "key": "x-operations-key", "value": "{{operationsKey}}" }], "url": "{{baseUrl}}/api/metrics" } },
+        { "name": "IMAP-SMTP Provider Health", "request": { "auth": { "type": "noauth" }, "method": "GET", "header": [{ "key": "x-operations-key", "value": "{{operationsKey}}" }], "url": "{{baseUrl}}/api/provider-mail/health" } },
         { "name": "OpenAPI JSON", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}/api/docs.json" } }
       ]
     },
@@ -182,9 +188,24 @@
         { "name": "List Domains", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/domains" } },
         { "name": "Add Domain", "event": [{ "listen": "test", "script": { "exec": ["if(pm.response.code===201)pm.collectionVariables.set('domainId',pm.response.json().data.id);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"domainName\":\"mail.example.com\"}" }, "url": "{{baseUrl}}/api/v1/domains" } },
         { "name": "Domain Diagnostics", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/domains/{{domainId}}/diagnostics" } },
+        { "name": "Domain Check History", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/domains/{{domainId}}/checks" } },
+        { "name": "Activate Domain Sending", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/domains/{{domainId}}/activate" } },
         { "name": "List Actions", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/actions" } },
         { "name": "List AI Actions", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/ai/actions" } },
         { "name": "List Integrations", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/integrations" } }
+      ]
+    },
+    {
+      "name": "Track A Connectors",
+      "item": [
+        { "name": "List Connected Accounts", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/connectors" } },
+        { "name": "Create Gmail Read-only Mapping", "event": [{ "listen": "test", "script": { "exec": ["if(pm.response.code===201)pm.collectionVariables.set('connectedAccountId',pm.response.json().data.id);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"provider\":\"GMAIL\",\"providerAccountId\":\"postman-gmail-account\",\"email\":\"postman@gmail.test\",\"scopes\":[\"https://www.googleapis.com/auth/gmail.readonly\"]}" }, "url": "{{baseUrl}}/api/v1/connectors" } },
+        { "name": "Receive Signed Provider Callback", "event": [{ "listen": "prerequest", "script": { "exec": ["const body=pm.request.body.raw;const secret=pm.environment.get('providerCallbackSecret')||pm.collectionVariables.get('providerCallbackSecret');const digest=CryptoJS.HmacSHA256(body,secret).toString(CryptoJS.enc.Hex);pm.request.headers.upsert({key:'x-provider-signature',value:'sha256='+digest});"] } }], "request": { "auth": { "type": "noauth" }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"providerEventId\":\"postman-event-001\",\"providerAccountId\":\"postman-gmail-account\",\"eventType\":\"MAILBOX_CHANGED\",\"resourceType\":\"MAILBOX\",\"resourceId\":\"postman-gmail-account\",\"occurredAt\":\"2026-07-28T12:00:00.000Z\"}" }, "url": "{{baseUrl}}/api/v1/connectors/callbacks/GMAIL" } },
+        { "name": "List Sanitized Provider Events", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/connectors/{{connectedAccountId}}/events" } },
+        { "name": "Provider Health", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/connectors/health" } },
+        { "name": "List Dead-letter Events", "event": [{ "listen": "test", "script": { "exec": ["const events=pm.response.json().data.events;if(events&&events.length)pm.collectionVariables.set('providerEventId',events[0].id);"] } }], "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/connectors/dead-letter" } },
+        { "name": "Replay Dead-letter Event", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/connectors/dead-letter/{{providerEventId}}/replay" } },
+        { "name": "Disconnect Provider Account", "request": { "method": "DELETE", "url": "{{baseUrl}}/api/v1/connectors/{{connectedAccountId}}" } }
       ]
     },
     {
@@ -194,6 +215,16 @@
         { "name": "Create Access Grant", "event": [{ "listen": "test", "script": { "exec": ["if(pm.response.code===201)pm.collectionVariables.set('supportGrantId',pm.response.json().data.id);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"supportMembershipId\":\"{{membershipId}}\",\"reason\":\"Postman diagnostics\",\"scopes\":[\"TENANT_DIAGNOSTICS\"],\"expiresAt\":\"2026-12-31T23:59:59.000Z\"}" }, "url": "{{baseUrl}}/api/v1/support/access-grants" } },
         { "name": "Support Diagnostics", "request": { "method": "GET", "header": [{ "key": "x-support-grant-id", "value": "{{supportGrantId}}" }], "url": "{{baseUrl}}/api/v1/support/diagnostics" } },
         { "name": "Revoke Access Grant", "request": { "method": "DELETE", "url": "{{baseUrl}}/api/v1/support/access-grants/{{supportGrantId}}" } }
+      ]
+    },
+    {
+      "name": "Delivery Protection",
+      "item": [
+        { "name": "List Suppressions", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/delivery-protection/suppressions" } },
+        { "name": "Create Hashed Suppression", "event": [{ "listen": "test", "script": { "exec": ["if(pm.response.code===201)pm.collectionVariables.set('suppressionId',pm.response.json().data.id);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"email\":\"blocked@example.test\",\"reason\":\"ADMIN\"}" }, "url": "{{baseUrl}}/api/v1/delivery-protection/suppressions" } },
+        { "name": "Remove Suppression", "request": { "method": "DELETE", "url": "{{baseUrl}}/api/v1/delivery-protection/suppressions/{{suppressionId}}" } },
+        { "name": "Mailbox Warm-up Status", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/delivery-protection/mailboxes/{{mailboxId}}/warmup" } },
+        { "name": "Evaluate Warm-up Promotion", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/delivery-protection/mailboxes/{{mailboxId}}/warmup/evaluate" } }
       ]
     }
   ]

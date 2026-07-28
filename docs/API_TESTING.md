@@ -18,5 +18,13 @@ Recommended order:
 4. Run the mail, message, label, lifecycle, notification and audit requests as required.
 
 Set `operationsKey` in the selected Postman environment before calling **System / Metrics**.
+The same key protects **System / IMAP-SMTP Provider Health**. Add `?probe=true` only after secure mailbox credentials have been configured.
+Use `POST /api/provider-mail/sync` with the same key to queue an idempotent metadata-only inbox sync for the configured pilot tenant.
+
+The **Track A Connectors** folder tests provider-account mappings and event visibility without real OAuth credentials. Set `providerCallbackSecret` to the same value as `PROVIDER_CALLBACK_SECRET` before running the signed callback request.
+
+The **Delivery Protection** folder covers hashed suppressions and mailbox warm-up status. Bounce, complaint, spam and malware events are tested automatically by the integration suite through sanitized connector events.
+
+For custom domains, run **Domain Diagnostics**, inspect **Domain Check History**, and call **Activate Domain Sending** only after TXT ownership, SPF, DKIM and DMARC are valid.
 
 Permanent tenant deletion is intentionally marked **DANGEROUS**. Use it only with a disposable tenant after testing request, approval and cancellation first.

@@ -14,6 +14,7 @@ class OperationalMetrics {
   private readonly statusClasses = { "2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0 };
   private readonly scheduledMail: WorkerSnapshot = { lastRunAt: null, successes: 0, failures: 0 };
   private readonly backgroundJobs: WorkerSnapshot = { lastRunAt: null, successes: 0, failures: 0 };
+  private readonly providerEvents: WorkerSnapshot = { lastRunAt: null, successes: 0, failures: 0 };
 
   requestStarted() {
     this.requests += 1;
@@ -39,7 +40,12 @@ class OperationalMetrics {
     this.backgroundJobs[success ? "successes" : "failures"] += 1;
   }
 
-  render(extra: { pendingJobs: number; dueScheduledMail: number }) {
+  providerEventRun(success: boolean) {
+    this.providerEvents.lastRunAt = new Date().toISOString();
+    this.providerEvents[success ? "successes" : "failures"] += 1;
+  }
+
+  render(extra: { pendingJobs: number; dueScheduledMail: number; pendingProviderEvents: number; deadLetterProviderEvents: number }) {
     const memory = process.memoryUsage();
     const average = this.requests > 0 ? this.durationMsTotal / this.requests : 0;
     const lines = [
@@ -59,10 +65,14 @@ class OperationalMetrics {
       `zoiko_process_heap_used_bytes ${memory.heapUsed}`,
       `zoiko_background_jobs_pending ${extra.pendingJobs}`,
       `zoiko_scheduled_mail_due ${extra.dueScheduledMail}`,
+      `zoiko_provider_events_pending ${extra.pendingProviderEvents}`,
+      `zoiko_provider_events_dead_letter ${extra.deadLetterProviderEvents}`,
       `zoiko_scheduler_runs_total{outcome="success"} ${this.scheduledMail.successes}`,
       `zoiko_scheduler_runs_total{outcome="failure"} ${this.scheduledMail.failures}`,
       `zoiko_job_worker_runs_total{outcome="success"} ${this.backgroundJobs.successes}`,
       `zoiko_job_worker_runs_total{outcome="failure"} ${this.backgroundJobs.failures}`,
+      `zoiko_provider_event_worker_runs_total{outcome="success"} ${this.providerEvents.successes}`,
+      `zoiko_provider_event_worker_runs_total{outcome="failure"} ${this.providerEvents.failures}`,
     ];
     return `${lines.join("\n")}\n`;
   }

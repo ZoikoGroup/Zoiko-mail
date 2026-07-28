@@ -35,6 +35,8 @@ describe("Production runtime foundation", () => {
     expect(response.headers["content-type"]).toContain("text/plain");
     expect(response.text).toContain("zoiko_http_requests_total");
     expect(response.text).toContain("zoiko_background_jobs_pending");
+    expect(response.text).toContain("zoiko_provider_events_pending");
+    expect(response.text).toContain("zoiko_provider_events_dead_letter");
     expect(response.text).not.toContain(env.OPERATIONS_KEY);
   });
 

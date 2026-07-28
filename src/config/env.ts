@@ -34,16 +34,43 @@ const envSchema = z.object({
   JOB_WORKER_INTERVAL_MS: z.coerce.number().int().min(1_000).default(10_000),
   EXPORT_STORAGE_PATH: z.string().min(1).default("storage/exports"),
   OPERATIONS_KEY: z.string().min(32).default("change-me-operations-key-min-32-chars"),
+  PROVIDER_CALLBACK_SECRET: z.string().min(32).default("change-me-provider-callback-secret-32"),
+  PROVIDER_EVENT_WORKER_INTERVAL_MS: z.coerce.number().int().min(1_000).default(10_000),
+  PROVIDER_EVENT_RETRY_BASE_MS: z.coerce.number().int().min(1_000).default(30_000),
+  MAIL_PROVIDER_ENABLED: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
+  IMAP_HOST: z.string().min(1).default("imap.secureserver.net"),
+  IMAP_PORT: z.coerce.number().int().min(1).max(65535).default(993),
+  IMAP_SECURE: z.enum(["true", "false"]).default("true").transform((value) => value === "true"),
+  SMTP_HOST: z.string().min(1).default("smtpout.secureserver.net"),
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(465),
+  SMTP_SECURE: z.enum(["true", "false"]).default("true").transform((value) => value === "true"),
+  MAIL_PROVIDER_USERNAME: z.string().min(1).optional(),
+  MAIL_PROVIDER_PASSWORD: z.string().min(1).optional(),
+  MAIL_PROVIDER_FROM_ADDRESS: z.string().email().optional(),
+  MAIL_PROVIDER_TENANT_ID: z.string().uuid().optional(),
+  MAIL_PROVIDER_MEMBERSHIP_ID: z.string().uuid().optional(),
+  MAIL_PROVIDER_SYNC_INTERVAL_MS: z.coerce.number().int().min(60_000).default(300_000),
+  MAIL_PROVIDER_CONNECTION_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(15_000),
   BCRYPT_ROUNDS: z.coerce.number().int().min(10).max(15).default(12),
 }).superRefine((value, context) => {
   if (value.JWT_ACCESS_SECRET === value.JWT_REFRESH_SECRET) {
     context.addIssue({ code: "custom", path: ["JWT_REFRESH_SECRET"], message: "must differ from JWT_ACCESS_SECRET" });
   }
   if (value.NODE_ENV === "production") {
-    for (const key of ["JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET", "OPERATIONS_KEY"] as const) {
+    for (const key of ["JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET", "OPERATIONS_KEY", "PROVIDER_CALLBACK_SECRET"] as const) {
       if (/change-me|example|development|test-secret/i.test(value[key])) {
         context.addIssue({ code: "custom", path: [key], message: "must be a production secret" });
       }
+    }
+  }
+  if (value.MAIL_PROVIDER_ENABLED) {
+    for (const key of ["MAIL_PROVIDER_USERNAME", "MAIL_PROVIDER_PASSWORD", "MAIL_PROVIDER_FROM_ADDRESS", "MAIL_PROVIDER_TENANT_ID", "MAIL_PROVIDER_MEMBERSHIP_ID"] as const) {
+      if (!value[key]) {
+        context.addIssue({ code: "custom", path: [key], message: "is required when MAIL_PROVIDER_ENABLED=true" });
+      }
+    }
+    if (!value.IMAP_SECURE || !value.SMTP_SECURE) {
+      context.addIssue({ code: "custom", path: ["MAIL_PROVIDER_ENABLED"], message: "IMAP and SMTP TLS must remain enabled" });
     }
   }
 });

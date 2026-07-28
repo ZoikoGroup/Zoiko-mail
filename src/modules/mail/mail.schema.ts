@@ -35,7 +35,7 @@ export const updateSendingStatusSchema = z.object({
   }
 });
 export const listMailSchema = z.object({
-  folder: z.enum(["DRAFTS", "INBOX", "ARCHIVE", "SENT", "TRASH"]).default("INBOX"),
+  folder: z.enum(["DRAFTS", "INBOX", "ARCHIVE", "SENT", "TRASH", "QUARANTINE"]).default("INBOX"),
   starredOnly: z.coerce.boolean().default(false),
   labelId: z.string().uuid().optional(),
   page: z.coerce.number().int().min(1).default(1),

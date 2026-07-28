@@ -4,7 +4,13 @@ Zoiko Mail is a secure multi-tenant mail backend built as a modular monolith wit
 
 The project currently provides JWT authentication, tenant and membership management, internal mail delivery, message threads, attachments, mailbox organization, policies, audit logging, background jobs, lifecycle controls and operational monitoring.
 
-Provider-dependent integrations such as external SMTP delivery, Gmail/Microsoft synchronization, live DNS verification and AI model execution are intentionally not included yet.
+The Track A connector foundation is implemented for Gmail and Microsoft 365: read-only scope enforcement, tenant-safe account mappings, signed and idempotent callback ingestion, payload sanitization, normalized provider events, bounded exponential retry with jitter, dead-letter replay, provider health, reauthorization/degraded states, audit records, and disconnect handling. Real OAuth consent, provider watches/subscriptions, incremental synchronization, external SMTP delivery, and AI model execution require provider credentials and are intentionally not enabled yet.
+
+Provider-independent delivery protection is also implemented: staged mailbox warm-up caps, promotion thresholds, hashed recipient suppression, normalized delivery telemetry, bounce/complaint suspension, spam/phishing/malware verdicts, quarantine, and blocked attachment access.
+
+Custom-domain protection records DNS check history with readable errors and blocks outbound sending until ownership verification, SPF, DKIM and minimum DMARC policy pass an explicit activation gate.
+
+The SecureServer pilot adapter supports `imap.secureserver.net:993` and `smtpout.secureserver.net:465` using TLS 1.2 or newer. It is enabled only through environment-backed credentials plus an explicit tenant and membership mapping. Inbox sync stores allow-listed metadata only, SMTP sends run as idempotent background jobs, and passwords are never stored in PostgreSQL.
 
 ## Technolo
 
