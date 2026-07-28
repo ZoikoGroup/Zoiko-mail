@@ -6,7 +6,7 @@ The project currently provides JWT authentication, tenant and membership managem
 
 Provider-dependent integrations such as external SMTP delivery, Gmail/Microsoft synchronization, live DNS verification and AI model execution are intentionally not included yet.
 
-## Technology
+## Technolo
 
 - Node.js 22
 - Express.js 5
