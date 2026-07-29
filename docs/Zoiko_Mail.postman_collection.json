@@ -49,17 +49,20 @@
       "item": [
         {
           "name": "Register",
-          "event": [{ "listen": "test", "script": { "exec": ["const d=pm.response.json().data; pm.collectionVariables.set('accessToken',d.tokens.accessToken); pm.collectionVariables.set('refreshToken',d.tokens.refreshToken); pm.collectionVariables.set('tenantId',d.tenant.id); pm.collectionVariables.set('membershipId',d.membership.id);"] } }],
-          "request": { "auth": { "type": "noauth" }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"email\": \"postman-user@zoiko.test\",\n  \"password\": \"Password123!\",\n  \"displayName\": \"Postman User\",\n  \"tenantName\": \"Postman Tenant\",\n  \"planCode\": \"starter\"\n}" }, "url": "{{baseUrl}}/api/v1/auth/register" }
+          "event": [
+            { "listen": "prerequest", "script": { "exec": ["pm.environment.set('testEmail', `postman-${Date.now()}@zoiko.test`);"] } },
+            { "listen": "test", "script": { "exec": ["const d=pm.response.json().data; pm.environment.set('accessToken',d.tokens.accessToken); pm.environment.set('refreshToken',d.tokens.refreshToken); pm.environment.set('tenantId',d.tenant.id); pm.environment.set('membershipId',d.membership.id);"] } }
+          ],
+          "request": { "auth": { "type": "noauth" }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"Password123!\",\n  \"displayName\": \"Postman User\",\n  \"tenantName\": \"Postman Tenant\",\n  \"planCode\": \"starter\"\n}" }, "url": "{{baseUrl}}/api/v1/auth/register" }
         },
         {
           "name": "Login",
-          "event": [{ "listen": "test", "script": { "exec": ["const d=pm.response.json().data; if(d.accessToken){pm.collectionVariables.set('accessToken',d.accessToken);pm.collectionVariables.set('refreshToken',d.refreshToken);pm.collectionVariables.set('tenantId',d.tenant.id);pm.collectionVariables.set('membershipId',d.membership.id);}"] } }],
-          "request": { "auth": { "type": "noauth" }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"email\": \"owner@zoiko.test\",\n  \"password\": \"Password123!\",\n  \"tenantId\": \"{{tenantId}}\"\n}" }, "url": "{{baseUrl}}/api/v1/auth/login" }
+          "event": [{ "listen": "test", "script": { "exec": ["const d=pm.response.json().data; if(d.accessToken){pm.environment.set('accessToken',d.accessToken);pm.environment.set('refreshToken',d.refreshToken);pm.environment.set('tenantId',d.tenant.id);pm.environment.set('membershipId',d.membership.id);}"] } }],
+          "request": { "auth": { "type": "noauth" }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"Password123!\",\n  \"tenantId\": \"{{tenantId}}\"\n}" }, "url": "{{baseUrl}}/api/v1/auth/login" }
         },
         {
           "name": "Refresh",
-          "event": [{ "listen": "test", "script": { "exec": ["const d=pm.response.json().data; pm.collectionVariables.set('accessToken',d.accessToken); pm.collectionVariables.set('refreshToken',d.refreshToken);"] } }],
+          "event": [{ "listen": "test", "script": { "exec": ["const d=pm.response.json().data; pm.environment.set('accessToken',d.accessToken); pm.environment.set('refreshToken',d.refreshToken);"] } }],
           "request": { "auth": { "type": "noauth" }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"refreshToken\":\"{{refreshToken}}\"}" }, "url": "{{baseUrl}}/api/v1/auth/refresh" }
         },
         { "name": "Current Session", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/auth/me" } },
