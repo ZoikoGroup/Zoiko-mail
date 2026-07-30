@@ -1,0 +1,59 @@
+"use client";
+
+import { useState, InputHTMLAttributes } from "react";
+import { FaEye, FaEyeSlash, FaLock } from "react-icons/fa";
+
+interface PasswordInputProps
+  extends InputHTMLAttributes<HTMLInputElement> {
+  label: string;
+  error?: string;
+}
+
+export default function PasswordInput({
+  label,
+  error,
+  className = "",
+  ...props
+}: PasswordInputProps) {
+  const [showPassword, setShowPassword] = useState(false);
+
+  return (
+    <div className="space-y-1.5">
+      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+        {label}
+      </label>
+
+      <div
+        className={`flex items-center rounded-lg border bg-white transition-all duration-200
+        ${
+          error
+            ? "border-red-500 focus-within:ring-2 focus-within:ring-red-500"
+            : "border-slate-300 focus-within:border-teal-500 focus-within:ring-2 focus-within:ring-teal-500"
+        }
+        dark:border-slate-700 dark:bg-slate-900`}
+      >
+        <FaLock className="ml-3 shrink-0 text-slate-400 dark:text-slate-500" />
+
+        <input
+          {...props}
+          type={showPassword ? "text" : "password"}
+          className={`w-full bg-transparent px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:text-white ${className}`}
+        />
+
+        <button
+          type="button"
+          onClick={() => setShowPassword((prev) => !prev)}
+          className="mr-3 text-slate-400 transition hover:text-teal-600 dark:hover:text-teal-400"
+        >
+          {showPassword ? <FaEyeSlash /> : <FaEye />}
+        </button>
+      </div>
+
+      {error && (
+        <p className="text-sm text-red-500">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
