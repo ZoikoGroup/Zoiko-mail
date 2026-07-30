@@ -9,11 +9,27 @@ POSTGRES_PASSWORD=replace-with-a-strong-database-password
 JWT_ACCESS_SECRET=replace-with-at-least-32-random-characters
 JWT_REFRESH_SECRET=replace-with-a-different-32-character-secret
 OPERATIONS_KEY=replace-with-at-least-32-random-characters
+PROVIDER_CALLBACK_SECRET=replace-with-a-different-32-character-secret
 CORS_ORIGIN=https://mail.example.com
 API_PORT=5000
+
+# Enable only when the live mailbox is required in this environment
+MAIL_PROVIDER_ENABLED=true
+IMAP_HOST=imap.secureserver.net
+IMAP_PORT=993
+IMAP_SECURE=true
+SMTP_HOST=smtpout.secureserver.net
+SMTP_PORT=465
+SMTP_SECURE=true
+MAIL_PROVIDER_USERNAME=info@example.com
+MAIL_PROVIDER_PASSWORD=store-this-in-the-platform-secret-manager
+MAIL_PROVIDER_FROM_ADDRESS=info@example.com
+MAIL_PROVIDER_TENANT_ID=replace-with-the-active-tenant-uuid
+MAIL_PROVIDER_MEMBERSHIP_ID=replace-with-the-active-membership-uuid
+MAIL_PROVIDER_SYNC_INTERVAL_MS=300000
 ```
 
-The application secrets must be different. Production startup rejects example or development secrets.
+The application secrets must be different. Production startup rejects example or development secrets. Never commit the provider password; use the deployment platform's secret manager.
 
 ## Start
 
