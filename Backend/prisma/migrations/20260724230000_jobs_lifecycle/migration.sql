@@ -1,0 +1,16 @@
+CREATE TYPE "JobType" AS ENUM ('DATA_EXPORT','DATA_DELETION','NOTIFICATION_DIGEST');
+CREATE TYPE "JobStatus" AS ENUM ('PENDING','RUNNING','RETRY','COMPLETED','FAILED','CANCELLED');
+CREATE TYPE "LifecycleType" AS ENUM ('EXPORT','DELETION');
+CREATE TYPE "LifecycleStatus" AS ENUM ('REQUESTED','APPROVED','PROCESSING','COMPLETED','REJECTED','CANCELLED');
+CREATE TABLE "background_jobs" ("id" UUID NOT NULL,"tenant_id" UUID NOT NULL,"created_by_user_id" UUID NOT NULL,"type" "JobType" NOT NULL,"status" "JobStatus" NOT NULL DEFAULT 'PENDING',"payload" JSONB NOT NULL,"result" JSONB,"idempotency_key" TEXT NOT NULL,"attempts" INTEGER NOT NULL DEFAULT 0,"max_attempts" INTEGER NOT NULL DEFAULT 3,"run_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,"locked_at" TIMESTAMP(3),"completed_at" TIMESTAMP(3),"last_error" TEXT,"created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,"updated_at" TIMESTAMP(3) NOT NULL,CONSTRAINT "background_jobs_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "data_lifecycle_requests" ("id" UUID NOT NULL,"tenant_id" UUID NOT NULL,"requested_by_user_id" UUID NOT NULL,"type" "LifecycleType" NOT NULL,"status" "LifecycleStatus" NOT NULL DEFAULT 'REQUESTED',"reason" TEXT,"job_id" UUID,"approved_at" TIMESTAMP(3),"completed_at" TIMESTAMP(3),"created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,"updated_at" TIMESTAMP(3) NOT NULL,CONSTRAINT "data_lifecycle_requests_pkey" PRIMARY KEY ("id"));
+CREATE UNIQUE INDEX "background_jobs_tenant_id_idempotency_key_key" ON "background_jobs"("tenant_id","idempotency_key");
+CREATE INDEX "background_jobs_status_run_at_idx" ON "background_jobs"("status","run_at");
+CREATE INDEX "background_jobs_tenant_id_created_at_idx" ON "background_jobs"("tenant_id","created_at");
+CREATE UNIQUE INDEX "data_lifecycle_requests_job_id_key" ON "data_lifecycle_requests"("job_id");
+CREATE INDEX "data_lifecycle_requests_tenant_id_type_status_idx" ON "data_lifecycle_requests"("tenant_id","type","status");
+ALTER TABLE "background_jobs" ADD CONSTRAINT "background_jobs_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "background_jobs" ADD CONSTRAINT "background_jobs_created_by_user_id_fkey" FOREIGN KEY ("created_by_user_id") REFERENCES "app_users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "data_lifecycle_requests" ADD CONSTRAINT "data_lifecycle_requests_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "data_lifecycle_requests" ADD CONSTRAINT "data_lifecycle_requests_requested_by_user_id_fkey" FOREIGN KEY ("requested_by_user_id") REFERENCES "app_users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "data_lifecycle_requests" ADD CONSTRAINT "data_lifecycle_requests_job_id_fkey" FOREIGN KEY ("job_id") REFERENCES "background_jobs"("id") ON DELETE SET NULL ON UPDATE CASCADE;

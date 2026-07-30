@@ -1,0 +1,234 @@
+{
+  "info": {
+    "_postman_id": "d710545c-f66c-4e71-a185-zoikomail0001",
+    "name": "Zoiko Mail API",
+    "description": "Complete local API collection. Register, login, and refresh automatically save session variables.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000" },
+    { "key": "accessToken", "value": "" },
+    { "key": "refreshToken", "value": "" },
+    { "key": "tenantId", "value": "00000000-0000-4000-8000-000000000001" },
+    { "key": "membershipId", "value": "" },
+    { "key": "eventId", "value": "" },
+    { "key": "invitationToken", "value": "" },
+    { "key": "messageId", "value": "" },
+    { "key": "threadId", "value": "" },
+    { "key": "labelId", "value": "" },
+    { "key": "policyId", "value": "" },
+    { "key": "domainId", "value": "" },
+    { "key": "actionId", "value": "" },
+    { "key": "aiActionId", "value": "" },
+    { "key": "notificationId", "value": "" },
+    { "key": "integrationId", "value": "" },
+    { "key": "jobId", "value": "" },
+    { "key": "lifecycleRequestId", "value": "" },
+    { "key": "supportGrantId", "value": "" },
+    { "key": "operationsKey", "value": "" },
+    { "key": "connectedAccountId", "value": "" },
+    { "key": "providerCallbackSecret", "value": "" },
+    { "key": "providerEventId", "value": "" },
+    { "key": "mailboxId", "value": "" },
+    { "key": "suppressionId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "System",
+      "item": [
+        { "name": "Health", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}/api/health" } },
+        { "name": "Readiness", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}/api/ready" } },
+        { "name": "Metrics", "request": { "auth": { "type": "noauth" }, "method": "GET", "header": [{ "key": "x-operations-key", "value": "{{operationsKey}}" }], "url": "{{baseUrl}}/api/metrics" } },
+        { "name": "IMAP-SMTP Provider Health", "request": { "auth": { "type": "noauth" }, "method": "GET", "header": [{ "key": "x-operations-key", "value": "{{operationsKey}}" }], "url": "{{baseUrl}}/api/provider-mail/health" } },
+        { "name": "OpenAPI JSON", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}/api/docs.json" } }
+      ]
+    },
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Register",
+          "event": [
+            { "listen": "prerequest", "script": { "exec": ["pm.environment.set('testEmail', `postman-${Date.now()}@zoiko.test`);"] } },
+            { "listen": "test", "script": { "exec": ["const d=pm.response.json().data; pm.environment.set('accessToken',d.tokens.accessToken); pm.environment.set('refreshToken',d.tokens.refreshToken); pm.environment.set('tenantId',d.tenant.id); pm.environment.set('membershipId',d.membership.id);"] } }
+          ],
+          "request": { "auth": { "type": "noauth" }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"Password123!\",\n  \"displayName\": \"Postman User\",\n  \"tenantName\": \"Postman Tenant\",\n  \"planCode\": \"starter\"\n}" }, "url": "{{baseUrl}}/api/v1/auth/register" }
+        },
+        {
+          "name": "Login",
+          "event": [{ "listen": "test", "script": { "exec": ["const d=pm.response.json().data; if(d.accessToken){pm.environment.set('accessToken',d.accessToken);pm.environment.set('refreshToken',d.refreshToken);pm.environment.set('tenantId',d.tenant.id);pm.environment.set('membershipId',d.membership.id);}"] } }],
+          "request": { "auth": { "type": "noauth" }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"Password123!\",\n  \"tenantId\": \"{{tenantId}}\"\n}" }, "url": "{{baseUrl}}/api/v1/auth/login" }
+        },
+        {
+          "name": "Refresh",
+          "event": [{ "listen": "test", "script": { "exec": ["const d=pm.response.json().data; pm.environment.set('accessToken',d.accessToken); pm.environment.set('refreshToken',d.refreshToken);"] } }],
+          "request": { "auth": { "type": "noauth" }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"refreshToken\":\"{{refreshToken}}\"}" }, "url": "{{baseUrl}}/api/v1/auth/refresh" }
+        },
+        { "name": "Current Session", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/auth/me" } },
+        { "name": "Change Password", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"currentPassword\":\"Password123!\",\"newPassword\":\"NewPassword123!\"}" }, "url": "{{baseUrl}}/api/v1/auth/change-password" } },
+        { "name": "Logout", "request": { "auth": { "type": "noauth" }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"refreshToken\":\"{{refreshToken}}\"}" }, "url": "{{baseUrl}}/api/v1/auth/logout" } },
+        { "name": "Logout All", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/auth/logout-all" } }
+      ]
+    },
+    {
+      "name": "User Profile",
+      "item": [
+        { "name": "Get Profile", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/users/me" } },
+        { "name": "Update Profile", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"displayName\":\"Updated User\",\"timezone\":\"Asia/Kolkata\",\"language\":\"en-IN\"}" }, "url": "{{baseUrl}}/api/v1/users/me" } }
+      ]
+    },
+    {
+      "name": "Tenant Settings",
+      "item": [
+        { "name": "Get Current Tenant", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/tenants/current" } },
+        { "name": "Update Current Tenant", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"name\":\"Zoiko Tenant\",\"timezone\":\"Asia/Kolkata\",\"allowedDomains\":[\"zoiko.com\"]}" }, "url": "{{baseUrl}}/api/v1/tenants/current" } }
+      ]
+    },
+    {
+      "name": "Memberships",
+      "item": [
+        { "name": "List Members", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/membership/members" } },
+        {
+          "name": "Create Invitation",
+          "event": [{ "listen": "test", "script": { "exec": ["if(pm.response.code===201){const d=pm.response.json().data;pm.collectionVariables.set('membershipId',d.membership.id);pm.collectionVariables.set('invitationToken',d.invitationToken);}"] } }],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"email\":\"member@zoiko.test\",\"role\":\"MEMBER\"}" }, "url": "{{baseUrl}}/api/v1/membership/invitations" }
+        },
+        { "name": "Accept Invitation", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"invitationToken\":\"{{invitationToken}}\"}" }, "url": "{{baseUrl}}/api/v1/membership/invitations/accept" } },
+        { "name": "Cancel Invitation", "request": { "method": "DELETE", "url": "{{baseUrl}}/api/v1/membership/invitations/{{membershipId}}" } },
+        {
+          "name": "Add Existing User",
+          "event": [{ "listen": "test", "script": { "exec": ["if(pm.response.code===201) pm.collectionVariables.set('membershipId',pm.response.json().data.id);"] } }],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"email\":\"member@zoiko.test\",\"role\":\"MEMBER\"}" }, "url": "{{baseUrl}}/api/v1/membership/members" }
+        },
+        { "name": "Update Member", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"role\":\"ADMIN\",\"status\":\"ACTIVE\"}" }, "url": "{{baseUrl}}/api/v1/membership/members/{{membershipId}}" } },
+        { "name": "Remove Member", "request": { "method": "DELETE", "url": "{{baseUrl}}/api/v1/membership/members/{{membershipId}}" } }
+      ]
+    },
+    {
+      "name": "Audit",
+      "item": [
+        {
+          "name": "List Events",
+          "event": [{ "listen": "test", "script": { "exec": ["const e=pm.response.json().data.events; if(e.length) pm.collectionVariables.set('eventId',e[0].id);"] } }],
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/audit/events?page=1&limit=25" }
+        },
+        { "name": "Get Event", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/audit/events/{{eventId}}" } }
+      ]
+    },
+    {
+      "name": "Mail",
+      "item": [
+        { "name": "List Inbox", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/mail?folder=INBOX&page=1&limit=25" } },
+        { "name": "List Starred Archive", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/mail?folder=ARCHIVE&starredOnly=true&page=1&limit=25" } },
+        { "name": "Create Draft", "event": [{ "listen": "test", "script": { "exec": ["if(pm.response.code===201){const d=pm.response.json().data;pm.collectionVariables.set('messageId',d.id);if(d.threadId)pm.collectionVariables.set('threadId',d.threadId);}"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"subject\":\"Postman test\",\"textBody\":\"Hello from Postman\",\"recipients\":{\"to\":[\"member@zoiko.test\"],\"cc\":[],\"bcc\":[]}}" }, "url": "{{baseUrl}}/api/v1/mail/drafts" } },
+        { "name": "Update Draft", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"subject\":\"Updated Postman test\",\"textBody\":\"Updated body\"}" }, "url": "{{baseUrl}}/api/v1/mail/drafts/{{messageId}}" } },
+        { "name": "Send Draft", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/mail/drafts/{{messageId}}/send" } },
+        { "name": "Schedule Draft", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"scheduledAt\":\"2026-12-31T10:00:00.000Z\"}" }, "url": "{{baseUrl}}/api/v1/mail/drafts/{{messageId}}/schedule" } },
+        { "name": "Cancel Schedule", "request": { "method": "DELETE", "url": "{{baseUrl}}/api/v1/mail/drafts/{{messageId}}/schedule" } },
+        { "name": "Delete Draft", "request": { "method": "DELETE", "url": "{{baseUrl}}/api/v1/mail/drafts/{{messageId}}" } },
+        { "name": "Get Mailbox Message", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/mail/{{messageId}}" } },
+        { "name": "Update Mailbox Message", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"isRead\":true,\"isStarred\":true,\"folder\":\"ARCHIVE\"}" }, "url": "{{baseUrl}}/api/v1/mail/{{messageId}}" } },
+        { "name": "Bulk Mailbox Action", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"messageIds\":[\"{{messageId}}\"],\"action\":\"MARK_READ\"}" }, "url": "{{baseUrl}}/api/v1/mail/bulk" } },
+        { "name": "Reply", "event": [{ "listen": "test", "script": { "exec": ["if(pm.response.code===201)pm.collectionVariables.set('messageId',pm.response.json().data.id);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"textBody\":\"Reply from Postman\"}" }, "url": "{{baseUrl}}/api/v1/mail/{{messageId}}/reply" } },
+        { "name": "Reply All", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"textBody\":\"Reply all from Postman\"}" }, "url": "{{baseUrl}}/api/v1/mail/{{messageId}}/reply-all" } },
+        { "name": "Forward", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"textBody\":\"Forwarded from Postman\",\"recipients\":{\"to\":[\"member@zoiko.test\"],\"cc\":[],\"bcc\":[]}}" }, "url": "{{baseUrl}}/api/v1/mail/{{messageId}}/forward" } },
+        { "name": "Delivery Events", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/mail/{{messageId}}/delivery-events" } },
+        { "name": "Upload Attachment", "request": { "method": "POST", "body": { "mode": "formdata", "formdata": [{ "key": "file", "type": "file", "src": "" }] }, "url": "{{baseUrl}}/api/v1/mail/drafts/{{messageId}}/attachments" } },
+        { "name": "Empty Trash", "request": { "method": "DELETE", "url": "{{baseUrl}}/api/v1/mail/trash" } }
+      ]
+    },
+    {
+      "name": "Mail Labels",
+      "item": [
+        { "name": "List Labels", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/mail/labels" } },
+        { "name": "Create Label", "event": [{ "listen": "test", "script": { "exec": ["if(pm.response.code===201)pm.collectionVariables.set('labelId',pm.response.json().data.id);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"name\":\"Important\",\"color\":\"#FF8800\"}" }, "url": "{{baseUrl}}/api/v1/mail/labels" } },
+        { "name": "Update Label", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"name\":\"Priority\",\"color\":\"#CC0000\"}" }, "url": "{{baseUrl}}/api/v1/mail/labels/{{labelId}}" } },
+        { "name": "Assign Label", "request": { "method": "PUT", "url": "{{baseUrl}}/api/v1/mail/{{messageId}}/labels/{{labelId}}" } },
+        { "name": "Remove Label", "request": { "method": "DELETE", "url": "{{baseUrl}}/api/v1/mail/{{messageId}}/labels/{{labelId}}" } },
+        { "name": "Delete Label", "request": { "method": "DELETE", "url": "{{baseUrl}}/api/v1/mail/labels/{{labelId}}" } }
+      ]
+    },
+    {
+      "name": "Messages and Threads",
+      "item": [
+        { "name": "Search Messages", "event": [{ "listen": "test", "script": { "exec": ["const d=pm.response.json().data.items;if(d&&d.length){pm.collectionVariables.set('messageId',d[0].message.id);if(d[0].message.threadId)pm.collectionVariables.set('threadId',d[0].message.threadId);}"] } }], "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/messages?q=Postman&page=1&limit=25" } },
+        { "name": "Get Message", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/messages/{{messageId}}" } },
+        { "name": "List Threads", "event": [{ "listen": "test", "script": { "exec": ["const d=pm.response.json().data.items;if(d&&d.length)pm.collectionVariables.set('threadId',d[0].id);"] } }], "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/threads?page=1&limit=25" } },
+        { "name": "Get Thread", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/threads/{{threadId}}" } }
+      ]
+    },
+    {
+      "name": "Policies",
+      "item": [
+        { "name": "List Policies", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/policies" } },
+        { "name": "Create Sending Policy", "event": [{ "listen": "test", "script": { "exec": ["if(pm.response.code===201)pm.collectionVariables.set('policyId',pm.response.json().data.id);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"type\":\"SENDING\",\"name\":\"Allow sending\",\"rules\":{\"defaultEffect\":\"ALLOW\",\"conditions\":[]}}" }, "url": "{{baseUrl}}/api/v1/policies" } },
+        { "name": "Activate Policy", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/policies/{{policyId}}/activate" } },
+        { "name": "Evaluate Policy", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"type\":\"SENDING\",\"context\":{\"recipient\":{\"external\":false}}}" }, "url": "{{baseUrl}}/api/v1/policies/evaluate" } },
+        { "name": "Preview Retention", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{}" }, "url": "{{baseUrl}}/api/v1/policies/retention/preview" } },
+        { "name": "Execute Retention", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"confirmation\":\"DELETE_ELIGIBLE_MESSAGES\"}" }, "url": "{{baseUrl}}/api/v1/policies/retention/execute" } }
+      ]
+    },
+    {
+      "name": "Lifecycle and Jobs",
+      "item": [
+        { "name": "List Lifecycle Requests", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/lifecycle" } },
+        { "name": "Request Export", "event": [{ "listen": "test", "script": { "exec": ["if(pm.response.code===202){const d=pm.response.json().data;pm.collectionVariables.set('lifecycleRequestId',d.request.id);pm.collectionVariables.set('jobId',d.job.id);}"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"idempotencyKey\":\"postman-export-001\",\"reason\":\"Postman verification\"}" }, "url": "{{baseUrl}}/api/v1/lifecycle/exports" } },
+        { "name": "Download Export", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/lifecycle/exports/{{lifecycleRequestId}}/download" } },
+        { "name": "Request Tenant Deletion", "event": [{ "listen": "test", "script": { "exec": ["if(pm.response.code===202)pm.collectionVariables.set('lifecycleRequestId',pm.response.json().data.id);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"idempotencyKey\":\"postman-delete-001\",\"reason\":\"Only use on a disposable tenant\"}" }, "url": "{{baseUrl}}/api/v1/lifecycle/deletions" } },
+        { "name": "Approve Deletion", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/lifecycle/{{lifecycleRequestId}}/approve" } },
+        { "name": "Cancel Deletion", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/lifecycle/{{lifecycleRequestId}}/cancel" } },
+        { "name": "Confirm Permanent Deletion - DANGEROUS", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"confirmation\":\"DELETE_TENANT_PERMANENTLY\",\"tenantName\":\"Postman Tenant\"}" }, "url": "{{baseUrl}}/api/v1/lifecycle/{{lifecycleRequestId}}/confirm-deletion" } },
+        { "name": "List Jobs", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/jobs" } },
+        { "name": "Get Job", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/jobs/{{jobId}}" } }
+      ]
+    },
+    {
+      "name": "Notifications and Platform Modules",
+      "item": [
+        { "name": "List Notifications", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/notifications" } },
+        { "name": "Queue Digest", "event": [{ "listen": "test", "script": { "exec": ["if(pm.response.code===202)pm.collectionVariables.set('jobId',pm.response.json().data.id);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"idempotencyKey\":\"postman-digest-001\"}" }, "url": "{{baseUrl}}/api/v1/notifications/digests" } },
+        { "name": "List Domains", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/domains" } },
+        { "name": "Add Domain", "event": [{ "listen": "test", "script": { "exec": ["if(pm.response.code===201)pm.collectionVariables.set('domainId',pm.response.json().data.id);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"domainName\":\"mail.example.com\"}" }, "url": "{{baseUrl}}/api/v1/domains" } },
+        { "name": "Domain Diagnostics", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/domains/{{domainId}}/diagnostics" } },
+        { "name": "Domain Check History", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/domains/{{domainId}}/checks" } },
+        { "name": "Activate Domain Sending", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/domains/{{domainId}}/activate" } },
+        { "name": "List Actions", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/actions" } },
+        { "name": "List AI Actions", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/ai/actions" } },
+        { "name": "List Integrations", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/integrations" } }
+      ]
+    },
+    {
+      "name": "Track A Connectors",
+      "item": [
+        { "name": "List Connected Accounts", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/connectors" } },
+        { "name": "Create Gmail Read-only Mapping", "event": [{ "listen": "test", "script": { "exec": ["if(pm.response.code===201)pm.collectionVariables.set('connectedAccountId',pm.response.json().data.id);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"provider\":\"GMAIL\",\"providerAccountId\":\"postman-gmail-account\",\"email\":\"postman@gmail.test\",\"scopes\":[\"https://www.googleapis.com/auth/gmail.readonly\"]}" }, "url": "{{baseUrl}}/api/v1/connectors" } },
+        { "name": "Receive Signed Provider Callback", "event": [{ "listen": "prerequest", "script": { "exec": ["const body=pm.request.body.raw;const secret=pm.environment.get('providerCallbackSecret')||pm.collectionVariables.get('providerCallbackSecret');const digest=CryptoJS.HmacSHA256(body,secret).toString(CryptoJS.enc.Hex);pm.request.headers.upsert({key:'x-provider-signature',value:'sha256='+digest});"] } }], "request": { "auth": { "type": "noauth" }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"providerEventId\":\"postman-event-001\",\"providerAccountId\":\"postman-gmail-account\",\"eventType\":\"MAILBOX_CHANGED\",\"resourceType\":\"MAILBOX\",\"resourceId\":\"postman-gmail-account\",\"occurredAt\":\"2026-07-28T12:00:00.000Z\"}" }, "url": "{{baseUrl}}/api/v1/connectors/callbacks/GMAIL" } },
+        { "name": "List Sanitized Provider Events", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/connectors/{{connectedAccountId}}/events" } },
+        { "name": "Provider Health", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/connectors/health" } },
+        { "name": "List Dead-letter Events", "event": [{ "listen": "test", "script": { "exec": ["const events=pm.response.json().data.events;if(events&&events.length)pm.collectionVariables.set('providerEventId',events[0].id);"] } }], "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/connectors/dead-letter" } },
+        { "name": "Replay Dead-letter Event", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/connectors/dead-letter/{{providerEventId}}/replay" } },
+        { "name": "Disconnect Provider Account", "request": { "method": "DELETE", "url": "{{baseUrl}}/api/v1/connectors/{{connectedAccountId}}" } }
+      ]
+    },
+    {
+      "name": "Support",
+      "item": [
+        { "name": "List Access Grants", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/support/access-grants" } },
+        { "name": "Create Access Grant", "event": [{ "listen": "test", "script": { "exec": ["if(pm.response.code===201)pm.collectionVariables.set('supportGrantId',pm.response.json().data.id);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"supportMembershipId\":\"{{membershipId}}\",\"reason\":\"Postman diagnostics\",\"scopes\":[\"TENANT_DIAGNOSTICS\"],\"expiresAt\":\"2026-12-31T23:59:59.000Z\"}" }, "url": "{{baseUrl}}/api/v1/support/access-grants" } },
+        { "name": "Support Diagnostics", "request": { "method": "GET", "header": [{ "key": "x-support-grant-id", "value": "{{supportGrantId}}" }], "url": "{{baseUrl}}/api/v1/support/diagnostics" } },
+        { "name": "Revoke Access Grant", "request": { "method": "DELETE", "url": "{{baseUrl}}/api/v1/support/access-grants/{{supportGrantId}}" } }
+      ]
+    },
+    {
+      "name": "Delivery Protection",
+      "item": [
+        { "name": "List Suppressions", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/delivery-protection/suppressions" } },
+        { "name": "Create Hashed Suppression", "event": [{ "listen": "test", "script": { "exec": ["if(pm.response.code===201)pm.collectionVariables.set('suppressionId',pm.response.json().data.id);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"email\":\"blocked@example.test\",\"reason\":\"ADMIN\"}" }, "url": "{{baseUrl}}/api/v1/delivery-protection/suppressions" } },
+        { "name": "Remove Suppression", "request": { "method": "DELETE", "url": "{{baseUrl}}/api/v1/delivery-protection/suppressions/{{suppressionId}}" } },
+        { "name": "Mailbox Warm-up Status", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/delivery-protection/mailboxes/{{mailboxId}}/warmup" } },
+        { "name": "Evaluate Warm-up Promotion", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/delivery-protection/mailboxes/{{mailboxId}}/warmup/evaluate" } }
+      ]
+    }
+  ]
+}
