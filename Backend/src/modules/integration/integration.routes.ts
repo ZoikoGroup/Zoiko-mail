@@ -1,0 +1,10 @@
+import { Router } from "express";
+import { authenticate, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
+import { asyncHandler } from "../../common/middleware/asyncHandler.js";
+import { sendSuccess } from "../../common/utils/response.js";
+import { createIntegrationSchema } from "./integration.schema.js";
+import { integrationService } from "./integration.service.js";
+export const integrationRouter = Router();
+integrationRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBER"));
+integrationRouter.get("/", asyncHandler(async (req, res) => { sendSuccess(res, 200, { links: await integrationService.list(req.tenantContext!.tenantId) }, req.requestId); }));
+integrationRouter.post("/", validate(createIntegrationSchema), asyncHandler(async (req, res) => { sendSuccess(res, 201, await integrationService.create(req.body, req.tenantContext!.tenantId, req.tenantContext!.userId, req.tenantContext!.membershipId), req.requestId); }));
