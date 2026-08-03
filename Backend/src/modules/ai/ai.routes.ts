@@ -1,0 +1,12 @@
+import { Router } from "express";
+import { authenticate, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
+import { asyncHandler } from "../../common/middleware/asyncHandler.js";
+import { sendSuccess } from "../../common/utils/response.js";
+import { aiIdSchema, completeAiActionSchema, createAiActionSchema, reviewAiActionSchema } from "./ai.schema.js";
+import { aiService } from "./ai.service.js";
+export const aiRouter = Router();
+aiRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBER"));
+aiRouter.get("/actions", asyncHandler(async (req, res) => { sendSuccess(res, 200, { actions: await aiService.list(req.tenantContext!.tenantId, req.tenantContext!.userId) }, req.requestId); }));
+aiRouter.post("/actions", validate(createAiActionSchema), asyncHandler(async (req, res) => { sendSuccess(res, 202, await aiService.create(req.body, req.tenantContext!), req.requestId); }));
+aiRouter.patch("/actions/:aiActionId/result", requireRole("OWNER", "ADMIN"), validate(aiIdSchema, "params"), validate(completeAiActionSchema), asyncHandler(async (req, res) => { sendSuccess(res, 200, await aiService.complete(String(req.params.aiActionId), req.body, req.tenantContext!.tenantId, req.tenantContext!.userId), req.requestId); }));
+aiRouter.patch("/actions/:aiActionId/review", validate(aiIdSchema, "params"), validate(reviewAiActionSchema), asyncHandler(async (req, res) => { sendSuccess(res, 200, await aiService.review(String(req.params.aiActionId), req.body.status, req.tenantContext!.tenantId, req.tenantContext!.userId), req.requestId); }));
