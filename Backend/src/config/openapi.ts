@@ -48,6 +48,42 @@ export const openApiDocument = {
         responses: { "201": ok("User, tenant, OWNER membership and session created"), "409": { $ref: "#/components/responses/Conflict" } },
       },
     },
+    "/api/v1/auth/create-workspace": {
+      post: {
+        tags: ["Authentication"], summary: "Create a workspace for a pending (identity-only) user", security: bearer,
+        description: "Send the pendingToken returned by POST /register as a Bearer token. Creates the Tenant + OWNER membership and returns a full session.",
+        requestBody: jsonBody({
+          type: "object",
+          required: ["tenantName", "planCode"],
+          properties: {
+            tenantName: { type: "string", example: "Acme Inc" },
+            planCode: { type: "string", example: "starter" },
+          },
+        }),
+        responses: {
+          "201": ok("Tenant, OWNER membership and session created"),
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "409": { $ref: "#/components/responses/Conflict" },
+        },
+      },
+    },
+
+    "/api/v1/auth/verify-otp": {
+      post: {
+        tags: ["Authentication"], summary: "Verify the email OTP for a pending user", security: bearer,
+        description: "Send the pendingToken from POST /register as a Bearer token. On success the user becomes ACTIVE and emailVerifiedAt is set; a refreshed pending token is returned.",
+        requestBody: jsonBody({ type: "object", required: ["code"], properties: { code: { type: "string", example: "123456" } } }),
+        responses: { "200": ok("Email verified; refreshed pending token returned"), "400": { $ref: "#/components/responses/ValidationError" }, "401": { $ref: "#/components/responses/Unauthorized" } },
+      },
+    },
+    "/api/v1/auth/resend-otp": {
+      post: {
+        tags: ["Authentication"], summary: "Resend the email OTP for a pending user", security: bearer,
+        description: "Send the pendingToken from POST /register as a Bearer token. Rate-limited by cooldown and hourly cap.",
+        responses: { "200": ok("Code resent"), "401": { $ref: "#/components/responses/Unauthorized" }, "429": ok("Cooldown or hourly limit reached") },
+      },
+    },
+
     "/api/v1/auth/login": {
       post: {
         tags: ["Authentication"], summary: "Login or request tenant selection",

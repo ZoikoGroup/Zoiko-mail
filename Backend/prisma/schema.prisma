@@ -57,10 +57,16 @@ model AppUser {
   timezone                String?                @default("UTC")
   language                String?                @default("en")
   status                  AppUserStatus          @default(ACTIVE)
+  platformRole            PlatformRole           @default(NONE) @map("platform_role")
+  emailVerifiedAt         DateTime?              @map("email_verified_at")
+  lastLoginAt             DateTime?              @map("last_login_at")
+  failedLoginAttempts     Int                    @default(0) @map("failed_login_attempts")
+  lockedUntil             DateTime?              @map("locked_until")
   createdAt               DateTime               @default(now()) @map("created_at")
   updatedAt               DateTime               @updatedAt @map("updated_at")
   auditEvents             AuditEvent[]           @relation("AuditActor")
   refreshTokens           RefreshToken[]
+  emailOtps               EmailOtp[]
   memberships             TenantMembership[]
   createdPolicies         TenantPolicy[]         @relation("PolicyCreator")
   authoredMessages        EmailMessage[]         @relation("MessageAuthor")
@@ -75,6 +81,21 @@ model AppUser {
   connectedAccounts       ConnectedAccount[]
 
   @@map("app_users")
+}
+
+model EmailOtp {
+  id         String     @id @default(uuid()) @db.Uuid
+  userId     String     @map("user_id") @db.Uuid
+  purpose    OtpPurpose @default(EMAIL_VERIFICATION)
+  codeHash   String     @map("code_hash")
+  expiresAt  DateTime   @map("expires_at")
+  consumedAt DateTime?  @map("consumed_at")
+  attempts   Int        @default(0)
+  createdAt  DateTime   @default(now()) @map("created_at")
+  user       AppUser    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+  @@map("email_otps")
 }
 
 model TenantMembership {
@@ -622,13 +643,27 @@ model TenantDeletionReceipt {
   @@map("tenant_deletion_receipts")
 }
 
+enum PlatformRole {
+  NONE
+  SUPPORT
+  SUPER_ADMIN
+}
+
+enum OtpPurpose {
+  EMAIL_VERIFICATION
+}
+
 enum TenantStatus {
   ACTIVE
   SUSPENDED
+  DELETED_PENDING
 }
 
 enum AppUserStatus {
+  PENDING_VERIFICATION
   ACTIVE
+  INVITED
+  SUSPENDED
   DISABLED
 }
 

@@ -1,6 +1,6 @@
 import type { MembershipRole } from "@prisma/client";
 
-export type TokenType = "access" | "refresh";
+export type TokenType = "access" | "refresh" | "pending";
 
 export interface AccessTokenPayload {
   sub: string;
@@ -17,6 +17,17 @@ export interface RefreshTokenPayload {
   role: MembershipRole;
   type: "refresh";
   jti: string;
+}
+
+/**
+ * Issued by /register once identity is created but before a workspace
+ * (Tenant + TenantMembership) exists. Deliberately thin — no tenantId,
+ * no role — since neither exists yet. Only valid for /create-workspace
+ * (and, from Phase 3 onward, /verify-otp and /resend-otp).
+ */
+export interface PendingTokenPayload {
+  sub: string;
+  type: "pending";
 }
 
 export interface AuthContext {

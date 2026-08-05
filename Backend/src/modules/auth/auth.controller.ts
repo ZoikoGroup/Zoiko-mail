@@ -11,8 +11,35 @@ function getRequestContext(req: Request) {
   };
 }
 
+function getBearerToken(req: Request): string {
+  const header = req.header("authorization") ?? "";
+  return header.startsWith("Bearer ") ? header.slice(7) : "";
+}
+
+export const verifyOtp = asyncHandler(async (req: Request, res: Response) => {
+  const pendingToken = getBearerToken(req);
+  const result = await authService.verifyEmailOtp(pendingToken, req.body.code, getRequestContext(req));
+  sendSuccess(res, 200, result, req.requestId);
+});
+
+export const resendOtp = asyncHandler(async (req: Request, res: Response) => {
+  const pendingToken = getBearerToken(req);
+  const result = await authService.resendEmailOtp(pendingToken, getRequestContext(req));
+  sendSuccess(res, 200, result, req.requestId);
+});
+
 export const register = asyncHandler(async (req: Request, res: Response) => {
   const result = await authService.register(req.body, getRequestContext(req));
+  sendSuccess(res, 201, result, req.requestId);
+});
+
+export const createWorkspace = asyncHandler(async (req: Request, res: Response) => {
+  const pendingToken = getBearerToken(req);
+  const result = await authService.createWorkspace(
+    req.body,
+    pendingToken,
+    getRequestContext(req)
+  );
   sendSuccess(res, 201, result, req.requestId);
 });
 
