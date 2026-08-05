@@ -1,12 +1,20 @@
-import type { MembershipRole } from "@prisma/client";
+import type { MembershipRole, PlatformRole } from "@prisma/client";
 
-export type TokenType = "access" | "refresh" | "pending";
+export type TokenType = "access" | "refresh" | "pending" | "platform";
 
 export interface AccessTokenPayload {
   sub: string;
   tenantId: string;
   membershipId: string;
   role: MembershipRole;
+  /**
+   * Phase 4: carried alongside the tenant-scoped role so downstream
+   * authorization (support access grants, admin actions) can check
+   * platform-level privilege even on a tenant-scoped session. NONE for
+   * the overwhelming majority of users. Does NOT enable login without a
+   * membership — that's the separate "platform" token type below.
+   */
+  platformRole: PlatformRole;
   type: "access";
 }
 
@@ -22,20 +30,55 @@ export interface RefreshTokenPayload {
 /**
  * Issued by /register once identity is created but before a workspace
  * (Tenant + TenantMembership) exists. Deliberately thin — no tenantId,
- * no role — since neither exists yet. Only valid for /create-workspace
- * (and, from Phase 3 onward, /verify-otp and /resend-otp).
+ * no role — since neither exists yet. Valid for /create-workspace,
+ * /verify-otp, and /resend-otp.
  */
 export interface PendingTokenPayload {
   sub: string;
   type: "pending";
 }
 
+/**
+ * Phase 4 (staff): a platform-scoped session for Support / Super-admin.
+ * Staff are NOT tenant members, so this carries no tenantId/membershipId/
+ * role — only the platform privilege. `Exclude<PlatformRole, "NONE">`
+ * makes it a compile error to ever mint one for a normal user, who must
+ * always go through the tenant-scoped access token instead.
+ */
+export interface PlatformTokenPayload {
+  sub: string;
+  platformRole: Exclude<PlatformRole, "NONE">;
+  type: "platform";
+}
+
+/**
+ * Refresh counterpart for a platform session. NOTE: persisting this hits
+ * the RefreshToken table, whose tenantId column is currently required —
+ * so staff refresh isn't wired yet. See the note below; staff sessions
+ * start access-only until that's resolved.
+ */
+export interface PlatformRefreshTokenPayload {
+  sub: string;
+  platformRole: Exclude<PlatformRole, "NONE">;
+  type: "platform-refresh";
+  jti: string;
+}
+
+/** Populated on req.auth by `authenticate` — always a tenant-scoped access token. */
 export interface AuthContext {
   sub: string;
   tenantId: string;
   membershipId: string;
   role: MembershipRole;
-  type: TokenType;
+  platformRole: PlatformRole;
+  type: "access";
+}
+
+/** Populated on req.platformAuth by `authenticatePlatform` — staff, no tenant. */
+export interface PlatformAuthContext {
+  sub: string;
+  platformRole: Exclude<PlatformRole, "NONE">;
+  type: "platform";
 }
 
 export interface TenantContextData {
@@ -54,6 +97,7 @@ export interface TenantContextData {
     email: string;
     displayName: string;
     status: string;
+    platformRole: PlatformRole;
   };
 }
 
@@ -62,6 +106,7 @@ declare global {
     interface Request {
       requestId: string;
       auth?: AuthContext;
+      platformAuth?: PlatformAuthContext;
       tenantContext?: TenantContextData;
     }
   }

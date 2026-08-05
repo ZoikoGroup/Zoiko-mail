@@ -1,7 +1,7 @@
 import jwt from "jsonwebtoken";
 import type { Request } from "express";
 import { v4 as uuidv4 } from "uuid";
-import { Prisma, type MembershipRole } from "@prisma/client";
+import { Prisma, type MembershipRole, type PlatformRole } from "@prisma/client";
 import { env } from "../../config/env.js";
 import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../common/errors/AppError.js";
@@ -11,6 +11,7 @@ import { hashToken } from "../../common/utils/tokenHash.js";
 import type {
   AccessTokenPayload,
   PendingTokenPayload,
+  PlatformTokenPayload,
   RefreshTokenPayload,
 } from "../../common/types/jwt.js";
 import { auditService } from "../audit/audit.service.js";
@@ -19,6 +20,7 @@ import type { MembershipWithRelations } from "../membership/membership.repositor
 import { userRepository } from "../user/user.repository.js";
 import { tenantService } from "../tenant/tenant.service.js";
 import { otpService } from "./otp.service.js";
+import type { AuthState, PublicUser, WorkspaceOption } from "./auth.states.js";
 import type {
   LoginInput,
   LogoutInput,
@@ -98,6 +100,7 @@ function buildAccessToken(membership: MembershipWithRelations): string {
     tenantId: membership.tenantId,
     membershipId: membership.id,
     role: membership.role,
+    platformRole: membership.user.platformRole,
     type: "access",
   };
 
@@ -152,6 +155,41 @@ function buildPendingToken(userId: string): {
   });
 
   return { token, expiresIn: PENDING_TOKEN_EXPIRES_IN };
+}
+
+/**
+ * Phase 4 (staff): a platform-scoped session token for Support / Super-admin.
+ * Access-only for now — no refresh counterpart, because RefreshToken.tenantId
+ * is required and a staff session has no tenant to point at.
+ */
+function buildPlatformToken(
+  userId: string,
+  platformRole: Exclude<PlatformRole, "NONE">
+): { token: string; expiresIn: string } {
+  const payload: PlatformTokenPayload = {
+    sub: userId,
+    platformRole,
+    type: "platform",
+  };
+
+  const token = jwt.sign(payload, env.JWT_ACCESS_SECRET, {
+    expiresIn: env.JWT_ACCESS_EXPIRES_IN as jwt.SignOptions["expiresIn"],
+  });
+
+  return { token, expiresIn: env.JWT_ACCESS_EXPIRES_IN };
+}
+
+function toWorkspaceOption(m: MembershipWithRelations): WorkspaceOption {
+  return {
+    id: m.tenant.id,
+    name: m.tenant.name,
+    planCode: m.tenant.planCode,
+    role: m.role,
+    membershipId: m.id,
+    membershipStatus: m.status,
+    tenantStatus: m.tenant.status,
+    selectable: m.status === "ACTIVE" && m.tenant.status === "ACTIVE",
+  };
 }
 
 async function persistRefreshToken(
@@ -444,12 +482,93 @@ export class AuthService {
     return { message: "Verification code sent", cooldownMs };
   }
 
-  async login(
-    input: LoginInput,
-    context: RequestContext
-  ): Promise<AuthSessionResponse | TenantSelectionResponse> {
-    const user = await userRepository.findByEmail(input.email);
+  // async login(
+  //   input: LoginInput,
+  //   context: RequestContext
+  // ): Promise<AuthSessionResponse | TenantSelectionResponse> {
+  //   const user = await userRepository.findByEmail(input.email);
 
+  //   if (!user) {
+  //     await this.recordLoginFailure(null, input.email, "unknown_email", context);
+  //     throw new AppError("Invalid email or password", 401, ErrorCodes.UNAUTHORIZED);
+  //   }
+
+  //   const passwordValid = await verifyPassword(input.password, user.passwordHash);
+  //   if (!passwordValid) {
+  //     await this.recordLoginFailure(user.id, input.email, "invalid_password", context);
+  //     throw new AppError("Invalid email or password", 401, ErrorCodes.UNAUTHORIZED);
+  //   }
+
+  //   if (user.status !== "ACTIVE") {
+  //     await this.recordLoginFailure(user.id, input.email, "user_disabled", context);
+  //     throw new AppError("User account is disabled", 403, ErrorCodes.FORBIDDEN);
+  //   }
+
+  //   // TODO(Phase 4): this ACTIVE-only filter is the guard-chain resolver's
+  //   // job. For now it reproduces the old query-level filtering explicitly,
+  //   // so behavior is unchanged while the underlying repository now exposes
+  //   // the full picture (INVITED/SUSPENDED/REMOVED memberships) to callers
+  //   // that need it.
+  //   const memberships = (
+  //     await membershipRepository.findByUserId(user.id)
+  //   ).filter(
+  //     (membership) =>
+  //       membership.status === "ACTIVE" && membership.tenant.status === "ACTIVE"
+  //   );
+
+  //   if (memberships.length === 0) {
+  //     await this.recordLoginFailure(user.id, input.email, "no_active_membership", context);
+  //     throw new AppError(
+  //       "No active tenant membership found",
+  //       403,
+  //       ErrorCodes.FORBIDDEN
+  //     );
+  //   }
+
+  //   if (memberships.length > 1 && !input.tenantId) {
+  //     return {
+  //       requiresTenantSelection: true,
+  //       tenants: memberships.map((membership) => ({
+  //         id: membership.tenant.id,
+  //         name: membership.tenant.name,
+  //         planCode: membership.tenant.planCode,
+  //         role: membership.role,
+  //         membershipId: membership.id,
+  //       })),
+  //     };
+  //   }
+
+  //   const selectedMembership = input.tenantId
+  //     ? memberships.find((membership) => membership.tenantId === input.tenantId)
+  //     : memberships[0];
+
+  //   if (!selectedMembership) {
+  //     await this.recordLoginFailure(user.id, input.email, "invalid_tenant", context);
+  //     throw new AppError(
+  //       "Invalid tenant selection",
+  //       403,
+  //       ErrorCodes.FORBIDDEN
+  //     );
+  //   }
+
+  //   const session = await issueSession(selectedMembership);
+
+  //   await auditService.record({
+  //     tenantId: selectedMembership.tenantId,
+  //     actorUserId: user.id,
+  //     eventType: AuditEventTypes.LOGIN_SUCCESS,
+  //     targetType: "AppUser",
+  //     targetId: user.id,
+  //     requestId: context.requestId,
+  //     ipAddress: context.ipAddress,
+  //     userAgent: context.userAgent,
+  //   });
+
+  //   return session;
+  // }
+
+  async login(input: LoginInput, context: RequestContext): Promise<AuthState> {
+    const user = await userRepository.findByEmail(input.email);
     if (!user) {
       await this.recordLoginFailure(null, input.email, "unknown_email", context);
       throw new AppError("Invalid email or password", 401, ErrorCodes.UNAUTHORIZED);
@@ -461,62 +580,125 @@ export class AuthService {
       throw new AppError("Invalid email or password", 401, ErrorCodes.UNAUTHORIZED);
     }
 
-    if (user.status !== "ACTIVE") {
-      await this.recordLoginFailure(user.id, input.email, "user_disabled", context);
-      throw new AppError("User account is disabled", 403, ErrorCodes.FORBIDDEN);
-    }
+    // Credentials are valid — from here we return typed states, never generic
+    // errors, so the client can render the right screen.
+    return this.resolveAuthState(user, input.tenantId, context);
+  }
 
-    // TODO(Phase 4): this ACTIVE-only filter is the guard-chain resolver's
-    // job. For now it reproduces the old query-level filtering explicitly,
-    // so behavior is unchanged while the underlying repository now exposes
-    // the full picture (INVITED/SUSPENDED/REMOVED memberships) to callers
-    // that need it.
-    const memberships = (
-      await membershipRepository.findByUserId(user.id)
-    ).filter(
-      (membership) =>
-        membership.status === "ACTIVE" && membership.tenant.status === "ACTIVE"
-    );
+  /** Ordered guard chain. First matching guard decides the state. */
+  private async resolveAuthState(
+    user: Awaited<ReturnType<typeof userRepository.findByEmail>> & {},
+    selectedTenantId: string | undefined,
+    context: RequestContext
+  ): Promise<AuthState> {
+    const publicUser: PublicUser = {
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+    };
 
-    if (memberships.length === 0) {
-      await this.recordLoginFailure(user.id, input.email, "no_active_membership", context);
-      throw new AppError(
-        "No active tenant membership found",
-        403,
-        ErrorCodes.FORBIDDEN
-      );
-    }
-
-    if (memberships.length > 1 && !input.tenantId) {
+    // 1. Account status (evaluated before any tenant concern).
+    if (user.status === "PENDING_VERIFICATION") {
+      const pending = buildPendingToken(user.id);
       return {
-        requiresTenantSelection: true,
-        tenants: memberships.map((membership) => ({
-          id: membership.tenant.id,
-          name: membership.tenant.name,
-          planCode: membership.tenant.planCode,
-          role: membership.role,
-          membershipId: membership.id,
-        })),
+        state: "EMAIL_VERIFICATION_REQUIRED",
+        user: publicUser,
+        pendingToken: pending.token,
+        expiresIn: pending.expiresIn,
+      };
+    }
+    if (user.status === "SUSPENDED") {
+      await this.recordLoginFailure(user.id, user.email, "account_suspended", context);
+      return { state: "ACCOUNT_SUSPENDED", user: publicUser };
+    }
+    if (user.status === "DISABLED") {
+      await this.recordLoginFailure(user.id, user.email, "account_disabled", context);
+      return { state: "ACCOUNT_DISABLED", user: publicUser };
+    }
+    // ACTIVE and INVITED fall through to membership resolution.
+
+    // 2. Platform-staff branch — staff resolve to a console, not a tenant.
+    if (user.platformRole !== "NONE") {
+      const platform = buildPlatformToken(user.id, user.platformRole);
+      await ensureSystemTenant();
+      await auditService.record({
+        tenantId: SYSTEM_TENANT_ID,
+        actorUserId: user.id,
+        eventType: AuditEventTypes.LOGIN_SUCCESS,
+        targetType: "AppUser",
+        targetId: user.id,
+        requestId: context.requestId,
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+        metadata: { platformRole: user.platformRole },
+      });
+      return {
+        state: "STAFF_CONSOLE",
+        user: publicUser,
+        platformRole: user.platformRole,
+        platformToken: platform.token,
+        expiresIn: platform.expiresIn,
       };
     }
 
-    const selectedMembership = input.tenantId
-      ? memberships.find((membership) => membership.tenantId === input.tenantId)
-      : memberships[0];
+    // 3. Resolve every membership (repository no longer hides non-active ones).
+    const memberships = await membershipRepository.findByUserId(user.id);
+    const nonRemoved = memberships.filter((m) => m.status !== "REMOVED");
+    const invited = nonRemoved.filter((m) => m.status === "INVITED");
 
-    if (!selectedMembership) {
-      await this.recordLoginFailure(user.id, input.email, "invalid_tenant", context);
-      throw new AppError(
-        "Invalid tenant selection",
-        403,
-        ErrorCodes.FORBIDDEN
-      );
+    if (nonRemoved.length === 0) {
+      if (invited.length > 0) {
+        return { state: "INVITATION_PENDING", user: publicUser, invitations: invited.map(toWorkspaceOption) };
+      }
+      return { state: "NO_WORKSPACE", user: publicUser };
     }
 
-    const session = await issueSession(selectedMembership);
+    // 4. Explicit selection, or auto-resolve a single workspace.
+    if (selectedTenantId) {
+      const chosen = nonRemoved.find((m) => m.tenantId === selectedTenantId);
+      if (!chosen) {
+        return { state: "WORKSPACE_SELECTION", user: publicUser, workspaces: nonRemoved.map(toWorkspaceOption) };
+      }
+      return this.resolveSelectedWorkspace(user, chosen, publicUser, context);
+    }
 
+    if (nonRemoved.length === 1) {
+      return this.resolveSelectedWorkspace(user, nonRemoved[0]!, publicUser, context);
+    }
+
+    // 5. Multiple workspaces — let the client pick (statuses drive greying-out).
+    return { state: "WORKSPACE_SELECTION", user: publicUser, workspaces: nonRemoved.map(toWorkspaceOption) };
+  }
+
+  /** Evaluate one chosen workspace: tenant status first, then membership status. */
+  private async resolveSelectedWorkspace(
+    user: { id: string; email: string; displayName: string },
+    membership: MembershipWithRelations,
+    publicUser: PublicUser,
+    context: RequestContext
+  ): Promise<AuthState> {
+    const workspace = toWorkspaceOption(membership);
+
+    if (membership.tenant.status === "DELETED_PENDING") {
+      return { state: "WORKSPACE_DELETING", user: publicUser, workspace };
+    }
+    if (membership.tenant.status === "SUSPENDED") {
+      return { state: "WORKSPACE_SUSPENDED", user: publicUser, workspace };
+    }
+    if (membership.status === "INVITED") {
+      return { state: "INVITATION_PENDING", user: publicUser, invitations: [workspace] };
+    }
+    if (membership.status === "SUSPENDED") {
+      return { state: "MEMBERSHIP_SUSPENDED", user: publicUser, workspace };
+    }
+    if (membership.status === "REMOVED") {
+      return { state: "NO_WORKSPACE", user: publicUser };
+    }
+
+    // ACTIVE membership + ACTIVE tenant → sign in.
+    const session = await issueSession(membership);
     await auditService.record({
-      tenantId: selectedMembership.tenantId,
+      tenantId: membership.tenantId,
       actorUserId: user.id,
       eventType: AuditEventTypes.LOGIN_SUCCESS,
       targetType: "AppUser",
@@ -525,8 +707,7 @@ export class AuthService {
       ipAddress: context.ipAddress,
       userAgent: context.userAgent,
     });
-
-    return session;
+    return { state: "SIGNED_IN", session };
   }
 
   async refresh(

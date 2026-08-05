@@ -43,14 +43,18 @@ export const createWorkspace = asyncHandler(async (req: Request, res: Response) 
   sendSuccess(res, 201, result, req.requestId);
 });
 
+// export const login = asyncHandler(async (req: Request, res: Response) => {
+//   const result = await authService.login(req.body, getRequestContext(req));
+
+//   if ("requiresTenantSelection" in result) {
+//     sendSuccess(res, 200, result, req.requestId);
+//     return;
+//   }
+
+//   sendSuccess(res, 200, result, req.requestId);
+// });
 export const login = asyncHandler(async (req: Request, res: Response) => {
   const result = await authService.login(req.body, getRequestContext(req));
-
-  if ("requiresTenantSelection" in result) {
-    sendSuccess(res, 200, result, req.requestId);
-    return;
-  }
-
   sendSuccess(res, 200, result, req.requestId);
 });
 

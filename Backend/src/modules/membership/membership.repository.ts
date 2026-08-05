@@ -15,6 +15,7 @@ export interface MembershipWithRelations extends TenantMembership {
     planCode: string;
   };
   user: {
+    platformRole: PlatformRole;
     id: string;
     email: string;
     displayName: string;
