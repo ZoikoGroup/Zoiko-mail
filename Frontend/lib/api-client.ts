@@ -21,11 +21,18 @@ export class ApiError extends Error {
     }
 }
 
+// interface RequestOptions {
+//     method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
+//     body?: unknown;
+//     auth?: boolean; 
+//     _retried?: boolean; 
+// }
 interface RequestOptions {
     method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
     body?: unknown;
-    auth?: boolean; // attach the access token (default true)
-    _retried?: boolean; // internal: prevents infinite refresh loops
+    auth?: boolean;
+    headers?: Record<string, string>;
+    _retried?: boolean;
 }
 
 // Single-flight refresh: if many calls 401 at once, we refresh only once.
@@ -65,9 +72,20 @@ export async function apiRequest<T = unknown>(
     path: string,
     opts: RequestOptions = {}
 ): Promise<T> {
-    const { method = "GET", body, auth = true, _retried = false } = opts;
+    // const { method = "GET", body, auth = true, _retried = false } = opts;
+    const {
+        method = "GET",
+        body,
+        auth = true,
+        headers: customHeaders,
+        _retried = false,
+    } = opts;
 
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    // const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        ...customHeaders,
+    };
     if (auth) {
         const token = getAccessToken();
         if (token) headers["Authorization"] = `Bearer ${token}`;

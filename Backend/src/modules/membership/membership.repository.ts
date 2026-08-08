@@ -1,6 +1,7 @@
 import type {
   AppUserStatus,
   MembershipRole,
+  PlatformRole,
   Prisma,
   TenantMembership,
   TenantStatus,
@@ -35,6 +36,7 @@ const membershipInclude = {
   user: {
     select: {
       id: true,
+      platformRole: true,
       email: true,
       displayName: true,
       status: true,

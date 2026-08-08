@@ -91,6 +91,32 @@ export const openApiDocument = {
         responses: { "200": ok("Session or tenant selection returned"), "401": { $ref: "#/components/responses/Unauthorized" } },
       },
     },
+    "/api/v1/auth/forgot-password": {
+      post: {
+        tags: ["Authentication"], summary: "Request a password reset code",
+        description: "Always returns 200 with a generic message regardless of whether the email exists (no user enumeration). If the account exists, a single-use reset code is emailed. Rate-limited by cooldown and hourly cap.",
+        requestBody: jsonBody({
+          type: "object", required: ["email"],
+          properties: { email: { type: "string", format: "email" } },
+        }),
+        responses: { "200": ok("Generic acceptance message returned"), "429": ok("Too many requests") },
+      },
+    },
+    "/api/v1/auth/reset-password": {
+      post: {
+        tags: ["Authentication"], summary: "Reset the password using the emailed code",
+        description: "Verifies the single-use PASSWORD_RESET code, sets the new password, and revokes all of the user's refresh tokens across every tenant. Errors are generic to avoid email enumeration.",
+        requestBody: jsonBody({
+          type: "object", required: ["email", "code", "newPassword"],
+          properties: {
+            email: { type: "string", format: "email" },
+            code: { type: "string", example: "123456" },
+            newPassword: { type: "string", format: "password", minLength: 8 },
+          },
+        }),
+        responses: { "200": ok("Password reset; existing sessions revoked"), "400": { $ref: "#/components/responses/ValidationError" }, "409": { $ref: "#/components/responses/Conflict" }, "429": ok("Too many requests") },
+      },
+    },
     "/api/v1/auth/refresh": {
       post: {
         tags: ["Authentication"], summary: "Rotate refresh token",

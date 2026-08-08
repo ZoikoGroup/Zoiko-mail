@@ -5,7 +5,8 @@ RUN npm ci
 COPY tsconfig.json prisma.config.ts ./
 COPY prisma ./prisma
 COPY src ./src
-RUN npm run db:generate && npm run build
+# Supply a dummy DATABASE_URL so prisma generate succeeds during image build
+RUN DATABASE_URL="postgresql://zoiko:zoiko@localhost:5432/zoiko_mail" npm run db:generate && npm run build
 
 FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production

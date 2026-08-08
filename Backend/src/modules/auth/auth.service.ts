@@ -28,6 +28,8 @@ import type {
   CreateWorkspaceInput,
   RefreshInput,
   RegisterInput,
+  ForgotPasswordInput,
+  ResetPasswordInput,
 } from "./auth.schema.js";
 import {
   AuditEventTypes,
@@ -482,90 +484,56 @@ export class AuthService {
     return { message: "Verification code sent", cooldownMs };
   }
 
-  // async login(
-  //   input: LoginInput,
-  //   context: RequestContext
-  // ): Promise<AuthSessionResponse | TenantSelectionResponse> {
-  //   const user = await userRepository.findByEmail(input.email);
+  async forgotPassword(input: ForgotPasswordInput, context: RequestContext): Promise<{ message: string }> {
+    const genericMessage = "If an account exists for that email, a password reset code has been sent.";
+    const user = await userRepository.findByEmail(input.email);
+    if (!user || user.status === "DISABLED") return { message: genericMessage };
+    try {
+      await otpService.issuePasswordReset(user.id, user.email);
+    } catch (error) {
+      // Cooldown / hourly-cap must not reveal that the account exists.
+      if (error instanceof AppError &&
+        (error.code === ErrorCodes.OTP_COOLDOWN || error.code === ErrorCodes.OTP_RESEND_LIMIT)) {
+        return { message: genericMessage };
+      }
+      throw error;
+    }
+    await ensureSystemTenant();
+    await auditService.record({
+      tenantId: SYSTEM_TENANT_ID, actorUserId: user.id,
+      eventType: AuditEventTypes.PASSWORD_RESET_REQUESTED,
+      targetType: "AppUser", targetId: user.id,
+      requestId: context.requestId, ipAddress: context.ipAddress, userAgent: context.userAgent,
+    });
+    return { message: genericMessage };
+  }
 
-  //   if (!user) {
-  //     await this.recordLoginFailure(null, input.email, "unknown_email", context);
-  //     throw new AppError("Invalid email or password", 401, ErrorCodes.UNAUTHORIZED);
-  //   }
-
-  //   const passwordValid = await verifyPassword(input.password, user.passwordHash);
-  //   if (!passwordValid) {
-  //     await this.recordLoginFailure(user.id, input.email, "invalid_password", context);
-  //     throw new AppError("Invalid email or password", 401, ErrorCodes.UNAUTHORIZED);
-  //   }
-
-  //   if (user.status !== "ACTIVE") {
-  //     await this.recordLoginFailure(user.id, input.email, "user_disabled", context);
-  //     throw new AppError("User account is disabled", 403, ErrorCodes.FORBIDDEN);
-  //   }
-
-  //   // TODO(Phase 4): this ACTIVE-only filter is the guard-chain resolver's
-  //   // job. For now it reproduces the old query-level filtering explicitly,
-  //   // so behavior is unchanged while the underlying repository now exposes
-  //   // the full picture (INVITED/SUSPENDED/REMOVED memberships) to callers
-  //   // that need it.
-  //   const memberships = (
-  //     await membershipRepository.findByUserId(user.id)
-  //   ).filter(
-  //     (membership) =>
-  //       membership.status === "ACTIVE" && membership.tenant.status === "ACTIVE"
-  //   );
-
-  //   if (memberships.length === 0) {
-  //     await this.recordLoginFailure(user.id, input.email, "no_active_membership", context);
-  //     throw new AppError(
-  //       "No active tenant membership found",
-  //       403,
-  //       ErrorCodes.FORBIDDEN
-  //     );
-  //   }
-
-  //   if (memberships.length > 1 && !input.tenantId) {
-  //     return {
-  //       requiresTenantSelection: true,
-  //       tenants: memberships.map((membership) => ({
-  //         id: membership.tenant.id,
-  //         name: membership.tenant.name,
-  //         planCode: membership.tenant.planCode,
-  //         role: membership.role,
-  //         membershipId: membership.id,
-  //       })),
-  //     };
-  //   }
-
-  //   const selectedMembership = input.tenantId
-  //     ? memberships.find((membership) => membership.tenantId === input.tenantId)
-  //     : memberships[0];
-
-  //   if (!selectedMembership) {
-  //     await this.recordLoginFailure(user.id, input.email, "invalid_tenant", context);
-  //     throw new AppError(
-  //       "Invalid tenant selection",
-  //       403,
-  //       ErrorCodes.FORBIDDEN
-  //     );
-  //   }
-
-  //   const session = await issueSession(selectedMembership);
-
-  //   await auditService.record({
-  //     tenantId: selectedMembership.tenantId,
-  //     actorUserId: user.id,
-  //     eventType: AuditEventTypes.LOGIN_SUCCESS,
-  //     targetType: "AppUser",
-  //     targetId: user.id,
-  //     requestId: context.requestId,
-  //     ipAddress: context.ipAddress,
-  //     userAgent: context.userAgent,
-  //   });
-
-  //   return session;
-  // }
+  async resetPassword(input: ResetPasswordInput, context: RequestContext): Promise<{ message: string }> {
+    const user = await userRepository.findByEmail(input.email);
+    if (!user || user.status === "DISABLED") {
+      throw new AppError("Invalid or expired code", 400, ErrorCodes.OTP_INVALID);
+    }
+    await otpService.verifyPasswordReset(user.id, input.code);
+    if (await verifyPassword(input.newPassword, user.passwordHash)) {
+      throw new AppError("New password must be different from your current password", 409, ErrorCodes.CONFLICT);
+    }
+    const passwordHash = await hashPassword(input.newPassword);
+    await ensureSystemTenant();
+    await prisma.$transaction(async (tx) => {
+      await tx.appUser.update({ where: { id: user.id }, data: { passwordHash } });
+      await tx.refreshToken.updateMany({
+        where: { userId: user.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      await auditService.record({
+        tenantId: SYSTEM_TENANT_ID, actorUserId: user.id,
+        eventType: AuditEventTypes.PASSWORD_RESET_COMPLETED,
+        targetType: "AppUser", targetId: user.id,
+        requestId: context.requestId, ipAddress: context.ipAddress, userAgent: context.userAgent,
+      }, tx);
+    });
+    return { message: "Password has been reset. You can now sign in with your new password." };
+  }
 
   async login(input: LoginInput, context: RequestContext): Promise<AuthState> {
     const user = await userRepository.findByEmail(input.email);

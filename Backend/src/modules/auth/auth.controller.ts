@@ -98,3 +98,12 @@ export const me = asyncHandler(async (req: Request, res: Response) => {
   const result = authService.getCurrentUser(req);
   sendSuccess(res, 200, result, req.requestId);
 });
+
+export const forgotPassword = asyncHandler(async (req: Request, res: Response) => {
+  const result = await authService.forgotPassword(req.body, getRequestContext(req));
+  sendSuccess(res, 200, result, req.requestId);
+});
+export const resetPassword = asyncHandler(async (req: Request, res: Response) => {
+  const result = await authService.resetPassword(req.body, getRequestContext(req));
+  sendSuccess(res, 200, result, req.requestId);
+});

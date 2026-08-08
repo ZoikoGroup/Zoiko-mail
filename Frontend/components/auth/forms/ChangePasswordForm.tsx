@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ApiError } from "@/lib/api-client";
 import { useChangePassword } from "@/lib/auth-hooks";
-import { PasswordInput } from ".";
+import { PasswordInput } from "..";
 
 type FormErrors = {
   currentPassword?: string;

@@ -35,7 +35,7 @@ services:
       EXPORT_STORAGE_PATH: /app/storage/exports
       TRUST_PROXY: ${TRUST_PROXY:-1}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-            MAIL_PROVIDER_ENABLED: ${MAIL_PROVIDER_ENABLED:-false}
+      MAIL_PROVIDER_ENABLED: ${MAIL_PROVIDER_ENABLED:-false}
       IMAP_HOST: ${IMAP_HOST:-imap.secureserver.net}
       IMAP_PORT: ${IMAP_PORT:-993}
       IMAP_SECURE: ${IMAP_SECURE:-true}

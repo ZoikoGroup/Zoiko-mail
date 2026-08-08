@@ -39,6 +39,8 @@ const envSchema = z.object({
   OTP_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(5),
   OTP_RESEND_COOLDOWN_MS: z.coerce.number().int().min(10_000).default(60_000),
   OTP_RESEND_MAX_PER_HOUR: z.coerce.number().int().min(1).max(20).default(5),
+  PASSWORD_RESET_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),
+  PASSWORD_RESET_TTL_MS: z.coerce.number().int().min(60_000).default(900_000), // 15 min
   SYSTEM_MAIL_ENABLED: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),
   SYSTEM_MAIL_FROM: z.string().email().default("no-reply@zoikomail.com"),
   PROVIDER_CALLBACK_SECRET: z.string().min(32).default("change-me-provider-callback-secret-32"),

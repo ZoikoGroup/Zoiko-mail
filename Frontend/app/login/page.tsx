@@ -3,36 +3,104 @@
 import { useState } from "react";
 
 import {
-  AuthCard,
-  AuthTabs,
+  AuthLayout,
+  AuthContainer,
   LoginForm,
   RegisterForm,
-  ChangePasswordForm,
+  VerifyOtpForm,
+  CreateWorkspaceForm,
+  ForgotPasswordForm,
+  ResetPasswordForm,
 } from "@/components/auth";
+// import VerifyOtpForm from "@/components/auth/forms/VerifyOtpForm";
 
-type AuthTab = "login" | "register" | "password";
+import type { AuthStep } from "@/components/auth";
 
-export default function LoginPage() {
-  const [activeTab, setActiveTab] = useState<AuthTab>("login");
+export default function AuthPage() {
+  const [step, setStep] = useState<AuthStep>("login");
+  const [pendingToken, setPendingToken] = useState("");
+  const [verificationEmail, setVerificationEmail] = useState("");
+  const [resetEmail, setResetEmail] = useState("");
+
+  const renderStep = () => {
+    switch (step) {
+      case "login":
+        return (
+          <LoginForm
+            onRegister={() => setStep("register")}
+            onForgotPassword={() => setStep("forgotPassword")}
+          />
+        );
+
+      case "register":
+        return (
+          <RegisterForm
+            onBackToLogin={() => setStep("login")}
+            onSuccess={(token) => {
+              setPendingToken(token);
+              setVerificationEmail(verificationEmail);
+              setStep("verifyOtp");
+            }}
+          />
+        );
+
+      case "verifyOtp":
+        return (
+          <VerifyOtpForm
+            token={pendingToken}
+            email={verificationEmail}
+            onBack={() => setStep("register")}
+            onSuccess={(newToken) => {
+              setPendingToken(newToken);
+              setStep("workspace");
+            }}
+          />
+        );
+
+      case "workspace":
+        return (
+          <CreateWorkspaceForm
+            token={pendingToken}
+            email={verificationEmail}
+            onSuccess={() => {
+              // Temporary
+              // setStep("login");
+
+              // Later we'll redirect after backend confirmation
+            }}
+          />
+        );
+
+      case "forgotPassword":
+        return (
+          <ForgotPasswordForm
+            onBackToLogin={() => setStep("login")}
+            onSuccess={(email) => {
+              setResetEmail(email);
+              setStep("resetPassword");
+            }}
+          />
+        );
+
+      case "resetPassword":
+        return (
+          <ResetPasswordForm
+            email={resetEmail}
+            onBackToLogin={() => setStep("login")}
+            onSuccess={() => setStep("login")}
+          />
+        );
+
+      default:
+        return null;
+    }
+  };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10 transition-colors dark:bg-slate-950">
-      <AuthCard>
-        <AuthTabs
-          activeTab={activeTab}
-          onChange={setActiveTab}
-        />
-
-        <div className="mt-6">
-          {activeTab === "login" && <LoginForm />}
-
-          {activeTab === "register" && <RegisterForm />}
-
-          {activeTab === "password" && (
-            <ChangePasswordForm />
-          )}
-        </div>
-      </AuthCard>
-    </main>
+    <AuthLayout>
+      <AuthContainer>
+        {renderStep()}
+      </AuthContainer>
+    </AuthLayout>
   );
 }

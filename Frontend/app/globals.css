@@ -3,4 +3,11 @@
 @tailwind utilities;
 
 html, body, #__next { height: 100%; }
-body { @apply bg-slate-50 text-slate-800 antialiased; }
+/* body { @apply bg-slate-50 text-slate-800 antialiased; } */
+body {
+    @apply bg-slate-50 text-slate-800 antialiased transition-colors duration-300;
+}
+
+.dark body {
+    @apply bg-slate-950 text-slate-100;
+}

@@ -9,6 +9,7 @@ import { hashPassword, verifyPassword } from "../../common/utils/password.js";
 import { systemMailer } from "../../common/mailer/system-mailer.js";
 
 const PURPOSE = "EMAIL_VERIFICATION" as const;
+const RESET_PURPOSE = "PASSWORD_RESET" as const;
 
 function generateCode(length: number): string {
   return String(randomInt(0, 10 ** length)).padStart(length, "0");
@@ -105,6 +106,62 @@ export class OtpService {
 
     await this.issue(userId, user.email);
     return { cooldownMs: env.OTP_RESEND_COOLDOWN_MS };
+  }
+
+  /** Issue a password-reset code (cooldown + hourly cap). No status side effects. */
+  async issuePasswordReset(userId: string, email: string): Promise<{ cooldownMs: number }> {
+    const hourAgo = new Date(Date.now() - 3_600_000);
+    const sentLastHour = await prisma.emailOtp.count({
+      where: { userId, purpose: RESET_PURPOSE, createdAt: { gte: hourAgo } },
+    });
+    if (sentLastHour >= env.OTP_RESEND_MAX_PER_HOUR) {
+      throw new AppError("Too many reset requests; try again later", 429, ErrorCodes.OTP_RESEND_LIMIT);
+    }
+    const last = await prisma.emailOtp.findFirst({
+      where: { userId, purpose: RESET_PURPOSE },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true },
+    });
+    if (last && Date.now() - last.createdAt.getTime() < env.OTP_RESEND_COOLDOWN_MS) {
+      throw new AppError("Please wait before requesting another code", 429, ErrorCodes.OTP_COOLDOWN);
+    }
+    await prisma.emailOtp.updateMany({
+      where: { userId, purpose: RESET_PURPOSE, consumedAt: null },
+      data: { consumedAt: new Date() },
+    });
+    const code = generateCode(env.OTP_CODE_LENGTH);
+    const codeHash = await hashPassword(code);
+    const ttlMs = env.PASSWORD_RESET_TTL_MS;
+    const expiresAt = new Date(Date.now() + ttlMs);
+    await prisma.emailOtp.create({ data: { userId, purpose: RESET_PURPOSE, codeHash, expiresAt } });
+    try {
+      await systemMailer.sendPasswordResetEmail(email, code, Math.round(ttlMs / 60_000));
+    } catch (err) {
+      logger.error({ err, userId }, "failed to send password reset email");
+    }
+    return { cooldownMs: env.OTP_RESEND_COOLDOWN_MS };
+  }
+
+  /** Verify + consume a password-reset code. No user mutation (unlike verify()). */
+  async verifyPasswordReset(userId: string, code: string): Promise<void> {
+    const otp = await prisma.emailOtp.findFirst({
+      where: { userId, purpose: RESET_PURPOSE, consumedAt: null },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!otp) throw new AppError("Invalid or expired code", 400, ErrorCodes.OTP_INVALID);
+    if (otp.expiresAt.getTime() < Date.now()) {
+      throw new AppError("Reset code has expired", 400, ErrorCodes.OTP_EXPIRED);
+    }
+    if (otp.attempts >= env.OTP_MAX_ATTEMPTS) {
+      await prisma.emailOtp.update({ where: { id: otp.id }, data: { consumedAt: new Date() } });
+      throw new AppError("Too many incorrect attempts; request a new code", 429, ErrorCodes.OTP_MAX_ATTEMPTS);
+    }
+    const matches = await verifyPassword(code, otp.codeHash);
+    if (!matches) {
+      await prisma.emailOtp.update({ where: { id: otp.id }, data: { attempts: { increment: 1 } } });
+      throw new AppError("Invalid or expired code", 400, ErrorCodes.OTP_INVALID);
+    }
+    await prisma.emailOtp.update({ where: { id: otp.id }, data: { consumedAt: new Date() } });
   }
 }
 

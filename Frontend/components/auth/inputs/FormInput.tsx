@@ -23,7 +23,7 @@ export default function FormInput({
       </label>
 
       <div
-        className={`flex items-center rounded-lg border bg-white transition-all duration-200
+        className={`flex items-center rounded-lg border bg-white  transition-all duration-200
         ${
           error
             ? "border-red-500 focus-within:ring-2 focus-within:ring-red-500"
@@ -37,7 +37,7 @@ export default function FormInput({
 
         <input
           {...props}
-          className={`w-full bg-transparent px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:text-white ${className}`}
+          className={`w-full bg-transparent dark:bg-slate-900 px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:text-white ${className}`}
         />
       </div>
 

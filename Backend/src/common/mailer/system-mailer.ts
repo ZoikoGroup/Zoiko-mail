@@ -65,6 +65,18 @@ export class SystemMailer {
         + `<p>It expires in ${ttlMinutes} minutes. If you didn't request this, you can ignore this email.</p>`,
     });
   }
+
+  async sendPasswordResetEmail(to: string, code: string, ttlMinutes: number): Promise<void> {
+  await this.send({
+    to,
+    subject: "Reset your Zoiko Mail password",
+    text: `Your password reset code is ${code}. It expires in ${ttlMinutes} minutes. `
+      + `If you didn't request a reset, ignore this email — your password won't change.`,
+    html: `<p>We received a request to reset your Zoiko Mail password. Your code is:</p>`
+      + `<p style="font-size:24px;font-weight:bold;letter-spacing:3px">${code}</p>`
+      + `<p>It expires in ${ttlMinutes} minutes. If you didn't request this, ignore this email — your password won't change.</p>`,
+  });
+}
 }
 
 export const systemMailer = new SystemMailer();

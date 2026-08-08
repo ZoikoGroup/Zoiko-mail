@@ -6,6 +6,7 @@ import {
   registerRateLimit,
   tenantContext,
   validate,
+  passwordResetRateLimit
 } from "../../common/middleware/index.js";
 import {
   loginSchema,
@@ -14,6 +15,8 @@ import {
   logoutSchema,
   refreshSchema,
   registerSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema
 } from "./auth.schema.js";
 import * as authController from "./auth.controller.js";
 import { verifyOtpSchema } from "./otp.schema.js";
@@ -52,6 +55,9 @@ authRouter.post(
 );
 
 authRouter.post("/login", loginRateLimit, validate(loginSchema), authController.login);
+
+authRouter.post("/forgot-password", passwordResetRateLimit, validate(forgotPasswordSchema), authController.forgotPassword);
+authRouter.post("/reset-password", passwordResetRateLimit, validate(resetPasswordSchema), authController.resetPassword);
 
 authRouter.post(
   "/refresh",
