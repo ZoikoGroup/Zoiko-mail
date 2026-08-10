@@ -106,7 +106,7 @@ export default function LoginForm({
           HEADER
       ================================================= */}
 
-      <div className="mb-8 text-center">
+      <div className="mb-5 text-center">
         <h2 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-white">
           Welcome Back
         </h2>
@@ -123,7 +123,7 @@ export default function LoginForm({
 
       <form
         onSubmit={onSubmit}
-        className="space-y-6"
+        className="space-y-3"
       >
         <FormInput
           label="Email Address"

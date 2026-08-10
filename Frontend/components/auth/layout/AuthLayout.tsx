@@ -17,7 +17,7 @@ export default function AuthLayout({ children }: AuthLayoutProps) {
 
         {/* RIGHT FORM AREA */}
 
-        <section className="flex min-h-screen items-center justify-center px-6 py-10 sm:px-10 lg:px-14">
+        <section className="flex overflow-hidden h-screen items-center justify-center px-6 py-8 sm:px-8 lg:px-10">
           {children}
         </section>
       </div>

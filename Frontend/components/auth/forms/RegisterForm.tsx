@@ -18,7 +18,8 @@ type FormErrors = {
 
 interface RegisterFormProps {
   onBackToLogin: () => void;
-  onSuccess: (pendingToken: string) => void;
+  // onSuccess: (pendingToken: string) => void;
+  onSuccess: (pendingToken: string, tenantName: string, planCode: string) => void;
 }
 
 export default function RegisterForm({
@@ -68,9 +69,9 @@ export default function RegisterForm({
       newErrors.email = "Enter a valid email address.";
     }
 
-    if (!formData.tenantName.trim()) {
-      newErrors.tenantName = "Tenant name is required.";
-    }
+    // if (!formData.tenantName.trim()) {
+    //   newErrors.tenantName = "Tenant name is required.";
+    // }
 
     if (!formData.password) {
       newErrors.password = "Password is required.";
@@ -99,25 +100,8 @@ export default function RegisterForm({
 
     if (!validate()) return;
 
-    // registerMutation.mutate(
-    //   {
-    //     displayName: formData.displayName,
-    //     email: formData.email,
-    //     tenantName: formData.tenantName,
-    //     planCode: formData.planCode,
-    //     password: formData.password,
-    //   },
-    //   {
-    //     onSuccess: (response) => {
-    //       const pendingToken =
-    //         response?.data?.pendingToken;
-
-    //       if (pendingToken) {
-    //         onSuccess(pendingToken);
-    //       }
-    //     },
-    //   }
-    // );
+    const workspaceName = `${formData.displayName.trim()}'s Workspace`;
+    const planCode = "starter";
 
     registerMutation.mutate(
       {
@@ -134,7 +118,8 @@ export default function RegisterForm({
           // const pendingToken = response.data.pendingToken;
           const pendingToken = response.pendingToken;
 
-          onSuccess(pendingToken);
+          // onSuccess(pendingToken);
+          onSuccess(pendingToken, workspaceName, planCode);
         },
       }
     );
@@ -149,7 +134,7 @@ export default function RegisterForm({
 
   return (
     <>
-      <div className="mb-8 text-center">
+      <div className="mb-4 text-center">
         <h2 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-white">
           Create your account
         </h2>
@@ -159,7 +144,7 @@ export default function RegisterForm({
         </p>
       </div>
 
-      <form onSubmit={onSubmit} className="space-y-5">
+      <form onSubmit={onSubmit} className="space-y-3">
         <FormInput
           label="Display Name"
           icon={FaUser}
@@ -183,7 +168,7 @@ export default function RegisterForm({
           error={errors.email}
         />
 
-        <FormInput
+        {/* <FormInput
           label="Tenant Name"
           icon={FaBuilding}
           placeholder="Acme Pvt Ltd"
@@ -192,7 +177,7 @@ export default function RegisterForm({
             handleChange("tenantName", e.target.value)
           }
           error={errors.tenantName}
-        />
+        /> */}
 
         <div className="space-y-1.5">
           <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
@@ -245,7 +230,7 @@ export default function RegisterForm({
             ? "Creating Account..."
             : "Continue"}
         </button>
-        <div className="border-t border-slate-200 pt-6 dark:border-slate-700">
+        <div className="border-t border-slate-200 pt-3 dark:border-slate-700">
           <p className="text-center text-sm text-slate-600 dark:text-slate-400">
             Already have an account?{" "}
             <button
@@ -258,18 +243,6 @@ export default function RegisterForm({
           </p>
         </div>
       </form>
-      {/* <div className="text-center">
-        <p className="text-sm text-slate-600 dark:text-slate-400">
-          Already have an account?{" "}
-          <button
-            type="button"
-            onClick={onBackToLogin}
-            className="font-semibold text-teal-600 hover:text-teal-700 dark:text-teal-400"
-          >
-            Sign In
-          </button>
-        </p>
-      </div> */}
     </>
   );
 }

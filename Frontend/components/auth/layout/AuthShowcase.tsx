@@ -47,11 +47,11 @@ export default function AuthShowcase() {
         }}
       />
 
-      <div className="relative z-10 flex h-full w-full flex-col justify-between px-10 py-8">
+      <div className="relative z-10 flex h-screen w-full flex-col justify-between px-8 py-6">
         {/* ---------------- Logo ---------------- */}
 
         <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white font-bold text-cyan-700 shadow-lg">
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white font-bold text-cyan-700 shadow-lg">
             Z
           </div>
 
@@ -70,11 +70,11 @@ export default function AuthShowcase() {
 
         <div className="max-w-xl">
           <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium text-white backdrop-blur">
-            <HiCheckBadge className="text-lg" />
+            <HiCheckBadge className="text-base md:text-lg" />
             Trusted by Modern Teams
           </span>
 
-          <h1 className="mt-3 text-2xl md:text-3xl lg:text-4xl font-bold leading-tight text-white">
+          <h1 className="mt-2 text-xl md:text-2xl lg:text-3xl font-bold leading-tight text-white">
             Smarter &
             Secure Email
             Collaboration
@@ -88,7 +88,7 @@ export default function AuthShowcase() {
 
           {/* Features */}
 
-          <div className="mt-6 space-y-3">
+          <div className="mt-4 space-y-2">
             {FEATURES.map((feature) => {
               const Icon = feature.icon;
 
@@ -118,7 +118,7 @@ export default function AuthShowcase() {
 
         {/* ---------------- Footer ---------------- */}
 
-        <div className="flex items-center justify-between border-t border-white/10 pt-6">
+        <div className="flex items-center justify-between border-t border-white/10 pt-3">
           <div className="text-sm text-cyan-100">
             © 2026 Zoiko Group
           </div>
