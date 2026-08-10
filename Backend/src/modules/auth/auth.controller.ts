@@ -11,19 +11,50 @@ function getRequestContext(req: Request) {
   };
 }
 
+function getBearerToken(req: Request): string {
+  const header = req.header("authorization") ?? "";
+  return header.startsWith("Bearer ") ? header.slice(7) : "";
+}
+
+export const verifyOtp = asyncHandler(async (req: Request, res: Response) => {
+  const pendingToken = getBearerToken(req);
+  const result = await authService.verifyEmailOtp(pendingToken, req.body.code, getRequestContext(req));
+  sendSuccess(res, 200, result, req.requestId);
+});
+
+export const resendOtp = asyncHandler(async (req: Request, res: Response) => {
+  const pendingToken = getBearerToken(req);
+  const result = await authService.resendEmailOtp(pendingToken, getRequestContext(req));
+  sendSuccess(res, 200, result, req.requestId);
+});
+
 export const register = asyncHandler(async (req: Request, res: Response) => {
   const result = await authService.register(req.body, getRequestContext(req));
   sendSuccess(res, 201, result, req.requestId);
 });
 
+export const createWorkspace = asyncHandler(async (req: Request, res: Response) => {
+  const pendingToken = getBearerToken(req);
+  const result = await authService.createWorkspace(
+    req.body,
+    pendingToken,
+    getRequestContext(req)
+  );
+  sendSuccess(res, 201, result, req.requestId);
+});
+
+// export const login = asyncHandler(async (req: Request, res: Response) => {
+//   const result = await authService.login(req.body, getRequestContext(req));
+
+//   if ("requiresTenantSelection" in result) {
+//     sendSuccess(res, 200, result, req.requestId);
+//     return;
+//   }
+
+//   sendSuccess(res, 200, result, req.requestId);
+// });
 export const login = asyncHandler(async (req: Request, res: Response) => {
   const result = await authService.login(req.body, getRequestContext(req));
-
-  if ("requiresTenantSelection" in result) {
-    sendSuccess(res, 200, result, req.requestId);
-    return;
-  }
-
   sendSuccess(res, 200, result, req.requestId);
 });
 
@@ -65,5 +96,14 @@ export const logoutAll = asyncHandler(async (req: Request, res: Response) => {
 
 export const me = asyncHandler(async (req: Request, res: Response) => {
   const result = authService.getCurrentUser(req);
+  sendSuccess(res, 200, result, req.requestId);
+});
+
+export const forgotPassword = asyncHandler(async (req: Request, res: Response) => {
+  const result = await authService.forgotPassword(req.body, getRequestContext(req));
+  sendSuccess(res, 200, result, req.requestId);
+});
+export const resetPassword = asyncHandler(async (req: Request, res: Response) => {
+  const result = await authService.resetPassword(req.body, getRequestContext(req));
   sendSuccess(res, 200, result, req.requestId);
 });

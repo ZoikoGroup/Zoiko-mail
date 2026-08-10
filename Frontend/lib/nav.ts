@@ -31,7 +31,7 @@ export const NAV: NavItem[] = [
   // Track A — the first-ship intelligence layer
   { section: "Track A · Intelligence", label: "Action Inbox", href: "/inbox", icon: Inbox, status: "live",
     desc: "Review and triage commitments, replies owed, and deadlines." },
-  { section: "Track A · Intelligence", label: "Connected accounts", href: "/connected-accounts", icon: Link2, status: "soon",
+  { section: "Track A · Intelligence", label: "Connected accounts", href: "/connected-accounts", icon: Link2, status: "live",
     desc: "Connect Gmail or Microsoft 365 (read-only) to detect actions." },
   { section: "Track A · Intelligence", label: "Threads & messages", href: "/threads", icon: MessagesSquare, status: "soon",
     desc: "Browse conversations behind each detected action." },

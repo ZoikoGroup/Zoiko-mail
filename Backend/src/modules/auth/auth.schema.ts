@@ -7,6 +7,9 @@ export const registerSchema = z.object({
     .min(8, "Password must be at least 8 characters")
     .max(128),
   displayName: z.string().trim().min(1).max(120),
+});
+
+export const createWorkspaceSchema = z.object({
   tenantName: z.string().trim().min(1).max(120),
   planCode: z.string().trim().min(1).max(64).default("starter"),
 });
@@ -30,8 +33,21 @@ export const changePasswordSchema = z.object({
   newPassword: z.string().min(8, "Password must be at least 8 characters").max(128),
 });
 
+export const forgotPasswordSchema = z.object({
+  email: z.string().email().transform((value) => value.toLowerCase()),
+});
+
+export const resetPasswordSchema = z.object({
+  email: z.string().email().transform((value) => value.toLowerCase()),
+  code: z.string().regex(/^\d{4,10}$/, "Code must be 4–10 digits"),
+  newPassword: z.string().min(8, "Password must be at least 8 characters").max(128),
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>;
+export type CreateWorkspaceInput = z.infer<typeof createWorkspaceSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type RefreshInput = z.infer<typeof refreshSchema>;
 export type LogoutInput = z.infer<typeof logoutSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;

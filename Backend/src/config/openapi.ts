@@ -48,11 +48,73 @@ export const openApiDocument = {
         responses: { "201": ok("User, tenant, OWNER membership and session created"), "409": { $ref: "#/components/responses/Conflict" } },
       },
     },
+    "/api/v1/auth/create-workspace": {
+      post: {
+        tags: ["Authentication"], summary: "Create a workspace for a pending (identity-only) user", security: bearer,
+        description: "Send the pendingToken returned by POST /register as a Bearer token. Creates the Tenant + OWNER membership and returns a full session.",
+        requestBody: jsonBody({
+          type: "object",
+          required: ["tenantName", "planCode"],
+          properties: {
+            tenantName: { type: "string", example: "Acme Inc" },
+            planCode: { type: "string", example: "starter" },
+          },
+        }),
+        responses: {
+          "201": ok("Tenant, OWNER membership and session created"),
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "409": { $ref: "#/components/responses/Conflict" },
+        },
+      },
+    },
+
+    "/api/v1/auth/verify-otp": {
+      post: {
+        tags: ["Authentication"], summary: "Verify the email OTP for a pending user", security: bearer,
+        description: "Send the pendingToken from POST /register as a Bearer token. On success the user becomes ACTIVE and emailVerifiedAt is set; a refreshed pending token is returned.",
+        requestBody: jsonBody({ type: "object", required: ["code"], properties: { code: { type: "string", example: "123456" } } }),
+        responses: { "200": ok("Email verified; refreshed pending token returned"), "400": { $ref: "#/components/responses/ValidationError" }, "401": { $ref: "#/components/responses/Unauthorized" } },
+      },
+    },
+    "/api/v1/auth/resend-otp": {
+      post: {
+        tags: ["Authentication"], summary: "Resend the email OTP for a pending user", security: bearer,
+        description: "Send the pendingToken from POST /register as a Bearer token. Rate-limited by cooldown and hourly cap.",
+        responses: { "200": ok("Code resent"), "401": { $ref: "#/components/responses/Unauthorized" }, "429": ok("Cooldown or hourly limit reached") },
+      },
+    },
+
     "/api/v1/auth/login": {
       post: {
         tags: ["Authentication"], summary: "Login or request tenant selection",
         requestBody: jsonBody({ $ref: "#/components/schemas/LoginRequest" }),
         responses: { "200": ok("Session or tenant selection returned"), "401": { $ref: "#/components/responses/Unauthorized" } },
+      },
+    },
+    "/api/v1/auth/forgot-password": {
+      post: {
+        tags: ["Authentication"], summary: "Request a password reset code",
+        description: "Always returns 200 with a generic message regardless of whether the email exists (no user enumeration). If the account exists, a single-use reset code is emailed. Rate-limited by cooldown and hourly cap.",
+        requestBody: jsonBody({
+          type: "object", required: ["email"],
+          properties: { email: { type: "string", format: "email" } },
+        }),
+        responses: { "200": ok("Generic acceptance message returned"), "429": ok("Too many requests") },
+      },
+    },
+    "/api/v1/auth/reset-password": {
+      post: {
+        tags: ["Authentication"], summary: "Reset the password using the emailed code",
+        description: "Verifies the single-use PASSWORD_RESET code, sets the new password, and revokes all of the user's refresh tokens across every tenant. Errors are generic to avoid email enumeration.",
+        requestBody: jsonBody({
+          type: "object", required: ["email", "code", "newPassword"],
+          properties: {
+            email: { type: "string", format: "email" },
+            code: { type: "string", example: "123456" },
+            newPassword: { type: "string", format: "password", minLength: 8 },
+          },
+        }),
+        responses: { "200": ok("Password reset; existing sessions revoked"), "400": { $ref: "#/components/responses/ValidationError" }, "409": { $ref: "#/components/responses/Conflict" }, "429": ok("Too many requests") },
       },
     },
     "/api/v1/auth/refresh": {
