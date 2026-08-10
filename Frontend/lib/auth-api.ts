@@ -1,0 +1,307 @@
+import { apiRequest } from "./api-client";
+import { setTokens, clearTokens, getRefreshToken } from "./auth-storage";
+
+export interface LoginInput {
+  email: string;
+  password: string;
+  tenantId?: string;
+}
+
+export interface RegisterInput {
+  email: string;
+  password: string;
+  displayName: string;
+  tenantName: string;
+  planCode: string;
+}
+
+export interface VerifyOtpInput {
+  code: string;
+  token: string;
+}
+
+export interface VerifyOtpResponse {
+  cooldownMs: number;
+  pendingToken(pendingToken: any): unknown;
+  success: boolean;
+  data: {
+    emailVerified: boolean;
+    pendingToken: string;
+    expiresIn: string;
+  };
+}
+
+export interface ResendOtpInput {
+  token: string;
+}
+
+export interface ResendOtpResponse {
+  success: boolean;
+  data: {
+    message: string;
+    cooldownMs: number;
+  };
+}
+
+export interface CreateWorkspaceInput {
+  token: string;
+  tenantName: string;
+  planCode: string;
+}
+
+// export interface CreateWorkspaceResponse {
+//   success: boolean;
+//   data: {
+//     tenant: {
+//       id: string;
+//       name: string;
+//       slug: string;
+//       planCode: string;
+//     };
+
+//     membership: {
+//       id: string;
+//       role: string;
+//     };
+
+//     accessToken: string;
+//     refreshToken: string;
+//     expiresIn: string;
+//   };
+// }
+
+export interface CreateWorkspaceResponse {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: string;
+  user: { id: string; email: string; displayName: string };
+  tenant: { id: string; name: string; slug?: string; planCode: string };
+  membership: { id: string; role: string };
+}
+
+export interface ChangePasswordInput {
+  currentPassword: string;
+  newPassword: string;
+}
+
+export interface ForgotPasswordInput {
+  email: string;
+}
+
+export interface ResetPasswordInput {
+  email: string;
+  code: string;
+  newPassword: string;
+}
+
+// Both password-recovery endpoints return a generic { message }.
+export interface MessageResponse {
+  message: string;
+}
+
+interface Tokens {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: string;
+}
+
+// The backend returns tokens in TWO different shapes:
+//   login / refresh -> tokens at the TOP level of data (data.accessToken, ...)
+//   register        -> tokens NESTED under data.tokens (data.tokens.accessToken)
+// AuthResponse models both so callers can read either.
+export interface AuthResponse {
+  pendingToken: any;
+  data: any;
+  user: { id: string; email: string; displayName: string };
+  tenant: { id: string; name: string; planCode: string };
+  membership: { id: string; role: string };
+  // present on register
+  tokens?: Tokens;
+  // present on login / refresh
+  accessToken?: string;
+  refreshToken?: string;
+  expiresIn?: string;
+}
+
+export interface MeResponse {
+  id: string;
+  email: string;
+  displayName: string;
+  tenant: { id: string; name: string; planCode: string };
+  membership: { id: string; role: "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT" | string };
+}
+
+// Pull tokens out regardless of which shape the endpoint used.
+// function extractTokens(data: any): { accessToken?: string; refreshToken?: string } {
+//   const nested = data?.tokens ?? data?.data ?? {};
+//   return {
+//     accessToken:
+//       data?.accessToken ?? nested?.accessToken ??
+//       data?.access_token ?? nested?.access_token,
+//     refreshToken:
+//       data?.refreshToken ?? nested?.refreshToken ??
+//       data?.refresh_token ?? nested?.refresh_token,
+//   };
+// }
+function extractTokens(data: any): { accessToken?: string; refreshToken?: string } {
+  const src = data?.session ?? data?.tokens ?? data ?? {};
+  return {
+    accessToken:
+      src?.accessToken ?? src?.access_token ??
+      data?.accessToken ?? data?.access_token,
+    refreshToken:
+      src?.refreshToken ?? src?.refresh_token ??
+      data?.refreshToken ?? data?.refresh_token,
+  };
+}
+
+// export async function login(input: LoginInput): Promise<AuthResponse> {
+//   const data = await apiRequest<AuthResponse>("/auth/login", {
+//     method: "POST",
+//     body: input,
+//     auth: false,
+//   });
+//   const { accessToken, refreshToken } = extractTokens(data);
+//   if (accessToken) setTokens(accessToken, refreshToken);
+//   return data;
+// }
+export async function login(input: LoginInput): Promise<AuthResponse> {
+  const data = await apiRequest<AuthResponse>("/auth/login", {
+    method: "POST",
+    body: input,
+    auth: false,
+  });
+  console.log("LOGIN RESPONSE", data);   // <-- temporary, remove later
+  const { accessToken, refreshToken } = extractTokens(data);
+  if (accessToken) setTokens(accessToken, refreshToken);
+  return data;
+}
+
+export async function register(input: RegisterInput): Promise<AuthResponse> {
+  const data = await apiRequest<AuthResponse>("/auth/register", {
+    method: "POST",
+    body: input,
+    auth: false,
+  });
+  const { accessToken, refreshToken } = extractTokens(data);
+  if (accessToken) setTokens(accessToken, refreshToken);
+  return data;
+}
+
+export async function changePassword(input: ChangePasswordInput): Promise<void> {
+  await apiRequest("/auth/change-password", { method: "POST", body: input });
+}
+
+export async function getMe(): Promise<MeResponse> {
+  return apiRequest<MeResponse>("/auth/me");
+}
+
+export async function logout(): Promise<void> {
+  const refreshToken = getRefreshToken();
+  try {
+    await apiRequest("/auth/logout", {
+      method: "POST",
+      body: { refreshToken }, // camelCase — matches the backend
+    });
+  } catch {
+    // even if the server call fails, clear locally
+  } finally {
+    clearTokens();
+  }
+}
+
+export async function logoutAll(): Promise<void> {
+  const refreshToken = getRefreshToken();
+  try {
+    await apiRequest("/auth/logout-all", { method: "POST", body: { refreshToken } });
+  } finally {
+    clearTokens();
+  }
+}
+
+export async function verifyOtp(
+  input: VerifyOtpInput
+): Promise<VerifyOtpResponse> {
+  return apiRequest<VerifyOtpResponse>(
+    "/auth/verify-otp",
+    {
+      method: "POST",
+
+      headers: {
+        Authorization: `Bearer ${input.token}`,
+      },
+
+      body: {
+        code: input.code,
+      },
+
+      auth: false,
+    }
+  );
+}
+
+export async function resendOtp(
+  input: ResendOtpInput
+): Promise<ResendOtpResponse> {
+  return apiRequest<ResendOtpResponse>(
+    "/auth/resend-otp",
+    {
+      method: "POST",
+
+      headers: {
+        Authorization: `Bearer ${input.token}`,
+      },
+
+      auth: false,
+    }
+  );
+}
+
+export async function createWorkspace(
+  input: CreateWorkspaceInput
+): Promise<CreateWorkspaceResponse> {
+  const data =
+    await apiRequest<CreateWorkspaceResponse>(
+      "/auth/create-workspace",
+      {
+        method: "POST",
+
+        headers: {
+          Authorization: `Bearer ${input.token}`,
+        },
+
+        body: {
+          tenantName: input.tenantName,
+          planCode: input.planCode,
+        },
+
+        auth: false,
+      }
+    );
+
+  setTokens(
+    data.accessToken,
+    data.refreshToken
+  );
+
+  return data;
+}
+export async function forgotPassword(
+  input: ForgotPasswordInput
+): Promise<MessageResponse> {
+  return apiRequest<MessageResponse>("/auth/forgot-password", {
+    method: "POST",
+    body: input,
+    auth: false,
+  });
+}
+
+export async function resetPassword(
+  input: ResetPasswordInput
+): Promise<MessageResponse> {
+  return apiRequest<MessageResponse>("/auth/reset-password", {
+    method: "POST",
+    body: input,
+    auth: false,
+  });
+}

@@ -1,0 +1,10 @@
+import { Router } from "express";
+import { z } from "zod";
+import { authenticate, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
+import { asyncHandler } from "../../common/middleware/asyncHandler.js";
+import { sendSuccess } from "../../common/utils/response.js";
+import { jobService } from "./job.service.js";
+export const jobRouter = Router();
+jobRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN"));
+jobRouter.get("/", asyncHandler(async (req, res) => { sendSuccess(res, 200, { jobs: await jobService.list(req.tenantContext!.tenantId) }, req.requestId); }));
+jobRouter.get("/:jobId", validate(z.object({ jobId: z.string().uuid() }), "params"), asyncHandler(async (req, res) => { sendSuccess(res, 200, await jobService.get(String(req.params.jobId), req.tenantContext!.tenantId), req.requestId); }));

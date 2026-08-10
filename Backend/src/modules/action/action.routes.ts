@@ -1,0 +1,11 @@
+import { Router } from "express";
+import { authenticate, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
+import { asyncHandler } from "../../common/middleware/asyncHandler.js";
+import { sendSuccess } from "../../common/utils/response.js";
+import { actionIdSchema, createActionSchema, updateActionSchema } from "./action.schema.js";
+import { actionService } from "./action.service.js";
+export const actionRouter = Router();
+actionRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBER"));
+actionRouter.get("/", asyncHandler(async (req, res) => { sendSuccess(res, 200, { actions: await actionService.list(req.tenantContext!.tenantId, req.tenantContext!.userId) }, req.requestId); }));
+actionRouter.post("/", validate(createActionSchema), asyncHandler(async (req, res) => { sendSuccess(res, 201, await actionService.create(req.body, req.tenantContext!.tenantId, req.tenantContext!.userId, req.tenantContext!.membershipId), req.requestId); }));
+actionRouter.patch("/:actionId", validate(actionIdSchema, "params"), validate(updateActionSchema), asyncHandler(async (req, res) => { sendSuccess(res, 200, await actionService.update(String(req.params.actionId), req.body, req.tenantContext!.tenantId, req.tenantContext!.userId), req.requestId); }));

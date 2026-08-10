@@ -1,0 +1,367 @@
+import { createHash } from "node:crypto";
+import { Prisma, type ConnectorProvider } from "@prisma/client";
+import { prisma } from "../../config/prisma.js";
+import { AppError } from "../../common/errors/AppError.js";
+import { ErrorCodes } from "../../common/errors/errorCodes.js";
+import { auditService } from "../audit/audit.service.js";
+import { env } from "../../config/env.js";
+import { deliveryProtectionService } from "../delivery-protection/delivery-protection.service.js";
+
+interface CreateAccountInput {
+  provider: ConnectorProvider;
+  providerAccountId: string;
+  email: string;
+  scopes: string[];
+}
+
+interface NormalizedCallback {
+  providerEventId?: string;
+  providerAccountId: string;
+  eventType: string;
+  resourceType?: string;
+  resourceId?: string;
+  providerReference?: string;
+  occurredAt: string;
+  cursor?: string;
+}
+
+function eventHash(provider: ConnectorProvider, input: NormalizedCallback) {
+  return createHash("sha256").update(JSON.stringify({
+    provider,
+    providerEventId: input.providerEventId ?? null,
+    providerAccountId: input.providerAccountId,
+    eventType: input.eventType,
+    resourceType: input.resourceType ?? null,
+    resourceId: input.resourceId ?? null,
+    providerReference: input.providerReference ?? null,
+    occurredAt: input.occurredAt,
+    cursor: input.cursor ?? null,
+  })).digest("hex");
+}
+
+export class ConnectorService {
+  list(tenantId: string, membershipId: string) {
+    return prisma.connectedAccount.findMany({
+      where: { tenantId, membershipId },
+      select: {
+        id: true, provider: true, email: true, scopes: true, status: true,
+        watchExpiresAt: true, lastSyncedAt: true, lastErrorCode: true,
+        disconnectedAt: true, createdAt: true, updatedAt: true,
+      },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  async create(
+    input: CreateAccountInput,
+    context: { tenantId: string; membershipId: string; userId: string; requestId?: string }
+  ) {
+    try {
+      const account = await prisma.$transaction(async (tx) => {
+        const membership = await tx.tenantMembership.findFirst({
+          where: {
+            id: context.membershipId,
+            tenantId: context.tenantId,
+            userId: context.userId,
+            status: "ACTIVE",
+          },
+          select: { id: true },
+        });
+        if (!membership) {
+          throw new AppError("Active membership not found", 403, ErrorCodes.FORBIDDEN);
+        }
+        const created = await tx.connectedAccount.create({
+          data: {
+            tenantId: context.tenantId,
+            membershipId: context.membershipId,
+            userId: context.userId,
+            ...input,
+          },
+          select: {
+            id: true, provider: true, email: true, scopes: true, status: true,
+            createdAt: true, updatedAt: true,
+          },
+        });
+        await auditService.record({
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          eventType: "CONNECTED_ACCOUNT_CREATED",
+          targetType: "ConnectedAccount",
+          targetId: created.id,
+          requestId: context.requestId,
+          metadata: { provider: input.provider, scopes: input.scopes },
+        }, tx);
+        return created;
+      });
+      return account;
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new AppError("This provider account is already connected", 409, ErrorCodes.CONFLICT);
+      }
+      throw error;
+    }
+  }
+
+  async disconnect(
+    accountId: string,
+    context: { tenantId: string; membershipId: string; userId: string; requestId?: string }
+  ) {
+    return prisma.$transaction(async (tx) => {
+      const account = await tx.connectedAccount.findFirst({
+        where: { id: accountId, tenantId: context.tenantId, membershipId: context.membershipId },
+      });
+      if (!account) throw new AppError("Connected account not found", 404, ErrorCodes.NOT_FOUND);
+      const updated = await tx.connectedAccount.update({
+        where: { id: account.id },
+        data: { status: "DISCONNECTED", disconnectedAt: new Date() },
+        select: { id: true, provider: true, email: true, status: true, disconnectedAt: true },
+      });
+      await auditService.record({
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        eventType: "CONNECTED_ACCOUNT_DISCONNECTED",
+        targetType: "ConnectedAccount",
+        targetId: account.id,
+        requestId: context.requestId,
+        metadata: { provider: account.provider },
+      }, tx);
+      return updated;
+    });
+  }
+
+  async listEvents(accountId: string, tenantId: string, membershipId: string) {
+    const account = await prisma.connectedAccount.findFirst({
+      where: { id: accountId, tenantId, membershipId },
+      select: { id: true },
+    });
+    if (!account) throw new AppError("Connected account not found", 404, ErrorCodes.NOT_FOUND);
+    return prisma.providerEvent.findMany({
+      where: { tenantId, connectedAccountId: account.id },
+      select: {
+        id: true, providerEventId: true, provider: true, eventType: true,
+        normalizedResourceType: true, normalizedResourceId: true,
+        providerReference: true, sanitizedPayload: true, receivedAt: true,
+        processedAt: true, processingStatus: true, errorCode: true, requestId: true,
+      },
+      orderBy: { receivedAt: "desc" },
+      take: 100,
+    });
+  }
+
+  async receiveEvent(provider: ConnectorProvider, input: NormalizedCallback, requestId?: string) {
+    const account = await prisma.connectedAccount.findUnique({
+      where: { provider_providerAccountId: { provider, providerAccountId: input.providerAccountId } },
+    });
+    if (!account || account.status === "DISCONNECTED") {
+      throw new AppError("Provider account mapping not found", 404, ErrorCodes.NOT_FOUND);
+    }
+    const hash = eventHash(provider, input);
+    const existing = await prisma.providerEvent.findUnique({
+      where: { provider_eventHash: { provider, eventHash: hash } },
+      select: { id: true, processingStatus: true, receivedAt: true },
+    });
+    if (existing) return { duplicate: true, event: existing };
+
+    const sanitizedPayload: Prisma.InputJsonObject = {
+      providerEventId: input.providerEventId ?? null,
+      eventType: input.eventType,
+      resourceType: input.resourceType ?? null,
+      resourceId: input.resourceId ?? null,
+      providerReference: input.providerReference ?? null,
+      occurredAt: input.occurredAt,
+      cursor: input.cursor ?? null,
+    };
+    const event = await prisma.$transaction(async (tx) => {
+      const created = await tx.providerEvent.create({
+        data: {
+          providerEventId: input.providerEventId,
+          tenantId: account.tenantId,
+          connectedAccountId: account.id,
+          provider,
+          eventType: input.eventType,
+          normalizedResourceType: input.resourceType,
+          normalizedResourceId: input.resourceId,
+          providerReference: input.providerReference,
+          eventHash: hash,
+          sanitizedPayload,
+          requestId,
+        },
+        select: { id: true, processingStatus: true, receivedAt: true },
+      });
+      await auditService.record({
+        tenantId: account.tenantId,
+        eventType: "PROVIDER_EVENT_RECEIVED",
+        targetType: "ProviderEvent",
+        targetId: created.id,
+        requestId,
+        metadata: { provider, eventType: input.eventType },
+      }, tx);
+      return created;
+    });
+    return { duplicate: false, event };
+  }
+
+  async health(tenantId: string) {
+    const [accountGroups, eventGroups] = await prisma.$transaction([
+      prisma.connectedAccount.groupBy({
+        by: ["provider", "status"],
+        where: { tenantId },
+        _count: { _all: true },
+      }),
+      prisma.providerEvent.groupBy({
+        by: ["provider", "processingStatus"],
+        where: { tenantId },
+        _count: { _all: true },
+      }),
+    ]);
+    return {
+      accounts: accountGroups.map((row) => ({
+        provider: row.provider, status: row.status, count: row._count._all,
+      })),
+      events: eventGroups.map((row) => ({
+        provider: row.provider, status: row.processingStatus, count: row._count._all,
+      })),
+    };
+  }
+
+  listDeadLetters(tenantId: string) {
+    return prisma.providerEvent.findMany({
+      where: { tenantId, processingStatus: "DEAD_LETTER" },
+      select: {
+        id: true, connectedAccountId: true, provider: true, eventType: true,
+        sanitizedPayload: true, attempts: true, maxAttempts: true,
+        errorCode: true, receivedAt: true, processedAt: true,
+      },
+      orderBy: { receivedAt: "desc" },
+      take: 100,
+    });
+  }
+
+  async replayDeadLetter(eventId: string, tenantId: string, userId: string, requestId?: string) {
+    return prisma.$transaction(async (tx) => {
+      const event = await tx.providerEvent.findFirst({
+        where: { id: eventId, tenantId, processingStatus: "DEAD_LETTER" },
+      });
+      if (!event) throw new AppError("Dead-letter event not found", 404, ErrorCodes.NOT_FOUND);
+      const replayed = await tx.providerEvent.update({
+        where: { id: event.id },
+        data: {
+          processingStatus: "RETRY", attempts: 0, runAt: new Date(),
+          lockedAt: null, processedAt: null, errorCode: null,
+        },
+      });
+      await auditService.record({
+        tenantId,
+        actorUserId: userId,
+        eventType: "PROVIDER_EVENT_REPLAYED",
+        targetType: "ProviderEvent",
+        targetId: event.id,
+        requestId,
+      }, tx);
+      return replayed;
+    });
+  }
+
+  private async claimEvent() {
+    const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+      UPDATE "provider_events"
+      SET "processing_status"='FAILED', "locked_at"=CURRENT_TIMESTAMP,
+          "attempts"="attempts"+1
+      WHERE "id"=(
+        SELECT "id" FROM "provider_events"
+        WHERE (
+          ("processing_status" IN ('RECEIVED','RETRY') AND "run_at"<=CURRENT_TIMESTAMP)
+          OR ("processing_status"='FAILED' AND "locked_at"<=CURRENT_TIMESTAMP-INTERVAL '5 minutes')
+        )
+        ORDER BY "run_at", "received_at"
+        FOR UPDATE SKIP LOCKED LIMIT 1
+      )
+      RETURNING "id"`;
+    return rows[0]
+      ? prisma.providerEvent.findUnique({ where: { id: rows[0].id }, include: { connectedAccount: true } })
+      : null;
+  }
+
+  async processNextEvent() {
+    const event = await this.claimEvent();
+    if (!event) return { processed: false };
+    try {
+      const reauthEvents = new Set(["AUTH_REVOKED", "REAUTH_REQUIRED", "PERMISSION_MISMATCH"]);
+      const degradedEvents = new Set(["WATCH_EXPIRED", "SUBSCRIPTION_EXPIRED", "MISSED_NOTIFICATION"]);
+      const retryableEvents = new Set(["PROVIDER_RATE_LIMIT", "PROVIDER_UNAVAILABLE", "TEMPORARY_FAILURE"]);
+      if (retryableEvents.has(event.eventType)) {
+        throw new Error(event.eventType);
+      }
+
+      await prisma.$transaction(async (tx) => {
+        await deliveryProtectionService.processProviderSignal(tx, event);
+        const accountData = reauthEvents.has(event.eventType)
+          ? { status: "REAUTH_REQUIRED" as const, lastErrorCode: event.eventType }
+          : degradedEvents.has(event.eventType)
+            ? { status: "DEGRADED" as const, lastErrorCode: event.eventType }
+            : {
+                status: "ACTIVE" as const,
+                lastErrorCode: null,
+                lastSyncedAt: new Date(),
+              };
+        await tx.connectedAccount.update({
+          where: { id: event.connectedAccountId },
+          data: accountData,
+        });
+        await tx.providerEvent.update({
+          where: { id: event.id },
+          data: {
+            processingStatus: "PROCESSED", processedAt: new Date(),
+            lockedAt: null, errorCode: null,
+          },
+        });
+        await auditService.record({
+          tenantId: event.tenantId,
+          eventType: "PROVIDER_EVENT_PROCESSED",
+          targetType: "ProviderEvent",
+          targetId: event.id,
+          requestId: event.requestId,
+          metadata: { provider: event.provider, eventType: event.eventType },
+        }, tx);
+      });
+      return { processed: true, eventId: event.id, status: "PROCESSED" as const };
+    } catch (error) {
+      const errorCode = error instanceof Error ? error.message.slice(0, 100) : "PROCESSING_FAILED";
+      const deadLetter = event.attempts >= event.maxAttempts;
+      const jitter = Math.floor(Math.random() * Math.max(1, env.PROVIDER_EVENT_RETRY_BASE_MS / 4));
+      const delay = env.PROVIDER_EVENT_RETRY_BASE_MS * 2 ** Math.max(0, event.attempts - 1) + jitter;
+      await prisma.$transaction(async (tx) => {
+        await tx.providerEvent.update({
+          where: { id: event.id },
+          data: {
+            processingStatus: deadLetter ? "DEAD_LETTER" : "RETRY",
+            runAt: deadLetter ? event.runAt : new Date(Date.now() + delay),
+            lockedAt: null,
+            processedAt: deadLetter ? new Date() : null,
+            errorCode,
+          },
+        });
+        await tx.connectedAccount.update({
+          where: { id: event.connectedAccountId },
+          data: { status: "DEGRADED", lastErrorCode: errorCode },
+        });
+        if (deadLetter) {
+          await auditService.record({
+            tenantId: event.tenantId,
+            eventType: "PROVIDER_EVENT_DEAD_LETTERED",
+            targetType: "ProviderEvent",
+            targetId: event.id,
+            requestId: event.requestId,
+            metadata: { provider: event.provider, eventType: event.eventType, attempts: event.attempts },
+          }, tx);
+        }
+      });
+      return {
+        processed: true, eventId: event.id,
+        status: deadLetter ? "DEAD_LETTER" as const : "RETRY" as const,
+      };
+    }
+  }
+}
+
+export const connectorService = new ConnectorService();

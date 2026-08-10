@@ -1,0 +1,26 @@
+name: Deploy to zoikomail.com
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.GCP_SSH_HOST }}
+          username: ${{ secrets.GCP_SSH_USER }}
+          key: ${{ secrets.GCP_SSH_KEY }}
+          script: |
+            set -e
+            cd /var/www/zoiko-mail/app
+            git pull origin main
+            cd Frontend
+            npm install
+            npm run build
+            pm2 restart zoiko-mail
+            pm2 save
