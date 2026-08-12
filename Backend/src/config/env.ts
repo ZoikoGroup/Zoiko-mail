@@ -1,6 +1,15 @@
 import { z } from "zod";
 import "dotenv/config";
 
+// docker-compose passes unset optional vars through as empty strings (`${VAR:-}`),
+// and an empty string is present-but-invalid rather than absent. Treat it as absent
+// so an unconfigured mail provider does not fail validation.
+const blankAsUndefined = (value: unknown) => (value === "" ? undefined : value);
+
+/** Boolean env var parsed from the literal strings "true" / "false". */
+const boolFlag = (fallback: "true" | "false") =>
+  z.enum(["true", "false"]).default(fallback).transform((value: "true" | "false") => value === "true");
+
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(5000),
@@ -53,17 +62,42 @@ const envSchema = z.object({
   SMTP_HOST: z.string().min(1).default("smtpout.secureserver.net"),
   SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(465),
   SMTP_SECURE: z.enum(["true", "false"]).default("true").transform((value) => value === "true"),
-  MAIL_PROVIDER_USERNAME: z.string().min(1).optional(),
-  MAIL_PROVIDER_PASSWORD: z.string().min(1).optional(),
-  MAIL_PROVIDER_FROM_ADDRESS: z.string().email().optional(),
-  MAIL_PROVIDER_TENANT_ID: z.string().uuid().optional(),
-  MAIL_PROVIDER_MEMBERSHIP_ID: z.string().uuid().optional(),
+  MAIL_PROVIDER_USERNAME: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  MAIL_PROVIDER_PASSWORD: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  MAIL_PROVIDER_FROM_ADDRESS: z.preprocess(blankAsUndefined, z.string().email().optional()),
+  MAIL_PROVIDER_TENANT_ID: z.preprocess(blankAsUndefined, z.string().uuid().optional()),
+  MAIL_PROVIDER_MEMBERSHIP_ID: z.preprocess(blankAsUndefined, z.string().uuid().optional()),
   MAIL_PROVIDER_SYNC_INTERVAL_MS: z.coerce.number().int().min(60_000).default(300_000),
   MAIL_PROVIDER_CONNECTION_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(15_000),
-  BCRYPT_ROUNDS: z.coerce.number().int().min(10).max(15).default(12),
+  // Floor is 4 so the test suite can hash cheaply; anything below 10 is rejected
+  // outside NODE_ENV=test by the refinement below. Without this the suite could
+  // not boot at all, because tests/setup.ts sets 4 for speed.
+  BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(12),
+  // Secret access — Security §15. "env" reads SECRET_<REF> for local and CI use;
+  // "gcp" routes through Secret Manager and fails loudly until it is wired.
+  SECRET_STORE: z.enum(["env", "gcp"]).default("env"),
+  SECRET_CACHE_TTL_MS: z.coerce.number().int().min(0).max(3_600_000).default(300_000),
+  // Feature flags and kill switches — Infrastructure spec §15. A global "false"
+  // is a kill switch: no tenant/domain/mailbox override can re-enable it.
+  // Track B capabilities default off so hosted mail ships built-but-disabled.
+  FLAG_CONNECTOR_GMAIL_ENABLED: boolFlag("true"),
+  FLAG_CONNECTOR_M365_ENABLED: boolFlag("true"),
+  FLAG_AI_EXTRACTION_ENABLED: boolFlag("true"),
+  FLAG_AI_DRAFTING_ENABLED: boolFlag("true"),
+  FLAG_HOSTED_MAIL_PILOT_ENABLED: boolFlag("false"),
+  FLAG_OUTBOUND_SENDING_ENABLED: boolFlag("true"),
+  FLAG_CUSTOM_DOMAIN_ENABLED: boolFlag("false"),
+  FLAG_PROVIDER_CALLBACKS_ACCEPTING: boolFlag("true"),
 }).superRefine((value, context) => {
   if (value.JWT_ACCESS_SECRET === value.JWT_REFRESH_SECRET) {
     context.addIssue({ code: "custom", path: ["JWT_REFRESH_SECRET"], message: "must differ from JWT_ACCESS_SECRET" });
+  }
+  if (value.NODE_ENV !== "test" && value.BCRYPT_ROUNDS < 10) {
+    context.addIssue({
+      code: "custom",
+      path: ["BCRYPT_ROUNDS"],
+      message: "must be at least 10 outside the test environment",
+    });
   }
   if (value.NODE_ENV === "production") {
     for (const key of ["JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET", "OPERATIONS_KEY", "PROVIDER_CALLBACK_SECRET"] as const) {

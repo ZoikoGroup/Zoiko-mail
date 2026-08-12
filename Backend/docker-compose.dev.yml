@@ -1,0 +1,20 @@
+# Local development only — explicit opt-in, never auto-loaded.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# Publishes Postgres to the host so local tooling (prisma migrate, studio, the
+# test suite) can reach it. The base compose file deliberately does not, because
+# Infrastructure §8 requires private database connectivity with "no public
+# database access from unmanaged clients" — that rule is for deployed
+# environments, not a developer workstation.
+#
+# Named docker-compose.dev.yml rather than docker-compose.override.yml so it is
+# never picked up implicitly by a deployment that happens to run `compose up`.
+services:
+  postgres:
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+
+  api:
+    environment:
+      LOG_LEVEL: debug

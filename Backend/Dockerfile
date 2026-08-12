@@ -16,6 +16,9 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/prisma.config.ts ./prisma.config.ts
+# The runtime `npm ci` above installs a fresh node_modules without the generated
+# Prisma client, so carry over the client produced by the build stage.
+COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 RUN mkdir -p /app/storage/attachments /app/storage/exports && chown -R node:node /app
 USER node
 EXPOSE 5000
