@@ -126,9 +126,9 @@ describe("Delivery protection", () => {
     });
     expect(await connectorService.processNextEvent()).toMatchObject({ status: "PROCESSED" });
     const quarantined = await request(app).get("/api/v1/mail?folder=QUARANTINE")
-      .set(authHeader(login.body.data.accessToken)).expect(200);
+      .set(authHeader(login.body.data.session.accessToken)).expect(200);
     expect(quarantined.body.data.items).toHaveLength(1);
     await request(app).get(`/api/v1/mail/${draft.body.data.id}/attachments/${attachment.body.data.id}`)
-      .set(authHeader(login.body.data.accessToken)).expect(403);
+      .set(authHeader(login.body.data.session.accessToken)).expect(403);
   });
 });

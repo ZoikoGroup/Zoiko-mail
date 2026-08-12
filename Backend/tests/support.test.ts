@@ -14,7 +14,7 @@ describe("Temporary audited SUPPORT access", () => {
       .send({ email: support.email, role: "SUPPORT" }).expect(201);
     const login = await request(app).post("/api/v1/auth/login")
       .send({ email: support.email, password: support.password, tenantId: owner.tenantId }).expect(200);
-    const token = login.body.data.accessToken;
+    const token = login.body.data.session.accessToken;
 
     await request(app).get("/api/v1/support/diagnostics").set(authHeader(token)).expect(403);
     await request(app).get("/api/v1/messages").set(authHeader(token)).expect(403);
@@ -42,7 +42,7 @@ describe("Temporary audited SUPPORT access", () => {
     const login = await request(app).post("/api/v1/auth/login")
       .send({ email: support.email, password: support.password, tenantId: owner.tenantId }).expect(200);
     const grant = await prisma.supportAccessGrant.create({ data: { tenantId: owner.tenantId, supportMembershipId: added.body.data.id, approvedByUserId: owner.userId, reason: "Expired test access grant", scopes: ["TENANT_DIAGNOSTICS"], expiresAt: new Date(Date.now() - 1000) } });
-    await request(app).get("/api/v1/support/diagnostics").set(authHeader(login.body.data.accessToken))
+    await request(app).get("/api/v1/support/diagnostics").set(authHeader(login.body.data.session.accessToken))
       .set("x-support-grant-id", grant.id).expect(403);
   });
 });
