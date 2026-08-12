@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import Link from "next/link";
 import {
   Inbox, CheckCircle2, XCircle, Clock, Play, Calendar, Plus, X,
-  AlertCircle, Loader2,
+  AlertCircle, Loader2, FileSearch,
 } from "lucide-react";
 import {
   useActions,
@@ -16,20 +17,20 @@ import type {
   ActionPriority,
 } from "@/lib/actions-api";
 
-// ---- small presentation helpers -------------------------------------------
-const PRIORITY_STYLES: Record<ActionPriority, string> = {
-  LOW: "bg-slate-100 text-slate-600 ring-slate-500/20",
-  MEDIUM: "bg-sky-50 text-sky-700 ring-sky-600/20",
-  HIGH: "bg-amber-50 text-amber-700 ring-amber-600/20",
-  URGENT: "bg-rose-50 text-rose-700 ring-rose-600/20",
+// ---- token tones -----------------------------------------------------------
+const PRIORITY_TONE: Record<ActionPriority, string> = {
+  LOW: "nu",
+  MEDIUM: "accent",
+  HIGH: "warn",
+  URGENT: "crit",
 };
 
-const STATUS_STYLES: Record<ActionStatus, string> = {
-  OPEN: "bg-teal-50 text-teal-700 ring-teal-600/20",
-  IN_PROGRESS: "bg-indigo-50 text-indigo-700 ring-indigo-600/20",
-  SNOOZED: "bg-slate-100 text-slate-500 ring-slate-500/20",
-  COMPLETED: "bg-green-50 text-green-700 ring-green-600/20",
-  DISMISSED: "bg-slate-100 text-slate-400 ring-slate-400/20",
+const STATUS_TONE: Record<ActionStatus, string> = {
+  OPEN: "accent",
+  IN_PROGRESS: "ai",
+  SNOOZED: "nu",
+  COMPLETED: "ok",
+  DISMISSED: "nu",
 };
 
 const STATUS_LABEL: Record<ActionStatus, string> = {
@@ -40,12 +41,8 @@ const STATUS_LABEL: Record<ActionStatus, string> = {
   DISMISSED: "Dismissed",
 };
 
-function Chip({ text, cls }: { text: string; cls: string }) {
-  return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${cls}`}>
-      {text}
-    </span>
-  );
+function Pill({ text, tone }: { text: string; tone: string }) {
+  return <span className={`zoiko-pill ${tone}`}>{text}</span>;
 }
 
 function formatDue(iso: string | null): { label: string; overdue: boolean } {
@@ -109,16 +106,16 @@ export function ActionInbox() {
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="flex items-center gap-2 font-serif text-2xl font-semibold text-slate-900">
-            <Inbox className="h-6 w-6 text-teal-600" /> Action Inbox
+          <h1 className="flex items-center gap-2 font-editorial text-2xl sm:text-3xl font-normal tracking-tight text-[var(--ink)]">
+            <Inbox className="h-6 w-6 text-[var(--accent)]" /> Commitments
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-[var(--ink3)]">
             {activeCount} active {activeCount === 1 ? "commitment" : "commitments"}.
           </p>
         </div>
         <button
           onClick={() => setShowCreate((s) => !s)}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-teal-700"
+          className="zoiko-btn pri shrink-0"
         >
           {showCreate ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
           <span className="hidden sm:inline">{showCreate ? "Close" : "New commitment"}</span>
@@ -136,8 +133,8 @@ export function ActionInbox() {
             onClick={() => setFilter(f.key)}
             className={`shrink-0 rounded-full px-3 py-1 text-sm transition ${
               filter === f.key
-                ? "bg-slate-900 text-white"
-                : "bg-white text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-slate-100"
+                ? "bg-[var(--accent)] text-white"
+                : "bg-[var(--surface)] text-[var(--ink2)] ring-1 ring-inset ring-[var(--border)] hover:bg-[var(--s2)]"
             }`}
           >
             {f.label}
@@ -148,22 +145,22 @@ export function ActionInbox() {
       {/* List */}
       <div className="mt-4 flex-1 space-y-2">
         {isLoading && (
-          <div className="flex items-center gap-2 py-10 text-sm text-slate-400">
+          <div className="flex items-center gap-2 py-10 text-sm text-[var(--ink3)]">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading commitments…
           </div>
         )}
 
         {error && (
-          <div className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+          <div className="flex items-start gap-2 rounded-lg border border-[var(--crit)]/30 bg-[var(--crit-soft)] p-4 text-sm text-[var(--crit)]">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
             Couldn&rsquo;t load commitments. Your session may have expired — try logging in again.
           </div>
         )}
 
         {!isLoading && !error && visible.length === 0 && (
-          <div className="flex flex-col items-center py-16 text-center text-slate-400">
-            <CheckCircle2 className="h-10 w-10 text-teal-500" />
-            <p className="mt-3 text-sm font-medium text-slate-600">Nothing here</p>
+          <div className="flex flex-col items-center py-16 text-center text-[var(--ink3)]">
+            <CheckCircle2 className="h-10 w-10 text-[var(--ok)]" />
+            <p className="mt-3 text-sm font-medium text-[var(--ink2)]">Nothing here</p>
             <p className="text-xs">Create a commitment or switch filters.</p>
           </div>
         )}
@@ -190,38 +187,35 @@ function ActionCard({
 }) {
   const due = formatDue(a.dueAt);
   const terminal = a.status === "COMPLETED" || a.status === "DISMISSED";
+  const hasEvidence = Boolean(a.threadId || a.messageId);
 
   return (
-    <div
-      className={`rounded-xl border bg-white p-4 transition ${
-        terminal ? "border-slate-200 opacity-70" : "border-slate-200 hover:border-slate-300 hover:shadow-sm"
-      }`}
-    >
+    <div className={`zoiko-card p-4 transition ${terminal ? "opacity-70" : "hover:shadow-[var(--sh2)]"}`}>
       <div className="flex flex-wrap items-center gap-2">
-        <Chip text={a.priority} cls={PRIORITY_STYLES[a.priority]} />
-        <Chip text={STATUS_LABEL[a.status]} cls={STATUS_STYLES[a.status]} />
+        <Pill text={a.priority} tone={PRIORITY_TONE[a.priority]} />
+        <Pill text={STATUS_LABEL[a.status]} tone={STATUS_TONE[a.status]} />
         <span
           className={`ml-auto inline-flex items-center gap-1 text-xs ${
-            due.overdue && !terminal ? "font-medium text-amber-600" : "text-slate-500"
+            due.overdue && !terminal ? "font-medium text-[var(--warn)]" : "text-[var(--ink3)]"
           }`}
         >
           <Clock className="h-3 w-3" /> {due.label}
         </span>
       </div>
 
-      <p className={`mt-2 text-sm font-medium ${terminal ? "text-slate-500 line-through" : "text-slate-900"}`}>
+      <p className={`mt-2 text-sm font-medium ${terminal ? "text-[var(--ink3)] line-through" : "text-[var(--ink)]"}`}>
         {a.text}
       </p>
 
       {a.status === "SNOOZED" && a.snoozedUntil && (
-        <p className="mt-1 text-xs text-slate-400">
+        <p className="mt-1 text-xs text-[var(--ink3)]">
           Snoozed until {formatDue(a.snoozedUntil).label}
         </p>
       )}
 
       {/* Lifecycle buttons — reflect the real status machine */}
       {!terminal && (
-        <div className="mt-3 flex flex-wrap gap-1.5">
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
           {a.status === "OPEN" && (
             <Btn onClick={() => onSetStatus(a, "IN_PROGRESS")} disabled={busy} icon={Play}>
               Start
@@ -238,19 +232,38 @@ function ActionCard({
           <Btn onClick={() => onSetStatus(a, "DISMISSED")} disabled={busy} icon={XCircle} variant="danger">
             Dismiss
           </Btn>
+          {hasEvidence && <EvidenceLink threadId={a.threadId} />}
         </div>
       )}
 
       {terminal && (
-        <button
-          onClick={() => onSetStatus(a, "OPEN")}
-          disabled={busy}
-          className="mt-3 text-xs font-medium text-teal-700 hover:underline disabled:opacity-50"
-        >
-          Reopen
-        </button>
+        <div className="mt-3 flex items-center gap-3">
+          <button
+            onClick={() => onSetStatus(a, "OPEN")}
+            disabled={busy}
+            className="text-xs font-medium text-[var(--accent-ink)] hover:underline disabled:opacity-50"
+          >
+            Reopen
+          </button>
+          {hasEvidence && <EvidenceLink threadId={a.threadId} />}
+        </div>
       )}
     </div>
+  );
+}
+
+// Links to the source thread the commitment was detected from.
+// Lights up once the Threads / message-detail screen ships; until then it
+// points at that route so no wiring changes are needed later.
+function EvidenceLink({ threadId }: { threadId: string | null }) {
+  if (!threadId) return null;
+  return (
+    <Link
+      href={`/threads/${threadId}`}
+      className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-[var(--ink3)] transition hover:text-[var(--accent-ink)]"
+    >
+      <FileSearch className="h-3.5 w-3.5" /> View evidence
+    </Link>
   );
 }
 
@@ -267,17 +280,14 @@ function Btn({
   icon: React.ComponentType<{ className?: string }>;
   variant?: "primary" | "ghost" | "danger";
 }) {
-  const styles = {
-    primary: "bg-teal-600 text-white hover:bg-teal-700",
-    ghost: "text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-slate-100",
-    danger: "text-slate-500 ring-1 ring-inset ring-slate-200 hover:bg-rose-50 hover:text-rose-600",
-  }[variant];
+  const cls =
+    variant === "primary"
+      ? "zoiko-btn pri sm"
+      : variant === "danger"
+      ? "zoiko-btn crit sm"
+      : "zoiko-btn sm";
   return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition disabled:opacity-50 ${styles}`}
-    >
+    <button onClick={onClick} disabled={disabled} className={`${cls} disabled:opacity-50`}>
       <Icon className="h-3.5 w-3.5" />
       {children}
     </button>
@@ -311,21 +321,20 @@ function CreateForm({ onDone }: { onDone: () => void }) {
     );
   };
 
+  const field =
+    "rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--ink)] outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)]";
+
   return (
-    <form onSubmit={submit} className="mt-4 space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+    <form onSubmit={submit} className="mt-4 space-y-3 rounded-xl border border-[var(--border)] bg-[var(--s2)] p-4">
       <input
         autoFocus
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder="What needs doing? e.g. Send the proposal to Meridian"
-        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+        className={`w-full ${field}`}
       />
       <div className="flex flex-col gap-3 sm:flex-row">
-        <select
-          value={priority}
-          onChange={(e) => setPriority(e.target.value as ActionPriority)}
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500"
-        >
+        <select value={priority} onChange={(e) => setPriority(e.target.value as ActionPriority)} className={field}>
           <option value="LOW">Low</option>
           <option value="MEDIUM">Medium</option>
           <option value="HIGH">High</option>
@@ -335,18 +344,14 @@ function CreateForm({ onDone }: { onDone: () => void }) {
           type="datetime-local"
           value={dueAt}
           onChange={(e) => setDueAt(e.target.value)}
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 outline-none focus:border-teal-500"
+          className={`text-[var(--ink2)] ${field}`}
         />
-        <button
-          type="submit"
-          disabled={create.isPending || !text.trim()}
-          className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-teal-700 disabled:opacity-50 sm:ml-auto"
-        >
+        <button type="submit" disabled={create.isPending || !text.trim()} className="zoiko-btn pri disabled:opacity-50 sm:ml-auto">
           {create.isPending ? "Adding…" : "Add commitment"}
         </button>
       </div>
       {create.isError && (
-        <p className="text-xs text-rose-600">Couldn&rsquo;t create that — check the fields and try again.</p>
+        <p className="text-xs text-[var(--crit)]">Couldn&rsquo;t create that — check the fields and try again.</p>
       )}
     </form>
   );
