@@ -19,6 +19,7 @@ export async function registerUser(
     displayName: string;
     tenantName: string;
     planCode: string;
+    createWorkspace?: boolean; // optional flag, defaults to true
   }> = {}
 ): Promise<RegisteredUser> {
   const payload = {
@@ -29,19 +30,47 @@ export async function registerUser(
     planCode: overrides.planCode ?? "starter",
   };
 
-  const response = await request(app)
+  // Register the user (pending token flow)
+  const registerResponse = await request(app)
     .post("/api/v1/auth/register")
     .send(payload)
     .expect(201);
 
+  const pendingToken = registerResponse.body.data.pendingToken;
+  // By default, create a workspace for the newly registered user.
+  const shouldCreate = overrides.createWorkspace !== false;
+  let tenantId: string | null = null;
+  let membershipId: string | null = null;
+  let userId: string = registerResponse.body.data.user.id;
+  let accessToken: string | null = null;
+  let refreshToken: string | null = null;
+
+  if (shouldCreate) {
+    const workspaceResponse = await request(app)
+      .post("/api/v1/auth/create-workspace")
+      .set({ Authorization: `Bearer ${pendingToken}` })
+      .send({ tenantName: payload.tenantName, planCode: payload.planCode })
+      .expect(201);
+    const data = workspaceResponse.body.data;
+    tenantId = data.tenant.id;
+    membershipId = data.membership.id;
+    userId = data.user.id;
+    accessToken = data.accessToken ?? data.tokens?.accessToken;
+    refreshToken = data.refreshToken ?? data.tokens?.refreshToken;
+  }
+
+  if (!tenantId || !membershipId || !accessToken || !refreshToken) {
+    throw new Error("Test user registration did not create a complete workspace session");
+  }
+
   return {
     email: payload.email,
     password: payload.password,
-    tenantId: response.body.data.tenant.id,
-    membershipId: response.body.data.membership.id,
-    userId: response.body.data.user.id,
-    accessToken: response.body.data.tokens.accessToken,
-    refreshToken: response.body.data.tokens.refreshToken,
+    tenantId,
+    membershipId,
+    userId,
+    accessToken,
+    refreshToken,
   };
 }
 
@@ -56,7 +85,11 @@ export async function loginUser(
     .send({ email, password, tenantId })
     .expect(200);
 
-  return response.body.data;
+  const data = response.body.data;
+  if (data?.session) {
+    return { ...data.session, ...data };
+  }
+  return data;
 }
 
 export function authHeader(token: string): { Authorization: string } {

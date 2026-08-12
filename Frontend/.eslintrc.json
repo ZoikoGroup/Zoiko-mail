@@ -1,8 +1,7 @@
 {
-  "extends": ["next/core-web-vitals", "next/typescript"],
+  "extends": ["next/core-web-vitals"],
   "rules": {
-    "no-console": ["warn", { "allow": ["debug", "info", "warn", "error"] }],
-    "@typescript-eslint/consistent-type-imports": ["warn", { "prefer": "type-imports" }]
+    "no-console": ["warn", { "allow": ["debug", "info", "warn", "error"] }]
   },
   "ignorePatterns": ["node_modules/", ".next/", "out/"]
 }

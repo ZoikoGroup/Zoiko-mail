@@ -21,6 +21,14 @@ export class ApiError extends Error {
     }
 }
 
+export function newRequestId(): string {
+    return `req_${Math.random().toString(16).slice(2, 10)}`;
+}
+
+export function newIdempotencyKey(): string {
+    return `idem_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 8)}`;
+}
+
 // interface RequestOptions {
 //     method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 //     body?: unknown;
@@ -33,6 +41,9 @@ interface RequestOptions {
     auth?: boolean;
     headers?: Record<string, string>;
     _retried?: boolean;
+    idempotent?: boolean;
+    tenantId?: string | null;
+    accessToken?: string | null;
 }
 
 // Single-flight refresh: if many calls 401 at once, we refresh only once.
@@ -79,6 +90,9 @@ export async function apiRequest<T = unknown>(
         auth = true,
         headers: customHeaders,
         _retried = false,
+        idempotent,
+        tenantId,
+        accessToken,
     } = opts;
 
     // const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -86,16 +100,27 @@ export async function apiRequest<T = unknown>(
         "Content-Type": "application/json",
         ...customHeaders,
     };
+    if (idempotent) headers["Idempotency-Key"] = `idem_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 8)}`;
     if (auth) {
-        const token = getAccessToken();
+        const token = accessToken ?? getAccessToken();
         if (token) headers["Authorization"] = `Bearer ${token}`;
     }
+    if (tenantId) headers["X-Zoiko-Tenant-ID"] = tenantId;
 
-    const res = await fetch(`${API_BASE}${path}`, {
-        method,
-        headers,
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+    let res: Response;
+    try {
+        res = await fetch(`${API_BASE}${path}`, {
+            method,
+            headers,
+            body: body !== undefined ? JSON.stringify(body) : undefined,
+        });
+    } catch {
+        throw new ApiError(
+            0,
+            "Unable to reach Zoiko Mail. Please make sure the backend server is running and try again.",
+            "NETWORK_ERROR"
+        );
+    }
 
     // Token expired -> refresh once, then retry the original request.
     if (res.status === 401 && auth && !_retried) {

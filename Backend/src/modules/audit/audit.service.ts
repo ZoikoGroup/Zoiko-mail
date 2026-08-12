@@ -26,7 +26,7 @@ export interface AuditEventFilters {
 
 const sensitiveMetadataKey = /password|token|secret|authorization|cookie/i;
 
-function redactMetadata(value: unknown): unknown {
+export function redactMetadata(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redactMetadata);
   if (value && typeof value === "object") {
     return Object.fromEntries(

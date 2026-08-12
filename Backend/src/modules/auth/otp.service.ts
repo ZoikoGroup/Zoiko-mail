@@ -16,8 +16,12 @@ function generateCode(length: number): string {
 }
 
 export class OtpService {
-  /** Generate, persist, and email a fresh code; invalidates prior unconsumed codes. */
-  async issue(userId: string, email: string, tx: Prisma.TransactionClient = prisma): Promise<void> {
+  /**
+   * Generate, persist, and return a fresh code; invalidates prior unconsumed
+   * codes. Persistence only — email delivery happens AFTER the issuing
+   * transaction commits via sendOtpEmail(), never inside the transaction.
+   */
+  async issue(userId: string, tx: Prisma.TransactionClient = prisma): Promise<{ code: string }> {
     await tx.emailOtp.updateMany({
       where: { userId, purpose: PURPOSE, consumedAt: null },
       data: { consumedAt: new Date() },
@@ -29,12 +33,19 @@ export class OtpService {
 
     await tx.emailOtp.create({ data: { userId, purpose: PURPOSE, codeHash, expiresAt } });
 
-    // Best-effort send: a transient SMTP failure must not roll back issuance.
-    try {
-      await systemMailer.sendOtpEmail(email, code, Math.round(env.OTP_TTL_MS / 60_000));
-    } catch (err) {
-      logger.error({ err, userId }, "failed to send OTP email");
-    }
+    return { code };
+  }
+
+  /**
+   * Best-effort delivery of an issued code. Fire-and-forget so a slow or
+   * unreachable SMTP server can never block the auth response.
+   */
+  async sendOtpEmail(email: string, code: string): Promise<void> {
+    void systemMailer
+      .sendOtpEmail(email, code, Math.round(env.OTP_TTL_MS / 60_000))
+      .catch((err) => {
+        logger.error({ err, email }, "failed to send OTP email");
+      });
   }
 
   /** Verify a code; on success consume it and promote a PENDING_VERIFICATION user to ACTIVE. */
@@ -104,7 +115,8 @@ export class OtpService {
       throw new AppError("Please wait before requesting another code", 429, ErrorCodes.OTP_COOLDOWN);
     }
 
-    await this.issue(userId, user.email);
+    const { code } = await this.issue(userId);
+    await this.sendOtpEmail(user.email, code);
     return { cooldownMs: env.OTP_RESEND_COOLDOWN_MS };
   }
 

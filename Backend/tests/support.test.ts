@@ -14,7 +14,7 @@ describe("Temporary audited SUPPORT access", () => {
       .send({ email: support.email, role: "SUPPORT" }).expect(201);
     const login = await request(app).post("/api/v1/auth/login")
       .send({ email: support.email, password: support.password, tenantId: owner.tenantId }).expect(200);
-    const token = login.body.data.accessToken;
+    const token = login.body.data.session?.accessToken ?? login.body.data.accessToken;
 
     await request(app).get("/api/v1/support/diagnostics").set(authHeader(token)).expect(403);
     await request(app).get("/api/v1/messages").set(authHeader(token)).expect(403);
@@ -41,8 +41,44 @@ describe("Temporary audited SUPPORT access", () => {
       .send({ email: support.email, role: "SUPPORT" }).expect(201);
     const login = await request(app).post("/api/v1/auth/login")
       .send({ email: support.email, password: support.password, tenantId: owner.tenantId }).expect(200);
+    const supportToken = login.body.data.session?.accessToken ?? login.body.data.accessToken;
     const grant = await prisma.supportAccessGrant.create({ data: { tenantId: owner.tenantId, supportMembershipId: added.body.data.id, approvedByUserId: owner.userId, reason: "Expired test access grant", scopes: ["TENANT_DIAGNOSTICS"], expiresAt: new Date(Date.now() - 1000) } });
-    await request(app).get("/api/v1/support/diagnostics").set(authHeader(login.body.data.accessToken))
+    await request(app).get("/api/v1/support/diagnostics").set(authHeader(supportToken))
       .set("x-support-grant-id", grant.id).expect(403);
+  });
+
+  it("exposes the support workspace overview to owner, admin and support roles", async () => {
+    const owner = await registerUser(app, { email: "overview-owner@zoiko.test" });
+    const admin = await registerUser(app, { email: "overview-admin@zoiko.test" });
+    const support = await registerUser(app, { email: "overview-agent@zoiko.test" });
+
+    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+      .send({ email: admin.email, role: "ADMIN" }).expect(201);
+    const added = await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+      .send({ email: support.email, role: "SUPPORT" }).expect(201);
+
+    const ownerOverview = await request(app).get("/api/v1/support/overview")
+      .set(authHeader(owner.accessToken)).expect(200);
+    expect(ownerOverview.body.data.stats).toMatchObject({ members: 3, mailboxes: 0, activeGrants: 0 });
+    expect(ownerOverview.body.data.members).toHaveLength(3);
+    expect(ownerOverview.body.data.team).toHaveLength(1);
+    expect(Array.isArray(ownerOverview.body.data.issues)).toBe(true);
+    expect(Array.isArray(ownerOverview.body.data.audit)).toBe(true);
+    expect(Array.isArray(ownerOverview.body.data.grants)).toBe(true);
+    expect(ownerOverview.body.data.team[0]).toMatchObject({ email: support.email });
+
+    const adminLogin = await request(app).post("/api/v1/auth/login")
+      .send({ email: admin.email, password: admin.password, tenantId: owner.tenantId }).expect(200);
+    const adminToken = adminLogin.body.data.session?.accessToken ?? adminLogin.body.data.accessToken;
+    await request(app).get("/api/v1/support/overview").set(authHeader(adminToken)).expect(200);
+
+    const supportLogin = await request(app).post("/api/v1/auth/login")
+      .send({ email: support.email, password: support.password, tenantId: owner.tenantId }).expect(200);
+    const supportToken = supportLogin.body.data.session?.accessToken ?? supportLogin.body.data.accessToken;
+    const supportOverview = await request(app).get("/api/v1/support/overview")
+      .set(authHeader(supportToken)).expect(200);
+    expect(supportOverview.body.data.stats.members).toBe(3);
+
+    await request(app).get("/api/v1/support/overview").expect(401);
   });
 });

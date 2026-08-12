@@ -6,6 +6,8 @@ import { resolve } from "node:path";
 loadEnv({ path: resolve(process.cwd(), ".env") });
 
 process.env.NODE_ENV = "test";
+// Never touch real SMTP from tests — the system mailer falls back to log-only.
+process.env.SYSTEM_MAIL_ENABLED = "false";
 process.env.JWT_ACCESS_SECRET ??=
   "test-access-secret-minimum-32-characters-long";
 process.env.JWT_REFRESH_SECRET ??=
