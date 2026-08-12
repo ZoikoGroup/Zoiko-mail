@@ -115,7 +115,7 @@ describe("Auth security", () => {
       })
       .expect(200);
 
-    const memberToken = memberLogin.body.data.accessToken;
+    const memberToken = memberLogin.body.data.session.accessToken;
 
     const denied = await request(app)
       .get("/api/v1/membership/members")
@@ -144,7 +144,7 @@ describe("Auth security", () => {
 
     const response = await request(app)
       .get("/api/v1/membership/members")
-      .set(authHeader(login.body.data.accessToken))
+      .set(authHeader(login.body.data.session.accessToken))
       .expect(403);
 
     expect(response.body.error.code).toBe("FORBIDDEN");
@@ -203,16 +203,16 @@ describe("Auth flows", () => {
       })
       .expect(200);
 
-    expect(loginResponse.body.data.accessToken).toBeTruthy();
+    expect(loginResponse.body.data.session.accessToken).toBeTruthy();
 
     await request(app)
       .post("/api/v1/auth/logout")
-      .send({ refreshToken: loginResponse.body.data.refreshToken })
+      .send({ refreshToken: loginResponse.body.data.session.refreshToken })
       .expect(200);
 
     await request(app)
       .post("/api/v1/auth/refresh")
-      .send({ refreshToken: loginResponse.body.data.refreshToken })
+      .send({ refreshToken: loginResponse.body.data.session.refreshToken })
       .expect(401);
   });
 
@@ -247,7 +247,10 @@ describe("Auth flows", () => {
       })
       .expect(200);
 
-    expect(selectionResponse.body.data.requiresTenantSelection).toBe(true);
-    expect(selectionResponse.body.data.tenants).toHaveLength(2);
+    // Login resolves to a discriminated AuthState (auth.states.ts). The former
+    // { requiresTenantSelection, tenants } shape was replaced by
+    // { state: "WORKSPACE_SELECTION", user, workspaces }.
+    expect(selectionResponse.body.data.state).toBe("WORKSPACE_SELECTION");
+    expect(selectionResponse.body.data.workspaces).toHaveLength(2);
   });
 });

@@ -34,7 +34,7 @@ describe("Message and thread module", () => {
       .post("/api/v1/auth/login")
       .send({ email: member.email, password: member.password, tenantId: owner.tenantId })
       .expect(200);
-    const memberToken = login.body.data.accessToken;
+    const memberToken = login.body.data.session.accessToken;
     await activateSending(owner.accessToken);
 
     const draft = await request(app)

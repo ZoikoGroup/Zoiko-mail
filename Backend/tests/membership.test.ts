@@ -81,13 +81,13 @@ describe("Tenant membership management", () => {
 
     await request(app)
       .post("/api/v1/membership/members")
-      .set(authHeader(login.body.data.accessToken))
+      .set(authHeader(login.body.data.session.accessToken))
       .send({ email: candidate.email, role: "OWNER" })
       .expect(403);
 
     await request(app)
       .patch(`/api/v1/membership/members/${owner.membershipId}`)
-      .set(authHeader(login.body.data.accessToken))
+      .set(authHeader(login.body.data.session.accessToken))
       .send({ status: "SUSPENDED" })
       .expect(403);
 
