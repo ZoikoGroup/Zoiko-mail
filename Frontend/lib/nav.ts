@@ -41,7 +41,7 @@ export const NAV: NavItem[] = [
     desc: "Draft replies and summarize threads — you always send." },
 
   // Track B — hosted mail (gated until Track A proves out)
-  { section: "Track B · Hosted mail", label: "Webmail", href: "/mail", icon: Mail, status: "soon",
+  { section: "Track B · Hosted mail", label: "Webmail", href: "/mail", icon: Mail, status: "live",
     desc: "Send and receive from your Zoiko mailbox." },
   { section: "Track B · Hosted mail", label: "Domains & DNS", href: "/domains", icon: Globe, status: "soon",
     desc: "Add a domain and verify MX / SPF / DKIM / DMARC." },
