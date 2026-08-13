@@ -40,7 +40,7 @@ describe("Account security", () => {
       .send({ email: user.email, password: "NewPassword123!", tenantId: user.tenantId })
       .expect(200);
 
-    expect(secondLogin.body.data.refreshToken).toBeTruthy();
+    expect(secondLogin.body.data.session.refreshToken).toBeTruthy();
     const audit = await prisma.auditEvent.findFirst({
       where: { tenantId: user.tenantId, eventType: "PASSWORD_CHANGED" },
     });

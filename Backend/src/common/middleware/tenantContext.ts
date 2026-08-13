@@ -14,7 +14,10 @@ export async function tenantContext(
     return;
   }
 
-  const { sub: userId, tenantId, membershipId, role } = req.auth;
+  // `role` is deliberately NOT taken from the token. Security §7.2 requires the
+  // role to be read per request so a demotion takes effect on the caller's next
+  // call rather than at their next sign-in; it comes from the membership row below.
+  const { sub: userId, tenantId, membershipId } = req.auth;
 
   const membership = await prisma.tenantMembership.findFirst({
     where: {

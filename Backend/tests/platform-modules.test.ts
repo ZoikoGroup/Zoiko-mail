@@ -13,7 +13,7 @@ describe("Provider-independent platform modules", () => {
       .send({ email: member.email, role: "MEMBER" }).expect(201);
     const memberLogin = await request(app).post("/api/v1/auth/login")
       .send({ email: member.email, password: member.password, tenantId: owner.tenantId }).expect(200);
-    const memberToken = memberLogin.body.data.accessToken;
+    const memberToken = memberLogin.body.data.session.accessToken;
 
     const domain = await request(app).post("/api/v1/domains").set(authHeader(owner.accessToken))
       .send({ domainName: "example.test" }).expect(201);

@@ -35,11 +35,7 @@ import {
   AuditEventTypes,
   SYSTEM_TENANT_ID,
 } from "./auth.types.js";
-import type {
-  AuthSessionResponse,
-  RegisterResponse,
-  TenantSelectionResponse,
-} from "./auth.types.js";
+import type { AuthSessionResponse, RegisterResponse } from "./auth.types.js";
 
 interface RequestContext {
   requestId?: string;
@@ -791,14 +787,13 @@ export class AuthService {
   }
 
   async logout(input: LogoutInput, context: RequestContext): Promise<void> {
-    let payload: RefreshTokenPayload;
-
+    // The token is verified for its side effect only — logout is resolved by
+    // hash lookup below, so the decoded payload is not needed.
     try {
       const decoded = jwt.verify(input.refreshToken, env.JWT_REFRESH_SECRET);
       if (!isRefreshTokenPayload(decoded)) {
         throw new AppError("Invalid refresh token", 401, ErrorCodes.TOKEN_INVALID);
       }
-      payload = decoded;
     } catch {
       throw new AppError("Invalid refresh token", 401, ErrorCodes.TOKEN_INVALID);
     }

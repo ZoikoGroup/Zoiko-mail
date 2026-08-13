@@ -1,5 +1,4 @@
-import { beforeAll, afterAll, beforeEach } from "vitest";
-import { execSync } from "node:child_process";
+import { afterAll, beforeEach } from "vitest";
 import { config as loadEnv } from "dotenv";
 import { resolve } from "node:path";
 
@@ -37,13 +36,6 @@ if (process.env.TEST_DATABASE_URL) {
   process.env.DATABASE_URL =
     "postgresql://postgres:postgres@localhost:5432/zoiko_mail_test?schema=public";
 }
-
-beforeAll(() => {
-  execSync("npx prisma migrate deploy", {
-    stdio: "inherit",
-    env: process.env,
-  });
-});
 
 beforeEach(async () => {
   const { prisma } = await import("../src/config/prisma.js");

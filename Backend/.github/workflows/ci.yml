@@ -1,12 +1,55 @@
-name: Backend CI
+name: CI
+
+# Lives at the repository root because GitHub Actions only reads
+# .github/workflows from the root. The previous copies under Backend/.github and
+# Frontend/.github were never executed.
 
 on:
   push:
+    branches: ["**"]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
-  test:
+  # ── Static quality — Infrastructure §13 "Static quality" stage ─────────
+  backend-static:
+    name: Backend static quality
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Backend
+    env:
+      # prisma generate needs the variable present; it does not connect.
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/unused?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: Backend/package-lock.json
+      - run: npm ci
+      - run: npm run db:generate
+      - name: Lint
+        run: npm run lint
+      - name: Type check
+        run: npm run type-check
+      - name: OpenAPI contract lint
+        run: npm run lint:openapi
+
+  # ── Tests — Infrastructure §13 "Tests" stage ───────────────────────────
+  backend-test:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Backend
     services:
       postgres:
         image: postgres:17
@@ -25,9 +68,11 @@ jobs:
       NODE_ENV: test
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/zoiko_mail_test?schema=public
       TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/zoiko_mail_test?schema=public
+      # Test-only values. env.ts rejects these under NODE_ENV=production.
       JWT_ACCESS_SECRET: ci-access-secret-minimum-32-characters-long
       JWT_REFRESH_SECRET: ci-refresh-secret-minimum-32-characters-long
       OPERATIONS_KEY: ci-operations-key-minimum-32-characters-long
+      PROVIDER_CALLBACK_SECRET: ci-callback-secret-minimum-32-characters-long
       BCRYPT_ROUNDS: 10
       CORS_ORIGIN: http://localhost:3000
     steps:
@@ -36,8 +81,148 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: Backend/package-lock.json
       - run: npm ci
       - run: npm run db:generate
-      - run: npm run type-check
       - run: npm run build
-      - run: npm test
+      - name: Unit and integration tests
+        run: npm test
+
+  # ── Migration tests — Infrastructure §13, §25 "Database recovery" ──────
+  # Guards the expand/backfill/contract sequence that roadmap item 78 depends on.
+  backend-migrations:
+    name: Backend migrations
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Backend
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: zoiko_mail_migrate
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d zoiko_mail_migrate"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/zoiko_mail_migrate?schema=public
+      JWT_ACCESS_SECRET: ci-access-secret-minimum-32-characters-long
+      JWT_REFRESH_SECRET: ci-refresh-secret-minimum-32-characters-long
+      OPERATIONS_KEY: ci-operations-key-minimum-32-characters-long
+      CORS_ORIGIN: http://localhost:3000
+      BCRYPT_ROUNDS: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: Backend/package-lock.json
+      - run: npm ci
+      - run: npm run db:generate
+
+      - name: Apply committed migrations to an empty database
+        run: npm run db:migrate:deploy
+
+      - name: Fail if the schema drifts from the migrations
+        # A schema change without a matching migration is a release blocker:
+        # prisma migrate deploy would leave production behind the code.
+        run: npx prisma migrate diff
+          --from-migrations prisma/migrations
+          --to-schema-datamodel prisma/schema.prisma
+          --shadow-database-url "$DATABASE_URL"
+          --exit-code
+
+      - name: Seed applies cleanly on a migrated database
+        run: npm run build && npm run db:seed:compiled
+
+      - name: Seed is idempotent
+        run: npm run db:seed:compiled
+
+  # ── Frontend ──────────────────────────────────────────────────────────
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: Frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+  # ── Container build — Infrastructure §13 "Artifact" stage ──────────────
+  # Proves the runtime image boots. The publish job below pushes and signs it.
+  container:
+    name: Container build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build runtime image
+        run: docker build -t zoiko-mail-api:${{ github.sha }} Backend
+      - name: Verify the Prisma client survived the runtime stage
+        # Regression guard for the build/runtime stage split that previously
+        # shipped an image with an uninitialized Prisma client.
+        run: |
+          docker run --rm --entrypoint node zoiko-mail-api:${{ github.sha }} \
+            -e "require('fs').accessSync('/app/node_modules/.prisma/client'); console.log('prisma client present')"
+
+  # ── Publish — Infrastructure §13 "Artifact", §14 rollback ──────────────
+  # Immutable, signed images make rollback an image swap instead of a rebuild on
+  # the server (which is what the current SSH + pm2 deploy does, and why a
+  # rollback today is not byte-identical to what was working before).
+  #
+  # Skips automatically until the GCP repository variables exist, so the pipeline
+  # stays green before any infrastructure is provisioned. Required variables:
+  #   GCP_PROJECT_ID  GCP_REGION  GCP_ARTIFACT_REPO
+  #   GCP_WIF_PROVIDER  GCP_DEPLOY_SERVICE_ACCOUNT
+  publish:
+    name: Publish signed image
+    runs-on: ubuntu-latest
+    needs: [backend-static, backend-test, backend-migrations, container]
+    if: github.ref == 'refs/heads/main' && vars.GCP_PROJECT_ID != ''
+    permissions:
+      contents: read
+      id-token: write # Workload Identity Federation — no long-lived service-account key
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Artifact Registry auth
+        run: gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Build, push and sign
+        env:
+          IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.GCP_ARTIFACT_REPO }}/api
+        run: |
+          set -euo pipefail
+          docker build -t "$IMAGE:${{ github.sha }}" Backend
+          docker push "$IMAGE:${{ github.sha }}"
+          # Sign the digest, not the tag: keyless signing binds the immutable
+          # digest to this workflow identity, so `cosign verify` can prove which
+          # commit produced whatever image is running.
+          DIGEST="$(gcloud artifacts docker images describe "$IMAGE:${{ github.sha }}" --format='value(image_summary.digest)')"
+          cosign sign --yes "$IMAGE@$DIGEST"
+          echo "Signed $IMAGE@$DIGEST"
