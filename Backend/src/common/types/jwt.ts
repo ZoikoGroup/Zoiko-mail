@@ -81,6 +81,18 @@ export interface PlatformAuthContext {
   type: "platform";
 }
 
+/**
+ * Normalized staff context set by `requireSupportAccess` for the support
+ * console, regardless of which token type authenticated the request.
+ * `membershipId` is only present for tenant-scoped access-token sessions.
+ */
+export interface StaffAuthContext {
+  userId: string;
+  platformRole: PlatformRole;
+  membershipId?: string;
+  type: "access" | "platform";
+}
+
 export interface TenantContextData {
   tenantId: string;
   userId: string;
@@ -108,6 +120,9 @@ declare global {
       auth?: AuthContext;
       platformAuth?: PlatformAuthContext;
       tenantContext?: TenantContextData;
+      staffAuth?: StaffAuthContext;
     }
   }
 }
+
+export {};

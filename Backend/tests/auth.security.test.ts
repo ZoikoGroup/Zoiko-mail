@@ -115,7 +115,7 @@ describe("Auth security", () => {
       })
       .expect(200);
 
-    const memberToken = memberLogin.body.data.session.accessToken;
+    const memberToken = memberLogin.body.data.session?.accessToken ?? memberLogin.body.data.accessToken;
 
     const denied = await request(app)
       .get("/api/v1/membership/members")

@@ -23,6 +23,10 @@ function getTransporter(): Transporter | null {
       port: env.SMTP_PORT,
       secure: env.SMTP_SECURE,
       auth: { user: env.MAIL_PROVIDER_USERNAME, pass: env.MAIL_PROVIDER_PASSWORD },
+      // Fail fast instead of letting an unreachable host hang the process.
+      connectionTimeout: 15_000,
+      greetingTimeout: 15_000,
+      socketTimeout: 15_000,
     });
   }
   return transporter;
@@ -56,6 +60,9 @@ export class SystemMailer {
   }
 
   async sendOtpEmail(to: string, code: string, ttlMinutes: number): Promise<void> {
+    if (env.NODE_ENV !== "production") {
+      logger.info({ to, code, ttlMinutes }, "OTP issued (development)");
+    }
     await this.send({
       to,
       subject: "Your Zoiko Mail verification code",

@@ -1,0 +1,7 @@
+{
+  "extends": ["next/core-web-vitals"],
+  "rules": {
+    "no-console": ["warn", { "allow": ["debug", "info", "warn", "error"] }]
+  },
+  "ignorePatterns": ["node_modules/", ".next/", "out/"]
+}

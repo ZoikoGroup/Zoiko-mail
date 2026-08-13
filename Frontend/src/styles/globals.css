@@ -1,0 +1,219 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   ZOIKO MAIL — DESIGN TOKENS
+   Light is the default. Dark is a token-level swap, applied by OS
+   preference and overridden by an explicit data-theme flag so the manual
+   toggle wins in both directions.
+
+   Palette provenance: the accent and the dark-mode set were validated for
+   OKLCH lightness band, chroma floor, CVD separation and contrast against
+   their own surface. AI violet is deliberately separate from the brand
+   accent so a machine-generated claim never reads as a system state.
+   ============================================================ */
+
+:root {
+  --ground: #eef2f6;
+  --surface: #ffffff;
+  --s2: #f5f8fa;
+  --s3: #e9eff3;
+  --border: #dce4eb;
+  --bstrong: #c1cdd8;
+
+  --ink: #08121a;
+  --ink-2: #31465a;
+  --ink-3: #6a8093;
+
+  --accent: #0a7ea4;
+  --accent-ink: #065b77;
+  --accent-soft: #ddeff6;
+  --accent-on: #ffffff;
+
+  --ai: #5b54e8;
+  --ai-soft: #e9e8fd;
+
+  --ok: #12855b;
+  --ok-soft: #def1e8;
+  --warn: #a57400;
+  --warn-soft: #f7eed8;
+  --crit: #ce3226;
+  --crit-soft: #fbe6e4;
+
+  --sh1: 0 1px 2px rgba(8, 18, 26, 0.05);
+  --sh2: 0 1px 3px rgba(8, 18, 26, 0.07), 0 14px 34px -12px rgba(8, 18, 26, 0.2);
+  --sh3: 0 2px 5px rgba(8, 18, 26, 0.09), 0 34px 72px -18px rgba(8, 18, 26, 0.36);
+
+  /* Committed brand panel — deliberately identical in both themes. */
+  --pnl: #07191f;
+  --pnl-2: #0c242c;
+  --pnl-ink: #e9f3f6;
+  --pnl-mut: #8ca9b4;
+  --pnl-line: rgba(233, 243, 246, 0.11);
+
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, 'Cascadia Mono', 'Segoe UI Mono', Menlo, Consolas, monospace;
+  --font-editorial: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #040809;
+    --surface: #0d1519;
+    --s2: #121c21;
+    --s3: #18242a;
+    --border: #1e2b32;
+    --bstrong: #31434c;
+
+    --ink: #e4edf1;
+    --ink-2: #a1b3bc;
+    --ink-3: #6d8290;
+
+    --accent: #2c9dc0;
+    --accent-ink: #7fcde4;
+    --accent-soft: #092832;
+    --accent-on: #03222c;
+
+    --ai: #7a72f2;
+    --ai-soft: #181739;
+
+    --ok: #25a878;
+    --ok-soft: #0b291e;
+    --warn: #bc8a2a;
+    --warn-soft: #2a2010;
+    --crit: #e2564a;
+    --crit-soft: #30140e;
+
+    --sh1: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --sh2: 0 1px 3px rgba(0, 0, 0, 0.55), 0 16px 38px -14px rgba(0, 0, 0, 0.8);
+    --sh3: 0 2px 6px rgba(0, 0, 0, 0.6), 0 40px 80px -20px rgba(0, 0, 0, 0.92);
+  }
+}
+
+:root[data-theme='dark'] {
+  --ground: #040809;
+  --surface: #0d1519;
+  --s2: #121c21;
+  --s3: #18242a;
+  --border: #1e2b32;
+  --bstrong: #31434c;
+  --ink: #e4edf1;
+  --ink-2: #a1b3bc;
+  --ink-3: #6d8290;
+  --accent: #2c9dc0;
+  --accent-ink: #7fcde4;
+  --accent-soft: #092832;
+  --accent-on: #03222c;
+  --ai: #7a72f2;
+  --ai-soft: #181739;
+  --ok: #25a878;
+  --ok-soft: #0b291e;
+  --warn: #bc8a2a;
+  --warn-soft: #2a2010;
+  --crit: #e2564a;
+  --crit-soft: #30140e;
+  --sh1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --sh2: 0 1px 3px rgba(0, 0, 0, 0.55), 0 16px 38px -14px rgba(0, 0, 0, 0.8);
+  --sh3: 0 2px 6px rgba(0, 0, 0, 0.6), 0 40px 80px -20px rgba(0, 0, 0, 0.92);
+}
+
+:root[data-theme='light'] {
+  --ground: #eef2f6;
+  --surface: #ffffff;
+  --s2: #f5f8fa;
+  --s3: #e9eff3;
+  --border: #dce4eb;
+  --bstrong: #c1cdd8;
+  --ink: #08121a;
+  --ink-2: #31465a;
+  --ink-3: #6a8093;
+  --accent: #0a7ea4;
+  --accent-ink: #065b77;
+  --accent-soft: #ddeff6;
+  --accent-on: #ffffff;
+  --ai: #5b54e8;
+  --ai-soft: #e9e8fd;
+  --ok: #12855b;
+  --ok-soft: #def1e8;
+  --warn: #a57400;
+  --warn-soft: #f7eed8;
+  --crit: #ce3226;
+  --crit-soft: #fbe6e4;
+  --sh1: 0 1px 2px rgba(8, 18, 26, 0.05);
+  --sh2: 0 1px 3px rgba(8, 18, 26, 0.07), 0 14px 34px -12px rgba(8, 18, 26, 0.2);
+  --sh3: 0 2px 5px rgba(8, 18, 26, 0.09), 0 34px 72px -18px rgba(8, 18, 26, 0.36);
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-ground text-ink antialiased;
+    font-family: var(--font-ui);
+    font-size: 13.5px;
+    line-height: 1.5;
+  }
+
+  /* Visible focus on every interactive element — WCAG 2.2 AA. */
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Numeric alignment wherever digits are compared. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  /* The 44px grid on the brand panel. Decorative only. */
+  .panel-grid {
+    background-image:
+      repeating-linear-gradient(0deg, transparent 0 43px, var(--pnl-line) 43px 44px),
+      repeating-linear-gradient(90deg, transparent 0 43px, var(--pnl-line) 43px 44px);
+    opacity: 0.5;
+  }
+
+  .panel-wash {
+    background-image:
+      radial-gradient(120% 80% at 12% 4%, var(--pnl-2) 0%, transparent 58%),
+      radial-gradient(90% 70% at 100% 100%, rgba(10, 126, 164, 0.2) 0%, transparent 60%);
+  }
+
+  .rule-or::before,
+  .rule-or::after {
+    content: '';
+    flex: 1 1 0%;
+    height: 1px;
+    background: var(--border);
+  }
+}
+
+/* Respect the user's motion preference throughout. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .panel-grid,
+  .panel-wash {
+    background-image: none;
+  }
+}
+
+/* Forced-colors: drop decoration, keep structure. */
+@media (forced-colors: active) {
+  .panel-grid,
+  .panel-wash {
+    background-image: none;
+  }
+}

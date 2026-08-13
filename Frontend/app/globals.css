@@ -73,96 +73,11 @@ body {
 }
 
 html, body, #__next { height: 100%; }
-
+/* body { @apply bg-slate-50 text-slate-800 antialiased; } */
 body {
-  margin: 0;
-  background: var(--ground);
-  color: var(--ink);
-  font-family: var(--ui);
-  font-size: 13.5px;
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-  transition: background-color 0.3s ease, color 0.3s ease;
+    @apply bg-slate-50 text-slate-800 antialiased transition-colors duration-300;
 }
 
-.font-editorial { font-family: var(--ed); }
-.font-mono-num { font-family: var(--mo); font-variant-numeric: tabular-nums; }
-
-/* ---- Reusable component classes (token-driven) ---------------------------- */
-.zoiko-stat {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 11px;
-  padding: 14px 16px;
-  box-shadow: var(--sh1);
+.dark body {
+    @apply bg-slate-950 text-slate-100;
 }
-
-.zoiko-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: var(--sh1);
-  overflow: hidden;
-}
-
-.zoiko-btn {
-  border: 1px solid var(--border);
-  background: var(--surface);
-  border-radius: 7px;
-  padding: 6px 12px;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--ink2);
-  transition: all 0.15s ease;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  cursor: pointer;
-}
-.zoiko-btn:hover { border-color: var(--bstrong); color: var(--ink); }
-.zoiko-btn.pri { background: var(--accent); border-color: var(--accent); color: #ffffff; }
-.zoiko-btn.pri:hover { opacity: 0.92; }
-.zoiko-btn.crit { background: var(--crit-soft); border-color: var(--crit-soft); color: var(--crit); }
-.zoiko-btn.sm { padding: 4px 9px; font-size: 10.8px; }
-
-.zoiko-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 10.6px;
-  font-weight: 650;
-  padding: 3px 9px;
-  border-radius: 20px;
-  letter-spacing: 0.01em;
-}
-.zoiko-pill.ok { background: var(--ok-soft); color: var(--ok); }
-.zoiko-pill.warn { background: var(--warn-soft); color: var(--warn); }
-.zoiko-pill.crit { background: var(--crit-soft); color: var(--crit); }
-.zoiko-pill.ai { background: var(--ai-soft); color: var(--ai); }
-.zoiko-pill.nu { background: var(--s3); color: var(--ink3); }
-.zoiko-pill.accent { background: var(--accent-soft); color: var(--accent-ink); }
-
-.zoiko-toggle {
-  width: 34px; height: 19px;
-  border-radius: 20px;
-  background: var(--s3);
-  border: 1px solid var(--border);
-  position: relative; flex: none; cursor: pointer;
-  transition: background-color 0.15s ease, border-color 0.15s ease;
-}
-.zoiko-toggle i {
-  position: absolute; top: 1px; left: 1px;
-  width: 15px; height: 15px; border-radius: 50%;
-  background: var(--surface); box-shadow: var(--sh1);
-  transition: left 0.15s ease;
-}
-.zoiko-toggle.on { background: var(--accent); border-color: var(--accent); }
-.zoiko-toggle.on i { left: 16px; background: #ffffff; }
-.zoiko-toggle.lock { opacity: 0.55; cursor: not-allowed; }
-
-/* ---- Scrollbars ----------------------------------------------------------- */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--bstrong); }

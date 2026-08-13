@@ -27,6 +27,7 @@ import {
   type ResetPasswordInput,
 } from "./auth-api";
 import { isLoggedIn } from "./auth-storage";
+import { resolveWorkspaceHref } from "./workspace";
 
 // Server state (the logged-in user) lives in TanStack Query, keyed by ['me'].
 export function useMe() {
@@ -46,12 +47,33 @@ export function useLogin() {
   return useMutation({
     mutationFn: (input: LoginInput) => login(input),
 
-    onSuccess: async () => {
+    onSuccess: async (data) => {
       await qc.invalidateQueries({
         queryKey: ["me"],
       });
 
-      router.replace("/");
+      // Determine redirect based on backend auth state — the backend is the
+      // source of truth for role, never localStorage or email.
+      let href: string;
+
+      if (data.state === "STAFF_CONSOLE") {
+        // Platform-scoped session (staff with platformRole but no tenant).
+        href = "/platform-console";
+      } else if (data.state === "SIGNED_IN") {
+        // Regular user — use the membership role from the backend session.
+        const role = data.membership?.role;
+        href = resolveWorkspaceHref(role);
+      } else if (data.state === "NO_WORKSPACE") {
+        href = "/";
+      } else if (data.state === "WORKSPACE_SELECTION") {
+        // Multiple workspaces — show workspace chooser (not implemented here;
+        // the backend already returned the options).
+        href = "/";
+      } else {
+        href = "/login";
+      }
+
+      router.replace(href);
     },
   });
 }
@@ -103,12 +125,12 @@ export function useCreateWorkspace() {
       input: CreateWorkspaceInput
     ) => createWorkspace(input),
 
-    onSuccess: async () => {
+    onSuccess: async (data) => {
       await qc.invalidateQueries({
         queryKey: ["me"],
       });
 
-      router.replace("/");
+      router.replace(resolveWorkspaceHref(data?.membership?.role));
     },
   });
 }
