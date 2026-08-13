@@ -51,7 +51,7 @@ describe("Tenant policy module", () => {
       .send({ email: member.email, role: "MEMBER" }).expect(201);
     const login = await request(app).post("/api/v1/auth/login")
       .send({ email: member.email, password: member.password, tenantId: owner.tenantId }).expect(200);
-    const token = login.body.data.accessToken;
+    const token = login.body.data.session.accessToken;
     await request(app).post("/api/v1/policies/evaluate").set(authHeader(token))
       .send({ type: "ABUSE", context: {} }).expect(200);
     await request(app).get("/api/v1/policies").set(authHeader(token)).expect(403);
@@ -106,7 +106,7 @@ describe("Tenant policy module", () => {
     await request(app).post("/api/v1/policies/retention/execute")
       .set(authHeader(owner.accessToken)).send({ confirmation: "wrong" }).expect(400);
     await request(app).post("/api/v1/policies/retention/execute")
-      .set(authHeader(memberLogin.body.data.accessToken))
+      .set(authHeader(memberLogin.body.data.session.accessToken))
       .send({ confirmation: "DELETE_ELIGIBLE_MESSAGES" }).expect(403);
     const executed = await request(app).post("/api/v1/policies/retention/execute")
       .set(authHeader(owner.accessToken))
@@ -115,7 +115,7 @@ describe("Tenant policy module", () => {
     expect(await prisma.emailMessage.findUnique({ where: { id: oldMessageId } })).toBeNull();
 
     const inbox = await request(app).get("/api/v1/mail?folder=INBOX")
-      .set(authHeader(memberLogin.body.data.accessToken)).expect(200);
+      .set(authHeader(memberLogin.body.data.session.accessToken)).expect(200);
     expect(inbox.body.data.items).toHaveLength(1);
     expect(inbox.body.data.items[0].message.subject).toBe("Recent retained message");
     const audit = await prisma.auditEvent.findFirst({

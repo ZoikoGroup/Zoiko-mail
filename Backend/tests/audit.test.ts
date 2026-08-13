@@ -71,7 +71,7 @@ describe("Audit log API", () => {
 
     await request(app)
       .get("/api/v1/audit/events")
-      .set(authHeader(login.body.data.accessToken))
+      .set(authHeader(login.body.data.session.accessToken))
       .expect(403);
 
     await request(app)

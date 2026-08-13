@@ -1,6 +1,76 @@
+/* @tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #__next { height: 100%; }
+body {
+    @apply bg-slate-50 text-slate-800 antialiased transition-colors duration-300;
+}
+
+.dark body {
+    @apply bg-slate-950 text-slate-100;
+} */
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ============================================================
+   Zoiko Mail design tokens — light + dark
+   Components reference these vars (e.g. bg-[var(--surface)]),
+   so the whole UI re-themes just by toggling `.dark` on <html>.
+   ============================================================ */
+:root {
+  --ground: #EEF2F5;
+  --surface: #FFFFFF;
+  --s2: #F6F9FB;
+  --s3: #EAF0F4;
+  --border: #DBE3EA;
+  --bstrong: #C2CED8;
+  --ink: #0A141D;
+  --ink2: #33465A;
+  --ink3: #6C8092;
+  --accent: #0A7EA4;
+  --accent-ink: #075D7A;
+  --accent-soft: #DFF0F6;
+  --ai: #5B54E8;
+  --ai-soft: #EAE9FD;
+  --ok: #12855B;
+  --ok-soft: #E0F2E9;
+  --warn: #A57400;
+  --warn-soft: #F8EFD9;
+  --crit: #CE3226;
+  --crit-soft: #FBE7E5;
+  --sh1: 0 1px 2px rgba(10, 20, 29, 0.05);
+  --sh2: 0 1px 2px rgba(10, 20, 29, 0.06), 0 10px 26px -8px rgba(10, 20, 29, 0.16);
+  --sh3: 0 2px 4px rgba(10, 20, 29, 0.08), 0 24px 56px -12px rgba(10, 20, 29, 0.30);
+  --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mo: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono", "Segoe UI Mono", Menlo, Consolas, monospace;
+  --ed: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+}
+
+:root[data-theme="dark"], .dark {
+  --ground: #05090D;
+  --surface: #0F1821;
+  --s2: #141E28;
+  --s3: #1A2530;
+  --border: #202D39;
+  --bstrong: #324351;
+  --ink: #E6EDF3;
+  --ink2: #A4B5C3;
+  --ink3: #6F8397;
+  --accent: #289AC6;
+  --accent-ink: #7FCDE8;
+  --accent-soft: #0B2A38;
+  --ai: #7A72F2;
+  --ai-soft: #191838;
+  --ok: #25A878;
+  --ok-soft: #0C2A1F;
+  --warn: #BC8A2A;
+  --warn-soft: #2B2110;
+  --crit: #E2564A;
+  --crit-soft: #31150F;
+}
 
 html, body, #__next { height: 100%; }
 /* body { @apply bg-slate-50 text-slate-800 antialiased; } */

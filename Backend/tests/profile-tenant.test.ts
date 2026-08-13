@@ -97,7 +97,7 @@ describe("Tenant settings", () => {
       .post("/api/v1/auth/login")
       .send({ email: member.email, password: member.password, tenantId: owner.tenantId })
       .expect(200);
-    const token = login.body.data.accessToken;
+    const token = login.body.data.session.accessToken;
 
     await request(app)
       .get("/api/v1/tenants/current")
