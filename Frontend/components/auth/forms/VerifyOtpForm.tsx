@@ -270,7 +270,7 @@ export default function VerifyOtpForm({
         <div className="text-center">
           {seconds > 0 ? (
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              Didn't receive the code?
+              Didn&apos;t receive the code?
               <br />
 
               <span className="mt-1 inline-block font-semibold text-teal-600 dark:text-teal-400">

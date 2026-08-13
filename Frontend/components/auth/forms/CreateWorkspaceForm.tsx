@@ -125,7 +125,7 @@ export default function CreateWorkspaceForm({
         </h2>
 
         <p className="mt-3 text-sm leading-6 text-slate-500 dark:text-slate-400">
-          Your workspace is where you'll manage
+          Your workspace is where you&apos;ll manage
           your organization, users and settings.
         </p>
       </div>
