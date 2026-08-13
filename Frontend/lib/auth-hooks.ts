@@ -39,6 +39,22 @@ export function useMe() {
   });
 }
 
+/**
+ * Landing route per membership role, mirroring the role prototype: Admin and
+ * Owner start on the admin dashboard, everyone else on their own work.
+ *
+ * Read defensively because login resolves to a discriminated AuthState — the
+ * membership sits under `session` for a SIGNED_IN result and at the top level in
+ * the older shape.
+ */
+function landingFor(response: unknown): string {
+  const data = response as
+    | { membership?: { role?: string }; session?: { membership?: { role?: string } } }
+    | undefined;
+  const role = data?.session?.membership?.role ?? data?.membership?.role;
+  return role === "ADMIN" || role === "OWNER" ? "/admin" : "/";
+}
+
 export function useLogin() {
   const qc = useQueryClient();
   const router = useRouter();
@@ -46,12 +62,12 @@ export function useLogin() {
   return useMutation({
     mutationFn: (input: LoginInput) => login(input),
 
-    onSuccess: async () => {
+    onSuccess: async (data) => {
       await qc.invalidateQueries({
         queryKey: ["me"],
       });
 
-      router.replace("/");
+      router.replace(landingFor(data));
     },
   });
 }
