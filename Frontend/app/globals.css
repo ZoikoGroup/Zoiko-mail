@@ -1,13 +1,168 @@
-@tailwind base;
+/* @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 html, body, #__next { height: 100%; }
-/* body { @apply bg-slate-50 text-slate-800 antialiased; } */
 body {
     @apply bg-slate-50 text-slate-800 antialiased transition-colors duration-300;
 }
 
 .dark body {
     @apply bg-slate-950 text-slate-100;
+} */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   Zoiko Mail design tokens — light + dark
+   Components reference these vars (e.g. bg-[var(--surface)]),
+   so the whole UI re-themes just by toggling `.dark` on <html>.
+   ============================================================ */
+:root {
+  --ground: #EEF2F5;
+  --surface: #FFFFFF;
+  --s2: #F6F9FB;
+  --s3: #EAF0F4;
+  --border: #DBE3EA;
+  --bstrong: #C2CED8;
+  --ink: #0A141D;
+  --ink2: #33465A;
+  --ink3: #6C8092;
+  --accent: #0A7EA4;
+  --accent-ink: #075D7A;
+  --accent-soft: #DFF0F6;
+  --ai: #5B54E8;
+  --ai-soft: #EAE9FD;
+  --ok: #12855B;
+  --ok-soft: #E0F2E9;
+  --warn: #A57400;
+  --warn-soft: #F8EFD9;
+  --crit: #CE3226;
+  --crit-soft: #FBE7E5;
+  --sh1: 0 1px 2px rgba(10, 20, 29, 0.05);
+  --sh2: 0 1px 2px rgba(10, 20, 29, 0.06), 0 10px 26px -8px rgba(10, 20, 29, 0.16);
+  --sh3: 0 2px 4px rgba(10, 20, 29, 0.08), 0 24px 56px -12px rgba(10, 20, 29, 0.30);
+  --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mo: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono", "Segoe UI Mono", Menlo, Consolas, monospace;
+  --ed: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
 }
+
+:root[data-theme="dark"], .dark {
+  --ground: #05090D;
+  --surface: #0F1821;
+  --s2: #141E28;
+  --s3: #1A2530;
+  --border: #202D39;
+  --bstrong: #324351;
+  --ink: #E6EDF3;
+  --ink2: #A4B5C3;
+  --ink3: #6F8397;
+  --accent: #289AC6;
+  --accent-ink: #7FCDE8;
+  --accent-soft: #0B2A38;
+  --ai: #7A72F2;
+  --ai-soft: #191838;
+  --ok: #25A878;
+  --ok-soft: #0C2A1F;
+  --warn: #BC8A2A;
+  --warn-soft: #2B2110;
+  --crit: #E2564A;
+  --crit-soft: #31150F;
+}
+
+html, body, #__next { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--ui);
+  font-size: 13.5px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.font-editorial { font-family: var(--ed); }
+.font-mono-num { font-family: var(--mo); font-variant-numeric: tabular-nums; }
+
+/* ---- Reusable component classes (token-driven) ---------------------------- */
+.zoiko-stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 14px 16px;
+  box-shadow: var(--sh1);
+}
+
+.zoiko-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--sh1);
+  overflow: hidden;
+}
+
+.zoiko-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 7px;
+  padding: 6px 12px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink2);
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.zoiko-btn:hover { border-color: var(--bstrong); color: var(--ink); }
+.zoiko-btn.pri { background: var(--accent); border-color: var(--accent); color: #ffffff; }
+.zoiko-btn.pri:hover { opacity: 0.92; }
+.zoiko-btn.crit { background: var(--crit-soft); border-color: var(--crit-soft); color: var(--crit); }
+.zoiko-btn.sm { padding: 4px 9px; font-size: 10.8px; }
+
+.zoiko-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.6px;
+  font-weight: 650;
+  padding: 3px 9px;
+  border-radius: 20px;
+  letter-spacing: 0.01em;
+}
+.zoiko-pill.ok { background: var(--ok-soft); color: var(--ok); }
+.zoiko-pill.warn { background: var(--warn-soft); color: var(--warn); }
+.zoiko-pill.crit { background: var(--crit-soft); color: var(--crit); }
+.zoiko-pill.ai { background: var(--ai-soft); color: var(--ai); }
+.zoiko-pill.nu { background: var(--s3); color: var(--ink3); }
+.zoiko-pill.accent { background: var(--accent-soft); color: var(--accent-ink); }
+
+.zoiko-toggle {
+  width: 34px; height: 19px;
+  border-radius: 20px;
+  background: var(--s3);
+  border: 1px solid var(--border);
+  position: relative; flex: none; cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.zoiko-toggle i {
+  position: absolute; top: 1px; left: 1px;
+  width: 15px; height: 15px; border-radius: 50%;
+  background: var(--surface); box-shadow: var(--sh1);
+  transition: left 0.15s ease;
+}
+.zoiko-toggle.on { background: var(--accent); border-color: var(--accent); }
+.zoiko-toggle.on i { left: 16px; background: #ffffff; }
+.zoiko-toggle.lock { opacity: 0.55; cursor: not-allowed; }
+
+/* ---- Scrollbars ----------------------------------------------------------- */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--bstrong); }
