@@ -1334,7 +1334,7 @@ export const supportStyles = `
 .support-workspace .dropdown .ditem span { font-size: 10.8px; color: var(--ink3); }
 .support-workspace .dropdown button.ditem { width: 100%; text-align: left; }
 .support-workspace .shell { display: grid; grid-template-columns: 216px 1fr; min-height: calc(100vh - 54px); }
-.support-workspace .rail { background: var(--s2); border-right: 1px solid var(--border); padding: 14px 0; display: flex; flex-direction: column; }
+.support-workspace .rail { background: var(--s2); border-right: 1px solid var(--border); padding: 14px 0; display: flex; flex-direction: column; position: sticky; top: 54px; height: calc(100vh - 54px); overflow-y: auto; }
 .support-workspace .railitem { display: flex; align-items: center; gap: 11px; width: 100%; padding: 9px 18px; font-size: 12.6px; font-weight: 560; color: var(--ink2); border-left: 2px solid transparent; text-align: left; }
 .support-workspace .railitem .ico { width: 17px; text-align: center; flex: none; font-size: 13px; }
 .support-workspace .railitem:hover { background: var(--s3); }
