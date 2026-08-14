@@ -1,7 +1,10 @@
 import request from "supertest";
 import type { Express } from "express";
+import bcrypt from "bcrypt";
 import { prisma } from "../src/config/prisma.js";
-import { hashPassword } from "../src/common/utils/password.js";
+
+const hashPassword = (value: string) => bcrypt.hash(value, 10);
+const TEST_OTP_CODE = "123456";
 
 export interface RegisteredUser {
   email: string;
@@ -13,21 +16,6 @@ export interface RegisteredUser {
   refreshToken: string;
 }
 
-/** Planted OTP code — see the comment in registerUser. */
-const TEST_OTP_CODE = "123456";
-
-/**
- * Drives the real three-step signup funnel and returns an authenticated user.
- *
- *   1. POST /auth/register          → identity only, returns a pendingToken
- *   2. POST /auth/verify-otp        → consumes the emailed code, returns a NEW pendingToken
- *   3. POST /auth/create-workspace  → creates the tenant and issues the session
- *
- * Registration deliberately issues no session (see RegisterResponse in
- * auth.types.ts): no tenant or membership exists yet, so there is nothing to
- * sign into. An earlier version of this helper read `data.tenant` straight off
- * the register response, which is why the suite could not get past step 1.
- */
 export async function registerUser(
   app: Express,
   overrides: Partial<{
@@ -40,7 +28,7 @@ export async function registerUser(
   }> = {}
 ): Promise<RegisteredUser> {
   const payload = {
-    email: overrides.email ?? `user-${Date.now()}-${Math.round(process.hrtime()[1] / 1000)}@zoiko.test`,
+    email: overrides.email ?? `user-${Date.now()}@zoiko.test`,
     password: overrides.password ?? "Password123!",
     displayName: overrides.displayName ?? "Test User",
     tenantName: overrides.tenantName ?? "Test Tenant",
@@ -118,11 +106,6 @@ export async function registerUser(
   };
 }
 
-/**
- * Logs in and returns the AuthState payload. Callers that need tokens should
- * read `.session`, because login resolves to one of several states (workspace
- * selection, suspended, staff console) and only SIGNED_IN carries a session.
- */
 export async function loginUser(
   app: Express,
   email: string,

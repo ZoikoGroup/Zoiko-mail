@@ -31,6 +31,7 @@ import {
   type TenantOverview,
 } from "@/lib/support-api";
 import { supportStyles } from "@/components/support/SupportWorkspace";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 
 type PageId = "overview" | "tenants" | "provider-events" | "delivery-events" | "jobs" | "audit" | "grants";
 
@@ -1160,6 +1161,7 @@ export default function PlatformConsole() {
           <input placeholder="Cross-tenant search (API endpoint)…" readOnly />
         </div>
         <div className="sp" />
+        <ThemeToggle />
         <span className={`pill ${isPlatform ? "violet" : "accent"}`}>
           {isPlatform ? "Platform (staff)" : "Support member"}
         </span>

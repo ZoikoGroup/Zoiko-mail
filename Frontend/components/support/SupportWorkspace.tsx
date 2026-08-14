@@ -14,6 +14,7 @@ import {
 import { isLoggedIn } from "@/lib/auth-storage";
 import { useLogout, useMe } from "@/lib/auth-hooks";
 import { ApiError } from "@/lib/api-client";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 
 type Role = "agent" | "lead";
 type Page = "dashboard" | "tickets" | "customers" | "diagnostics" | "kb" | "audit" | "team" | "settings";
@@ -1101,6 +1102,7 @@ export function SupportWorkspace() {
           </button>
         </div>
         <button className="iconbtn" onClick={() => setOpenDrop(openDrop === "notif" ? null : "notif")}>🔔<span className="badge-dot" /></button>
+        <ThemeToggle />
         <div className="who" style={{ position: "relative" }}>
           <button style={{ display: "flex", alignItems: "center", gap: "8px" }} onClick={() => setOpenDrop(openDrop === "profile" ? null : "profile")}>
             <div className="avatar">{userInitials}</div>
@@ -1295,9 +1297,25 @@ export const supportStyles = `
   --warn:#A57400;--warn-soft:#F8EFD9;
   --crit:#CE3226;--crit-soft:#FBE7E5;
   --violet:#7B3FA0;--violet-soft:#F1E5F7;
+  --sh1: 0 1px 2px rgba(10, 20, 29, 0.05);
+  --sh3: 0 2px 4px rgba(10, 20, 29, 0.08), 0 24px 56px -12px rgba(10, 20, 29, 0.30);
   --ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
   --mo:ui-monospace,"SF Mono",SFMono-Regular,"Cascadia Mono","Segoe UI Mono",Menlo,Consolas,monospace;
   --ed:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
+}
+
+:root[data-theme="dark"], .dark {
+  --ground:#05090D;--surface:#0F1821;--s2:#141E28;--s3:#1A2530;
+  --border:#202D39;--bstrong:#324351;
+  --ink:#E6EDF3;--ink2:#A4B5C3;--ink3:#6F8397;
+  --accent:#289AC6;--accent-ink:#7FCDE8;--accent-soft:#0B2A38;
+  --ai:#7A72F2;--ai-soft:#191838;
+  --ok:#25A878;--ok-soft:#0C2A1F;
+  --warn:#BC8A2A;--warn-soft:#2B2110;
+  --crit:#E2564A;--crit-soft:#31150F;
+  --violet:#B18CD9;--violet-soft:#2A1B38;
+  --sh1: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --sh3: 0 2px 4px rgba(0, 0, 0, 0.45), 0 24px 56px -12px rgba(0, 0, 0, 0.60);
 }
 
 .support-workspace * { box-sizing: border-box; }
@@ -1334,7 +1352,7 @@ export const supportStyles = `
 .support-workspace .dropdown .ditem span { font-size: 10.8px; color: var(--ink3); }
 .support-workspace .dropdown button.ditem { width: 100%; text-align: left; }
 .support-workspace .shell { display: grid; grid-template-columns: 216px 1fr; min-height: calc(100vh - 54px); }
-.support-workspace .rail { background: var(--s2); border-right: 1px solid var(--border); padding: 14px 0; display: flex; flex-direction: column; }
+.support-workspace .rail { background: var(--s2); border-right: 1px solid var(--border); padding: 14px 0; display: flex; flex-direction: column; position: sticky; top: 54px; height: calc(100vh - 54px); overflow-y: auto; }
 .support-workspace .railitem { display: flex; align-items: center; gap: 11px; width: 100%; padding: 9px 18px; font-size: 12.6px; font-weight: 560; color: var(--ink2); border-left: 2px solid transparent; text-align: left; }
 .support-workspace .railitem .ico { width: 17px; text-align: center; flex: none; font-size: 13px; }
 .support-workspace .railitem:hover { background: var(--s3); }
