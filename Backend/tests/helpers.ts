@@ -1,5 +1,10 @@
 import request from "supertest";
 import type { Express } from "express";
+import bcrypt from "bcrypt";
+import { prisma } from "../src/config/prisma.js";
+
+const hashPassword = (value: string) => bcrypt.hash(value, 10);
+const TEST_OTP_CODE = "123456";
 
 export interface RegisteredUser {
   email: string;
@@ -33,7 +38,34 @@ export async function registerUser(
   // Register the user (pending token flow)
   const registerResponse = await request(app)
     .post("/api/v1/auth/register")
-    .send(payload)
+    .send({
+      email: payload.email,
+      password: payload.password,
+      displayName: payload.displayName,
+    })
+    .expect(201);
+
+  let userId = registerResponse.body.data.user.id;
+
+  // Issued codes are bcrypt-hashed and cannot be read back, and the mailer is
+  // disabled under test. Overwrite the hash with a known code so the suite still
+  // exercises the real /verify-otp endpoint rather than bypassing verification.
+  await prisma.emailOtp.updateMany({
+    where: { userId, purpose: "EMAIL_VERIFICATION", consumedAt: null },
+    data: { codeHash: await hashPassword(TEST_OTP_CODE) },
+  });
+
+  const verified = await request(app)
+    .post("/api/v1/auth/verify-otp")
+    .set("Authorization", `Bearer ${registerResponse.body.data.pendingToken}`)
+    .send({ code: TEST_OTP_CODE })
+    .expect(200);
+
+  // verify-otp mints a fresh pending token; the register one must not be reused.
+  const session = await request(app)
+    .post("/api/v1/auth/create-workspace")
+    .set("Authorization", `Bearer ${verified.body.data.pendingToken}`)
+    .send({ tenantName: payload.tenantName, planCode: payload.planCode })
     .expect(201);
 
   const pendingToken = registerResponse.body.data.pendingToken;
@@ -41,9 +73,9 @@ export async function registerUser(
   const shouldCreate = overrides.createWorkspace !== false;
   let tenantId: string | null = null;
   let membershipId: string | null = null;
-  let userId: string = registerResponse.body.data.user.id;
   let accessToken: string | null = null;
   let refreshToken: string | null = null;
+  let resolvedUserId = userId;
 
   if (shouldCreate) {
     const workspaceResponse = await request(app)

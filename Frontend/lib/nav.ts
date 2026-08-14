@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, Inbox, Link2, MessagesSquare, Bell, Sparkles,
-  Mail, Globe, Users, ShieldCheck, FileText, KeyRound,
+  Mail, Globe, Users, ShieldCheck, FileText, KeyRound, Settings,
   type LucideIcon,
 } from "lucide-react";
 
@@ -37,7 +37,7 @@ export const NAV: NavItem[] = [
     desc: "Browse conversations behind each detected action." },
   { section: "Track A · Intelligence", label: "Daily digest", href: "/digest", icon: Bell, status: "soon",
     desc: "A once-a-day summary of what needs your attention." },
-  { section: "Track A · Intelligence", label: "AI drafting & summaries", href: "/ai", icon: Sparkles, status: "soon",
+  { section: "Track A · Intelligence", label: "AI drafting & summaries", href: "/ai", icon: Sparkles, status: "live",
     desc: "Draft replies and summarize threads — you always send." },
 
   // Track B — hosted mail (gated until Track A proves out)
@@ -55,8 +55,10 @@ export const NAV: NavItem[] = [
     desc: "Every privileged and AI action, append-only." },
 
   // Account
-  { section: "Account", label: "Security", href: "/account", icon: KeyRound, status: "live",
-    desc: "Change your password and manage sign-in." },
+  { section: "Account", label: "Profile", href: "/account", icon: KeyRound, status: "live",
+    desc: "Your account details and sign-in security." },
+  { section: "Account", label: "Settings", href: "/settings", icon: Settings, status: "live",
+    desc: "Appearance, notifications, and preferences." },
 ];
 
 // Ordered, de-duplicated section names for grouped rendering.
