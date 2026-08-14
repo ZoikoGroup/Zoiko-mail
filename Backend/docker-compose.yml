@@ -36,6 +36,12 @@ services:
       TRUST_PROXY: ${TRUST_PROXY:-1}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       MAIL_PROVIDER_ENABLED: ${MAIL_PROVIDER_ENABLED:-false}
+      # System mail carries OTP and security notices. Separate from the
+      # tenant provider-mail pipeline, which is warm-up limited and must not
+      # send auth email. Defaults are non-empty because env.ts validates
+      # SYSTEM_MAIL_ENABLED as an enum and SYSTEM_MAIL_FROM as an email.
+      SYSTEM_MAIL_ENABLED: ${SYSTEM_MAIL_ENABLED:-false}
+      SYSTEM_MAIL_FROM: ${SYSTEM_MAIL_FROM:-no-reply@zoikomail.com}
       IMAP_HOST: ${IMAP_HOST:-imap.secureserver.net}
       IMAP_PORT: ${IMAP_PORT:-993}
       IMAP_SECURE: ${IMAP_SECURE:-true}
