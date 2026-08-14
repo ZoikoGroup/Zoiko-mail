@@ -14,7 +14,7 @@ import { notificationRouter } from "../modules/notification/notification.routes.
 import { integrationRouter } from "../modules/integration/integration.routes.js";
 import { jobRouter } from "../modules/job/job.routes.js";
 import { lifecycleRouter } from "../modules/lifecycle/lifecycle.routes.js";
-import { supportRouter } from "../modules/support/support.routes.js";
+import { supportPlatformRouter, supportRouter } from "../modules/support/support.routes.js";
 import { connectorRouter } from "../modules/connector/connector.routes.js";
 import { deliveryProtectionRouter } from "../modules/delivery-protection/delivery-protection.routes.js";
 
@@ -36,6 +36,10 @@ apiRouter.use("/notifications", notificationRouter);
 apiRouter.use("/integrations", integrationRouter);
 apiRouter.use("/jobs", jobRouter);
 apiRouter.use("/lifecycle", lifecycleRouter);
+// Mount the platform support console before the tenant-scoped /support router:
+// supportRouter runs tenantContext (ACTIVE membership required), which would
+// otherwise reject staff sessions that lack a tenant context.
+apiRouter.use("/support/platform", supportPlatformRouter);
 apiRouter.use("/support", supportRouter);
 apiRouter.use("/connectors", connectorRouter);
 apiRouter.use("/delivery-protection", deliveryProtectionRouter);

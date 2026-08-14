@@ -45,8 +45,9 @@ export default function AuthPage() {
             //   setVerificationEmail(verificationEmail);
             //   setStep("verifyOtp");
             // }}
-            onSuccess={(token, tenantName, planCode) => {
+            onSuccess={(token, email, tenantName, planCode) => {
               setPendingToken(token);
+              setVerificationEmail(email);
               setWorkspaceName(tenantName);
               setWorkspacePlan(planCode);
               setStep("verifyOtp");
@@ -66,7 +67,11 @@ export default function AuthPage() {
             // }}
             onSuccess={(newToken) => {
               createWorkspace.mutate(
-                { token: newToken, tenantName: workspaceName, planCode: workspacePlan },
+                {
+                  token: newToken,
+                  tenantName: workspaceName,
+                  planCode: workspacePlan,
+                },
                 { onError: () => alert("Couldn't finish setting up your account. Please try again.") }
               );
             }}

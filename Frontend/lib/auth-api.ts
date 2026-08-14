@@ -1,5 +1,5 @@
 import { apiRequest } from "./api-client";
-import { setTokens, clearTokens, getRefreshToken } from "./auth-storage";
+import { setTokens, setPlatformToken, clearTokens, getRefreshToken } from "./auth-storage";
 
 export interface LoginInput {
   email: string;
@@ -121,6 +121,10 @@ export interface AuthResponse {
   accessToken?: string;
   refreshToken?: string;
   expiresIn?: string;
+  // staff (STAFF_CONSOLE) logins
+  state?: string;
+  platformRole?: string;
+  platformToken?: string;
 }
 
 export interface MeResponse {
@@ -132,18 +136,8 @@ export interface MeResponse {
 }
 
 // Pull tokens out regardless of which shape the endpoint used.
-// function extractTokens(data: any): { accessToken?: string; refreshToken?: string } {
-//   const nested = data?.tokens ?? data?.data ?? {};
-//   return {
-//     accessToken:
-//       data?.accessToken ?? nested?.accessToken ??
-//       data?.access_token ?? nested?.access_token,
-//     refreshToken:
-//       data?.refreshToken ?? nested?.refreshToken ??
-//       data?.refresh_token ?? nested?.refresh_token,
-//   };
-// }
-function extractTokens(data: any): { accessToken?: string; refreshToken?: string } {
+// Also extracts the staff "platform" token returned by STAFF_CONSOLE logins.
+function extractTokens(data: any): { accessToken?: string; refreshToken?: string; platformToken?: string } {
   const src = data?.session ?? data?.tokens ?? data ?? {};
   return {
     accessToken:
@@ -152,6 +146,7 @@ function extractTokens(data: any): { accessToken?: string; refreshToken?: string
     refreshToken:
       src?.refreshToken ?? src?.refresh_token ??
       data?.refreshToken ?? data?.refresh_token,
+    platformToken: src?.platformToken ?? data?.platformToken,
   };
 }
 
@@ -171,9 +166,9 @@ export async function login(input: LoginInput): Promise<AuthResponse> {
     body: input,
     auth: false,
   });
-  console.log("LOGIN RESPONSE", data);   // <-- temporary, remove later
-  const { accessToken, refreshToken } = extractTokens(data);
+  const { accessToken, refreshToken, platformToken } = extractTokens(data);
   if (accessToken) setTokens(accessToken, refreshToken);
+  if (platformToken) setPlatformToken(platformToken);
   return data;
 }
 

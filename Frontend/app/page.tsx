@@ -1,17 +1,25 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { AppShell } from "@/components/shell/AppShell";
 import { useMe } from "@/lib/auth-hooks";
 import { useActions } from "@/lib/actions-hooks";
+import { isLoggedIn } from "@/lib/auth-storage";
 import type { MeResponse } from "@/lib/auth-api";
 import { NAV, SECTIONS } from "@/lib/nav";
 
 export default function DashboardPage() {
+  const router = useRouter();
   const { data } = useMe();
   const me = data as MeResponse | undefined;
   const { data: actions = [], isLoading } = useActions();
+
+  useEffect(() => {
+    if (!isLoggedIn()) router.replace("/login");
+  }, [router]);
 
   const active = actions.filter((a) => a.status === "OPEN" || a.status === "IN_PROGRESS").length;
 
