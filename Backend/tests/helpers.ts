@@ -57,7 +57,7 @@ export async function registerUser(
     })
     .expect(201);
 
-  const userId: string = registered.body.data.user.id;
+  let userId = registerResponse.body.data.user.id;
 
   // Issued codes are bcrypt-hashed and cannot be read back, and the mailer is
   // disabled under test. Overwrite the hash with a known code so the suite still
@@ -69,7 +69,7 @@ export async function registerUser(
 
   const verified = await request(app)
     .post("/api/v1/auth/verify-otp")
-    .set("Authorization", `Bearer ${registered.body.data.pendingToken}`)
+    .set("Authorization", `Bearer ${registerResponse.body.data.pendingToken}`)
     .send({ code: TEST_OTP_CODE })
     .expect(200);
 
@@ -85,9 +85,9 @@ export async function registerUser(
   const shouldCreate = overrides.createWorkspace !== false;
   let tenantId: string | null = null;
   let membershipId: string | null = null;
-  let userId: string = registerResponse.body.data.user.id;
   let accessToken: string | null = null;
   let refreshToken: string | null = null;
+  let resolvedUserId = userId;
 
   if (shouldCreate) {
     const workspaceResponse = await request(app)
