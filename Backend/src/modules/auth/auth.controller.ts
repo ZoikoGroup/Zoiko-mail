@@ -78,10 +78,6 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     return;
   }
 
-//   sendSuccess(res, 200, result, req.requestId);
-// });
-export const login = asyncHandler(async (req: Request, res: Response) => {
-  const result = await authService.login(req.body, getRequestContext(req));
   sendSuccess(res, 200, result, req.requestId);
 });
 
