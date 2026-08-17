@@ -51,10 +51,10 @@ export default function AuthShowcase() {
         {/* ---------------- Logo ---------------- */}
 
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white font-bold text-cyan-700 shadow-lg">
-            Z
+          <div className="flex items-center justify-center rounded-xl bg-cyan-600 text-xl font-bold text-white shadow-lg">
+            <img src="/ZoikoMail_Logo_DarkBG_PNG.png" className="h-10 w-auto" alt="Zoiko Mail" />
           </div>
-
+          {/* 
           <div>
             <h2 className="text-xl font-bold text-white">
               Zoiko Mail
@@ -63,7 +63,7 @@ export default function AuthShowcase() {
             <p className="text-sm text-cyan-100">
               Secure Business Communication
             </p>
-          </div>
+          </div> */}
         </div>
 
         {/* ---------------- Hero Content ---------------- */}

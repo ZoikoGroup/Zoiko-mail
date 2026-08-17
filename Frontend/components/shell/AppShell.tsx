@@ -143,10 +143,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 px-5 py-4">
-        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[var(--accent)] font-bold text-white">
+        {/* <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[var(--accent)] font-bold text-white">
           Z
         </div>
-        <span className="font-editorial text-lg font-semibold text-[var(--ink)]">Zoiko Mail</span>
+        <span className="font-editorial text-lg font-semibold text-[var(--ink)]">Zoiko Mail</span> */}
+        <img src="/ZoikoMail_Logo_DarkBG_PNG.png" className="h-8 w-auto" alt="Zoiko Mail" />
       </div>
 
       <nav className="flex-1 space-y-4 overflow-y-auto px-3 pb-4">
