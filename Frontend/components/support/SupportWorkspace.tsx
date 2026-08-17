@@ -15,6 +15,7 @@ import { isLoggedIn } from "@/lib/auth-storage";
 import { useLogout, useMe } from "@/lib/auth-hooks";
 import { ApiError } from "@/lib/api-client";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
+import { resolveWorkspaceHref } from "@/lib/workspace";
 
 type Role = "agent" | "lead";
 type Page = "dashboard" | "tickets" | "customers" | "diagnostics" | "kb" | "audit" | "team" | "settings";
@@ -137,7 +138,8 @@ const AGENTS: Agent[] = [
 export function SupportWorkspace() {
   const router = useRouter();
   const logout = useLogout();
-  const { data: meData } = useMe();
+  // const { data: meData } = useMe();
+  const { data: meData, isLoading: meLoading } = useMe();
   const [role, setRole] = useState<Role>("agent"); // demo view switch (Agent / Lead) — UI parity only
   const [page, setPage] = useState<Page>("dashboard");
   const [selectedTicket, setSelectedTicket] = useState("");
@@ -165,6 +167,15 @@ export function SupportWorkspace() {
       return;
     }
   }, [router]);
+
+  // Role guard: only SUPPORT members belong on this dashboard. Anyone else
+  // who lands here (wrong redirect, stale bookmark, typed URL) gets sent to
+  // the workspace their actual role resolves to.
+  useEffect(() => {
+    if (meData && meData.membership.role !== "SUPPORT") {
+      router.replace(resolveWorkspaceHref(meData.membership.role));
+    }
+  }, [meData, router]);
 
   const loadOverview = useCallback(async () => {
     setLoadingOverview(true);
@@ -1065,6 +1076,22 @@ export function SupportWorkspace() {
     );
   };
 
+  // Loading gate: don't render the dashboard until we know the user's role.
+  // Without this, non-SUPPORT users would briefly see the support UI before
+  // the role guard useEffect kicks in and redirects them.
+  if (meLoading || !meData) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[var(--surface)]">
+        <div className="text-sm text-[var(--ink3)]">Loading…</div>
+      </div>
+    );
+  }
+  if (meData.membership.role !== "SUPPORT") {
+    // Guard useEffect is about to redirect — render nothing in the meantime
+    // rather than the wrong dashboard.
+    return null;
+  }
+
   return (
     <div className="support-workspace">
       <style jsx global>{supportStyles}</style>
@@ -1215,11 +1242,11 @@ function priorityPill(priority: string) {
 function statusPill(status: string) {
   const tone =
     status === "Resolved" || status === "Closed" ? "ok"
-    : status === "New" ? "accent"
-    : status === "Waiting for Customer" ? "nu"
-    : ["FAILED", "BOUNCED", "REJECTED", "BLOCKED"].includes(status) ? "crit"
-    : ["RETRY", "PENDING", "RUNNING", "In Progress", "Open"].includes(status) ? "warn"
-    : "nu";
+      : status === "New" ? "accent"
+        : status === "Waiting for Customer" ? "nu"
+          : ["FAILED", "BOUNCED", "REJECTED", "BLOCKED"].includes(status) ? "crit"
+            : ["RETRY", "PENDING", "RUNNING", "In Progress", "Open"].includes(status) ? "warn"
+              : "nu";
   return <span className={`pill ${tone}`}>{status}</span>;
 }
 
