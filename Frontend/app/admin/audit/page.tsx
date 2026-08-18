@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useAuditEvents } from "@/lib/admin/hooks";
-import type { AuditEventDto } from "@/lib/admin/fixtures";
+import { useAuditEvents } from "@/lib/admin-hooks";
+import type { AuditEventDto } from "@/lib/admin-api";
 import {
   Card,
   EmptyState,

@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useDashboard } from "@/lib/admin/hooks";
-import { useCan } from "@/lib/admin/capabilities";
+import { useDashboard } from "@/lib/admin-hooks";
+import { useCan } from "@/lib/admin-capabilities";
 import {
   Card,
   ErrorState,

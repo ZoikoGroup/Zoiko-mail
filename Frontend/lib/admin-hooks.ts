@@ -46,7 +46,7 @@ import {
   type MailboxDto,
   type MemberDto,
   type SupportGrantDto,
-} from "./fixtures";
+} from "./admin-api";
 
 export interface QueryLike<T> {
   data: T | undefined;

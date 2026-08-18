@@ -2,7 +2,7 @@
  * Static fixtures for the admin workspace.
  *
  * Every shape here mirrors the response the API will eventually return, so the
- * real-data swap happens inside `lib/admin/hooks.ts` and no component changes.
+ * real-data swap happens inside `lib/admin-hooks.ts` and no component changes.
  * Counts match `Backend/prisma/seed.ts` so the static UI and the seeded API show
  * the same workspace.
  *

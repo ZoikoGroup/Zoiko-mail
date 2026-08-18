@@ -1,7 +1,7 @@
 "use client";
 
-import { useDomains } from "@/lib/admin/hooks";
-import type { DnsRecordDto, DomainDto } from "@/lib/admin/fixtures";
+import { useDomains } from "@/lib/admin-hooks";
+import type { DnsRecordDto, DomainDto } from "@/lib/admin-api";
 import {
   Card,
   EmptyState,

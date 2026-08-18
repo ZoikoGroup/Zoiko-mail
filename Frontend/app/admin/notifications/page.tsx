@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useNotifications } from "@/lib/admin/hooks";
-import type { NotificationDto } from "@/lib/admin/fixtures";
+import { useNotifications } from "@/lib/admin-hooks";
+import type { NotificationDto } from "@/lib/admin-api";
 import {
   Card,
   EmptyState,

@@ -2,8 +2,8 @@
 
 import { Fragment } from "react";
 
-import { useCapabilityMatrix, useGuardrails } from "@/lib/admin/hooks";
-import type { CapabilityCell } from "@/lib/admin/fixtures";
+import { useCapabilityMatrix, useGuardrails } from "@/lib/admin-hooks";
+import type { CapabilityCell } from "@/lib/admin-api";
 import {
   Card,
   ErrorState,

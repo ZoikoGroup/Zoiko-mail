@@ -1,7 +1,7 @@
 "use client";
 
-import { useInvitations } from "@/lib/admin/hooks";
-import { useCan } from "@/lib/admin/capabilities";
+import { useInvitations } from "@/lib/admin-hooks";
+import { useCan } from "@/lib/admin-capabilities";
 import {
   Card,
   EmptyState,

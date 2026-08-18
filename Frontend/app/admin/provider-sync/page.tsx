@@ -1,7 +1,7 @@
 "use client";
 
-import { useConnectors, useSyncErrors } from "@/lib/admin/hooks";
-import { useCan } from "@/lib/admin/capabilities";
+import { useConnectors, useSyncErrors } from "@/lib/admin-hooks";
+import { useCan } from "@/lib/admin-capabilities";
 import {
   Card,
   EmptyState,

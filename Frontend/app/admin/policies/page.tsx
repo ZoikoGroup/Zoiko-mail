@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { usePolicyGroups } from "@/lib/admin/hooks";
-import { useCan } from "@/lib/admin/capabilities";
+import { usePolicyGroups } from "@/lib/admin-hooks";
+import { useCan } from "@/lib/admin-capabilities";
 import {
   Card,
   ErrorState,

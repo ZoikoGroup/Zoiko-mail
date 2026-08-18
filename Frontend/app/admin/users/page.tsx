@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useWorkspacePeople } from "@/lib/admin/hooks";
-import { useCan } from "@/lib/admin/capabilities";
-import type { MemberDto, MfaMethod, MembershipRole } from "@/lib/admin/fixtures";
+import { useWorkspacePeople } from "@/lib/admin-hooks";
+import { useCan } from "@/lib/admin-capabilities";
+import type { MemberDto, MfaMethod, MembershipRole } from "@/lib/admin-api";
 import {
   Card,
   ErrorState,

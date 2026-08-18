@@ -15,7 +15,7 @@ import {
   CheckSquare,
   type LucideIcon,
 } from "lucide-react";
-import type { Capability } from "./capabilities";
+import type { Capability } from "./admin-capabilities";
 
 /**
  * Admin workspace navigation.

@@ -1,7 +1,7 @@
 "use client";
 
-import { useSettings } from "@/lib/admin/hooks";
-import { useCan } from "@/lib/admin/capabilities";
+import { useSettings } from "@/lib/admin-hooks";
+import { useCan } from "@/lib/admin-capabilities";
 import {
   Card,
   ErrorState,

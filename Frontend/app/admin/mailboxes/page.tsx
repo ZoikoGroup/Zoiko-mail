@@ -1,8 +1,8 @@
 "use client";
 
-import { useMailboxes } from "@/lib/admin/hooks";
-import { useCan } from "@/lib/admin/capabilities";
-import { DASHBOARD } from "@/lib/admin/fixtures";
+import { useMailboxes } from "@/lib/admin-hooks";
+import { useCan } from "@/lib/admin-capabilities";
+import { DASHBOARD } from "@/lib/admin-api";
 import {
   Card,
   EmptyState,
