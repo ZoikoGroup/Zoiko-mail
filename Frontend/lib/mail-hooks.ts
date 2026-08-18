@@ -1,16 +1,24 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ApiError } from "./api-client";
 import {
   listMail,
   getMessage,
   listLabels,
   updateMailItem,
   bulkMailAction,
+  createDraft,
+  sendDraft,
+  scheduleDraft,
+  reply as replyApi,
+  replyAll as replyAllApi,
+  forward as forwardApi,
   type ListMailParams,
   type ListMailResponse,
   type MailItem,
   type BulkAction,
+  type Recipients,
 } from "./mail-api";
 
 const listKey = (params: ListMailParams) =>
@@ -80,6 +88,85 @@ export function useBulkMailAction() {
   return useMutation({
     mutationFn: (v: { messageIds: string[]; action: BulkAction }) =>
       bulkMailAction(v.messageIds, v.action),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["mail", "list"] }),
+  });
+}
+
+export type ComposerMode = "new" | "reply" | "replyAll" | "forward";
+
+export interface ComposerPayload {
+  mode: ComposerMode;
+  sourceId?: string; // required for reply/replyAll/forward
+  subject?: string; // new only (reply/forward subject is derived server-side)
+  recipients?: Recipients; // new + forward
+  textBody: string;
+  action: "send" | "draft" | "schedule";
+  scheduledAt?: string; // ISO, required when action === "schedule"
+}
+
+export interface ComposerResult {
+  draftId: string;
+  action: "sent" | "draft" | "scheduled";
+  gated: boolean; // true when a send was requested but blocked by policy/mailbox
+  gateMessage?: string;
+}
+
+// Orchestrates the backend's create-then-send model. Because reply/forward and
+// createDraft persist a draft *before* sending, a blocked send (Track B gate:
+// 403 policy / 429 suspended or warm-up) degrades gracefully to "saved as
+// draft" rather than losing the user's message.
+export function useComposerSubmit() {
+  const qc = useQueryClient();
+  return useMutation<ComposerResult, Error, ComposerPayload>({
+    mutationFn: async (p) => {
+      // 1) create the draft according to mode
+      let draft: MailItem;
+      if (p.mode === "new") {
+        draft = await createDraft({
+          subject: p.subject ?? "",
+          textBody: p.textBody,
+          recipients: p.recipients ?? { to: [], cc: [], bcc: [] },
+        });
+      } else if (p.mode === "reply") {
+        draft = await replyApi(p.sourceId as string, { textBody: p.textBody });
+      } else if (p.mode === "replyAll") {
+        draft = await replyAllApi(p.sourceId as string, { textBody: p.textBody });
+      } else {
+        draft = await forwardApi(p.sourceId as string, {
+          recipients: p.recipients as Recipients,
+          textBody: p.textBody,
+        });
+      }
+
+      const draftId = draft.messageId ?? draft.id;
+
+      // 2) act on it
+      if (p.action === "draft") {
+        return { draftId, action: "draft", gated: false };
+      }
+      if (p.action === "schedule") {
+        await scheduleDraft(draftId, p.scheduledAt as string);
+        return { draftId, action: "scheduled", gated: false };
+      }
+      // action === "send" — catch the runtime Track B gate specifically
+      try {
+        await sendDraft(draftId);
+        return { draftId, action: "sent", gated: false };
+      } catch (err) {
+        if (err instanceof ApiError && (err.status === 403 || err.status === 429)) {
+          return {
+            draftId,
+            action: "draft",
+            gated: true,
+            gateMessage:
+              err.status === 429
+                ? "Your mailbox can't send right now (suspended or warming up). Saved as a draft."
+                : "Sending isn't enabled for your mailbox yet. Saved as a draft.",
+          };
+        }
+        throw err; // genuine failure
+      }
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["mail", "list"] }),
   });
 }

@@ -3,10 +3,10 @@
 /**
  * The webmail client, shell-free on purpose.
  *
- * Both the member route (/mail, inside AppShell) and the admin route
- * (/admin/inbox, inside AdminShell) render this, so an Admin reads their own
- * mail without being bounced out of the admin workspace into the member one.
- * One implementation, two shells — not a per-role copy.
+ * Rendered by the member route (/mail, inside AppShell) and the admin route
+ * (/admin/inbox, inside AdminShell), so an Admin reads their own mail without
+ * being ejected into the member workspace and losing the admin rail.
+ * One implementation, two shells — never a per-role copy.
  */
 
 import { useEffect, useState } from "react";
@@ -15,10 +15,13 @@ import {
   useMessage,
   useUpdateMailItem,
 } from "@/lib/mail-hooks";
+import { ComposeModal } from "@/components/mail/ComposeModal";
+import type { ComposerMode } from "@/lib/mail-hooks";
 import { downloadAttachment, type MailFolder, type MailItem } from "@/lib/mail-api";
 import {
   Inbox, Send, FileText, Archive, Trash2, Star, Loader2, AlertCircle,
   ChevronLeft, ChevronRight, Paperclip, Download, ArrowLeft, MailOpen,
+  Pencil, Reply, ReplyAll, Forward,
 } from "lucide-react";
 
 const FOLDERS: { key: MailFolder; label: string; icon: any }[] = [
@@ -54,6 +57,13 @@ export function MailClient() {
   const [folder, setFolder] = useState<MailFolder>("INBOX");
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [compose, setCompose] = useState<{ open: boolean; mode: ComposerMode; source: MailItem | null }>({
+    open: false,
+    mode: "new",
+    source: null,
+  });
+  const openCompose = (mode: ComposerMode, source: MailItem | null) =>
+    setCompose({ open: true, mode, source });
 
   const { data, isLoading, error } = useMailList({ folder, page, limit: 25 });
   const items = data?.items ?? [];
@@ -66,9 +76,13 @@ export function MailClient() {
   };
 
   return (
+    <>
       <div className="flex h-full min-h-0">
         {/* Folder rail */}
         <aside className="hidden w-48 shrink-0 border-r border-[var(--border)] bg-[var(--surface)] p-3 lg:block">
+          <button onClick={() => openCompose("new", null)} className="zoiko-btn pri mb-3 w-full">
+            <Pencil className="h-4 w-4" /> Compose
+          </button>
           <nav className="space-y-0.5">
             {FOLDERS.map((f) => {
               const Icon = f.icon;
@@ -98,6 +112,12 @@ export function MailClient() {
         >
           {/* Mobile folder switch */}
           <div className="flex gap-1.5 overflow-x-auto border-b border-[var(--border)] p-2 lg:hidden">
+            <button
+              onClick={() => openCompose("new", null)}
+              className="zoiko-btn pri sm shrink-0"
+            >
+              <Pencil className="h-3.5 w-3.5" /> Compose
+            </button>
             {FOLDERS.map((f) => (
               <button
                 key={f.key}
@@ -205,6 +225,7 @@ export function MailClient() {
               messageId={selectedId}
               folder={folder}
               onClose={() => setSelectedId(null)}
+              onCompose={openCompose}
             />
           ) : (
             <div className="m-auto flex flex-col items-center text-[var(--ink3)]">
@@ -214,6 +235,14 @@ export function MailClient() {
           )}
         </section>
       </div>
+
+      <ComposeModal
+        open={compose.open}
+        mode={compose.mode}
+        source={compose.source}
+        onClose={() => setCompose((c) => ({ ...c, open: false }))}
+      />
+    </>
   );
 }
 
@@ -221,10 +250,12 @@ function ReadingPane({
   messageId,
   folder,
   onClose,
+  onCompose,
 }: {
   messageId: string;
   folder: MailFolder;
   onClose: () => void;
+  onCompose: (mode: ComposerMode, source: MailItem | null) => void;
 }) {
   const { data: item, isLoading, error } = useMessage(messageId);
   const update = useUpdateMailItem();
@@ -285,6 +316,17 @@ function ReadingPane({
             Restore
           </button>
         )}
+        <div className="ml-auto flex items-center gap-1.5">
+          <button onClick={() => onCompose("reply", item)} className="zoiko-btn sm" title="Reply">
+            <Reply className="h-4 w-4" /> <span className="hidden sm:inline">Reply</span>
+          </button>
+          <button onClick={() => onCompose("replyAll", item)} className="zoiko-btn sm" title="Reply all">
+            <ReplyAll className="h-4 w-4" />
+          </button>
+          <button onClick={() => onCompose("forward", item)} className="zoiko-btn sm" title="Forward">
+            <Forward className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       {/* Header */}
