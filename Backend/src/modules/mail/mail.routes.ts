@@ -23,6 +23,11 @@ mailRouter.post("/:messageId/reply-all", validate(messageIdParamsSchema, "params
 mailRouter.post("/:messageId/forward", validate(messageIdParamsSchema, "params"), validate(forwardSchema), controller.forward);
 mailRouter.put("/:messageId/labels/:labelId", validate(messageLabelParamsSchema, "params"), controller.assignLabel);
 mailRouter.delete("/:messageId/labels/:labelId", validate(messageLabelParamsSchema, "params"), controller.removeLabel);
+
+// ─── Admin: Mailbox management (must be before /:messageId wildcard) ──────────
+mailRouter.get("/admin/mailboxes", requireRole("OWNER", "ADMIN"), controller.listAllMailboxes);
+mailRouter.post("/admin/mailboxes", requireRole("OWNER", "ADMIN"), controller.adminCreateMailbox);
+mailRouter.delete("/admin/mailboxes/:mailboxId", requireRole("OWNER", "ADMIN"), validate(mailboxIdParamsSchema, "params"), controller.adminDeleteMailbox);
 mailRouter.patch(
   "/admin/mailboxes/:mailboxId/sending",
   requireRole("OWNER", "ADMIN"),
@@ -30,6 +35,7 @@ mailRouter.patch(
   validate(updateSendingStatusSchema),
   controller.updateSendingStatus
 );
+
 mailRouter.get("/:messageId", validate(messageIdParamsSchema, "params"), controller.get);
 mailRouter.patch("/:messageId", validate(messageIdParamsSchema, "params"), validate(updateMailboxItemSchema), controller.updateMailboxItem);
 mailRouter.delete("/:messageId", validate(messageIdParamsSchema, "params"), controller.permanentlyDelete);

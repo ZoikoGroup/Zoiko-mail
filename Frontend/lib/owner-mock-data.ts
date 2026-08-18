@@ -1,5 +1,3 @@
-import type { Mailbox } from "./owner-api";
-
 // ─── Summary Stats ────────────────────────────────────────────────────────────
 
 export const mockSummaryStats = {
@@ -106,19 +104,6 @@ export const mockOrgHealth: HealthItem[] = [
   { label: "Provider Connection", status: "warning", detail: "1 connector needs re-auth" },
   { label: "Security Status", status: "warning", detail: "2 unresolved alerts" },
   { label: "Storage Usage", status: "healthy", detail: "42.7 GB / 100 GB used" },
-];
-
-// ─── Mailboxes ────────────────────────────────────────────────────────────────
-
-export const mockMailboxes: Mailbox[] = [
-  { id: "m1", userId: "u1", displayName: "Alex Morgan", email: "alex@zoiko.dev", type: "PRIMARY", provider: "ZOIKO", status: "ACTIVE", storageUsedMb: 2340, storageLimitMb: 15000, aiEnabled: true, createdAt: "2026-06-01T00:00:00Z" },
-  { id: "m2", userId: "u2", displayName: "Sarah Chen", email: "sarah@zoiko.dev", type: "PRIMARY", provider: "ZOIKO", status: "ACTIVE", storageUsedMb: 1890, storageLimitMb: 15000, aiEnabled: true, createdAt: "2026-06-05T00:00:00Z" },
-  { id: "m3", userId: "u3", displayName: "Jordan Patel", email: "jordan@zoiko.dev", type: "PRIMARY", provider: "ZOIKO", status: "ACTIVE", storageUsedMb: 4200, storageLimitMb: 15000, aiEnabled: false, createdAt: "2026-06-10T00:00:00Z" },
-  { id: "m4", userId: "u4", displayName: "Jamie Lee", email: "jamie@zoiko.dev", type: "PRIMARY", provider: "GMAIL", status: "ACTIVE", storageUsedMb: 890, storageLimitMb: 15000, aiEnabled: true, createdAt: "2026-06-15T00:00:00Z" },
-  { id: "m5", userId: "u5", displayName: "Taylor Kim", email: "taylor@zoiko.dev", type: "PRIMARY", provider: "ZOIKO", status: "ACTIVE", storageUsedMb: 560, storageLimitMb: 15000, aiEnabled: true, createdAt: "2026-07-01T00:00:00Z" },
-  { id: "m6", userId: "u6", displayName: "Casey Brooks", email: "casey@zoiko.dev", type: "PRIMARY", provider: "MICROSOFT_365", status: "SUSPENDED", storageUsedMb: 320, storageLimitMb: 15000, aiEnabled: false, createdAt: "2026-07-10T00:00:00Z" },
-  { id: "m7", userId: "u1", displayName: "Alex Morgan", email: "alex.m@zoiko.dev", type: "ALIAS", provider: "ZOIKO", status: "ACTIVE", storageUsedMb: 0, storageLimitMb: 0, aiEnabled: false, createdAt: "2026-07-15T00:00:00Z" },
-  { id: "m8", userId: "u7", displayName: "Support Queue", email: "support@zoiko.dev", type: "SHARED", provider: "ZOIKO", status: "ACTIVE", storageUsedMb: 6780, storageLimitMb: 30000, aiEnabled: true, createdAt: "2026-06-01T00:00:00Z" },
 ];
 
 // ─── Subscription / Billing ───────────────────────────────────────────────────

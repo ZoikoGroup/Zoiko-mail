@@ -1116,6 +1116,104 @@ export class MailService {
     return { deleted: true };
   }
 
+  // ─── Admin: List all tenant mailboxes ────────────────────────────────────────
+
+  async listAllMailboxes(tenantId: string) {
+    const mailboxes = await prisma.mailbox.findMany({
+      where: { tenantId },
+      include: {
+        membership: {
+          include: {
+            user: { select: { id: true, displayName: true, email: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    return mailboxes.map((mb) => ({
+      ...mb,
+      storageUsed: Number(mb.storageUsed),
+      storageLimit: Number(mb.storageLimit),
+    }));
+  }
+
+  // ─── Admin: Provision a mailbox for an existing member ──────────────────────
+
+  async adminCreateMailbox(tenantId: string, membershipId: string, context: MailContext) {
+    const membership = await prisma.tenantMembership.findFirst({
+      where: { id: membershipId, tenantId, status: "ACTIVE" },
+      include: { user: { select: { id: true, email: true } }, mailbox: true },
+    });
+    if (!membership) throw new AppError("Active membership not found", 404, ErrorCodes.NOT_FOUND);
+    if (membership.mailbox) throw new AppError("Mailbox already exists for this member", 409, ErrorCodes.CONFLICT);
+
+    const mailbox = await prisma.mailbox.create({
+      data: {
+        tenantId,
+        membershipId,
+        address: membership.user.email.toLowerCase(),
+      },
+      include: {
+        membership: {
+          include: {
+            user: { select: { id: true, displayName: true, email: true } },
+          },
+        },
+      },
+    });
+
+    await auditService.record({
+      tenantId,
+      actorUserId: context.userId,
+      eventType: "MAILBOX_CREATED",
+      targetType: "Mailbox",
+      targetId: mailbox.id,
+      requestId: context.requestId,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+      metadata: { address: mailbox.address, membershipId },
+    });
+
+    return {
+      ...mailbox,
+      storageUsed: Number(mailbox.storageUsed),
+      storageLimit: Number(mailbox.storageLimit),
+    };
+  }
+
+  // ─── Admin: Delete a mailbox ────────────────────────────────────────────────
+
+  async adminDeleteMailbox(tenantId: string, mailboxId: string, context: MailContext) {
+    const mailbox = await prisma.mailbox.findFirst({
+      where: { id: mailboxId, tenantId },
+      select: { id: true, address: true },
+    });
+    if (!mailbox) throw new AppError("Mailbox not found", 404, ErrorCodes.NOT_FOUND);
+
+    const messageCount = await prisma.mailboxMessage.count({
+      where: { mailboxId, tenantId },
+    });
+    if (messageCount > 0) {
+      throw new AppError("Cannot delete mailbox with messages", 409, ErrorCodes.CONFLICT);
+    }
+
+    await prisma.mailbox.delete({ where: { id: mailboxId, tenantId } });
+
+    await auditService.record({
+      tenantId,
+      actorUserId: context.userId,
+      eventType: "MAILBOX_DELETED",
+      targetType: "Mailbox",
+      targetId: mailboxId,
+      requestId: context.requestId,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+      metadata: { address: mailbox.address },
+    });
+
+    return { deleted: true };
+  }
+
   private async audit(
     tx: Prisma.TransactionClient,
     context: MailContext,

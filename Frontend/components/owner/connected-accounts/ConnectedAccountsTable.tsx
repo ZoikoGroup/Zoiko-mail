@@ -4,40 +4,21 @@ import { useState } from "react";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { StatusBadge, statusBadge } from "@/components/ui/StatusBadge";
 import { DropdownMenu, DropdownItem } from "@/components/ui/DropdownMenu";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { Link2, RefreshCw, Unplug, Mail } from "lucide-react";
-
-interface ConnectorRow {
-  id: string;
-  displayName: string;
-  email: string;
-  provider: "GMAIL" | "MICROSOFT_365";
-  status: "ACTIVE" | "DISCONNECTED" | "ERROR";
-  syncStatus: "IDLE" | "SYNCING" | "FAILED";
-  lastSyncAt: string | null;
-  connectedAt: string;
-}
-
-const mockConnectors: ConnectorRow[] = [
-  { id: "c1", displayName: "Alex Morgan", email: "alex.morgan@gmail.com", provider: "GMAIL", status: "ACTIVE", syncStatus: "IDLE", lastSyncAt: "2026-08-18T08:30:00Z", connectedAt: "2026-06-01T00:00:00Z" },
-  { id: "c2", displayName: "Sarah Chen", email: "sarah.chen@outlook.com", provider: "MICROSOFT_365", status: "ACTIVE", syncStatus: "IDLE", lastSyncAt: "2026-08-18T07:45:00Z", connectedAt: "2026-06-05T00:00:00Z" },
-  { id: "c3", displayName: "Jordan Patel", email: "jordan.patel@gmail.com", provider: "GMAIL", status: "ERROR", syncStatus: "FAILED", lastSyncAt: "2026-08-17T18:00:00Z", connectedAt: "2026-06-10T00:00:00Z" },
-  { id: "c4", displayName: "Jamie Lee", email: "jamie.lee@outlook.com", provider: "MICROSOFT_365", status: "ACTIVE", syncStatus: "SYNCING", lastSyncAt: "2026-08-18T09:00:00Z", connectedAt: "2026-06-15T00:00:00Z" },
-  { id: "c5", displayName: "Taylor Kim", email: "taylor.kim@gmail.com", provider: "GMAIL", status: "ACTIVE", syncStatus: "IDLE", lastSyncAt: "2026-08-17T22:00:00Z", connectedAt: "2026-07-01T00:00:00Z" },
-];
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { RefreshCw, Unplug, Mail } from "lucide-react";
+import { useConnectors, useDeleteConnector } from "@/lib/owner-hooks";
 
 function formatDate(d: string | null) {
   if (!d) return "—";
   return new Date(d).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-const providerIcon: Record<string, string> = {
-  GMAIL: "bg-[var(--crit-soft)] text-[var(--crit)]",
-  MICROSOFT_365: "bg-[var(--accent-soft)] text-[var(--accent-ink)]",
-};
-
 export function ConnectedAccountsTable() {
-  const columns: Column<ConnectorRow>[] = [
+  const [confirmDisconnect, setConfirmDisconnect] = useState<any>(null);
+  const { data: connectors = [], isLoading } = useConnectors();
+  const deleteConnector = useDeleteConnector();
+
+  const columns: Column<any>[] = [
     {
       key: "displayName",
       label: "User",
@@ -108,20 +89,30 @@ export function ConnectedAccountsTable() {
     <div className="space-y-4">
       <DataTable
         columns={columns}
-        data={mockConnectors}
+        data={connectors}
         keyExtractor={(row) => row.id}
         pageSize={10}
-        emptyMessage="No connected accounts."
+        emptyMessage={isLoading ? "Loading connected accounts…" : "No connected accounts."}
         actions={(row) => (
           <DropdownMenu>
-            <DropdownItem onClick={() => {}}>
-              <RefreshCw className="h-3.5 w-3.5" /> Sync Now
-            </DropdownItem>
-            <DropdownItem danger onClick={() => {}}>
+            <DropdownItem danger onClick={() => setConfirmDisconnect(row)}>
               <Unplug className="h-3.5 w-3.5" /> Disconnect
             </DropdownItem>
           </DropdownMenu>
         )}
+      />
+
+      <ConfirmDialog
+        open={!!confirmDisconnect}
+        onClose={() => setConfirmDisconnect(null)}
+        onConfirm={() => {
+          if (confirmDisconnect) deleteConnector.mutate(confirmDisconnect.id);
+          setConfirmDisconnect(null);
+        }}
+        title="Disconnect Account"
+        message={`Disconnect ${confirmDisconnect?.displayName}'s ${confirmDisconnect?.provider === "GMAIL" ? "Gmail" : "Microsoft 365"} account? This will stop syncing.`}
+        confirmLabel="Disconnect"
+        variant="danger"
       />
     </div>
   );

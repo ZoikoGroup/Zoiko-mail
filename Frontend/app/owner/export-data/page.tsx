@@ -1,9 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import { ProtectedRoute } from "@/components/owner/ProtectedRoute";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { mockExportRequests } from "@/lib/owner-mock-data";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { useLifecycleRequests, useRequestDataExport, useTenant } from "@/lib/owner-hooks";
+import { downloadExport } from "@/lib/owner-api";
 import { Download, FileText, Building2, Mail } from "lucide-react";
 
 function formatDate(d: string | null) {
@@ -12,12 +15,38 @@ function formatDate(d: string | null) {
 }
 
 const typeIcons: Record<string, typeof Building2> = {
-  organization: Building2,
-  user: FileText,
-  mailbox: Mail,
+  EXPORT: Building2,
+  DELETION: FileText,
 };
 
 export default function ExportDataPage() {
+  const [confirmExport, setConfirmExport] = useState<string | null>(null);
+  const { data: requests = [], isLoading } = useLifecycleRequests();
+  const requestDataExport = useRequestDataExport();
+  const { data: tenant } = useTenant();
+
+  const exportRequests = requests.filter((r) => r.type === "EXPORT");
+
+  const handleRequestExport = (type: string) => {
+    setConfirmExport(type);
+  };
+
+  const handleDownload = async (requestId: string) => {
+    try {
+      const blob = await downloadExport(requestId);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `zoiko-export-${requestId}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Download failed:", err);
+    }
+  };
+
   return (
     <ProtectedRoute allowedRoles={["OWNER"]}>
       <div className="mx-auto max-w-4xl space-y-6 px-4 py-8 sm:px-6">
@@ -40,7 +69,7 @@ export default function ExportDataPage() {
                 <button
                   key={item.type}
                   className="flex flex-col items-center rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 text-center transition hover:border-[var(--accent)] hover:shadow-[var(--sh2)]"
-                  onClick={() => console.log("Request export:", item.type)}
+                  onClick={() => handleRequestExport(item.type)}
                 >
                   <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent-ink)]">
                     <Icon className="h-5 w-5" />
@@ -59,31 +88,35 @@ export default function ExportDataPage() {
             <h3 className="text-sm font-semibold text-[var(--ink)]">Export History</h3>
           </div>
           <div className="divide-y divide-[var(--border)]">
-            {mockExportRequests.length === 0 ? (
+            {isLoading ? (
+              <div className="px-4 py-8 text-center text-sm text-[var(--ink3)]">Loading…</div>
+            ) : exportRequests.length === 0 ? (
               <div className="px-4 py-8 text-center text-sm text-[var(--ink3)]">No export requests yet.</div>
             ) : (
-              mockExportRequests.map((req) => {
+              exportRequests.map((req) => {
                 const Icon = typeIcons[req.type] ?? FileText;
+                const isCompleted = req.status === "COMPLETED";
                 return (
                   <div key={req.id} className="flex items-center gap-3 px-4 py-3">
                     <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--s3)] text-[var(--ink3)]">
                       <Icon className="h-4 w-4" />
                     </span>
                     <div className="min-w-0 flex-1">
-                      <div className="text-sm text-[var(--ink)] capitalize">{req.type} Export</div>
+                      <div className="text-sm text-[var(--ink)] capitalize">{req.type.toLowerCase()} Export</div>
                       <div className="text-[11px] text-[var(--ink3)]">
-                        Requested by {req.requestedBy} · {formatDate(req.createdAt)}
+                        {formatDate(req.createdAt)}
+                        {req.reason && <> · {req.reason}</>}
                       </div>
                     </div>
                     <StatusBadge
                       variant={
-                        req.status === "completed" ? "ok" : req.status === "processing" ? "warn" : req.status === "failed" ? "crit" : "nu"
+                        isCompleted ? "ok" : req.status === "PROCESSING" || req.status === "APPROVED" ? "warn" : req.status === "FAILED" ? "crit" : "nu"
                       }
                     >
                       {req.status}
                     </StatusBadge>
-                    {req.downloadUrl && (
-                      <button className="zoiko-btn sm">
+                    {isCompleted && (
+                      <button onClick={() => handleDownload(req.id)} className="zoiko-btn sm">
                         <Download className="h-3 w-3" /> Download
                       </button>
                     )}
@@ -93,6 +126,22 @@ export default function ExportDataPage() {
             )}
           </div>
         </div>
+
+        <ConfirmDialog
+          open={!!confirmExport}
+          onClose={() => setConfirmExport(null)}
+          onConfirm={() => {
+            requestDataExport.mutate({
+              idempotencyKey: crypto.randomUUID(),
+              reason: `Owner requested ${confirmExport} export`,
+            });
+            setConfirmExport(null);
+          }}
+          title="Request Data Export"
+          message={`Request a ${confirmExport} data export? The export will be processed in the background and you'll be notified when it's ready.`}
+          confirmLabel="Request Export"
+          variant="warning"
+        />
       </div>
     </ProtectedRoute>
   );

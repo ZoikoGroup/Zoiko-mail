@@ -7,47 +7,30 @@ import { SearchInput } from "@/components/ui/SearchInput";
 import { FilterBar, FilterSelect } from "@/components/ui/FilterBar";
 import { DropdownMenu, DropdownItem } from "@/components/ui/DropdownMenu";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { useMembers, useUpdateMember, useRemoveMember } from "@/lib/owner-hooks";
+import { useMe } from "@/lib/auth-hooks";
 import { Users, ShieldCheck, UserX, UserCheck, Trash2 } from "lucide-react";
-
-interface UserRow {
-  id: string;
-  displayName: string;
-  email: string;
-  role: "OWNER" | "ADMIN" | "MEMBER";
-  status: "ACTIVE" | "INVITED" | "SUSPENDED";
-  joinedAt: string;
-  lastActiveAt: string | null;
-  isCurrentUser?: boolean;
-}
-
-const mockUsers: UserRow[] = [
-  { id: "u1", displayName: "Alex Morgan", email: "alex@zoiko.dev", role: "OWNER", status: "ACTIVE", joinedAt: "2026-06-01T00:00:00Z", lastActiveAt: "2026-08-18T09:00:00Z", isCurrentUser: true },
-  { id: "u2", displayName: "Sarah Chen", email: "sarah@zoiko.dev", role: "ADMIN", status: "ACTIVE", joinedAt: "2026-06-05T00:00:00Z", lastActiveAt: "2026-08-18T08:30:00Z" },
-  { id: "u3", displayName: "Jordan Patel", email: "jordan@zoiko.dev", role: "MEMBER", status: "ACTIVE", joinedAt: "2026-06-10T00:00:00Z", lastActiveAt: "2026-08-17T17:00:00Z" },
-  { id: "u4", displayName: "Jamie Lee", email: "jamie@zoiko.dev", role: "ADMIN", status: "ACTIVE", joinedAt: "2026-06-15T00:00:00Z", lastActiveAt: "2026-08-17T14:00:00Z" },
-  { id: "u5", displayName: "Taylor Kim", email: "taylor@zoiko.dev", role: "MEMBER", status: "ACTIVE", joinedAt: "2026-07-01T00:00:00Z", lastActiveAt: "2026-08-16T10:00:00Z" },
-  { id: "u6", displayName: "Casey Brooks", email: "casey@zoiko.dev", role: "MEMBER", status: "SUSPENDED", joinedAt: "2026-07-10T00:00:00Z", lastActiveAt: null },
-  { id: "u7", displayName: "Morgan Davis", email: "morgan@zoiko.dev", role: "MEMBER", status: "INVITED", joinedAt: "2026-08-18T09:00:00Z", lastActiveAt: null },
-  { id: "u8", displayName: "Riley Zhang", email: "riley@zoiko.dev", role: "MEMBER", status: "INVITED", joinedAt: "2026-08-17T15:00:00Z", lastActiveAt: null },
-  { id: "u9", displayName: "Sam Wilson", email: "sam@zoiko.dev", role: "MEMBER", status: "INVITED", joinedAt: "2026-08-16T11:00:00Z", lastActiveAt: null },
-];
-
-function formatDate(d: string | null) {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}
 
 interface UsersTableProps {
   onInvite: () => void;
+  onChangeRole: (user: { id: string; name: string; role: string }) => void;
 }
 
-export function UsersTable({ onInvite }: UsersTableProps) {
+export function UsersTable({ onInvite, onChangeRole }: UsersTableProps) {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [actionUser, setActionUser] = useState<UserRow | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<{ id: string; name: string } | null>(null);
 
-  const filtered = mockUsers.filter((u) => {
+  const { data: meData } = useMe();
+  const { data: members = [], isLoading } = useMembers();
+  const updateMember = useUpdateMember();
+  const removeMember = useRemoveMember();
+
+  const currentUserId = (meData as any)?.user?.id;
+
+  const filtered = members.filter((u) => {
     const matchSearch =
       !search ||
       u.displayName.toLowerCase().includes(search.toLowerCase()) ||
@@ -57,20 +40,25 @@ export function UsersTable({ onInvite }: UsersTableProps) {
     return matchSearch && matchRole && matchStatus;
   });
 
-  const columns: Column<UserRow>[] = [
+  function formatDate(d: string | null) {
+    if (!d) return "—";
+    return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  }
+
+  const columns = [
     {
       key: "displayName",
       label: "User",
       sortable: true,
-      render: (row) => (
+      render: (row: any) => (
         <div className="flex items-center gap-2.5">
           <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-xs font-semibold text-white">
-            {row.displayName.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+            {row.displayName.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}
           </span>
           <div>
             <div className="font-medium text-[var(--ink)]">
               {row.displayName}
-              {row.isCurrentUser && <span className="ml-1 text-[var(--ink3)]">(you)</span>}
+              {row.userId === currentUserId && <span className="ml-1 text-[var(--ink3)]">(you)</span>}
             </div>
             <div className="text-[11px] text-[var(--ink3)]">{row.email}</div>
           </div>
@@ -81,7 +69,7 @@ export function UsersTable({ onInvite }: UsersTableProps) {
       key: "role",
       label: "Role",
       sortable: true,
-      render: (row) => (
+      render: (row: any) => (
         <StatusBadge variant={roleBadge(row.role)}>{row.role}</StatusBadge>
       ),
     },
@@ -89,7 +77,7 @@ export function UsersTable({ onInvite }: UsersTableProps) {
       key: "status",
       label: "Status",
       sortable: true,
-      render: (row) => (
+      render: (row: any) => (
         <StatusBadge variant={statusBadge(row.status)} dot>
           {row.status}
         </StatusBadge>
@@ -99,13 +87,13 @@ export function UsersTable({ onInvite }: UsersTableProps) {
       key: "joinedAt",
       label: "Joined",
       sortable: true,
-      render: (row) => <span className="font-mono-num text-[var(--ink3)]">{formatDate(row.joinedAt)}</span>,
+      render: (row: any) => <span className="font-mono-num text-[var(--ink3)]">{formatDate(row.joinedAt)}</span>,
     },
     {
       key: "lastActiveAt",
       label: "Last Active",
       sortable: true,
-      render: (row) => <span className="font-mono-num text-[var(--ink3)]">{formatDate(row.lastActiveAt)}</span>,
+      render: (row: any) => <span className="font-mono-num text-[var(--ink3)]">{formatDate(row.lastActiveAt)}</span>,
     },
   ];
 
@@ -149,30 +137,31 @@ export function UsersTable({ onInvite }: UsersTableProps) {
       <DataTable
         columns={columns}
         data={filtered}
-        keyExtractor={(row) => row.id}
+        keyExtractor={(row: any) => row.id}
         pageSize={10}
-        emptyMessage="No users match your search."
-        actions={(user) => {
+        emptyMessage={isLoading ? "Loading users…" : "No users match your search."}
+        actions={(user: any) => {
           const isOwner = user.role === "OWNER";
+          const isCurrentUser = user.userId === currentUserId;
           return (
             <DropdownMenu>
               {!isOwner && (
-                <DropdownItem onClick={() => setActionUser(user)}>
+                <DropdownItem onClick={() => onChangeRole({ id: user.id, name: user.displayName, role: user.role })}>
                   <ShieldCheck className="h-3.5 w-3.5" /> Change Role
                 </DropdownItem>
               )}
               {!isOwner && user.status === "ACTIVE" && (
-                <DropdownItem onClick={() => {}}>
+                <DropdownItem onClick={() => updateMember.mutate({ id: user.id, input: { status: "SUSPENDED" } })}>
                   <UserX className="h-3.5 w-3.5" /> Suspend
                 </DropdownItem>
               )}
               {!isOwner && user.status === "SUSPENDED" && (
-                <DropdownItem onClick={() => {}}>
+                <DropdownItem onClick={() => updateMember.mutate({ id: user.id, input: { status: "ACTIVE" } })}>
                   <UserCheck className="h-3.5 w-3.5" /> Activate
                 </DropdownItem>
               )}
-              {!isOwner && (
-                <DropdownItem danger onClick={() => {}}>
+              {!isOwner && !isCurrentUser && (
+                <DropdownItem danger onClick={() => setConfirmRemove({ id: user.id, name: user.displayName })}>
                   <Trash2 className="h-3.5 w-3.5" /> Remove
                 </DropdownItem>
               )}
@@ -184,6 +173,19 @@ export function UsersTable({ onInvite }: UsersTableProps) {
             </DropdownMenu>
           );
         }}
+      />
+
+      <ConfirmDialog
+        open={!!confirmRemove}
+        onClose={() => setConfirmRemove(null)}
+        onConfirm={() => {
+          if (confirmRemove) removeMember.mutate(confirmRemove.id);
+          setConfirmRemove(null);
+        }}
+        title="Remove Member"
+        message={`Are you sure you want to remove ${confirmRemove?.name} from the organization?`}
+        confirmLabel="Remove"
+        variant="danger"
       />
     </div>
   );

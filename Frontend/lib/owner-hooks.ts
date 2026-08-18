@@ -21,12 +21,23 @@ import {
   getConnectors,
   deleteConnector,
   getConnectorHealth,
+  getAdminMailboxes,
+  createAdminMailbox,
+  deleteAdminMailbox,
+  getLifecycleRequests,
+  requestDataExport,
+  requestDeletion,
+  cancelLifecycleRequest,
+  approveDeletion,
+  confirmDeletion,
   type InviteMemberInput,
   type UpdateMemberInput,
   type AddDomainInput,
   type AuditEventQuery,
   type CreatePolicyInput,
   type UpdateTenantInput,
+  type RequestExportInput,
+  type RequestDeletionInput,
 } from "./owner-api";
 
 // ─── Members ──────────────────────────────────────────────────────────────────
@@ -192,5 +203,82 @@ export function useConnectorHealth() {
     queryKey: ["owner", "connector-health"],
     queryFn: getConnectorHealth,
     staleTime: 30_000,
+  });
+}
+
+// ─── Admin Mailboxes ────────────────────────────────────────────────────────
+
+export function useAdminMailboxes() {
+  return useQuery({
+    queryKey: ["owner", "admin-mailboxes"],
+    queryFn: getAdminMailboxes,
+    staleTime: 30_000,
+  });
+}
+
+export function useCreateAdminMailbox() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (membershipId: string) => createAdminMailbox(membershipId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "admin-mailboxes"] }),
+  });
+}
+
+export function useDeleteAdminMailbox() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (mailboxId: string) => deleteAdminMailbox(mailboxId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "admin-mailboxes"] }),
+  });
+}
+
+// ─── Lifecycle (exports & deletions) ────────────────────────────────────────
+
+export function useLifecycleRequests() {
+  return useQuery({
+    queryKey: ["owner", "lifecycle"],
+    queryFn: getLifecycleRequests,
+    staleTime: 15_000,
+  });
+}
+
+export function useRequestDataExport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: RequestExportInput) => requestDataExport(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "lifecycle"] }),
+  });
+}
+
+export function useRequestDeletion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: RequestDeletionInput) => requestDeletion(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "lifecycle"] }),
+  });
+}
+
+export function useCancelLifecycleRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (requestId: string) => cancelLifecycleRequest(requestId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "lifecycle"] }),
+  });
+}
+
+export function useApproveDeletion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (requestId: string) => approveDeletion(requestId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "lifecycle"] }),
+  });
+}
+
+export function useConfirmDeletion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ requestId, data }: { requestId: string; data: { confirmation: string; tenantName: string } }) =>
+      confirmDeletion(requestId, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "lifecycle"] }),
   });
 }

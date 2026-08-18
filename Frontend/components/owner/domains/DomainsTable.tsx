@@ -2,28 +2,13 @@
 
 import { useState } from "react";
 import { DataTable, type Column } from "@/components/ui/DataTable";
-import { StatusBadge, statusBadge } from "@/components/ui/StatusBadge";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { DropdownMenu, DropdownItem } from "@/components/ui/DropdownMenu";
 import { Modal } from "@/components/ui/Modal";
 import { StepIndicator } from "@/components/ui/StepIndicator";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Globe, CheckCircle2, AlertCircle, RefreshCw, Shield } from "lucide-react";
-
-interface DomainRow {
-  id: string;
-  domain: string;
-  verificationStatus: string;
-  mxStatus: string;
-  spfStatus: string;
-  dkimStatus: string;
-  dmarcStatus: string;
-  isActive: boolean;
-  createdAt: string;
-}
-
-const mockDomains: DomainRow[] = [
-  { id: "d1", domain: "zoiko.dev", verificationStatus: "VERIFIED", mxStatus: "VERIFIED", spfStatus: "VERIFIED", dkimStatus: "VERIFIED", dmarcStatus: "VERIFIED", isActive: true, createdAt: "2026-06-01T00:00:00Z" },
-  { id: "d2", domain: "mail.zoiko.dev", verificationStatus: "VERIFIED", mxStatus: "VERIFIED", spfStatus: "VERIFIED", dkimStatus: "PENDING", dmarcStatus: "NOT_CONFIGURED", isActive: false, createdAt: "2026-08-15T00:00:00Z" },
-];
+import { useDomains, useAddDomain, useRunDiagnostics, useActivateDomain } from "@/lib/owner-hooks";
 
 function dnsPill(status: string) {
   switch (status) {
@@ -35,10 +20,10 @@ function dnsPill(status: string) {
   }
 }
 
-function overallHealth(d: DomainRow): { label: string; variant: "ok" | "warn" | "crit" } {
+function overallHealth(d: any): { label: string; variant: "ok" | "warn" | "crit" } {
   const checks = [d.mxStatus, d.spfStatus, d.dkimStatus, d.dmarcStatus];
-  if (checks.every((c) => c === "VERIFIED")) return { label: "Healthy", variant: "ok" };
-  if (checks.some((c) => c === "FAILED")) return { label: "Issues", variant: "crit" };
+  if (checks.every((c: string) => c === "VERIFIED")) return { label: "Healthy", variant: "ok" };
+  if (checks.some((c: string) => c === "FAILED")) return { label: "Issues", variant: "crit" };
   return { label: "Partial", variant: "warn" };
 }
 
@@ -57,8 +42,14 @@ export function DomainsTable() {
   const [addOpen, setAddOpen] = useState(false);
   const [wizardStep, setWizardStep] = useState(0);
   const [newDomain, setNewDomain] = useState("");
+  const [confirmActivate, setConfirmActivate] = useState<any>(null);
 
-  const columns: Column<DomainRow>[] = [
+  const { data: domains = [], isLoading } = useDomains();
+  const addDomain = useAddDomain();
+  const runDiagnostics = useRunDiagnostics();
+  const activateDomain = useActivateDomain();
+
+  const columns: Column<any>[] = [
     {
       key: "domain",
       label: "Domain",
@@ -96,17 +87,17 @@ export function DomainsTable() {
 
       <DataTable
         columns={columns}
-        data={mockDomains}
+        data={domains}
         keyExtractor={(row) => row.id}
         pageSize={10}
-        emptyMessage="No domains configured."
+        emptyMessage={isLoading ? "Loading domains…" : "No domains configured."}
         actions={(row) => (
           <DropdownMenu>
-            <DropdownItem onClick={() => {}}>
+            <DropdownItem onClick={() => runDiagnostics.mutate(row.id)}>
               <RefreshCw className="h-3.5 w-3.5" /> Run Diagnostics
             </DropdownItem>
             {!row.isActive && (
-              <DropdownItem onClick={() => {}}>
+              <DropdownItem onClick={() => setConfirmActivate(row)}>
                 <Shield className="h-3.5 w-3.5" /> Activate
               </DropdownItem>
             )}
@@ -125,15 +116,23 @@ export function DomainsTable() {
             <button onClick={() => setAddOpen(false)} className="zoiko-btn">Cancel</button>
             {wizardStep < 7 ? (
               <button
-                onClick={() => setWizardStep((s) => Math.min(7, s + 1))}
+                onClick={() => {
+                  if (wizardStep === 0 && newDomain.trim()) {
+                    addDomain.mutate({ domain: newDomain.trim() }, {
+                      onSuccess: () => setWizardStep(1),
+                    });
+                  } else {
+                    setWizardStep((s) => Math.min(7, s + 1));
+                  }
+                }}
                 className="zoiko-btn pri"
-                disabled={wizardStep === 0 && !newDomain.trim()}
+                disabled={(wizardStep === 0 && !newDomain.trim()) || addDomain.isPending}
               >
-                Next Step
+                {addDomain.isPending ? "Adding…" : wizardStep === 0 ? "Add Domain" : "Next Step"}
               </button>
             ) : (
               <button onClick={() => setAddOpen(false)} className="zoiko-btn pri">
-                Activate Domain
+                Done
               </button>
             )}
           </>
@@ -193,6 +192,19 @@ export function DomainsTable() {
           )}
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={!!confirmActivate}
+        onClose={() => setConfirmActivate(null)}
+        onConfirm={() => {
+          if (confirmActivate) activateDomain.mutate(confirmActivate.id);
+          setConfirmActivate(null);
+        }}
+        title="Activate Domain"
+        message={`Activate ${confirmActivate?.domain}? This will enable sending from this domain.`}
+        confirmLabel="Activate"
+        variant="warning"
+      />
     </div>
   );
 }

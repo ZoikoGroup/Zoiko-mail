@@ -6,10 +6,14 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { UsersTable } from "@/components/owner/users/UsersTable";
 import { InviteUserModal } from "@/components/owner/users/InviteUserModal";
 import { ChangeRoleModal } from "@/components/owner/users/ChangeRoleModal";
+import { useInviteMember, useUpdateMember } from "@/lib/owner-hooks";
 
 export default function UsersPage() {
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [roleModalUser, setRoleModalUser] = useState<{ name: string; role: string } | null>(null);
+  const [roleModalUser, setRoleModalUser] = useState<{ id: string; name: string; role: string } | null>(null);
+
+  const inviteMember = useInviteMember();
+  const updateMember = useUpdateMember();
 
   return (
     <ProtectedRoute>
@@ -18,16 +22,21 @@ export default function UsersPage() {
           title="Users & Roles"
           description="Manage team members and their access levels."
         />
-        <UsersTable onInvite={() => setInviteOpen(true)} />
+        <UsersTable
+          onInvite={() => setInviteOpen(true)}
+          onChangeRole={(user) => setRoleModalUser(user)}
+        />
 
         <InviteUserModal
           open={inviteOpen}
           onClose={() => setInviteOpen(false)}
           onInvite={(email, role) => {
-            // TODO: wire to useInviteMember mutation
-            console.log("Invite:", email, role);
-            setInviteOpen(false);
+            inviteMember.mutate(
+              { email, role: role as "ADMIN" | "MEMBER" },
+              { onSuccess: () => setInviteOpen(false) }
+            );
           }}
+          loading={inviteMember.isPending}
         />
 
         {roleModalUser && (
@@ -37,10 +46,12 @@ export default function UsersPage() {
             userName={roleModalUser.name}
             currentRole={roleModalUser.role}
             onConfirm={(newRole) => {
-              // TODO: wire to useUpdateMember mutation
-              console.log("Change role:", roleModalUser.name, newRole);
-              setRoleModalUser(null);
+              updateMember.mutate(
+                { id: roleModalUser.id, input: { role: newRole as "ADMIN" | "MEMBER" } },
+                { onSuccess: () => setRoleModalUser(null) }
+              );
             }}
+            loading={updateMember.isPending}
           />
         )}
       </div>

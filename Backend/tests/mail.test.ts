@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
-import { authHeader, registerUser } from "./helpers.js";
+import { authHeader, loginUser, registerUser } from "./helpers.js";
 import { prisma } from "../src/config/prisma.js";
 import { env } from "../src/config/env.js";
 import { mailService } from "../src/modules/mail/mail.service.js";
@@ -455,5 +455,122 @@ describe("Mail module", () => {
     expect(inbox.body.data.items).toEqual([
       expect.objectContaining({ message: expect.objectContaining({ subject: "Due schedule" }) }),
     ]);
+  });
+
+  describe("Admin mailbox management", () => {
+    it("lists all tenant mailboxes", async () => {
+      const owner = await registerUser(app, { email: `admin-list-${Date.now()}@zoiko.test` });
+      // Trigger mailbox creation via draft
+      await activateAllowSendingPolicy(owner.accessToken);
+      await request(app)
+        .post("/api/v1/mail/drafts")
+        .set(authHeader(owner.accessToken))
+        .send({ subject: "Trigger", recipients: { to: ["x@x.com"] } })
+        .expect(201);
+
+      const res = await request(app)
+        .get("/api/v1/mail/admin/mailboxes")
+        .set(authHeader(owner.accessToken))
+        .expect(200);
+      expect(res.body.data).toBeInstanceOf(Array);
+      expect(res.body.data.length).toBeGreaterThanOrEqual(1);
+      const mb = res.body.data.find((m: any) => m.address === owner.email);
+      expect(mb).toBeDefined();
+      expect(mb.membership).toBeDefined();
+      expect(mb.membership.user.email).toBe(owner.email);
+    });
+
+    it("returns 403 for non-owner/admin members", async () => {
+      const owner = await registerUser(app, { email: `admin-owner-${Date.now()}@zoiko.test` });
+      const member = await registerUser(app, { email: `admin-member-${Date.now()}@zoiko.test` });
+      await request(app)
+        .post("/api/v1/membership/members")
+        .set(authHeader(owner.accessToken))
+        .send({ email: member.email, role: "MEMBER" })
+        .expect(201);
+      const memberLogin = await loginUser(app, member.email, member.password, owner.tenantId);
+
+      await request(app)
+        .get("/api/v1/mail/admin/mailboxes")
+        .set(authHeader(memberLogin.accessToken))
+        .expect(403);
+    });
+
+    it("provisions a mailbox for an existing member", async () => {
+      const owner = await registerUser(app, { email: `admin-prov-${Date.now()}@zoiko.test` });
+      const member = await registerUser(app, { email: `admin-provmem-${Date.now()}@zoiko.test` });
+      const addRes = await request(app)
+        .post("/api/v1/membership/members")
+        .set(authHeader(owner.accessToken))
+        .send({ email: member.email, role: "MEMBER" })
+        .expect(201);
+
+      const res = await request(app)
+        .post("/api/v1/mail/admin/mailboxes")
+        .set(authHeader(owner.accessToken))
+        .send({ membershipId: addRes.body.data.id })
+        .expect(201);
+      expect(res.body.data.address).toBe(member.email.toLowerCase());
+      expect(res.body.data.membership.user.email).toBe(member.email);
+    });
+
+    it("returns 409 when mailbox already exists for member", async () => {
+      const owner = await registerUser(app, { email: `admin-dup-${Date.now()}@zoiko.test` });
+      const member = await registerUser(app, { email: `admin-dup-mem-${Date.now()}@zoiko.test` });
+      const addRes = await request(app)
+        .post("/api/v1/membership/members")
+        .set(authHeader(owner.accessToken))
+        .send({ email: member.email, role: "MEMBER" })
+        .expect(201);
+      // Create first mailbox
+      await request(app)
+        .post("/api/v1/mail/admin/mailboxes")
+        .set(authHeader(owner.accessToken))
+        .send({ membershipId: addRes.body.data.id })
+        .expect(201);
+      // Try to create duplicate
+      const res = await request(app)
+        .post("/api/v1/mail/admin/mailboxes")
+        .set(authHeader(owner.accessToken))
+        .send({ membershipId: addRes.body.data.id })
+        .expect(409);
+      expect(res.body.error.code).toBe("CONFLICT");
+    });
+
+    it("deletes an empty mailbox", async () => {
+      const owner = await registerUser(app, { email: `admin-del-${Date.now()}@zoiko.test` });
+      const member = await registerUser(app, { email: `admin-delm-${Date.now()}@zoiko.test` });
+      const addRes = await request(app)
+        .post("/api/v1/membership/members")
+        .set(authHeader(owner.accessToken))
+        .send({ email: member.email, role: "MEMBER" })
+        .expect(201);
+      const createRes = await request(app)
+        .post("/api/v1/mail/admin/mailboxes")
+        .set(authHeader(owner.accessToken))
+        .send({ membershipId: addRes.body.data.id })
+        .expect(201);
+
+      await request(app)
+        .delete(`/api/v1/mail/admin/mailboxes/${createRes.body.data.id}`)
+        .set(authHeader(owner.accessToken))
+        .expect(200);
+
+      // Verify it's gone from the list
+      const list = await request(app)
+        .get("/api/v1/mail/admin/mailboxes")
+        .set(authHeader(owner.accessToken))
+        .expect(200);
+      expect(list.body.data.find((m: any) => m.id === createRes.body.data.id)).toBeUndefined();
+    });
+
+    it("returns 404 for non-existent mailbox deletion", async () => {
+      const owner = await registerUser(app, { email: `admin-del404-${Date.now()}@zoiko.test` });
+      const fakeId = "00000000-0000-0000-0000-000000000000";
+      await request(app)
+        .delete(`/api/v1/mail/admin/mailboxes/${fakeId}`)
+        .set(authHeader(owner.accessToken))
+        .expect(404);
+    });
   });
 });

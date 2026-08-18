@@ -7,27 +7,7 @@ import { DataTable, type Column } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { FilterBar, FilterSelect } from "@/components/ui/FilterBar";
-import { FileText } from "lucide-react";
-
-interface AuditRow {
-  id: string;
-  actorName: string;
-  action: string;
-  targetType: string;
-  targetName: string;
-  ipAddress: string;
-  status: "SUCCESS" | "FAILURE";
-  createdAt: string;
-}
-
-const mockAudit: AuditRow[] = [
-  { id: "a1", actorName: "Alex Morgan", action: "user.invite", targetType: "user", targetName: "dev@zoiko.dev", ipAddress: "192.168.1.1", status: "SUCCESS", createdAt: "2026-08-18T09:32:00Z" },
-  { id: "a2", actorName: "Sarah Chen", action: "mailbox.create", targetType: "mailbox", targetName: "support@zoiko.dev", ipAddress: "192.168.1.2", status: "SUCCESS", createdAt: "2026-08-18T08:15:00Z" },
-  { id: "a3", actorName: "System", action: "domain.verify", targetType: "domain", targetName: "zoiko.dev", ipAddress: "—", status: "SUCCESS", createdAt: "2026-08-17T16:42:00Z" },
-  { id: "a4", actorName: "Alex Morgan", action: "member.role_change", targetType: "member", targetName: "Jamie Lee", ipAddress: "192.168.1.1", status: "SUCCESS", createdAt: "2026-08-17T14:10:00Z" },
-  { id: "a5", actorName: "Unknown", action: "auth.login_failed", targetType: "user", targetName: "casey@zoiko.dev", ipAddress: "203.0.113.42", status: "FAILURE", createdAt: "2026-08-16T03:45:00Z" },
-  { id: "a6", actorName: "Alex Morgan", action: "policy.update", targetType: "policy", targetName: "AI Drafting Policy", ipAddress: "192.168.1.1", status: "SUCCESS", createdAt: "2026-08-16T15:30:00Z" },
-];
+import { useAuditEvents } from "@/lib/owner-hooks";
 
 function formatDate(d: string) {
   return new Date(d).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -36,18 +16,29 @@ function formatDate(d: string) {
 export default function AuditLogsPage() {
   const [search, setSearch] = useState("");
   const [actionFilter, setActionFilter] = useState("");
+  const [page, setPage] = useState(1);
 
-  const filtered = mockAudit.filter((e) => {
-    const matchSearch =
-      !search ||
-      e.actorName.toLowerCase().includes(search.toLowerCase()) ||
-      e.targetName.toLowerCase().includes(search.toLowerCase()) ||
-      e.action.toLowerCase().includes(search.toLowerCase());
-    const matchAction = !actionFilter || e.action.startsWith(actionFilter);
-    return matchSearch && matchAction;
+  const { data, isLoading } = useAuditEvents({
+    page,
+    limit: 15,
+    action: actionFilter || undefined,
   });
 
-  const columns: Column<AuditRow>[] = [
+  const events = data?.events ?? [];
+  const total = data?.total ?? 0;
+
+  const filtered = search
+    ? events.filter((e) => {
+        const q = search.toLowerCase();
+        return (
+          e.actorName.toLowerCase().includes(q) ||
+          e.targetName.toLowerCase().includes(q) ||
+          e.action.toLowerCase().includes(q)
+        );
+      })
+    : events;
+
+  const columns: Column<any>[] = [
     {
       key: "actorName",
       label: "Actor",
@@ -80,7 +71,7 @@ export default function AuditLogsPage() {
     {
       key: "ipAddress",
       label: "IP Address",
-      render: (row) => <span className="font-mono-num text-[11px] text-[var(--ink3)]">{row.ipAddress}</span>,
+      render: (row) => <span className="font-mono-num text-[11px] text-[var(--ink3)]">{row.ipAddress || "—"}</span>,
     },
     {
       key: "status",
@@ -105,7 +96,7 @@ export default function AuditLogsPage() {
           <FilterSelect
             label="Event Type"
             value={actionFilter}
-            onChange={setActionFilter}
+            onChange={(v) => { setActionFilter(v); setPage(1); }}
             options={[
               { label: "Auth", value: "auth" },
               { label: "User", value: "user" },
@@ -121,8 +112,27 @@ export default function AuditLogsPage() {
           data={filtered}
           keyExtractor={(row) => row.id}
           pageSize={15}
-          emptyMessage="No audit events match your filters."
+          emptyMessage={isLoading ? "Loading audit events…" : "No audit events match your filters."}
         />
+        {total > 15 && (
+          <div className="flex justify-center gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="zoiko-btn sm"
+            >
+              Previous
+            </button>
+            <span className="self-center text-sm text-[var(--ink3)]">Page {page} of {Math.ceil(total / 15)}</span>
+            <button
+              onClick={() => setPage((p) => p + 1)}
+              disabled={page * 15 >= total}
+              className="zoiko-btn sm"
+            >
+              Next
+            </button>
+          </div>
+        )}
       </div>
     </ProtectedRoute>
   );

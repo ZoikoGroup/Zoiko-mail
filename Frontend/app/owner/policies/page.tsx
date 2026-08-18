@@ -6,27 +6,8 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Tabs } from "@/components/ui/Tabs";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { mockSecurityAlerts } from "@/lib/owner-mock-data";
-import { ShieldCheck, Sparkles, Mail, Gauge, Lock, Save } from "lucide-react";
-
-interface PolicyRow {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  isEnabled: boolean;
-}
-
-const mockPolicies: PolicyRow[] = [
-  { id: "p1", name: "AI Drafting", description: "Allow AI to draft email replies for review.", category: "AI_FEATURES", isEnabled: true },
-  { id: "p2", name: "AI Summarization", description: "Enable thread summarization for long conversations.", category: "AI_FEATURES", isEnabled: true },
-  { id: "p3", name: "AI Action Detection", description: "Automatically detect commitments and deadlines.", category: "AI_FEATURES", isEnabled: true },
-  { id: "p4", name: "Bulk Sending Limit", description: "Maximum 500 recipients per hour per user.", category: "SENDING", isEnabled: true },
-  { id: "p5", name: "External Forwarding", description: "Block automatic forwarding to external addresses.", category: "SENDING", isEnabled: false },
-  { id: "p6", name: "API Rate Limit", description: "1000 requests per hour per API key.", category: "RATE_LIMITS", isEnabled: true },
-  { id: "p7", name: "Data Retention", description: "Retain email data for 365 days.", category: "DATA_HANDLING", isEnabled: true },
-  { id: "p8", name: "Two-Factor Auth", description: "Require 2FA for all admin users.", category: "SECURITY", isEnabled: false },
-];
+import { usePolicies, useActivatePolicy } from "@/lib/owner-hooks";
+import { ShieldCheck, Sparkles, Mail, Gauge, Lock } from "lucide-react";
 
 const categories = [
   { id: "all", label: "All Policies" },
@@ -47,9 +28,12 @@ const categoryIcons: Record<string, typeof Sparkles> = {
 
 export default function PoliciesPage() {
   const [activeTab, setActiveTab] = useState("all");
-  const [confirmToggle, setConfirmToggle] = useState<PolicyRow | null>(null);
+  const [confirmToggle, setConfirmToggle] = useState<any>(null);
 
-  const filtered = activeTab === "all" ? mockPolicies : mockPolicies.filter((p) => p.category === activeTab);
+  const { data: policies = [], isLoading } = usePolicies();
+  const activatePolicy = useActivatePolicy();
+
+  const filtered = activeTab === "all" ? policies : policies.filter((p) => p.category === activeTab);
 
   return (
     <ProtectedRoute allowedRoles={["OWNER", "ADMIN"]}>
@@ -63,13 +47,19 @@ export default function PoliciesPage() {
           tabs={categories.map((c) => ({
             id: c.id,
             label: c.label,
-            count: c.id === "all" ? mockPolicies.length : mockPolicies.filter((p) => p.category === c.id).length,
+            count: c.id === "all" ? policies.length : policies.filter((p) => p.category === c.id).length,
           }))}
           active={activeTab}
           onChange={setActiveTab}
         />
 
         <div className="space-y-2">
+          {isLoading && (
+            <div className="py-8 text-center text-sm text-[var(--ink3)]">Loading policies…</div>
+          )}
+          {!isLoading && filtered.length === 0 && (
+            <div className="py-8 text-center text-sm text-[var(--ink3)]">No policies found.</div>
+          )}
           {filtered.map((policy) => {
             const Icon = categoryIcons[policy.category] ?? ShieldCheck;
             return (
@@ -101,8 +91,7 @@ export default function PoliciesPage() {
           open={!!confirmToggle}
           onClose={() => setConfirmToggle(null)}
           onConfirm={() => {
-            // TODO: wire to useActivatePolicy mutation
-            console.log("Toggle policy:", confirmToggle?.id);
+            if (confirmToggle) activatePolicy.mutate(confirmToggle.id);
             setConfirmToggle(null);
           }}
           title={confirmToggle?.isEnabled ? "Disable Policy" : "Enable Policy"}
