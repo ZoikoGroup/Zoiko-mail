@@ -15,6 +15,13 @@
  */
 import {
   ACTIVE_GRANT,
+  CAPABILITY_MATRIX,
+  COMMITMENTS,
+  GUARDRAILS,
+  NOTIFICATIONS,
+  POLICY_GROUPS,
+  SETTINGS,
+  SYNC_ERRORS,
   AUDIT_EVENTS,
   CONNECTORS,
   DASHBOARD,
@@ -24,6 +31,13 @@ import {
   MAILBOXES,
   MEMBERS,
   type AuditEventDto,
+  type CapabilityGroupDto,
+  type CommitmentDto,
+  type GuardrailDto,
+  type NotificationDto,
+  type PolicyGroupDto,
+  type SettingsDto,
+  type SyncErrorDto,
   type ConnectorDto,
   type DashboardDto,
   type DomainDto,
@@ -102,4 +116,36 @@ export function useConnectors(): QueryLike<ConnectorDto[]> {
 /** Null when no Zoiko staff member currently holds access. */
 export function useActiveSupportGrant(): QueryLike<SupportGrantDto | null> {
   return stat(ACTIVE_GRANT);
+}
+
+/** `GET /permissions/matrix` — serialised from the same map the API enforces. */
+export function useCapabilityMatrix(): QueryLike<CapabilityGroupDto[]> {
+  return stat(CAPABILITY_MATRIX);
+}
+
+export function useGuardrails(): QueryLike<GuardrailDto[]> {
+  return stat(GUARDRAILS);
+}
+
+/** `GET /policies/toggles` — grouped by policy type, one active version each. */
+export function usePolicyGroups(): QueryLike<PolicyGroupDto[]> {
+  return stat(POLICY_GROUPS);
+}
+
+/** `GET /connectors/dead-letter` — failures needing an operator decision. */
+export function useSyncErrors(): QueryLike<SyncErrorDto[]> {
+  return stat(SYNC_ERRORS);
+}
+
+export function useNotifications(): QueryLike<NotificationDto[]> {
+  return stat(NOTIFICATIONS);
+}
+
+/** `GET /tenants/current` — general settings plus the enforced session policy. */
+export function useSettings(): QueryLike<SettingsDto> {
+  return stat(SETTINGS);
+}
+
+export function useCommitments(): QueryLike<CommitmentDto[]> {
+  return stat(COMMITMENTS);
 }

@@ -259,3 +259,260 @@ export const DASHBOARD: DashboardDto = {
   recentAudit: AUDIT_EVENTS.slice(0, 4),
   providerSync: CONNECTORS.slice(0, 3),
 };
+
+/* ── Trust & access ────────────────────────────────────────────────────── */
+
+/** 1 = allowed, 0 = denied, string = conditional (Step-up, 2-person, …). */
+export type CapabilityCell = 1 | 0 | string;
+
+export interface CapabilityRowDto {
+  capability: string;
+  member: CapabilityCell;
+  admin: CapabilityCell;
+  owner: CapabilityCell;
+  support: CapabilityCell;
+}
+
+export interface CapabilityGroupDto {
+  group: string;
+  rows: CapabilityRowDto[];
+}
+
+export interface GuardrailDto {
+  id: string;
+  title: string;
+  detail: string;
+}
+
+/**
+ * The authoritative matrix. Rendered from fixtures today; once the server-side
+ * capability map exists this comes from GET /permissions/matrix, so the page can
+ * never drift from what the API actually enforces.
+ */
+export const CAPABILITY_MATRIX: CapabilityGroupDto[] = [
+  {
+    group: "Own work",
+    rows: [
+      { capability: "Read and send own mail", member: 1, admin: 1, owner: 1, support: 0 },
+      { capability: "Manage own commitments", member: 1, admin: 1, owner: 1, support: 0 },
+      { capability: "Connect own inbox", member: 1, admin: 1, owner: 1, support: 0 },
+      { capability: "Read another member’s mail", member: 0, admin: 0, owner: 0, support: 0 },
+    ],
+  },
+  {
+    group: "People",
+    rows: [
+      { capability: "See the user list", member: 0, admin: 1, owner: 1, support: "Read-only" },
+      { capability: "Invite a Member", member: 0, admin: 1, owner: 1, support: 0 },
+      { capability: "Invite an Admin", member: 0, admin: 0, owner: 1, support: 0 },
+      { capability: "Invite an Owner", member: 0, admin: 0, owner: "2-person", support: 0 },
+      { capability: "Suspend or remove a Member", member: 0, admin: 1, owner: 1, support: 0 },
+      { capability: "Suspend or remove an Admin", member: 0, admin: 0, owner: 1, support: 0 },
+      { capability: "Act on an Owner", member: 0, admin: 0, owner: 1, support: 0 },
+      { capability: "Reset another person’s MFA", member: 0, admin: 0, owner: "Step-up", support: 0 },
+    ],
+  },
+  {
+    group: "Workspace",
+    rows: [
+      { capability: "Read workspace settings", member: "Own", admin: 1, owner: 1, support: "Read-only" },
+      { capability: "Change workspace settings", member: 0, admin: 1, owner: 1, support: 0 },
+      { capability: "Manage mailboxes, domains, groups", member: 0, admin: 1, owner: 1, support: 0 },
+      { capability: "Set the security policy", member: 0, admin: 0, owner: 1, support: 0 },
+      { capability: "Read the audit log", member: 0, admin: 1, owner: 1, support: "Read-only" },
+    ],
+  },
+  {
+    group: "Money and liability",
+    rows: [
+      { capability: "View billing and seats", member: 0, admin: 0, owner: 1, support: 0 },
+      { capability: "Change the plan", member: 0, admin: 0, owner: 1, support: 0 },
+      { capability: "Export all workspace data", member: 0, admin: 0, owner: "Step-up", support: 0 },
+      { capability: "Transfer ownership", member: 0, admin: 0, owner: "Step-up", support: 0 },
+      { capability: "Delete the tenant", member: 0, admin: 0, owner: "Step-up", support: 0 },
+    ],
+  },
+  {
+    group: "Support",
+    rows: [
+      { capability: "Hold standing access", member: 0, admin: 0, owner: 0, support: 0 },
+      { capability: "Access a workspace", member: 0, admin: 0, owner: 0, support: "Approved grant" },
+      { capability: "End a support grant early", member: 0, admin: 1, owner: 1, support: 1 },
+    ],
+  },
+];
+
+export const GUARDRAILS: GuardrailDto[] = [
+  {
+    id: "g1",
+    title: "No granting above your own level",
+    detail:
+      "An Admin inviting an Owner is escalation by proxy. The endpoint compares the requested role against the caller’s and refuses upward grants.",
+  },
+  {
+    id: "g2",
+    title: "No acting on someone senior",
+    detail:
+      "An Admin cannot suspend, demote or remove an Owner. The button is disabled and the call is rejected server-side.",
+  },
+  {
+    id: "g3",
+    title: "A workspace always keeps one Owner",
+    detail:
+      "Removing or demoting the last active Owner is refused, or the workspace becomes unadministrable and only Zoiko could rescue it.",
+  },
+  {
+    id: "g4",
+    title: "Role is read per request",
+    detail:
+      "Never cached in the session. Demote an Admin and it takes effect on their next call, not when they choose to sign out.",
+  },
+  {
+    id: "g5",
+    title: "Every query is tenant-scoped",
+    detail:
+      "An RBAC slip leaks a feature; a tenant-scoping slip leaks another company’s mail. Row-level security makes a forgotten WHERE return nothing.",
+  },
+  {
+    id: "g6",
+    title: "Step-up for consequential acts",
+    detail:
+      "Transfer, export and delete re-authenticate inside a valid session. A stolen cookie must not be enough to hand over the workspace.",
+  },
+];
+
+/* ── Policies ──────────────────────────────────────────────────────────── */
+
+export interface PolicyToggleDto {
+  key: string;
+  label: string;
+  detail: string;
+  enabled: boolean;
+  /** Locked toggles are non-negotiable or Owner-only; refused server-side too. */
+  locked: boolean;
+}
+
+export interface PolicyGroupDto {
+  group: string;
+  /** Set when the whole group sits outside this role’s authority. */
+  restriction: string | null;
+  toggles: PolicyToggleDto[];
+}
+
+export const POLICY_GROUPS: PolicyGroupDto[] = [
+  {
+    group: "AI",
+    restriction: null,
+    toggles: [
+      { key: "ai.commitment", label: "Commitment detection", detail: "Reply owed, approval, deadline and follow-up extraction", enabled: true, locked: false },
+      { key: "ai.summary", label: "Thread summarisation", detail: "Pilot hosted mailboxes only", enabled: true, locked: false },
+      { key: "ai.draft", label: "Draft reply", detail: "Human-approved send always required", enabled: true, locked: false },
+      { key: "ai.restricted", label: "Restricted mailboxes excluded from AI", detail: "HR and legal flagged by default", enabled: true, locked: true },
+      { key: "ai.training", label: "AI training on customer data", detail: "Never permitted", enabled: false, locked: true },
+    ],
+  },
+  {
+    group: "Sending",
+    restriction: null,
+    toggles: [
+      { key: "send.ratelimit", label: "Rate-limited sending", detail: "Per-tenant and per-mailbox caps", enabled: true, locked: false },
+      { key: "send.warmup", label: "New-domain warm-up", detail: "Gradual volume ramp", enabled: true, locked: false },
+      { key: "send.templates", label: "Template-based sending", detail: "Requires admin-approved templates", enabled: false, locked: false },
+      { key: "send.autonomous", label: "Autonomous external sending", detail: "Blocked at launch — governance review required", enabled: false, locked: true },
+    ],
+  },
+  {
+    group: "Access",
+    restriction: "Owner only",
+    toggles: [
+      { key: "access.mfa.privileged", label: "Require MFA for Owner and Admin", detail: "Passkey preferred, TOTP fallback", enabled: true, locked: true },
+      { key: "access.mfa.all", label: "Require MFA for all Members", detail: "2 people currently without", enabled: false, locked: true },
+      { key: "access.silentsupport", label: "Silent support access", detail: "Never permitted — approval always required", enabled: false, locked: true },
+      { key: "access.iplist", label: "IP allow-list", detail: "Configured but not enforced", enabled: false, locked: true },
+    ],
+  },
+];
+
+/* ── Provider sync ─────────────────────────────────────────────────────── */
+
+export interface SyncErrorDto {
+  id: string;
+  title: string;
+  detail: string;
+  ago: string;
+  action: string;
+}
+
+export const SYNC_ERRORS: SyncErrorDto[] = [
+  {
+    id: "err-1",
+    title: "OAuth token expired",
+    detail: "Gmail connector · sam@acme.test",
+    ago: "1 day ago",
+    action: "Re-auth",
+  },
+];
+
+/* ── Notifications ─────────────────────────────────────────────────────── */
+
+export interface NotificationDto {
+  id: string;
+  title: string;
+  body: string;
+  ago: string;
+  severity: "INFO" | "WARNING" | "ACTION_REQUIRED" | "CRITICAL";
+  readAt: string | null;
+}
+
+export const NOTIFICATIONS: NotificationDto[] = [
+  { id: "n-1", title: "Failed sends detected", body: "3 messages failed from contractor@acme.test in the last 24 hours.", ago: "12m ago", severity: "CRITICAL", readAt: null },
+  { id: "n-2", title: "Support access opened", body: "Jordan Reyes holds a 4 hour read-only grant, approved by H. Voss.", ago: "3h ago", severity: "ACTION_REQUIRED", readAt: null },
+  { id: "n-3", title: "Invitation expiring", body: "The invitation for rob@acme.test expires tomorrow.", ago: "8h ago", severity: "WARNING", readAt: null },
+  { id: "n-4", title: "Domain verified", body: "acme.test passed DKIM validation.", ago: "1d ago", severity: "INFO", readAt: "1d ago" },
+];
+
+/* ── Workspace settings ────────────────────────────────────────────────── */
+
+export interface SettingFieldDto {
+  key: string;
+  label: string;
+  value: string;
+  /** Read-only fields reflect a value enforced elsewhere, not an input. */
+  readOnly: boolean;
+}
+
+export interface SettingsDto {
+  general: SettingFieldDto[];
+  sessions: SettingFieldDto[];
+}
+
+export const SETTINGS: SettingsDto = {
+  general: [
+    { key: "name", label: "Workspace name", value: "Acme Corp", readOnly: false },
+    { key: "defaultDomain", label: "Default domain", value: "acme.test", readOnly: false },
+    { key: "timezone", label: "Timezone", value: "Europe/London", readOnly: false },
+    { key: "quota", label: "Default mailbox quota", value: "30 GB", readOnly: false },
+  ],
+  sessions: [
+    { key: "idle", label: "Idle timeout", value: "30 min Member · 15 min Owner and Admin", readOnly: true },
+    { key: "absolute", label: "Absolute lifetime", value: "8 hours, then full re-authentication", readOnly: true },
+  ],
+};
+
+/* ── Own work ──────────────────────────────────────────────────────────── */
+
+export interface CommitmentDto {
+  id: string;
+  title: string;
+  sourceExcerpt: string;
+  meta: string;
+  due: string;
+  state: "OVERDUE" | "DUE_TODAY" | "OPEN" | "APPROVAL";
+}
+
+export const COMMITMENTS: CommitmentDto[] = [
+  { id: "c-1", title: "Send revised proposal to Meridian", sourceExcerpt: "I’ll get the revised pricing over to you before end of week.", meta: "Meridian Partners · thread 8812", due: "Overdue 2 days", state: "OVERDUE" },
+  { id: "c-2", title: "Confirm Q4 numbers for Finance", sourceExcerpt: "Can you confirm the Tuesday figures before the board pack goes out?", meta: "Finance Acme · thread 8827", due: "Due today", state: "DUE_TODAY" },
+  { id: "c-3", title: "Counter-sign the Meridian NDA", sourceExcerpt: "Please find the signed copy attached, let us know once countersigned.", meta: "Meridian Legal · thread 8790", due: "Approval requested", state: "APPROVAL" },
+  { id: "c-4", title: "Reply on invoice 4402 dispute", sourceExcerpt: "Flagging a line-item discrepancy on this invoice.", meta: "Billing Acme · thread 8801", due: "Due in 2 days", state: "OPEN" },
+];

@@ -63,26 +63,27 @@ export const ADMIN_NAV: AdminNavGroup[] = [
   {
     group: "Trust & access",
     items: [
-      { label: "Roles & permissions", href: "/admin/permissions", icon: KeyRound, soon: true },
-      { label: "Policies", href: "/admin/policies", icon: ShieldCheck, capability: "policy.write", soon: true },
-      { label: "Provider sync", href: "/admin/provider-sync", icon: RefreshCw, soon: true },
-      { label: "Audit logs", href: "/admin/audit", icon: FileText, capability: "audit.read", soon: true },
+      { label: "Roles & permissions", href: "/admin/permissions", icon: KeyRound },
+      { label: "Policies", href: "/admin/policies", icon: ShieldCheck, capability: "policy.write" },
+      { label: "Provider sync", href: "/admin/provider-sync", icon: RefreshCw },
+      { label: "Audit logs", href: "/admin/audit", icon: FileText, capability: "audit.read" },
     ],
   },
   {
     group: "System",
     items: [
-      { label: "Notifications", href: "/admin/notifications", icon: Bell, count: 4, soon: true },
-      { label: "Workspace settings", href: "/admin/settings", icon: Settings, capability: "workspace.settings.read", soon: true },
+      { label: "Notifications", href: "/admin/notifications", icon: Bell, count: 4 },
+      { label: "Workspace settings", href: "/admin/settings", icon: Settings, capability: "workspace.settings.read" },
     ],
   },
   {
     group: "My work",
     items: [
-      // An Admin has a mailbox like any Member. These point at the existing
-      // member screens rather than admin copies of them.
-      { label: "Inbox", href: "/inbox", icon: Inbox, capability: "mail.own.rw", count: 12 },
-      { label: "Commitments", href: "/inbox", icon: CheckSquare, capability: "commitments.own.manage", count: 7, soon: true },
+      // An Admin has a mailbox like any Member. These render the same components
+      // the member routes use, but inside the admin shell — following a rail item
+      // must never eject an Admin into the member workspace.
+      { label: "Inbox", href: "/admin/inbox", icon: Inbox, capability: "mail.own.rw", count: 12 },
+      { label: "Commitments", href: "/admin/commitments", icon: CheckSquare, capability: "commitments.own.manage", count: 7 },
     ],
   },
 ];

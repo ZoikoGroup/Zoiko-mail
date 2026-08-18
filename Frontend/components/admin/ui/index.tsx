@@ -257,6 +257,91 @@ export function ErrorState({ message, onRetry }: { message: string; onRetry?: ()
   );
 }
 
+/* ── toggle ────────────────────────────────────────────────────────────── */
+
+/**
+ * A locked toggle is either non-negotiable or outside this role's authority.
+ * It renders disabled *and* the server refuses the write — the disabled control
+ * is never the enforcement.
+ */
+export function ToggleRow({
+  label,
+  detail,
+  enabled,
+  locked,
+  onToggle,
+}: {
+  label: string;
+  detail: string;
+  enabled: boolean;
+  locked: boolean;
+  onToggle?: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3 last:border-b-0">
+      <div className="min-w-0 flex-1">
+        <div className="text-[12.6px] font-semibold text-[var(--ink)]">{label}</div>
+        <div className="text-[11px] text-[var(--ink3)]">{detail}</div>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={enabled}
+        aria-label={`${label}${locked ? " (locked)" : ""}`}
+        disabled={locked}
+        onClick={onToggle}
+        title={locked ? "Locked — non-negotiable or Owner-only" : undefined}
+        className={`zoiko-toggle ${enabled ? "on" : ""} ${locked ? "lock" : ""}`}
+      >
+        <i />
+      </button>
+    </div>
+  );
+}
+
+/* ── filter chips ──────────────────────────────────────────────────────── */
+
+export function FilterChips({
+  options,
+  active,
+  onChange,
+}: {
+  options: string[];
+  active: string;
+  onChange: (option: string) => void;
+}) {
+  return (
+    <div className="mb-3 flex flex-wrap gap-1.5">
+      {options.map((option) => (
+        <button
+          key={option}
+          type="button"
+          aria-pressed={option === active}
+          onClick={() => onChange(option)}
+          className={`rounded-full border px-3 py-1 text-[11.5px] font-semibold transition ${
+            option === active
+              ? "border-[var(--ink)] bg-[var(--ink)] text-[var(--ground)]"
+              : "border-[var(--border)] bg-[var(--surface)] text-[var(--ink2)] hover:border-[var(--bstrong)]"
+          }`}
+        >
+          {option}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* ── guardrail ─────────────────────────────────────────────────────────── */
+
+export function GuardRow({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div className="border-b border-l-[3px] border-[var(--border)] border-l-[var(--crit)] px-4 py-3 last:border-b-0">
+      <div className="mb-0.5 text-[12.5px] font-semibold text-[var(--ink)]">{title}</div>
+      <div className="text-[11.8px] leading-relaxed text-[var(--ink2)]">{detail}</div>
+    </div>
+  );
+}
+
 /* ── static-data marker ────────────────────────────────────────────────── */
 
 /**
