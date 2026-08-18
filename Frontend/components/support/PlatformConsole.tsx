@@ -1118,7 +1118,14 @@ export default function PlatformConsole() {
   const [overviewError, setOverviewError] = useState<string | null>(null);
 
   const isPlatform = !!getPlatformToken();
-  const { data: me, isLoading: meLoading } = useMe();
+  // const { data: me, isLoading: meLoading } = useMe();
+  
+  // Only fetch /auth/me when we're a tenant user. Staff platform tokens are
+  // not valid for /auth/me, and calling it triggers a 401 -> refresh-fail ->
+  // clearTokens() cascade that wipes the platform token itself.
+  const meQuery = useMe();
+  const me = isPlatform ? undefined : meQuery.data;
+  const meLoading = isPlatform ? false : meQuery.isLoading;
 
   const loadOverview = useCallback(async () => {
     setOverviewLoading(true);

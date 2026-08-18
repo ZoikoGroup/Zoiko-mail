@@ -26,7 +26,7 @@ import {
   type ForgotPasswordInput,
   type ResetPasswordInput,
 } from "./auth-api";
-import { isLoggedIn } from "./auth-storage";
+import { getPlatformToken, isLoggedIn } from "./auth-storage";
 import { resolveWorkspaceHref } from "./workspace";
 
 // Server state (the logged-in user) lives in TanStack Query, keyed by ['me'].
@@ -34,7 +34,8 @@ export function useMe() {
   return useQuery({
     queryKey: ["me"],
     queryFn: getMe,
-    enabled: isLoggedIn(), // don't call /auth/me if we have no token
+    // enabled: isLoggedIn(), 
+    enabled: isLoggedIn() && !getPlatformToken(), // don't call /auth/me for anonymous or staff sessions
     retry: false,
     staleTime: 60_000,
   });
@@ -63,12 +64,42 @@ export function useLogin() {
         // Regular user — use the membership role from the backend session.
         const role = data.membership?.role;
         href = resolveWorkspaceHref(role);
-      } else if (data.state === "NO_WORKSPACE") {
-        href = "/";
+        // } else if (data.state === "NO_WORKSPACE") {
+        //   href = "/";
+        // } else if (data.state === "WORKSPACE_SELECTION") {
+        //   href = "/";
+        // } else {
+        //   href = "/login";
+        // }
+
       } else if (data.state === "WORKSPACE_SELECTION") {
         // Multiple workspaces — show workspace chooser (not implemented here;
         // the backend already returned the options).
         href = "/";
+      } else if (
+        data.state === "ACCOUNT_SUSPENDED" ||
+        data.state === "ACCOUNT_DISABLED"
+      ) {
+        // Account-level blocks — inform-only page, no workspace context needed.
+        href = `/auth-status?state=${data.state}`;
+      } else if (
+        data.state === "MEMBERSHIP_SUSPENDED" ||
+        data.state === "WORKSPACE_SUSPENDED" ||
+        data.state === "WORKSPACE_DELETING"
+      ) {
+        // All three carry a single workspace object with a `name` field.
+        const workspaceName = encodeURIComponent(data.workspace?.name ?? "");
+        href = `/auth-status?state=${data.state}&workspace=${workspaceName}`;
+      } else if (data.state === "EMAIL_VERIFICATION_REQUIRED") {
+        // Backend requires OTP verification before session issuance. Stash the
+        // pending token + email in sessionStorage so /verify-email can pick them
+        // up. sessionStorage (not localStorage) because these are short-lived
+        // and not a real session — they die with the browser tab.
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem("zoiko.pending_token", data.pendingToken ?? "");
+          sessionStorage.setItem("zoiko.pending_email", data.user?.email ?? "");
+        }
+        href = "/verify-email";
       } else {
         href = "/login";
       }
@@ -170,7 +201,7 @@ export function useLogout() {
   return useMutation({
     mutationFn: () => logout(),
     onSettled: () => {
-      qc.clear(); 
+      qc.clear();
       router.replace("/login");
     },
   });

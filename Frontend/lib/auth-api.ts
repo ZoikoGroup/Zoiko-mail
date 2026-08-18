@@ -110,6 +110,8 @@ interface Tokens {
 //   register        -> tokens NESTED under data.tokens (data.tokens.accessToken)
 // AuthResponse models both so callers can read either.
 export interface AuthResponse {
+  invitations: never[];
+  workspace: any;
   pendingToken: any;
   data: any;
   user: { id: string; email: string; displayName: string };
