@@ -58,7 +58,7 @@ export function useLogin() {
 
       if (data.state === "STAFF_CONSOLE") {
         // Platform-scoped session (staff with platformRole but no tenant).
-        href = "/platform-console";
+        href = "/support";
       } else if (data.state === "SIGNED_IN") {
         // Regular user — use the membership role from the backend session.
         const role = data.membership?.role;

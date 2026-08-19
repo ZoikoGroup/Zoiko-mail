@@ -2,7 +2,7 @@
 // The backend is the source of truth for role determination — never email,
 // localStorage, URL parameters, or frontend dropdowns.
 export function resolveWorkspaceHref(role?: string): string {
-  if (role === "SUPPORT") return "/support-workspace";
+  if (role === "SUPPORT") return "/support";
   if (role === "OWNER" || role === "ADMIN" || role === "MEMBER") return "/inbox";
   return "/inbox";
 }

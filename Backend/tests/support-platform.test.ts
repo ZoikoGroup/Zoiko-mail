@@ -147,4 +147,62 @@ describe("Platform support console", () => {
     await request(app).get(`/api/v1/support/platform/diagnostics?grantId=${grant.body.data.id}`)
       .set(authHeader(agent.token)).expect(403);
   });
+
+  it("searches and details mailboxes; 404 for unknown", async () => {
+    const owner = await registerUser(app, { email: "pc-mb-owner@zoiko.test", tenantName: "Mailbox Tenant" });
+    const { token, membership } = await setupSupport(owner, "pc-mb-agent@zoiko.test");
+
+    const domain = await prisma.mailDomain.create({
+      data: { tenantId: owner.tenantId, domainName: "mb-test.zoiko.test", verificationStatus: "VERIFIED", verificationToken: "test-token-mb", sendingEnabled: true },
+    });
+    const mailbox = await prisma.mailbox.create({
+      data: { tenantId: owner.tenantId, address: "test@mb-test.zoiko.test", membershipId: membership.id },
+    });
+
+    const search = await request(app).get("/api/v1/support/platform/mailboxes?q=mb-test")
+      .set(authHeader(token)).expect(200);
+    expect(search.body.data.mailboxes.some((m: { id: string }) => m.id === mailbox.id)).toBe(true);
+
+    const detail = await request(app).get(`/api/v1/support/platform/tenants/${owner.tenantId}/mailboxes/${mailbox.id}`)
+      .set(authHeader(token)).expect(200);
+    expect(detail.body.data.mailbox.id).toBe(mailbox.id);
+    expect(detail.body.data.mailbox.address).toBe("test@mb-test.zoiko.test");
+    expect(Array.isArray(detail.body.data.syncJobs)).toBe(true);
+    expect(Array.isArray(detail.body.data.providerEvents)).toBe(true);
+    expect(Array.isArray(detail.body.data.deliveryEvents)).toBe(true);
+
+    // Unknown mailbox -> 404.
+    await request(app).get(`/api/v1/support/platform/tenants/${owner.tenantId}/mailboxes/00000000-0000-4000-8000-000000000001`)
+      .set(authHeader(token)).expect(404);
+
+    // Cleanup.
+    await prisma.mailbox.delete({ where: { id: mailbox.id } });
+    await prisma.mailDomain.delete({ where: { id: domain.id } });
+  });
+
+  it("searches and details domains; 404 for unknown", async () => {
+    const owner = await registerUser(app, { email: "pc-dom-owner@zoiko.test", tenantName: "Domain Tenant" });
+    const { token } = await setupSupport(owner, "pc-dom-agent@zoiko.test");
+
+    const domain = await prisma.mailDomain.create({
+      data: { tenantId: owner.tenantId, domainName: "dom-test.zoiko.test", verificationStatus: "PENDING", verificationToken: "test-token-dom", sendingEnabled: false },
+    });
+
+    const search = await request(app).get("/api/v1/support/platform/domains?q=dom-test")
+      .set(authHeader(token)).expect(200);
+    expect(search.body.data.domains.some((d: { id: string }) => d.id === domain.id)).toBe(true);
+
+    const detail = await request(app).get(`/api/v1/support/platform/tenants/${owner.tenantId}/domains/${domain.id}`)
+      .set(authHeader(token)).expect(200);
+    expect(detail.body.data.domain.id).toBe(domain.id);
+    expect(detail.body.data.domain.domainName).toBe("dom-test.zoiko.test");
+    expect(Array.isArray(detail.body.data.checks)).toBe(true);
+
+    // Unknown domain -> 404.
+    await request(app).get(`/api/v1/support/platform/tenants/${owner.tenantId}/domains/00000000-0000-4000-8000-000000000001`)
+      .set(authHeader(token)).expect(404);
+
+    // Cleanup.
+    await prisma.mailDomain.delete({ where: { id: domain.id } });
+  });
 });
