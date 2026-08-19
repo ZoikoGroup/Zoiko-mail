@@ -91,6 +91,28 @@ export const openApiDocument = {
         responses: { "200": ok("Session or tenant selection returned"), "401": { $ref: "#/components/responses/Unauthorized" } },
       },
     },
+
+    "/api/v1/auth/select-workspace": {
+      post: {
+        tags: ["Authentication"], summary: "Complete login by selecting a workspace",
+        description: "Second half of the split login flow. Called after POST /auth/login returned state WORKSPACE_SELECTION with a selectionToken. Client passes back the selectionToken plus the chosen tenantId; the server issues a full session without asking for the password again. The selection token expires in ~15 minutes. Response state mirrors the second half of /auth/login: typically SIGNED_IN, but MEMBERSHIP_SUSPENDED / WORKSPACE_SUSPENDED / WORKSPACE_DELETING are also possible depending on the picked workspace's status.",
+        requestBody: jsonBody({
+          type: "object",
+          required: ["selectionToken", "tenantId"],
+          properties: {
+            selectionToken: { type: "string", description: "Short-lived JWT from the /auth/login WORKSPACE_SELECTION response" },
+            tenantId: { type: "string", format: "uuid", description: "One of the workspace IDs returned in the login response" },
+          },
+        }),
+        responses: {
+          "200": ok("Session issued, or another auth state returned based on the picked workspace"),
+          "400": { $ref: "#/components/responses/ValidationError" },
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "403": { $ref: "#/components/responses/Forbidden" },
+        },
+      },
+    },
+
     "/api/v1/auth/forgot-password": {
       post: {
         tags: ["Authentication"], summary: "Request a password reset code",

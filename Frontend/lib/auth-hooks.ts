@@ -73,9 +73,21 @@ export function useLogin() {
         // }
 
       } else if (data.state === "WORKSPACE_SELECTION") {
-        // Multiple workspaces — show workspace chooser (not implemented here;
-        // the backend already returned the options).
-        href = "/";
+        // Stash the workspaces + selection token so /select-workspace can render
+        // the picker and call /auth/select-workspace without asking for the
+        // password again. sessionStorage (not localStorage) — selection token
+        // expires in 15 min and this isn't a real session.
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem(
+            "zoiko.selection_token",
+            data.selectionToken ?? ""
+          );
+          sessionStorage.setItem(
+            "zoiko.selection_workspaces",
+            JSON.stringify(data.workspaces ?? [])
+          );
+        }
+        href = "/select-workspace";
       } else if (
         data.state === "ACCOUNT_SUSPENDED" ||
         data.state === "ACCOUNT_DISABLED"
