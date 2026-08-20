@@ -61,13 +61,6 @@ export async function registerUser(
     .send({ code: TEST_OTP_CODE })
     .expect(200);
 
-  // verify-otp mints a fresh pending token; the register one must not be reused.
-  const session = await request(app)
-    .post("/api/v1/auth/create-workspace")
-    .set("Authorization", `Bearer ${verified.body.data.pendingToken}`)
-    .send({ tenantName: payload.tenantName, planCode: payload.planCode })
-    .expect(201);
-
   const pendingToken = registerResponse.body.data.pendingToken;
   // By default, create a workspace for the newly registered user.
   const shouldCreate = overrides.createWorkspace !== false;

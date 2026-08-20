@@ -115,7 +115,7 @@ export function assertFlagEnabled(name: FlagName, scope: FlagScope = {}): void {
   throw new AppError(
     `This capability is currently disabled (${name})`,
     403,
-    ErrorCodes.FORBIDDEN
+    ErrorCodes.FEATURE_DISABLED
   );
 }
 
