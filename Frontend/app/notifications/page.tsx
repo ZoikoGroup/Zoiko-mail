@@ -18,6 +18,7 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+
 export default function NotificationsPage() {
   const { data: notifications = [], isLoading, error, refetch, isFetching } =
     useNotifications(false);
