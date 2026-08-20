@@ -410,6 +410,7 @@ export interface Mailbox {
   address: string;
   displayName: string;
   userId: string;
+  domain: string;
   storageUsedMb: number;
   storageLimitMb: number;
   sendSuspendedAt: string | null;
@@ -427,6 +428,7 @@ export async function getAdminMailboxes(): Promise<Mailbox[]> {
     address: m.address,
     displayName: m.membership?.user?.displayName ?? m.address,
     userId: m.membership?.userId ?? "",
+    domain: m.address.split("@")[1] ?? "",
     storageUsedMb: Math.round(m.storageUsed / 1024),
     storageLimitMb: Math.round(m.storageLimit / 1024),
     sendSuspendedAt: m.sendSuspendedAt,
@@ -448,6 +450,7 @@ export async function createAdminMailbox(membershipId: string): Promise<Mailbox>
     address: m.address,
     displayName: m.membership?.user?.displayName ?? m.address,
     userId: m.membership?.userId ?? "",
+    domain: m.address.split("@")[1] ?? "",
     storageUsedMb: Math.round(m.storageUsed / 1024),
     storageLimitMb: Math.round(m.storageLimit / 1024),
     sendSuspendedAt: m.sendSuspendedAt,
@@ -461,7 +464,7 @@ export async function deleteAdminMailbox(mailboxId: string): Promise<void> {
 
 export async function updateMailboxSendingStatus(
   mailboxId: string,
-  data: { sendingEnabled: boolean }
+  data: { suspended: boolean; reason?: string }
 ): Promise<void> {
   await apiRequest(`/mail/admin/mailboxes/${mailboxId}/sending`, {
     method: "PATCH",

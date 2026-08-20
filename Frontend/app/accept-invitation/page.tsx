@@ -5,12 +5,13 @@ import Link from "next/link";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { acceptInvitation } from "@/lib/owner-api";
+import { isLoggedIn } from "@/lib/auth-storage";
 
 function AcceptInvitationInner() {
   const params = useSearchParams();
   const token = params.get("token") ?? "";
 
-  const [status, setStatus] = useState<"loading" | "success" | "error" | "no-token">(
+  const [status, setStatus] = useState<"loading" | "success" | "error" | "no-token" | "need-login">(
     !token ? "no-token" : "loading"
   );
   const [errorMsg, setErrorMsg] = useState("");
@@ -18,10 +19,19 @@ function AcceptInvitationInner() {
   useEffect(() => {
     if (!token) return;
 
+    if (!isLoggedIn()) {
+      sessionStorage.setItem("pendingInvitationToken", token);
+      setStatus("need-login");
+      return;
+    }
+
     let cancelled = false;
     acceptInvitation(token)
       .then(() => {
-        if (!cancelled) setStatus("success");
+        if (!cancelled) {
+          sessionStorage.removeItem("pendingInvitationToken");
+          setStatus("success");
+        }
       })
       .catch((e: Error) => {
         if (!cancelled) {
@@ -49,6 +59,24 @@ function AcceptInvitationInner() {
         <div className="text-center">
           <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-teal-600" />
           <p className="text-sm text-slate-500 dark:text-slate-400">Accepting your invitation…</p>
+        </div>
+      )}
+
+      {status === "need-login" && (
+        <div className="text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-blue-100 text-2xl dark:bg-blue-900/30">
+            🔒
+          </div>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Sign in required</h2>
+          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+            Please sign in to accept this invitation.
+          </p>
+          <Link
+            href="/login"
+            className="mt-6 inline-block rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-teal-700"
+          >
+            Sign in
+          </Link>
         </div>
       )}
 

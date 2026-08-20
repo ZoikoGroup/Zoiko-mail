@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   AuthLayout,
@@ -18,6 +18,7 @@ import type { AuthStep } from "@/components/auth";
 import { useCreateWorkspace } from "@/lib/auth-hooks";
 
 export default function AuthPage() {
+  useEffect(() => { document.title = "Sign In | Zoiko Mail"; }, []);
   const [step, setStep] = useState<AuthStep>("login");
   const [pendingToken, setPendingToken] = useState("");
   const [verificationEmail, setVerificationEmail] = useState("");

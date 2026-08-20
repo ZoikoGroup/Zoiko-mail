@@ -26,7 +26,6 @@ import {
   type ForgotPasswordInput,
   type ResetPasswordInput,
 } from "./auth-api";
-import { getOnboardingStatus } from "./owner-api";
 import { getPlatformToken, isLoggedIn } from "./auth-storage";
 import { resolveWorkspaceHref } from "./workspace";
 
@@ -94,28 +93,29 @@ export function useLogin() {
         }
         href = "/verify-email";
       } else if (data.state === "INVITATION_PENDING") {
-        const names = (data.invitations ?? []).map((w: { name: string }) => w.name).join(",");
-        href = `/auth-status?state=INVITATION_PENDING${names ? `&invitations=${encodeURIComponent(names)}` : ""}`;
+        const pendingToken = typeof window !== "undefined"
+          ? sessionStorage.getItem("pendingInvitationToken")
+          : null;
+        if (pendingToken) {
+          const { acceptInvitation } = await import("@/lib/owner-api");
+          try {
+            await acceptInvitation(pendingToken);
+            sessionStorage.removeItem("pendingInvitationToken");
+            href = resolveWorkspaceHref(data.membership?.role);
+          } catch {
+            href = "/inbox";
+          }
+        } else {
+          const names = (data.invitations ?? []).map((w: { name: string }) => w.name).join(",");
+          href = `/auth-status?state=INVITATION_PENDING${names ? `&invitations=${encodeURIComponent(names)}` : ""}`;
+        }
       } else {
         href = "/login";
       }
 
       if (data.state === "NO_WORKSPACE") {
-        router.replace("/");
+        router.replace("/login");
         return;
-      }
-
-      if (data.state === "SIGNED_IN") {
-        // Check onboarding status and redirect if incomplete
-        try {
-          const onboarding = await getOnboardingStatus();
-          if (!onboarding.isComplete) {
-            router.replace("/owner/onboarding");
-            return;
-          }
-        } catch {
-          // Onboarding fetch failed — proceed to dashboard
-        }
       }
 
       router.replace(href);

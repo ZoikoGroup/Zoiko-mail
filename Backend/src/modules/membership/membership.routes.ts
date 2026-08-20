@@ -7,6 +7,7 @@ const membershipRouter = Router();
 
 membershipRouter.post(
   "/invitations/accept",
+  authenticate,
   validate(acceptInvitationSchema),
   controller.acceptInvitation
 );

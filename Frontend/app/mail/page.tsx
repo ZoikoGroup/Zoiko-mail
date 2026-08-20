@@ -46,6 +46,7 @@ function sender(item: MailItem): string {
 }
 
 export default function MailPage() {
+  useEffect(() => { document.title = "Webmail | Zoiko Mail"; }, []);
   const [folder, setFolder] = useState<MailFolder>("INBOX");
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
