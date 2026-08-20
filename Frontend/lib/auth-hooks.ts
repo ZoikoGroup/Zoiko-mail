@@ -26,6 +26,7 @@ import {
   type ForgotPasswordInput,
   type ResetPasswordInput,
 } from "./auth-api";
+import { getOnboardingStatus } from "./owner-api";
 import { isLoggedIn } from "./auth-storage";
 import { resolveWorkspaceHref } from "./workspace";
 
@@ -52,28 +53,35 @@ export function useLogin() {
         queryKey: ["me"],
       });
 
-      // Determine redirect based on backend auth state — the backend is the
-      // source of truth for role, never localStorage or email.
-      let href: string;
-
       if (data.state === "STAFF_CONSOLE") {
-        // Platform-scoped session (staff with platformRole but no tenant).
-        href = "/support";
-      } else if (data.state === "SIGNED_IN") {
-        // Regular user — use the membership role from the backend session.
-        const role = data.membership?.role;
-        href = resolveWorkspaceHref(role);
-      } else if (data.state === "NO_WORKSPACE") {
-        href = "/";
-      } else if (data.state === "WORKSPACE_SELECTION") {
-        // Multiple workspaces — show workspace chooser (not implemented here;
-        // the backend already returned the options).
-        href = "/";
-      } else {
-        href = "/login";
+        router.replace("/support");
+        return;
       }
 
-      router.replace(href);
+      if (data.state === "NO_WORKSPACE" || data.state === "WORKSPACE_SELECTION") {
+        router.replace("/");
+        return;
+      }
+
+      if (data.state === "SIGNED_IN") {
+        const role = data.membership?.role;
+        const href = resolveWorkspaceHref(role);
+
+        // Check onboarding status and redirect if incomplete
+        try {
+          const onboarding = await getOnboardingStatus();
+          if (!onboarding.isComplete) {
+            router.replace("/owner/onboarding");
+            return;
+          }
+        } catch {
+          // Onboarding fetch failed — proceed to dashboard
+        }
+
+        router.replace(href);
+      } else {
+        router.replace("/login");
+      }
     },
   });
 }
@@ -130,7 +138,8 @@ export function useCreateWorkspace() {
         queryKey: ["me"],
       });
 
-      router.replace(resolveWorkspaceHref(data?.membership?.role));
+      // New workspace always needs onboarding
+      router.replace("/owner/onboarding");
     },
   });
 }

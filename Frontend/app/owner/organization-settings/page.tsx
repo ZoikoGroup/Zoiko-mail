@@ -1,15 +1,17 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { ProtectedRoute } from "@/components/owner/ProtectedRoute";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { useMe } from "@/lib/auth-hooks";
 import { useUpdateTenant } from "@/lib/owner-hooks";
 import type { MeResponse } from "@/lib/auth-api";
 import { Building2, Save } from "lucide-react";
 
 export default function OrganizationSettingsPage() {
-  const { data } = useMe();
+  const { data, isLoading, error } = useMe();
   const me = data as MeResponse | undefined;
   const [name, setName] = useState("");
   const [initialized, setInitialized] = useState(false);
@@ -21,6 +23,43 @@ export default function OrganizationSettingsPage() {
       setInitialized(true);
     }
   }, [me, initialized]);
+
+  if (isLoading) {
+    return (
+      <ProtectedRoute allowedRoles={["OWNER", "ADMIN"]}>
+        <div className="mx-auto max-w-3xl space-y-6 px-4 py-8 sm:px-6">
+          <PageHeader title="Organization Settings" description="Manage your organization's basic information." />
+          <div className="zoiko-card p-6">
+            <div className="flex items-center gap-3 mb-6">
+              <Skeleton variant="rect" className="h-10 w-10 rounded-lg" />
+              <div className="space-y-2">
+                <Skeleton className="h-5 w-40" />
+                <Skeleton className="h-3 w-64" />
+              </div>
+            </div>
+            <div className="space-y-4">
+              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-9 w-full" />
+            </div>
+          </div>
+        </div>
+      </ProtectedRoute>
+    );
+  }
+
+  if (error) {
+    return (
+      <ProtectedRoute allowedRoles={["OWNER", "ADMIN"]}>
+        <div className="mx-auto max-w-3xl space-y-6 px-4 py-8 sm:px-6">
+          <PageHeader title="Organization Settings" description="Manage your organization's basic information." />
+          <div className="zoiko-card p-6 text-center">
+            <p className="text-sm text-[var(--crit)]">Failed to load organization settings. Please try again.</p>
+          </div>
+        </div>
+      </ProtectedRoute>
+    );
+  }
 
   return (
     <ProtectedRoute allowedRoles={["OWNER", "ADMIN"]}>
@@ -54,7 +93,9 @@ export default function OrganizationSettingsPage() {
               <label className="mb-1 block text-sm font-medium text-[var(--ink2)]">Plan</label>
               <div className="flex items-center gap-2">
                 <span className="zoiko-pill accent">{me?.tenant.planCode ?? "—"}</span>
-                <button className="zoiko-btn sm">Upgrade Plan</button>
+                <Link href="/owner/billing" className="zoiko-btn sm">
+                  View Billing
+                </Link>
               </div>
             </div>
             <div>
@@ -79,6 +120,7 @@ export default function OrganizationSettingsPage() {
               {updateTenant.isPending ? "Saving…" : "Save Changes"}
             </button>
             {updateTenant.isSuccess && <span className="text-xs text-[var(--ok)]">Saved successfully.</span>}
+            {updateTenant.isError && <span className="text-xs text-[var(--crit)]">Failed to save. Please try again.</span>}
           </div>
         </div>
       </div>

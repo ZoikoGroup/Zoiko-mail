@@ -13,6 +13,7 @@ import {
   Trash2,
   Sliders,
   UserCircle,
+  BarChart3,
   type LucideIcon,
 } from "lucide-react";
 
@@ -28,6 +29,7 @@ export interface OwnerNavItem {
 
 export const OWNER_NAV: OwnerNavItem[] = [
   { section: "Dashboard", label: "Overview", href: "/owner", icon: LayoutDashboard },
+  { section: "Dashboard", label: "Usage", href: "/owner/usage", icon: BarChart3 },
 
   { section: "Workspace", label: "Users & Roles", href: "/owner/users", icon: Users },
   { section: "Workspace", label: "Mailboxes", href: "/owner/mailboxes", icon: Mail },

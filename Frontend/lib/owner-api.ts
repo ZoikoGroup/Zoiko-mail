@@ -277,6 +277,65 @@ export async function updateTenant(input: UpdateTenantInput): Promise<Tenant> {
   });
 }
 
+// ─── Onboarding ─────────────────────────────────────────────────────────────
+
+export interface OnboardingSteps {
+  workspaceCreated: boolean;
+  domainAdded: boolean;
+  domainVerified: boolean;
+  mailboxCreated: boolean;
+  providerConnected: boolean;
+  teamInvited: boolean;
+}
+
+export interface OnboardingStatus {
+  steps: OnboardingSteps;
+  completedCount: number;
+  totalSteps: number;
+  isComplete: boolean;
+}
+
+export async function getOnboardingStatus(): Promise<OnboardingStatus> {
+  return apiRequest<OnboardingStatus>("/tenants/onboarding-status");
+}
+
+// ─── Usage ───────────────────────────────────────────────────────────────
+
+export interface UsageStorage {
+  used: number;
+  limit: number;
+  mailboxes: Array<{ address: string; used: number; limit: number }>;
+}
+
+export interface UsageEmails {
+  sent: number;
+  received: number;
+  failed: number;
+  draft: number;
+}
+
+export interface UsageConnectedAccounts {
+  total: number;
+  active: number;
+  providers: Record<string, number>;
+}
+
+export interface UsageData {
+  period: { days: number; since: string };
+  storage: UsageStorage;
+  mailboxes: { count: number };
+  emails: UsageEmails;
+  emailVolume: Array<{ date: string; count: number }>;
+  apiUsage: Array<{ date: string; count: number }>;
+  activeMembers: number;
+  totalDomains: number;
+  connectedAccounts: UsageConnectedAccounts;
+}
+
+export async function getUsage(days: number = 30): Promise<UsageData> {
+  return apiRequest<UsageData>(`/tenants/usage?days=${days}`);
+}
+
 // ─── Connectors ───────────────────────────────────────────────────────────────
 
 export interface Connector {

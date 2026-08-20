@@ -18,6 +18,8 @@ import {
   activatePolicy,
   getCurrentTenant,
   updateTenant,
+  getOnboardingStatus,
+  getUsage,
   getConnectors,
   deleteConnector,
   getConnectorHealth,
@@ -177,6 +179,26 @@ export function useUpdateTenant() {
   return useMutation({
     mutationFn: (input: UpdateTenantInput) => updateTenant(input),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "tenant"] }),
+  });
+}
+
+// ─── Onboarding ────────────────────────────────────────────────────────────
+
+export function useOnboardingStatus() {
+  return useQuery({
+    queryKey: ["owner", "onboarding"],
+    queryFn: getOnboardingStatus,
+    staleTime: 30_000,
+  });
+}
+
+// ─── Usage ────────────────────────────────────────────────────────────────
+
+export function useUsage(days: number = 30) {
+  return useQuery({
+    queryKey: ["owner", "usage", days],
+    queryFn: () => getUsage(days),
+    staleTime: 60_000,
   });
 }
 

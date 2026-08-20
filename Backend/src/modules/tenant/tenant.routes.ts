@@ -6,6 +6,8 @@ import { updateTenantSchema } from "./tenant.schema.js";
 const tenantRouter = Router();
 tenantRouter.use(authenticate, tenantContext);
 tenantRouter.get("/current", requireRole("OWNER", "ADMIN", "MEMBER"), controller.getCurrent);
+tenantRouter.get("/onboarding-status", requireRole("OWNER", "ADMIN", "MEMBER"), controller.getOnboardingStatus);
+tenantRouter.get("/usage", requireRole("OWNER", "ADMIN", "MEMBER"), controller.getUsage);
 tenantRouter.patch(
   "/current",
   requireRole("OWNER", "ADMIN"),

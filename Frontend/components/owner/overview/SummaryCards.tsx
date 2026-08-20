@@ -1,26 +1,47 @@
 "use client";
 
-import { Users, UserCheck, Mail, Globe, Link2, UserPlus, HardDrive, ShieldAlert } from "lucide-react";
+import { Users, UserCheck, Mail, Globe, Link2, UserPlus, HardDrive } from "lucide-react";
 import { StatCard } from "@/components/ui/StatCard";
 import { ProgressBar } from "@/components/ui/ProgressBar";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { useMembers, useAdminMailboxes, useDomains, useConnectors } from "@/lib/owner-hooks";
 
 export function SummaryCards() {
-  const { data: members = [] } = useMembers();
-  const { data: mailboxes = [] } = useAdminMailboxes();
-  const { data: domains = [] } = useDomains();
-  const { data: connectors = [] } = useConnectors();
+  const { data: members, isLoading: membersLoading } = useMembers();
+  const { data: mailboxes, isLoading: mailboxesLoading } = useAdminMailboxes();
+  const { data: domains, isLoading: domainsLoading } = useDomains();
+  const { data: connectors, isLoading: connectorsLoading } = useConnectors();
 
-  const totalUsers = members.length;
-  const activeUsers = members.filter((m) => m.status === "ACTIVE").length;
-  const pendingInvitations = members.filter((m) => m.status === "INVITED").length;
-  const activeDomains = domains.filter((d) => d.isActive).length;
-  const connectedAccounts = connectors.length;
-  const totalMailboxes = mailboxes.length;
-  const storageUsedMb = mailboxes.reduce((sum, m) => sum + m.storageUsedMb, 0);
-  const storageLimitMb = mailboxes.reduce((sum, m) => sum + m.storageLimitMb, 0);
+  const isLoading = membersLoading || mailboxesLoading || domainsLoading || connectorsLoading;
+
+  const membersList = members ?? [];
+  const mailboxesList = mailboxes ?? [];
+  const domainsList = domains ?? [];
+  const connectorsList = connectors ?? [];
+
+  const totalUsers = membersList.length;
+  const activeUsers = membersList.filter((m) => m.status === "ACTIVE").length;
+  const pendingInvitations = membersList.filter((m) => m.status === "INVITED").length;
+  const activeDomains = domainsList.filter((d) => d.isActive).length;
+  const connectedAccounts = connectorsList.length;
+  const totalMailboxes = mailboxesList.length;
+  const storageUsedMb = mailboxesList.reduce((sum, m) => sum + m.storageUsedMb, 0);
+  const storageLimitMb = mailboxesList.reduce((sum, m) => sum + m.storageLimitMb, 0);
   const storageUsedGb = +(storageUsedMb / 1024).toFixed(1);
   const storageLimitGb = Math.round(storageLimitMb / 1024);
+
+  if (isLoading) {
+    return (
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="zoiko-stat space-y-2">
+            <Skeleton className="h-3 w-20" />
+            <Skeleton className="h-6 w-12" />
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -49,7 +70,11 @@ export function SummaryCards() {
           className="mt-2"
         />
       </div>
-      <StatCard label="Security Alerts" value={0} icon={ShieldAlert} />
+      <StatCard
+        label="Unhealthy Connectors"
+        value={connectorsList.filter((c) => c.status !== "ACTIVE").length}
+        icon={Link2}
+      />
     </div>
   );
 }
