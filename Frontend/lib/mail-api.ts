@@ -195,3 +195,50 @@ export async function downloadAttachment(
   a.remove();
   URL.revokeObjectURL(url);
 }
+
+// ---- Threads --------------------------------------------------------------
+// The backend groups related messages into threads (subject + participants).
+// The list view returns one thread per row with only the most recent message
+// preview inside; the detail view returns the full message list chronologically.
+
+export interface MessageThread {
+  id: string;
+  subjectNormalized: string;
+  messageCount: number;
+  lastMessageAt: string;
+  createdAt: string;
+  // In list responses this contains only the most recent message (backend
+  // does `take: 1`). In detail responses it contains all messages in
+  // chronological order.
+  messages: EmailMessage[];
+}
+
+export interface ThreadPagination {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface ListThreadsResponse {
+  threads: MessageThread[];
+  pagination: ThreadPagination;
+}
+
+export interface ListThreadsParams {
+  page?: number;
+  limit?: number;
+  q?: string;
+}
+
+export async function listThreads(params: ListThreadsParams = {}): Promise<ListThreadsResponse> {
+  const q = new URLSearchParams();
+  q.set("page", String(params.page ?? 1));
+  q.set("limit", String(params.limit ?? 25));
+  if (params.q) q.set("q", params.q);
+  return apiRequest<ListThreadsResponse>(`/threads?${q.toString()}`);
+}
+
+export async function getThread(threadId: string): Promise<MessageThread> {
+  return apiRequest<MessageThread>(`/threads/${threadId}`);
+}

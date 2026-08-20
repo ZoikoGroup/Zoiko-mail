@@ -19,6 +19,9 @@ import {
   type MailItem,
   type BulkAction,
   type Recipients,
+  listThreads,
+  getThread,
+  type ListThreadsParams,
 } from "./mail-api";
 
 const listKey = (params: ListMailParams) =>
@@ -66,10 +69,10 @@ export function useUpdateMailItem() {
           items: data.items.map((it) =>
             it.messageId === v.messageId
               ? {
-                  ...it,
-                  isRead: v.isRead ?? it.isRead,
-                  isStarred: v.isStarred ?? it.isStarred,
-                }
+                ...it,
+                isRead: v.isRead ?? it.isRead,
+                isStarred: v.isStarred ?? it.isStarred,
+              }
               : it
           ),
         });
@@ -172,3 +175,27 @@ export function useComposerSubmit() {
 }
 
 export type { MailItem };
+
+// ---- Threads --------------------------------------------------------------
+// staleTime: 15s matches useMailList — threads change at the same cadence
+// as mail (new incoming messages create/update threads).
+
+const threadsListKey = (params: ListThreadsParams) =>
+  ["mail", "threads", "list", params.page ?? 1, params.limit ?? 25, params.q ?? ""] as const;
+
+export function useThreads(params: ListThreadsParams) {
+  return useQuery({
+    queryKey: threadsListKey(params),
+    queryFn: () => listThreads(params),
+    staleTime: 15_000,
+  });
+}
+
+export function useThread(threadId: string | null) {
+  return useQuery({
+    queryKey: ["mail", "threads", "detail", threadId],
+    queryFn: () => getThread(threadId as string),
+    enabled: Boolean(threadId),
+    staleTime: 15_000,
+  });
+}
