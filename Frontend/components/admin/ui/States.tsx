@@ -1,12 +1,18 @@
 /**
- * Admin workspace primitive. Composes the tokens and .zoiko-* classes that
- * already exist in app/globals.css rather than introducing a second styling
- * vocabulary.
+ * Compact, in-card loading / empty / error states.
+ *
+ * These are named `Inline*` on purpose. components/ui exports `EmptyState` and
+ * `ErrorState` too, but those are full-page states — py-16 with a 14x14 icon
+ * badge — meant to occupy a whole route. These render *inside* a Card body,
+ * usually where a table would be, so they stay compact.
+ *
+ * Same name for two different densities was the actual problem: it read as
+ * duplication and invited someone to "deduplicate" them into one component,
+ * which would have made every admin table card several rows taller. Use
+ * components/ui/EmptyState for a whole empty route; use these inside a card.
  */
 
-/* ── empty state ───────────────────────────────────────────────────────── */
-
-export function EmptyState({ title, hint }: { title: string; hint?: string }) {
+export function InlineEmpty({ title, hint }: { title: string; hint?: string }) {
   return (
     <div className="px-4 py-10 text-center text-[var(--ink3)]">
       <div aria-hidden className="mb-2 text-2xl">
@@ -17,8 +23,6 @@ export function EmptyState({ title, hint }: { title: string; hint?: string }) {
     </div>
   );
 }
-
-/* ── loading / error ───────────────────────────────────────────────────── */
 
 export function LoadingRows({ rows = 4 }: { rows?: number }) {
   return (
@@ -34,7 +38,7 @@ export function LoadingRows({ rows = 4 }: { rows?: number }) {
   );
 }
 
-export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+export function InlineError({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
     <div className="px-4 py-8 text-center">
       <div className="text-[13px] font-semibold text-[var(--crit)]">Could not load this</div>

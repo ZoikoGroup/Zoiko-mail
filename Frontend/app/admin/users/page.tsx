@@ -6,7 +6,7 @@ import { useCan } from "@/lib/admin-capabilities";
 import type { MemberDto, MfaMethod, MembershipRole } from "@/lib/admin-api";
 import {
   Card,
-  ErrorState,
+  InlineError,
   LoadingRows,
   Notice,
   PageHeader,
@@ -60,7 +60,7 @@ export default function AdminUsersPage() {
         action={<button type="button" className="zoiko-btn sm">Export</button>}
       >
         {error ? (
-          <ErrorState message={error.message} />
+          <InlineError message={error.message} />
         ) : isLoading || !people ? (
           <LoadingRows rows={6} />
         ) : people.length === 0 ? (

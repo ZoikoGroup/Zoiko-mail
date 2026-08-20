@@ -4,8 +4,8 @@ import { useInvitations } from "@/lib/admin-hooks";
 import { useCan } from "@/lib/admin-capabilities";
 import {
   Card,
-  EmptyState,
-  ErrorState,
+  InlineEmpty,
+  InlineError,
   LoadingRows,
   PageHeader,
   Pill,
@@ -48,11 +48,11 @@ export default function AdminInvitationsPage() {
         }
       >
         {error ? (
-          <ErrorState message={error.message} />
+          <InlineError message={error.message} />
         ) : isLoading || !invitations ? (
           <LoadingRows rows={3} />
         ) : invitations.length === 0 ? (
-          <EmptyState title="No pending invitations" hint="Everyone invited has accepted." />
+          <InlineEmpty title="No pending invitations" hint="Everyone invited has accepted." />
         ) : (
           invitations.map((invite) => {
             const expiringSoon = invite.expiresAt.toLowerCase().includes("tomorrow");

@@ -5,8 +5,8 @@ import { useNotifications } from "@/lib/admin-hooks";
 import type { NotificationDto } from "@/lib/admin-api";
 import {
   Card,
-  EmptyState,
-  ErrorState,
+  InlineEmpty,
+  InlineError,
   LoadingRows,
   PageHeader,
   Pill,
@@ -56,11 +56,11 @@ export default function AdminNotificationsPage() {
         badge={unread > 0 ? <Pill tone="warn">{`${unread} unread`}</Pill> : <Pill tone="ok">All read</Pill>}
       >
         {error ? (
-          <ErrorState message={error.message} />
+          <InlineError message={error.message} />
         ) : isLoading || !notifications ? (
           <LoadingRows rows={4} />
         ) : notifications.length === 0 ? (
-          <EmptyState title="Nothing to report" hint="Operational alerts will appear here." />
+          <InlineEmpty title="Nothing to report" hint="Operational alerts will appear here." />
         ) : (
           notifications.map((notification) => {
             const severity = SEVERITY[notification.severity];

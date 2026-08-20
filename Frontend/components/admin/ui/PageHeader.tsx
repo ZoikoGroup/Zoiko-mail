@@ -1,12 +1,18 @@
 /**
- * Admin workspace primitive. Composes the tokens and .zoiko-* classes that
- * already exist in app/globals.css rather than introducing a second styling
- * vocabulary.
+ * Admin page header.
+ *
+ * This is a thin adapter over components/ui/PageHeader rather than a second
+ * implementation. The two were genuinely the same component under two prop
+ * vocabularies — `subtitle`/`action` here, `description`/`actions` there — and
+ * keeping both would have meant every future change landing twice.
+ *
+ * The adapter survives for two reasons: it keeps the admin screens' prop names
+ * stable (fourteen pages, no churn), and it owns the admin-specific bottom
+ * margin, which the shared component deliberately does not impose.
  */
 
 import type { ReactNode } from "react";
-
-/* ── page header ───────────────────────────────────────────────────────── */
+import { PageHeader as SharedPageHeader } from "@/components/ui/PageHeader";
 
 export function PageHeader({
   title,
@@ -18,14 +24,8 @@ export function PageHeader({
   action?: ReactNode;
 }) {
   return (
-    <div className="mb-5 flex flex-wrap items-end gap-3">
-      <div className="min-w-0">
-        <h1 className="font-editorial text-[25px] font-normal leading-tight tracking-[-0.016em] text-[var(--ink)]">
-          {title}
-        </h1>
-        {subtitle && <p className="mt-0.5 text-[12.5px] text-[var(--ink3)]">{subtitle}</p>}
-      </div>
-      {action && <div className="ml-auto flex items-center gap-2">{action}</div>}
+    <div className="mb-5">
+      <SharedPageHeader title={title} description={subtitle} actions={action} />
     </div>
   );
 }

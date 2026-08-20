@@ -4,8 +4,8 @@ import { useGroups } from "@/lib/admin-hooks";
 import { useCan } from "@/lib/admin-capabilities";
 import {
   Card,
-  EmptyState,
-  ErrorState,
+  InlineEmpty,
+  InlineError,
   LoadingRows,
   PageHeader,
   Pill,
@@ -40,11 +40,11 @@ export default function AdminGroupsPage() {
         badge={groups ? <Pill tone="nu">{`${groups.filter((g) => g.kind === "SHARED").length} shared`}</Pill> : undefined}
       >
         {error ? (
-          <ErrorState message={error.message} />
+          <InlineError message={error.message} />
         ) : isLoading || !groups ? (
           <LoadingRows rows={4} />
         ) : groups.length === 0 ? (
-          <EmptyState
+          <InlineEmpty
             title="No groups yet"
             hint="Create a shared mailbox or a distribution address."
           />

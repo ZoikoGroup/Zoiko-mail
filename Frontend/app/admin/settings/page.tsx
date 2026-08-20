@@ -4,7 +4,7 @@ import { useSettings } from "@/lib/admin-hooks";
 import { useCan } from "@/lib/admin-capabilities";
 import {
   Card,
-  ErrorState,
+  InlineError,
   LoadingRows,
   Notice,
   PageHeader,
@@ -23,7 +23,7 @@ export default function AdminSettingsPage() {
       <>
         <PageHeader title="Workspace settings" />
         <Card>
-          <ErrorState message={error.message} />
+          <InlineError message={error.message} />
         </Card>
       </>
     );

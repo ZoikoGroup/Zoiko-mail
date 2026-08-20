@@ -6,7 +6,7 @@ import { useCapabilityMatrix, useGuardrails } from "@/lib/admin-hooks";
 import type { CapabilityCell } from "@/lib/admin-api";
 import {
   Card,
-  ErrorState,
+  InlineError,
   GuardRow,
   LoadingRows,
   Notice,
@@ -49,7 +49,7 @@ export default function AdminPermissionsPage() {
         badge={<Pill tone="nu">{`${capabilityCount} capabilities`}</Pill>}
       >
         {error ? (
-          <ErrorState message={error.message} />
+          <InlineError message={error.message} />
         ) : isLoading || !matrix ? (
           <LoadingRows rows={8} />
         ) : (

@@ -4,8 +4,8 @@ import { useConnectors, useSyncErrors } from "@/lib/admin-hooks";
 import { useCan } from "@/lib/admin-capabilities";
 import {
   Card,
-  EmptyState,
-  ErrorState,
+  InlineEmpty,
+  InlineError,
   LoadingRows,
   PageHeader,
   Pill,
@@ -43,11 +43,11 @@ export default function AdminProviderSyncPage() {
 
       <Card title="Connections">
         {error ? (
-          <ErrorState message={error.message} />
+          <InlineError message={error.message} />
         ) : isLoading || !connectors ? (
           <LoadingRows rows={4} />
         ) : connectors.length === 0 ? (
-          <EmptyState title="No connectors" hint="Members connect their own inbox." />
+          <InlineEmpty title="No connectors" hint="Members connect their own inbox." />
         ) : (
           connectors.map((connector) => {
             const status = STATUS[connector.status] ?? STATUS.IDLE;
@@ -79,7 +79,7 @@ export default function AdminProviderSyncPage() {
         }
       >
         {!syncErrors || syncErrors.length === 0 ? (
-          <EmptyState title="No sync errors" hint="Every connector reported success on its last run." />
+          <InlineEmpty title="No sync errors" hint="Every connector reported success on its last run." />
         ) : (
           syncErrors.map((item) => (
             <Row

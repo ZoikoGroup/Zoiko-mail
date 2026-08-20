@@ -5,7 +5,7 @@ import { useDashboard } from "@/lib/admin-hooks";
 import { useCan } from "@/lib/admin-capabilities";
 import {
   Card,
-  ErrorState,
+  InlineError,
   LoadingRows,
   Notice,
   PageHeader,
@@ -24,7 +24,7 @@ export default function AdminDashboardPage() {
       <>
         <PageHeader title="Dashboard" />
         <Card>
-          <ErrorState message={error.message} />
+          <InlineError message={error.message} />
         </Card>
       </>
     );

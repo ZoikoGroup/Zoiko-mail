@@ -5,8 +5,8 @@ import { useCan } from "@/lib/admin-capabilities";
 import { DASHBOARD } from "@/lib/admin-api";
 import {
   Card,
-  EmptyState,
-  ErrorState,
+  InlineEmpty,
+  InlineError,
   LoadingRows,
   Notice,
   PageHeader,
@@ -47,11 +47,11 @@ export default function AdminMailboxesPage() {
         badge={mailboxes ? <Pill tone="nu">{`${mailboxes.length} of ${seats} seats`}</Pill> : undefined}
       >
         {error ? (
-          <ErrorState message={error.message} />
+          <InlineError message={error.message} />
         ) : isLoading || !mailboxes ? (
           <LoadingRows rows={5} />
         ) : mailboxes.length === 0 ? (
-          <EmptyState title="No mailboxes yet" hint="Create one on a verified domain." />
+          <InlineEmpty title="No mailboxes yet" hint="Create one on a verified domain." />
         ) : (
           <TableWrap>
             <Table>

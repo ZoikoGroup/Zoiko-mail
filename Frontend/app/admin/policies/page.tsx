@@ -5,7 +5,7 @@ import { usePolicyGroups } from "@/lib/admin-hooks";
 import { useCan } from "@/lib/admin-capabilities";
 import {
   Card,
-  ErrorState,
+  InlineError,
   LoadingRows,
   Notice,
   PageHeader,
@@ -31,7 +31,7 @@ export default function AdminPoliciesPage() {
       <>
         <PageHeader title="Policies" />
         <Card>
-          <ErrorState message={error.message} />
+          <InlineError message={error.message} />
         </Card>
       </>
     );

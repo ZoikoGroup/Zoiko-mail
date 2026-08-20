@@ -5,8 +5,8 @@ import { useAuditEvents } from "@/lib/admin-hooks";
 import type { AuditEventDto } from "@/lib/admin-api";
 import {
   Card,
-  EmptyState,
-  ErrorState,
+  InlineEmpty,
+  InlineError,
   FilterChips,
   LoadingRows,
   Notice,
@@ -72,11 +72,11 @@ export default function AdminAuditPage() {
         badge={events ? <Pill tone="nu">{`${visible.length} of ${events.length}`}</Pill> : undefined}
       >
         {error ? (
-          <ErrorState message={error.message} />
+          <InlineError message={error.message} />
         ) : isLoading || !events ? (
           <LoadingRows rows={8} />
         ) : visible.length === 0 ? (
-          <EmptyState
+          <InlineEmpty
             title="No events match this filter"
             hint="Try a different actor, or clear the filter."
           />

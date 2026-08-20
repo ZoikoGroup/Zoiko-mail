@@ -4,8 +4,8 @@ import { useDomains } from "@/lib/admin-hooks";
 import type { DnsRecordDto, DomainDto } from "@/lib/admin-api";
 import {
   Card,
-  EmptyState,
-  ErrorState,
+  InlineEmpty,
+  InlineError,
   LoadingRows,
   Notice,
   PageHeader,
@@ -33,7 +33,7 @@ export default function AdminDomainsPage() {
 
       {error ? (
         <Card>
-          <ErrorState message={error.message} />
+          <InlineError message={error.message} />
         </Card>
       ) : isLoading || !domains ? (
         <Card>
@@ -41,7 +41,7 @@ export default function AdminDomainsPage() {
         </Card>
       ) : domains.length === 0 ? (
         <Card>
-          <EmptyState title="No domains yet" hint="Add a domain to send from your own address." />
+          <InlineEmpty title="No domains yet" hint="Add a domain to send from your own address." />
         </Card>
       ) : (
         domains.map((domain) => <DomainBlock key={domain.id} domain={domain} />)
