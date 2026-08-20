@@ -57,6 +57,20 @@ export async function cancelInvitation(membershipId: string): Promise<void> {
   await apiRequest(`/membership/invitations/${membershipId}`, { method: "DELETE" });
 }
 
+export async function acceptInvitation(invitationToken: string): Promise<{ id: string; role: string; status: string }> {
+  return apiRequest("/membership/invitations/accept", {
+    method: "POST",
+    body: { invitationToken },
+  });
+}
+
+export async function acceptInvitationById(membershipId: string): Promise<{ id: string; role: string; status: string }> {
+  return apiRequest("/membership/invitations/accept", {
+    method: "POST",
+    body: { membershipId },
+  });
+}
+
 export interface UpdateMemberInput {
   role?: "ADMIN" | "MEMBER";
   status?: "ACTIVE" | "SUSPENDED";

@@ -4,7 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ApiError } from "@/lib/api-client";
 import { getPlatformToken, isLoggedIn } from "@/lib/auth-storage";
-import { useLogout } from "@/lib/auth-hooks";
+// import { useLogout } from "@/lib/auth-hooks";
+import { useLogout, useMe } from "@/lib/auth-hooks";
+import { resolveWorkspaceHref } from "@/lib/workspace";
 import {
   fetchPlatformDiagnostics,
   fetchPlatformDomainDetail,
@@ -319,30 +321,30 @@ function TenantDetail({
     cols: string[];
     renderCell?: (row: Record<string, unknown>, col: string) => string;
   }> = [
-    { label: `Members (${tenant.members.length})`, rows: tenant.members, cols: ["name", "email", "role", "status"] },
-    { label: `Mailboxes (${tenant.mailboxes.length})`, rows: tenant.mailboxes, cols: ["email", "provider", "status", "isPrimary"] },
-    { label: `Domains (${tenant.domains.length})`, rows: tenant.domains, cols: ["domainName", "verificationStatus", "mxStatus", "spfStatus", "dkimStatus", "dmarcStatus"] },
-    { label: `Connected Accounts (${tenant.connectedAccounts.length})`, rows: tenant.connectedAccounts, cols: ["email", "provider", "accountStatus", "lastSyncAt"] },
-    { label: `Provider Events (${tenant.providerEvents.length})`, rows: tenant.providerEvents, cols: ["provider", "accountEmail", "eventType", "processingStatus", "errorCode", "receivedAt"] },
-    { label: `Delivery Events (${tenant.deliveryEvents.length})`, rows: tenant.deliveryEvents, cols: ["type", "failureCode", "failureReason", "createdAt"] },
-    { label: `Jobs (${tenant.jobs.length})`, rows: tenant.jobs, cols: ["type", "status", "attempts", "runAt", "completedAt", "lastError"] },
-    {
-      label: `Audit (${tenant.audit.length})`,
-      rows: tenant.audit,
-      cols: ["eventType", "actor", "resource", "result", "createdAt"],
-      renderCell: (row, col) => {
-        if (col === "actor") {
-          const a = row.actor;
-          if (a && typeof a === "object") {
-            const rec = a as Record<string, unknown>;
-            return String(rec.displayName ?? rec.email ?? "system");
+      { label: `Members (${tenant.members.length})`, rows: tenant.members, cols: ["name", "email", "role", "status"] },
+      { label: `Mailboxes (${tenant.mailboxes.length})`, rows: tenant.mailboxes, cols: ["email", "provider", "status", "isPrimary"] },
+      { label: `Domains (${tenant.domains.length})`, rows: tenant.domains, cols: ["domainName", "verificationStatus", "mxStatus", "spfStatus", "dkimStatus", "dmarcStatus"] },
+      { label: `Connected Accounts (${tenant.connectedAccounts.length})`, rows: tenant.connectedAccounts, cols: ["email", "provider", "accountStatus", "lastSyncAt"] },
+      { label: `Provider Events (${tenant.providerEvents.length})`, rows: tenant.providerEvents, cols: ["provider", "accountEmail", "eventType", "processingStatus", "errorCode", "receivedAt"] },
+      { label: `Delivery Events (${tenant.deliveryEvents.length})`, rows: tenant.deliveryEvents, cols: ["type", "failureCode", "failureReason", "createdAt"] },
+      { label: `Jobs (${tenant.jobs.length})`, rows: tenant.jobs, cols: ["type", "status", "attempts", "runAt", "completedAt", "lastError"] },
+      {
+        label: `Audit (${tenant.audit.length})`,
+        rows: tenant.audit,
+        cols: ["eventType", "actor", "resource", "result", "createdAt"],
+        renderCell: (row, col) => {
+          if (col === "actor") {
+            const a = row.actor;
+            if (a && typeof a === "object") {
+              const rec = a as Record<string, unknown>;
+              return String(rec.displayName ?? rec.email ?? "system");
+            }
+            return "system";
           }
-          return "system";
-        }
-        return val(row, col);
+          return val(row, col);
+        },
       },
-    },
-  ];
+    ];
 
   return (
     <div>
@@ -1547,6 +1549,14 @@ export default function PlatformConsole() {
   const [overviewError, setOverviewError] = useState<string | null>(null);
 
   const isPlatform = !!getPlatformToken();
+  // const { data: me, isLoading: meLoading } = useMe();
+  
+  // Only fetch /auth/me when we're a tenant user. Staff platform tokens are
+  // not valid for /auth/me, and calling it triggers a 401 -> refresh-fail ->
+  // clearTokens() cascade that wipes the platform token itself.
+  const meQuery = useMe();
+  const me = isPlatform ? undefined : meQuery.data;
+  const meLoading = isPlatform ? false : meQuery.isLoading;
 
   const loadOverview = useCallback(async () => {
     setOverviewLoading(true);
@@ -1568,10 +1578,35 @@ export default function PlatformConsole() {
     loadOverview();
   }, [router, loadOverview]);
 
+  // Backend's requireSupportAccess only allows a staff platform token OR a
+  // tenant member with role SUPPORT — OWNER/ADMIN/MEMBER get a 403 from every
+  // call on this page. Match that here so they never see the shell either.
+  useEffect(() => {
+    if (isPlatform) return; // staff platform token — always allowed, no member role check needed
+    if (!meLoading && me && me.membership.role !== "SUPPORT") {
+      router.replace(resolveWorkspaceHref(me.membership.role));
+    }
+  }, [isPlatform, me, meLoading, router]);
+
   const openTenant = useCallback((tenantId: string) => {
     setPendingTenant(tenantId);
     setPage("tenants");
   }, []);
+
+  // Loading gate: don't render the staff console until we know whether the
+  // user has staff platform access OR the tenant SUPPORT role. Without this,
+  // a member briefly sees the console UI before the guard redirects them.
+  // Staff platform users skip this because their access doesn't depend on /auth/me.
+  if (!isPlatform && (meLoading || !me)) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-sm">Loading…</div>
+      </div>
+    );
+  }
+  if (!isPlatform && me && me.membership.role !== "SUPPORT") {
+    return null;
+  }
 
   return (
     <div className="support-workspace">

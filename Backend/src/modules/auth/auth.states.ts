@@ -27,7 +27,8 @@ export interface WorkspaceOption {
 /** Discriminated union: every post-auth login outcome maps to one screen. */
 export type AuthState =
   | { state: "SIGNED_IN"; session: AuthSessionResponse }
-  | { state: "WORKSPACE_SELECTION"; user: PublicUser; workspaces: WorkspaceOption[] }
+  // | { state: "WORKSPACE_SELECTION"; user: PublicUser; workspaces: WorkspaceOption[] }
+  | { state: "WORKSPACE_SELECTION"; user: PublicUser; workspaces: WorkspaceOption[]; selectionToken: string; expiresIn: string }
   | { state: "NO_WORKSPACE"; user: PublicUser }
   | { state: "EMAIL_VERIFICATION_REQUIRED"; user: PublicUser; pendingToken: string; expiresIn: string }
   | { state: "ACCOUNT_SUSPENDED"; user: PublicUser }

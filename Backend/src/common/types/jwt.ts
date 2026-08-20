@@ -1,6 +1,7 @@
 import type { MembershipRole, PlatformRole } from "@prisma/client";
 
-export type TokenType = "access" | "refresh" | "pending" | "platform";
+// export type TokenType = "access" | "refresh" | "pending" | "platform";
+export type TokenType = "access" | "refresh" | "pending" | "platform" | "selection";
 
 export interface AccessTokenPayload {
   sub: string;
@@ -36,6 +37,19 @@ export interface RefreshTokenPayload {
 export interface PendingTokenPayload {
   sub: string;
   type: "pending";
+}
+
+/**
+ * Issued during login when a user has multiple selectable workspaces. Lets
+ * the client show a workspace picker and then complete auth without asking
+ * for the password again. Short-lived (15 min), single-purpose — the only
+ * endpoint that accepts it is /auth/select-workspace. Deliberately thin
+ * like PendingTokenPayload: no tenant, no role — those are decided when
+ * the user picks a workspace.
+ */
+export interface SelectionTokenPayload {
+  sub: string;
+  type: "selection";
 }
 
 /**

@@ -130,3 +130,8 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response) =>
   const result = await authService.resetPassword(req.body, getRequestContext(req));
   sendSuccess(res, 200, result, req.requestId);
 });
+
+export const selectWorkspace = asyncHandler(async (req: Request, res: Response) => {
+  const result = await authService.selectWorkspace(req.body, getRequestContext(req));
+  res.json({ success: true, data: result });
+});

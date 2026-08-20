@@ -6,6 +6,7 @@ import {
   HiBolt,
   HiSparkles,
 } from "react-icons/hi2";
+import Image from "next/image";
 
 const FEATURES = [
   {
@@ -50,20 +51,23 @@ export default function AuthShowcase() {
       <div className="relative z-10 flex h-screen w-full flex-col justify-between px-8 py-6">
         {/* ---------------- Logo ---------------- */}
 
-        <div className="flex items-center gap-3">
+        {/* <div className="flex items-center gap-3">
           <div className="flex items-center justify-center rounded-xl bg-cyan-600 text-xl font-bold text-white shadow-lg">
-            <img src="/ZoikoMail_Logo_DarkBG_PNG.png" className="h-10 w-auto" alt="Zoiko Mail" />
+            <Image src="/ZoikoMail_Logo_DarkBG_PNG.png" width={40} height={40} className="h-10 w-auto" alt="Zoiko Mail" />
           </div>
-          {/* 
-          <div>
-            <h2 className="text-xl font-bold text-white">
-              Zoiko Mail
-            </h2>
-
-            <p className="text-sm text-cyan-100">
-              Secure Business Communication
-            </p>
-          </div> */}
+        </div> */}
+        <div className="mb-6 text-left">
+          <Image
+            src="/ZoikoMail_Logo_DarkBG_PNG.png"
+            width={400}
+            height={100}
+            className=" h-12 w-auto"
+            alt="Zoiko Mail"
+            priority
+          />
+          <p className="mt-2 text-sm md:text-base text-slate-700 dark:text-slate-400">
+            Securely access your workspace
+          </p>
         </div>
 
         {/* ---------------- Hero Content ---------------- */}

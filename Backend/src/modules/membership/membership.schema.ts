@@ -11,9 +11,14 @@ export const addMemberSchema = z.object({
 
 export const createInvitationSchema = addMemberSchema;
 
-export const acceptInvitationSchema = z.object({
-  invitationToken: z.string().min(32).max(512),
-});
+export const acceptInvitationSchema = z
+  .object({
+    invitationToken: z.string().min(32).max(512).optional(),
+    membershipId: z.string().uuid().optional(),
+  })
+  .refine((v) => v.invitationToken || v.membershipId, {
+    message: "Either invitationToken or membershipId is required",
+  });
 
 export const updateMemberSchema = z
   .object({

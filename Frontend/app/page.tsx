@@ -9,7 +9,8 @@ import { useMe } from "@/lib/auth-hooks";
 import { useActions } from "@/lib/actions-hooks";
 import { isLoggedIn } from "@/lib/auth-storage";
 import type { MeResponse } from "@/lib/auth-api";
-import { NAV, SECTIONS } from "@/lib/nav";
+// import { NAV, SECTIONS } from "@/lib/nav";
+import { MEMBER_NAV, sectionsFor } from "@/lib/nav";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -22,6 +23,7 @@ export default function DashboardPage() {
   }, [router]);
 
   const active = actions.filter((a) => a.status === "OPEN" || a.status === "IN_PROGRESS").length;
+  const sections = sectionsFor(MEMBER_NAV);
 
   return (
     <AppShell>
@@ -51,13 +53,13 @@ export default function DashboardPage() {
         </div>
 
         {/* Feature sections */}
-        {SECTIONS.map((section) => (
+        {sections.map((section) => (
           <section key={section} className="mt-10">
             <h2 className="font-mono-num text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
               {section}
             </h2>
             <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {NAV.filter((n) => n.section === section).map((n) => {
+              {MEMBER_NAV.filter((n) => n.section === section).map((n) => {
                 const Icon = n.icon;
                 const live = n.status === "live";
                 const card = (

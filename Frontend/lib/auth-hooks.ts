@@ -27,7 +27,7 @@ import {
   type ResetPasswordInput,
 } from "./auth-api";
 import { getOnboardingStatus } from "./owner-api";
-import { isLoggedIn } from "./auth-storage";
+import { getPlatformToken, isLoggedIn } from "./auth-storage";
 import { resolveWorkspaceHref } from "./workspace";
 
 // Server state (the logged-in user) lives in TanStack Query, keyed by ['me'].
@@ -35,7 +35,8 @@ export function useMe() {
   return useQuery({
     queryKey: ["me"],
     queryFn: getMe,
-    enabled: isLoggedIn(), // don't call /auth/me if we have no token
+    // enabled: isLoggedIn(), 
+    enabled: isLoggedIn() && !getPlatformToken(), // don't call /auth/me for anonymous or staff sessions
     retry: false,
     staleTime: 60_000,
   });
@@ -53,20 +54,58 @@ export function useLogin() {
         queryKey: ["me"],
       });
 
+      // Determine redirect based on backend auth state — the backend is the
+      // source of truth for role, never localStorage or email.
+      let href: string;
+
       if (data.state === "STAFF_CONSOLE") {
-        router.replace("/support");
-        return;
+        href = "/support";
+      } else if (data.state === "SIGNED_IN") {
+        const role = data.membership?.role;
+        href = resolveWorkspaceHref(role);
+      } else if (data.state === "WORKSPACE_SELECTION") {
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem(
+            "zoiko.selection_token",
+            data.selectionToken ?? ""
+          );
+          sessionStorage.setItem(
+            "zoiko.selection_workspaces",
+            JSON.stringify(data.workspaces ?? [])
+          );
+        }
+        href = "/select-workspace";
+      } else if (
+        data.state === "ACCOUNT_SUSPENDED" ||
+        data.state === "ACCOUNT_DISABLED"
+      ) {
+        href = `/auth-status?state=${data.state}`;
+      } else if (
+        data.state === "MEMBERSHIP_SUSPENDED" ||
+        data.state === "WORKSPACE_SUSPENDED" ||
+        data.state === "WORKSPACE_DELETING"
+      ) {
+        const workspaceName = encodeURIComponent(data.workspace?.name ?? "");
+        href = `/auth-status?state=${data.state}&workspace=${workspaceName}`;
+      } else if (data.state === "EMAIL_VERIFICATION_REQUIRED") {
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem("zoiko.pending_token", data.pendingToken ?? "");
+          sessionStorage.setItem("zoiko.pending_email", data.user?.email ?? "");
+        }
+        href = "/verify-email";
+      } else if (data.state === "INVITATION_PENDING") {
+        const names = (data.invitations ?? []).map((w: { name: string }) => w.name).join(",");
+        href = `/auth-status?state=INVITATION_PENDING${names ? `&invitations=${encodeURIComponent(names)}` : ""}`;
+      } else {
+        href = "/login";
       }
 
-      if (data.state === "NO_WORKSPACE" || data.state === "WORKSPACE_SELECTION") {
+      if (data.state === "NO_WORKSPACE") {
         router.replace("/");
         return;
       }
 
       if (data.state === "SIGNED_IN") {
-        const role = data.membership?.role;
-        const href = resolveWorkspaceHref(role);
-
         // Check onboarding status and redirect if incomplete
         try {
           const onboarding = await getOnboardingStatus();
@@ -77,11 +116,9 @@ export function useLogin() {
         } catch {
           // Onboarding fetch failed — proceed to dashboard
         }
-
-        router.replace(href);
-      } else {
-        router.replace("/login");
       }
+
+      router.replace(href);
     },
   });
 }
@@ -179,7 +216,7 @@ export function useLogout() {
   return useMutation({
     mutationFn: () => logout(),
     onSettled: () => {
-      qc.clear(); 
+      qc.clear();
       router.replace("/login");
     },
   });

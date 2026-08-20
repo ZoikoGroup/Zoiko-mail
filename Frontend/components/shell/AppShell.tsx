@@ -2,13 +2,20 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { Menu, X, LogOut } from "lucide-react";
 import { isLoggedIn } from "@/lib/auth-storage";
 import { useMe, useLogout } from "@/lib/auth-hooks";
 import type { MeResponse } from "@/lib/auth-api";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
-import { DASHBOARD_ITEM, NAV, SECTIONS } from "@/lib/nav";
+// import { DASHBOARD_ITEM, NAV, SECTIONS } from "@/lib/nav";
+import { DASHBOARD_ITEM, MEMBER_NAV, sectionsFor } from "@/lib/nav";
+import { resolveWorkspaceHref } from "@/lib/workspace";
+
+// Roles that belong on the member dashboard. SUPPORT has its own dashboard
+// at /support-workspace and should never land here.
+const MEMBER_DASHBOARD_ROLES = ["OWNER", "ADMIN", "MEMBER"];
 
 function initials(name?: string, email?: string) {
   const base = (name?.trim() || email || "?").trim();
@@ -18,7 +25,7 @@ function initials(name?: string, email?: string) {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const { data } = useMe();
+  const { data, isLoading: meLoading } = useMe();
   const me = data as MeResponse | undefined;
   const logout = useLogout();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -27,6 +34,29 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!isLoggedIn()) router.replace("/login");
   }, [router]);
+
+  // Role guard: a SUPPORT member (or any future role that isn't OWNER/ADMIN/
+  // MEMBER) should never see this dashboard's nav or pages — send them to
+  // the one their role actually resolves to.
+  useEffect(() => {
+    if (me && !MEMBER_DASHBOARD_ROLES.includes(me.membership.role)) {
+      router.replace(resolveWorkspaceHref(me.membership.role));
+    }
+  }, [me, router]);
+
+  // Loading gate: don't render the shell until we know the user's role.
+  // Without this, a SUPPORT user would briefly see the member dashboard nav
+  // and header before the role guard useEffect kicks in and redirects them.
+  if (meLoading || !me) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[var(--ground)]">
+        <div className="text-sm text-[var(--ink3)]">Loading…</div>
+      </div>
+    );
+  }
+  if (!MEMBER_DASHBOARD_ROLES.includes(me.membership.role)) {
+    return null;
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--ground)] text-[var(--ink)]">
@@ -128,11 +158,10 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       <Link
         href={href}
         onClick={onNavigate}
-        className={`${base} ${
-          active
-            ? "bg-[var(--accent-soft)] font-medium text-[var(--accent-ink)]"
-            : "text-[var(--ink2)] hover:bg-[var(--s2)]"
-        }`}
+        className={`${base} ${active
+          ? "bg-[var(--accent-soft)] font-medium text-[var(--accent-ink)]"
+          : "text-[var(--ink2)] hover:bg-[var(--s2)]"
+          }`}
       >
         <Icon className="h-4 w-4 shrink-0" />
         <span className="flex-1">{label}</span>
@@ -142,13 +171,17 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 px-5 py-4">
-        {/* <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[var(--accent)] font-bold text-white">
-          Z
-        </div>
-        <span className="font-editorial text-lg font-semibold text-[var(--ink)]">Zoiko Mail</span> */}
-        <img src="/ZoikoMail_Logo_DarkBG_PNG.png" className="h-8 w-auto" alt="Zoiko Mail" />
-      </div>
+      {/* <div className="flex items-center gap-2 px-5 py-4">
+        <Image src="/ZoikoMail_Logo_DarkBG_PNG.png" width={40} height={40} className="h-8 w-auto" alt="Zoiko Mail" />
+      </div> */}
+      <Image
+        src="/ZoikoMail_Logo_DarkBG_PNG.png"
+        width={360}
+        height={120}
+        className="h-10 w-auto m-2"
+        alt="Zoiko Mail"
+        priority
+      />
 
       <nav className="flex-1 space-y-4 overflow-y-auto px-3 pb-4">
         <Row
@@ -158,13 +191,13 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           live
           active={pathname === DASHBOARD_ITEM.href}
         />
-        {SECTIONS.map((section) => (
+        {sectionsFor(MEMBER_NAV).map((section) => (
           <div key={section}>
             <div className="font-mono-num px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
               {section}
             </div>
             <div className="space-y-0.5">
-              {NAV.filter((n) => n.section === section).map((n) => (
+              {MEMBER_NAV.filter((n) => n.section === section).map((n) => (
                 <Row
                   key={n.href}
                   href={n.href}
