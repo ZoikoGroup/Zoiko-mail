@@ -1185,13 +1185,9 @@ export default function PlatformConsole() {
 
       <div className="topbar">
         <div className="brand">
-          <div className="bmark">Z</div>
-          <div>
-            <div className="bname">Zoikomail Platform</div>
-            <div className="bsub">Staff Console</div>
-          </div>
+          <img src="/ZoikoMail_Logo_DarkBG_PNG.png" alt="Zoiko Mail" style={{ height: 28, width: "auto" }} />
         </div>
-        <div className="gsearch">
+        <div className="gsearch" style={{ flex: 1, maxWidth: 420, marginLeft: 16 }}>
           <span>⌕</span>
           <input placeholder="Cross-tenant search (API endpoint)…" readOnly />
         </div>

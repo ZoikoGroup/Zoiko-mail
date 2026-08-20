@@ -130,3 +130,18 @@ export const replyAll = asyncHandler(async (req: Request, res: Response) => {
 export const forward = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 201, await mailService.createForward(String(req.params.messageId), req.body, context(req)), req.requestId);
 });
+
+// ─── Admin: Mailbox management ────────────────────────────────────────────────
+
+export const listAllMailboxes = asyncHandler(async (req: Request, res: Response) => {
+  const tenant = req.tenantContext!;
+  sendSuccess(res, 200, await mailService.listAllMailboxes(tenant.tenantId), req.requestId);
+});
+
+export const adminCreateMailbox = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 201, await mailService.adminCreateMailbox(req.tenantContext!.tenantId, req.body.membershipId, context(req)), req.requestId);
+});
+
+export const adminDeleteMailbox = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailService.adminDeleteMailbox(req.tenantContext!.tenantId, String(req.params.mailboxId), context(req)), req.requestId);
+});
