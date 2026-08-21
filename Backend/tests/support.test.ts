@@ -54,7 +54,8 @@ describe("Temporary audited SUPPORT access", () => {
 
     await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
       .send({ email: admin.email, role: "ADMIN" }).expect(201);
-    const added = await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+    // The 201 assertion is the check; the response body is not needed here.
+    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
       .send({ email: support.email, role: "SUPPORT" }).expect(201);
 
     const ownerOverview = await request(app).get("/api/v1/support/overview")

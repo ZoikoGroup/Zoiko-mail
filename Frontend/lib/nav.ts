@@ -35,26 +35,46 @@ export const DASHBOARD_ITEM: NavItem = {
 // ---------------------------------------------------------------------------
 export const MEMBER_NAV: NavItem[] = [
   // Track A — the first-ship intelligence layer
-  { section: "Track A · Intelligence", label: "Action Inbox", href: "/inbox", icon: Inbox, status: "live",
-    desc: "Review and triage commitments, replies owed, and deadlines." },
-  { section: "Track A · Intelligence", label: "Connected accounts", href: "/connected-accounts", icon: Link2, status: "live",
-    desc: "Connect Gmail or Microsoft 365 (read-only) to detect actions." },
-  { section: "Track A · Intelligence", label: "Threads & messages", href: "/threads", icon: MessagesSquare, status: "soon",
-    desc: "Browse conversations behind each detected action." },
-  { section: "Track A · Intelligence", label: "Daily digest", href: "/digest", icon: Bell, status: "soon",
-    desc: "A once-a-day summary of what needs your attention." },
-  { section: "Track A · Intelligence", label: "AI drafting & summaries", href: "/ai", icon: Sparkles, status: "live",
-    desc: "Draft replies and summarize threads — you always send." },
+  {
+    section: "Track A · Intelligence", label: "Action Inbox", href: "/inbox", icon: Inbox, status: "live",
+    desc: "Review and triage commitments, replies owed, and deadlines."
+  },
+  {
+    section: "Track A · Intelligence", label: "Connected accounts", href: "/connected-accounts", icon: Link2, status: "live",
+    desc: "Connect Gmail or Microsoft 365 (read-only) to detect actions."
+  },
+  {
+    section: "Track A · Intelligence", label: "Threads & messages", href: "/threads", icon: MessagesSquare, status: "live",
+    desc: "Browse conversations behind each detected action."
+  },
+  {
+    section: "Track A · Intelligence", label: "Notifications", href: "/notifications", icon: Bell, status: "live",
+    desc: "Alerts, digests, and other activity from your workspace."
+  },
+  // {
+  //   section: "Track A · Intelligence", label: "Daily digest", href: "/digest", icon: Bell, status: "soon",
+  //   desc: "A once-a-day summary of what needs your attention."
+  // },
+  {
+    section: "Track A · Intelligence", label: "AI drafting & summaries", href: "/ai", icon: Sparkles, status: "live",
+    desc: "Draft replies and summarize threads — you always send."
+  },
 
   // Track B — hosted mail
-  { section: "Track B · Hosted mail", label: "Webmail", href: "/mail", icon: Mail, status: "live",
-    desc: "Send and receive from your Zoiko mailbox." },
+  {
+    section: "Track B · Hosted mail", label: "Webmail", href: "/mail", icon: Mail, status: "live",
+    desc: "Send and receive from your Zoiko mailbox."
+  },
 
   // Account
-  { section: "Account", label: "Profile", href: "/account", icon: KeyRound, status: "live",
-    desc: "Your account details and sign-in security." },
-  { section: "Account", label: "Settings", href: "/settings", icon: Settings, status: "live",
-    desc: "Appearance, notifications, and preferences." },
+  {
+    section: "Account", label: "Profile", href: "/account", icon: KeyRound, status: "live",
+    desc: "Your account details and sign-in security."
+  },
+  {
+    section: "Account", label: "Settings", href: "/settings", icon: Settings, status: "live",
+    desc: "Appearance, notifications, and preferences."
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -68,16 +88,24 @@ export const ADMIN_NAV: NavItem[] = [
   ...MEMBER_NAV,
 
   // Domain management (extends Track B)
-  { section: "Track B · Hosted mail", label: "Domains & DNS", href: "/domains", icon: Globe, status: "soon",
-    desc: "Add a domain and verify MX / SPF / DKIM / DMARC." },
+  {
+    section: "Track B · Hosted mail", label: "Domains & DNS", href: "/domains", icon: Globe, status: "soon",
+    desc: "Add a domain and verify MX / SPF / DKIM / DMARC."
+  },
 
   // Team & governance — admin-only
-  { section: "Team & governance", label: "Members & roles", href: "/members", icon: Users, status: "soon",
-    desc: "Invite teammates and manage roles." },
-  { section: "Team & governance", label: "Policies", href: "/policies", icon: ShieldCheck, status: "soon",
-    desc: "Control AI and data-handling policy for the workspace." },
-  { section: "Team & governance", label: "Audit log", href: "/audit", icon: FileText, status: "soon",
-    desc: "Every privileged and AI action, append-only." },
+  {
+    section: "Team & governance", label: "Members & roles", href: "/members", icon: Users, status: "soon",
+    desc: "Invite teammates and manage roles."
+  },
+  {
+    section: "Team & governance", label: "Policies", href: "/policies", icon: ShieldCheck, status: "soon",
+    desc: "Control AI and data-handling policy for the workspace."
+  },
+  {
+    section: "Team & governance", label: "Audit log", href: "/audit", icon: FileText, status: "soon",
+    desc: "Every privileged and AI action, append-only."
+  },
 ];
 
 // Ordered, de-duplicated section names for grouped rendering.

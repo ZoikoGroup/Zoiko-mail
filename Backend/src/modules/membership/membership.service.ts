@@ -187,13 +187,28 @@ export class MembershipService {
           where: { inviteToken: tokenHash },
           include: { tenant: true },
         });
-        if (!invitation || invitation.status !== "INVITED") {
+        if (!invitation) {
           throw new AppError("Invitation is invalid", 401, ErrorCodes.INVITATION_INVALID);
         }
         // Token-based accept: skip userId check — the token IS the proof of identity.
         // If user is authenticated, also verify ownership for extra safety.
         if (context.userId && invitation.userId !== context.userId) {
           throw new AppError("Invitation belongs to another user", 403, ErrorCodes.FORBIDDEN);
+        }
+        // Idempotent re-accept. Email links get triggered twice in practice —
+        // React StrictMode double-mounts the accept page, mail scanners
+        // prefetch URLs, users click again after a slow response. The invite
+        // token is deliberately kept on the membership after activation so a
+        // second presentment of the SAME token resolves instead of failing.
+        if (invitation.status === "ACTIVE") {
+          const current = await tx.tenantMembership.findUnique({
+            where: { id: invitation.id },
+            select: memberSelect,
+          });
+          return current!;
+        }
+        if (invitation.status !== "INVITED") {
+          throw new AppError("Invitation is invalid", 401, ErrorCodes.INVITATION_INVALID);
         }
       } else {
         // membershipId path — used by the UI accept button
@@ -219,7 +234,10 @@ export class MembershipService {
 
       const membership = await tx.tenantMembership.update({
         where: { id: invitation.id },
-        data: { status: "ACTIVE", inviteToken: null, inviteExpiresAt: null },
+        // inviteToken is intentionally preserved (not nulled) so presenting
+        // the same email link again stays idempotent; it is cleared on
+        // cancel, removal and re-invitation.
+        data: { status: "ACTIVE", inviteExpiresAt: null },
         select: memberSelect,
       });
       await auditService.record(

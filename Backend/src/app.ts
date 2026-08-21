@@ -42,7 +42,13 @@ export function createApp() {
   app.use(compression({ threshold: env.COMPRESSION_THRESHOLD }));
   app.use(
     cors({
-      origin: env.CORS_ORIGIN,
+      // Security §6 requires an allow-list, not a single origin: several
+      // developers run the app on different ports (Next falls back to 3001 when
+      // 3000 is taken), and each needs to reach the same API. Comma-separated,
+      // trimmed, blanks dropped — never a wildcard.
+      origin: env.CORS_ORIGIN.split(",")
+        .map((origin) => origin.trim())
+        .filter(Boolean),
       credentials: true,
     })
   );

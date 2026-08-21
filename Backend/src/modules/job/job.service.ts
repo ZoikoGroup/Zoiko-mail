@@ -251,6 +251,13 @@ export class JobService {
           deletedRecordCounts,
         },
       });
+      // audit_events is append-only (see migration
+      // 20260820120000_audit_events_append_only). Deleting the tenant cascades
+      // into it, so this transaction opts in explicitly. SET LOCAL keeps the
+      // exemption inside this transaction, so a pooled connection cannot carry
+      // it to the next request. The receipt above already recorded how many
+      // audit rows this erases.
+      await tx.$executeRawUnsafe("SET LOCAL zoiko.audit_purge = 'on'");
       await tx.tenant.delete({ where: { id: tenantId } });
       return created;
     });

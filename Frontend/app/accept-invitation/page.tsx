@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
@@ -16,8 +16,23 @@ function AcceptInvitationInner() {
   );
   const [errorMsg, setErrorMsg] = useState("");
 
+  // Acceptance is a one-time server action, so it must fire exactly once per
+  // token. React StrictMode double-invokes effects in development — without
+  // this guard the first request consumes the token and the second one fails,
+  // which surfaced to users as "Invitation is invalid" right after a
+  // successful accept.
+  //
+  // The ref alone is the single-fire mechanism; there is deliberately NO
+  // cancelled flag. A cleanup-time cancel combined with the ref guard left
+  // the first (and only) request's response unhandled, parking the page on
+  // "Loading…" forever. Late setState after an unmount is a harmless no-op.
+  const attemptedToken = useRef<string | null>(null);
+
   useEffect(() => {
     if (!token) return;
+
+    if (attemptedToken.current === token) return;
+    attemptedToken.current = token;
 
     if (!isLoggedIn()) {
       sessionStorage.setItem("pendingInvitationToken", token);
@@ -25,21 +40,15 @@ function AcceptInvitationInner() {
       return;
     }
 
-    let cancelled = false;
     acceptInvitation(token)
       .then(() => {
-        if (!cancelled) {
-          sessionStorage.removeItem("pendingInvitationToken");
-          setStatus("success");
-        }
+        sessionStorage.removeItem("pendingInvitationToken");
+        setStatus("success");
       })
       .catch((e: Error) => {
-        if (!cancelled) {
-          setStatus("error");
-          setErrorMsg(e.message || "Something went wrong");
-        }
+        setStatus("error");
+        setErrorMsg(e.message || "Something went wrong");
       });
-    return () => { cancelled = true; };
   }, [token]);
 
   return (
@@ -104,7 +113,11 @@ function AcceptInvitationInner() {
             ✗
           </div>
           <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Invitation failed</h2>
-          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{errorMsg}</p>
+          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+            {errorMsg === "Invitation is invalid"
+              ? "This invitation link is no longer valid. It may have already been accepted, or a newer invitation email was sent — please use the most recent one."
+              : errorMsg || "Something went wrong"}
+          </p>
           <Link
             href="/login"
             className="mt-6 inline-block rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"

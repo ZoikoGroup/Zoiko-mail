@@ -61,14 +61,17 @@ export async function registerUser(
     .send({ code: TEST_OTP_CODE })
     .expect(200);
 
-  const pendingToken = registerResponse.body.data.pendingToken;
+  // verify-otp mints a fresh pending token; the register one is now consumed and
+  // must not be reused. Exactly one create-workspace call may succeed per
+  // registration — a second returns 409, since the user already owns a tenant.
+  const pendingToken = verified.body.data.pendingToken;
+
   // By default, create a workspace for the newly registered user.
   const shouldCreate = overrides.createWorkspace !== false;
   let tenantId: string | null = null;
   let membershipId: string | null = null;
   let accessToken: string | null = null;
   let refreshToken: string | null = null;
-  let resolvedUserId = userId;
 
   if (shouldCreate) {
     const workspaceResponse = await request(app)
@@ -84,6 +87,7 @@ export async function registerUser(
     refreshToken = data.refreshToken ?? data.tokens?.refreshToken;
   }
 
+  // Also narrows the nullable locals to satisfy RegisteredUser.
   if (!tenantId || !membershipId || !accessToken || !refreshToken) {
     throw new Error("Test user registration did not create a complete workspace session");
   }
