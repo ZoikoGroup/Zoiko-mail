@@ -13,6 +13,7 @@ import type {
   PendingTokenPayload,
   PlatformTokenPayload,
   RefreshTokenPayload,
+  SelectionTokenPayload,
 } from "../../common/types/jwt.js";
 import { auditService } from "../audit/audit.service.js";
 import { membershipRepository } from "../membership/membership.repository.js";
@@ -30,6 +31,7 @@ import type {
   RegisterInput,
   ForgotPasswordInput,
   ResetPasswordInput,
+  SelectWorkspaceInput,
 } from "./auth.schema.js";
 import {
   AuditEventTypes,
@@ -72,6 +74,17 @@ function isPendingTokenPayload(value: unknown): value is PendingTokenPayload {
   if (!value || typeof value !== "object") return false;
   const payload = value as Record<string, unknown>;
   return typeof payload.sub === "string" && payload.type === "pending";
+}
+
+function isSelectionTokenPayload(value: unknown): value is SelectionTokenPayload {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "sub" in value &&
+    typeof (value as { sub: unknown }).sub === "string" &&
+    "type" in value &&
+    (value as { type: unknown }).type === "selection"
+  );
 }
 
 function parseDurationToMs(duration: string): number {
@@ -153,6 +166,30 @@ function buildPendingToken(userId: string): {
   });
 
   return { token, expiresIn: PENDING_TOKEN_EXPIRES_IN };
+}
+
+/**
+ * Issued during login when the user needs to pick a workspace. Short-lived
+ * (15 min) — enough time to show the picker and click. Only /auth/select-
+ * workspace accepts it, so leakage is bounded to swapping workspaces on
+ * an account the attacker already has *some* way to hit login for.
+ */
+const SELECTION_TOKEN_EXPIRES_IN = "15m";
+
+function buildSelectionToken(userId: string): {
+  token: string;
+  expiresIn: string;
+} {
+  const payload: SelectionTokenPayload = {
+    sub: userId,
+    type: "selection",
+  };
+
+  const token = jwt.sign(payload, env.JWT_ACCESS_SECRET, {
+    expiresIn: SELECTION_TOKEN_EXPIRES_IN,
+  });
+
+  return { token, expiresIn: SELECTION_TOKEN_EXPIRES_IN };
 }
 
 /**
@@ -631,8 +668,18 @@ export class AuthService {
     // 4. Explicit selection, or auto-resolve a single workspace.
     if (selectedTenantId) {
       const chosen = nonRemoved.find((m) => m.tenantId === selectedTenantId);
+      // if (!chosen) {
+      //   return { state: "WORKSPACE_SELECTION", user: publicUser, workspaces: nonRemoved.map(toWorkspaceOption) };
+      // }
       if (!chosen) {
-        return { state: "WORKSPACE_SELECTION", user: publicUser, workspaces: nonRemoved.map(toWorkspaceOption) };
+        const selection = buildSelectionToken(user.id);
+        return {
+          state: "WORKSPACE_SELECTION",
+          user: publicUser,
+          workspaces: nonRemoved.map(toWorkspaceOption),
+          selectionToken: selection.token,
+          expiresIn: selection.expiresIn,
+        };
       }
       return this.resolveSelectedWorkspace(user, chosen, publicUser, context);
     }
@@ -642,7 +689,42 @@ export class AuthService {
     }
 
     // 5. Multiple workspaces — let the client pick (statuses drive greying-out).
-    return { state: "WORKSPACE_SELECTION", user: publicUser, workspaces: nonRemoved.map(toWorkspaceOption) };
+    // return { state: "WORKSPACE_SELECTION", user: publicUser, workspaces: nonRemoved.map(toWorkspaceOption) };
+
+    // Issue a short-lived selection token so the client can call /auth/select-
+    // workspace without asking the user for their password again.
+    const selection = buildSelectionToken(user.id);
+    return {
+      state: "WORKSPACE_SELECTION",
+      user: publicUser,
+      workspaces: nonRemoved.map(toWorkspaceOption),
+      selectionToken: selection.token,
+      expiresIn: selection.expiresIn,
+    };
+  }
+  
+  /**
+  * Second half of the split login flow. Called after /auth/login returned
+  * WORKSPACE_SELECTION with a selectionToken; the client picked a workspace
+  * and now we complete auth without asking for the password again.
+  */
+  async selectWorkspace(
+    input: SelectWorkspaceInput,
+    context: RequestContext
+  ): Promise<AuthState> {
+    // 1. Verify the selection token and extract userId.
+    const userId = this.verifySelectionToken(input.selectionToken);
+
+    // 2. Fetch the user record.
+    const user = await userRepository.findById(userId);
+    if (!user) {
+      throw new AppError("User not found", 404, ErrorCodes.NOT_FOUND);
+    }
+
+    // 3. Delegate to the shared resolver with the chosen tenantId. All the
+    //    membership-lookup, account-status, tenant-status, and membership-
+    //    status logic lives there — we just point it at the picked workspace.
+    return this.resolveAuthState(user, input.tenantId, context);
   }
 
   /** Evaluate one chosen workspace: tenant status first, then membership status. */
@@ -936,6 +1018,29 @@ export class AuthService {
 
     if (!isPendingTokenPayload(payload)) {
       throw new AppError("Invalid pending session", 401, ErrorCodes.TOKEN_INVALID);
+    }
+
+    return payload.sub;
+  }
+
+  private verifySelectionToken(token: string): string {
+    let payload: unknown;
+
+    try {
+      payload = jwt.verify(token, env.JWT_ACCESS_SECRET);
+    } catch (error) {
+      if (error instanceof jwt.TokenExpiredError) {
+        throw new AppError(
+          "Workspace selection expired, please sign in again",
+          401,
+          ErrorCodes.TOKEN_EXPIRED
+        );
+      }
+      throw new AppError("Invalid selection token", 401, ErrorCodes.TOKEN_INVALID);
+    }
+
+    if (!isSelectionTokenPayload(payload)) {
+      throw new AppError("Invalid selection token", 401, ErrorCodes.TOKEN_INVALID);
     }
 
     return payload.sub;

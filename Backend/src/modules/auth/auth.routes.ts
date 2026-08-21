@@ -16,7 +16,8 @@ import {
   refreshSchema,
   registerSchema,
   forgotPasswordSchema,
-  resetPasswordSchema
+  resetPasswordSchema,
+  selectWorkspaceSchema
 } from "./auth.schema.js";
 import * as authController from "./auth.controller.js";
 import { verifyOtpSchema } from "./otp.schema.js";
@@ -52,6 +53,13 @@ authRouter.post(
   "/resend-otp",
   registerRateLimit,
   authController.resendOtp
+);
+
+authRouter.post(
+  "/select-workspace",
+  loginRateLimit,
+  validate(selectWorkspaceSchema),
+  authController.selectWorkspace
 );
 
 authRouter.post("/login", loginRateLimit, validate(loginSchema), authController.login);
