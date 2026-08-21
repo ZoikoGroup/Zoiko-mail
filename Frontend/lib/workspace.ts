@@ -3,7 +3,10 @@
 // localStorage, URL parameters, or frontend dropdowns.
 export function resolveWorkspaceHref(role?: string): string {
   if (role === "SUPPORT") return "/support-workspace";
-  if (role === "OWNER" || role === "ADMIN" || role === "MEMBER") return "/inbox";
+  // Admin and Owner land on the admin workspace. Owner holds every Admin
+  // capability plus more, so /admin is a valid subset view until the Owner
+  // workspace exists; the Accountable group is added there later.
+  if (role === "ADMIN" || role === "OWNER") return "/admin";
   return "/inbox";
 }
 

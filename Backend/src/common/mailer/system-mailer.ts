@@ -43,8 +43,13 @@ export class SystemMailer {
   async send(mail: SystemMail): Promise<void> {
     const tx = getTransporter();
     if (!tx) {
+      // The field is `logOnlyBody`, not `body`: the logger redacts `body`
+      // because real message content must never reach logs (Infrastructure §10).
+      // This branch only runs when SYSTEM_MAIL_ENABLED is false — no recipient
+      // is receiving the mail, so printing it is the whole point of log-only
+      // mode and is how local development reads an OTP.
       logger.info(
-        { to: mail.to, subject: mail.subject, body: mail.text },
+        { to: mail.to, subject: mail.subject, logOnlyBody: mail.text },
         "[system-mail:log-only] email not sent (mailer disabled)"
       );
       return;

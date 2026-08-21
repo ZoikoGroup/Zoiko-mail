@@ -5,8 +5,6 @@ import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
 import { createGrantSchema, domainParamSchema, grantIdSchema, mailboxParamSchema, platformListQuerySchema, tenantParamSchema } from "./support.schema.js";
 import { supportService } from "./support.service.js";
-import { AppError } from "../../common/errors/AppError.js";
-import { ErrorCodes } from "../../common/errors/errorCodes.js";
 
 export const supportRouter = Router();
 supportRouter.use(authenticate, tenantContext);

@@ -40,23 +40,33 @@ if (process.env.TEST_DATABASE_URL) {
 beforeEach(async () => {
   const { prisma } = await import("../src/config/prisma.js");
 
-  await prisma.refreshToken.deleteMany();
-  await prisma.tenantDeletionReceipt.deleteMany();
-  await prisma.auditEvent.deleteMany();
-  await prisma.supportAccessGrant.deleteMany();
-  await prisma.integrationLink.deleteMany();
-  await prisma.providerEvent.deleteMany();
-  await prisma.connectedAccount.deleteMany();
-  await prisma.dataLifecycleRequest.deleteMany();
-  await prisma.backgroundJob.deleteMany();
-  await prisma.notification.deleteMany();
-  await prisma.commitment.deleteMany();
-  await prisma.aIAction.deleteMany();
-  await prisma.emailMessage.deleteMany();
-  await prisma.tenantPolicy.deleteMany();
-  await prisma.tenantMembership.deleteMany();
-  await prisma.appUser.deleteMany();
-  await prisma.tenant.deleteMany();
+  // audit_events is append-only at the database (migration
+  // 20260820120000_audit_events_append_only), and deleting tenants cascades
+  // into it. Wiping between tests is a legitimate purge, so it declares
+  // itself the same way the confirmed tenant-deletion path does. One
+  // transaction, because SET LOCAL is transaction-scoped — issuing it outside
+  // one would either leak onto a pooled connection or not apply at all.
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SET LOCAL zoiko.audit_purge = 'on'");
+
+    await tx.refreshToken.deleteMany();
+    await tx.tenantDeletionReceipt.deleteMany();
+    await tx.auditEvent.deleteMany();
+    await tx.supportAccessGrant.deleteMany();
+    await tx.integrationLink.deleteMany();
+    await tx.providerEvent.deleteMany();
+    await tx.connectedAccount.deleteMany();
+    await tx.dataLifecycleRequest.deleteMany();
+    await tx.backgroundJob.deleteMany();
+    await tx.notification.deleteMany();
+    await tx.commitment.deleteMany();
+    await tx.aIAction.deleteMany();
+    await tx.emailMessage.deleteMany();
+    await tx.tenantPolicy.deleteMany();
+    await tx.tenantMembership.deleteMany();
+    await tx.appUser.deleteMany();
+    await tx.tenant.deleteMany();
+  });
 
   await prisma.tenant.create({
     data: {
