@@ -75,9 +75,18 @@ export interface ListMailResponse {
   pagination: MailPagination;
 }
 
+// export interface ListMailParams {
+//   folder?: MailFolder;
+//   starredOnly?: boolean;
+//   labelId?: string;
+//   page?: number;
+//   limit?: number;
+// }
+
 export interface ListMailParams {
   folder?: MailFolder;
   starredOnly?: boolean;
+  unreadOnly?: boolean;
   labelId?: string;
   page?: number;
   limit?: number;
@@ -104,6 +113,7 @@ export async function listMail(params: ListMailParams = {}): Promise<ListMailRes
   const q = new URLSearchParams();
   q.set("folder", params.folder ?? "INBOX");
   if (params.starredOnly) q.set("starredOnly", "true");
+  if (params.unreadOnly) q.set("unreadOnly", "true");
   if (params.labelId) q.set("labelId", params.labelId);
   q.set("page", String(params.page ?? 1));
   q.set("limit", String(params.limit ?? 25));

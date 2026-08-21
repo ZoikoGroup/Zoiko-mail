@@ -51,10 +51,10 @@ export const MEMBER_NAV: NavItem[] = [
     section: "Track A · Intelligence", label: "Notifications", href: "/notifications", icon: Bell, status: "live",
     desc: "Alerts, digests, and other activity from your workspace."
   },
-  // {
-  //   section: "Track A · Intelligence", label: "Daily digest", href: "/digest", icon: Bell, status: "soon",
-  //   desc: "A once-a-day summary of what needs your attention."
-  // },
+  {
+    section: "Track A · Intelligence", label: "Daily digest", href: "/digest", icon: LayoutDashboard, status: "live",
+    desc: "A once-a-day summary of what needs your attention."
+  },
   {
     section: "Track A · Intelligence", label: "AI drafting & summaries", href: "/ai", icon: Sparkles, status: "live",
     desc: "Draft replies and summarize threads — you always send."

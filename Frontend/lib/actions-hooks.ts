@@ -8,12 +8,25 @@ import {
   type ActionItem,
   type CreateActionInput,
   type UpdateActionInput,
+  type ListActionsParams,
 } from "./actions-api";
 
 const KEY = ["actions"] as const;
 
-export function useActions() {
-  return useQuery({ queryKey: KEY, queryFn: listActions, staleTime: 15_000 });
+// export function useActions() {
+//   return useQuery({ queryKey: KEY, queryFn: listActions, staleTime: 15_000 });
+// }
+
+export function useActions(params?: ListActionsParams) {
+  // Key structure: no params -> ["actions"] (matches existing Action Inbox
+  // + optimistic updates in useUpdateAction). With params -> nested key so
+  // different filter sets cache separately.
+  const queryKey = params ? ([...KEY, params] as const) : KEY;
+  return useQuery({
+    queryKey,
+    queryFn: () => listActions(params),
+    staleTime: 15_000,
+  });
 }
 
 export function useCreateAction() {

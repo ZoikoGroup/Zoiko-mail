@@ -721,6 +721,7 @@ export class MailService {
       mailboxId: mailbox.id,
       folder: filters.folder,
       ...(filters.starredOnly ? { isStarred: true } : {}),
+      ...(filters.unreadOnly ? { isRead: false } : {}),
       ...(filters.labelId ? {
         labels: { some: { tenantId: context.tenantId, labelId: filters.labelId } },
       } : {}),
