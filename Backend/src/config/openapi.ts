@@ -182,6 +182,38 @@ export const openApiDocument = {
         responses: { "200": ok("Tenant updated"), "403": { $ref: "#/components/responses/Forbidden" } },
       },
     },
+    "/api/v1/tenants/usage": {
+      get: {
+        tags: ["Tenants"], summary: "Workspace usage analytics (OWNER/ADMIN)", security: bearer,
+        parameters: [
+          { name: "days", in: "query", schema: { type: "integer", minimum: 1, maximum: 365, default: 30 } },
+        ],
+        responses: { "200": ok("Usage metrics returned"), "403": { $ref: "#/components/responses/Forbidden" } },
+      },
+    },
+    "/api/v1/tenants/settings/general": {
+      get: {
+        tags: ["Tenants"], summary: "Get general workspace settings with defaults (OWNER/ADMIN)", security: bearer,
+        responses: { "200": ok("General settings returned"), "403": { $ref: "#/components/responses/Forbidden" } },
+      },
+      patch: {
+        tags: ["Tenants"], summary: "Update general workspace settings (merged; OWNER/ADMIN)", security: bearer,
+        requestBody: jsonBody({
+          type: "object",
+          properties: {
+            emailNotifications: { type: "boolean" },
+            digestFrequency: { type: "string", enum: ["daily", "weekly", "none"] },
+            theme: { type: "string", enum: ["light", "dark", "system"] },
+          },
+          anyOf: [{ required: ["emailNotifications"] }, { required: ["digestFrequency"] }, { required: ["theme"] }],
+        }),
+        responses: {
+          "200": ok("General settings updated"),
+          "400": { $ref: "#/components/responses/ValidationError" },
+          "403": { $ref: "#/components/responses/Forbidden" },
+        },
+      },
+    },
     "/api/v1/membership/members": {
       get: { tags: ["Memberships"], summary: "List members (OWNER/ADMIN)", security: bearer, responses: { "200": ok("Members returned") } },
       post: {
@@ -341,6 +373,10 @@ export const openApiDocument = {
     "/api/v1/domains/{domainId}/activate": {
       post: { tags: ["Domains"], summary: "Enable sending after TXT, SPF, DKIM and DMARC pass", security: bearer, responses: { "200": ok("Domain sending activated"), "409": { $ref: "#/components/responses/Conflict" } } },
     },
+    "/api/v1/domains/{domainId}": {
+      parameters: [{ name: "domainId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+      delete: { tags: ["Domains"], summary: "Delete a domain that is not active for sending", security: bearer, responses: { "200": ok("Domain removed"), "404": { $ref: "#/components/responses/NotFound" }, "409": { $ref: "#/components/responses/Conflict" } } },
+    },
     "/api/v1/ai/actions": {
       get: { tags: ["AI"], summary: "List the user's governed AI actions", security: bearer, responses: { "200": ok("AI actions returned") } },
       post: { tags: ["AI"], summary: "Request a policy-checked AI action without invoking a provider", security: bearer, responses: { "202": ok("AI action queued") } },
@@ -441,6 +477,18 @@ export const openApiDocument = {
         security: bearer, responses: { "200": ok("Dead-letter events returned") },
       },
     },
+    "/api/v1/connectors/provider-events": {
+      get: {
+        tags: ["Connectors"], summary: "Tenant-wide provider event feed, metadata only (OWNER/ADMIN)",
+        security: bearer,
+        parameters: [
+          { name: "status", in: "query", schema: { type: "string", enum: ["RECEIVED", "RETRY", "PROCESSED", "FAILED", "DEAD_LETTER"] } },
+          { name: "provider", in: "query", schema: { type: "string", enum: ["GMAIL", "MICROSOFT_365", "IMAP_SMTP"] } },
+          { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 200, default: 50 } },
+        ],
+        responses: { "200": ok("Provider events returned"), "403": { $ref: "#/components/responses/Forbidden" } },
+      },
+    },
     "/api/v1/connectors/dead-letter/{eventId}/replay": {
       post: {
         tags: ["Connectors"], summary: "Replay a dead-letter provider event (OWNER/ADMIN)",
@@ -504,6 +552,31 @@ export const openApiDocument = {
     },
     "/api/v1/support/diagnostics": {
       get: { tags: ["Support"], summary: "Access scoped diagnostics using x-support-grant-id", security: bearer, responses: { "200": ok("Scoped diagnostics returned"), "403": { $ref: "#/components/responses/Forbidden" } } },
+    },
+    "/api/v1/support/platform/{section}": {
+      get: {
+        tags: ["Support"], summary: "Platform support console read-only feeds (staff/SUPPORT-role only)",
+        description: "Read-only operational endpoints mounted under /support/platform: overview, tenants, tenants/{tenantId}, tenants/{tenantId}/domains/{domainId}, tenants/{tenantId}/mailboxes/{mailboxId}, mailboxes, domains, provider-events, delivery-events, jobs, suppressions, audit, grants, diagnostics. Access requires a SUPPORT workspace role or a staff platform token (requireSupportAccess); OWNER/ADMIN/MEMBER tenant roles are rejected.",
+        parameters: [
+          { name: "section", in: "path", required: true, schema: { type: "string", enum: ["overview", "tenants", "mailboxes", "domains", "provider-events", "delivery-events", "jobs", "suppressions", "audit", "grants", "diagnostics"] } },
+          { name: "q", in: "query", schema: { type: "string" } },
+          { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 200, default: 50 } },
+          { name: "grantId", in: "query", schema: { type: "string" }, description: "Required for diagnostics; also accepted via x-support-grant-id header" },
+        ],
+        responses: {
+          "200": ok("Feed returned"),
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "403": { $ref: "#/components/responses/Forbidden" },
+        },
+      },
+    },
+    "/api/v1/support/platform/grants/{grantId}": {
+      delete: {
+        tags: ["Support"], summary: "Revoke a support access grant (SUPER_ADMIN or assigned support member)",
+        security: bearer,
+        parameters: [{ name: "grantId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: { "200": ok("Grant revoked"), "403": { $ref: "#/components/responses/Forbidden" }, "404": { $ref: "#/components/responses/NotFound" } },
+      },
     },
     "/api/v1/mail/drafts": {
       post: {
@@ -640,6 +713,16 @@ export const openApiDocument = {
         tags: ["Mail"], summary: "List delivery events for a message authored by the current user", security: bearer,
         parameters: [{ name: "messageId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
         responses: { "200": ok("Delivery events returned"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/mail/admin/delivery-events": {
+      get: {
+        tags: ["Mail"], summary: "Tenant-wide delivery event feed (OWNER/ADMIN)", security: bearer,
+        parameters: [
+          { name: "type", in: "query", schema: { type: "string", enum: ["ACCEPTED", "QUEUED", "DELIVERED", "DEFERRED", "FAILED", "BOUNCED", "COMPLAINED", "REJECTED", "BLOCKED", "SUPPRESSED", "RATE_LIMITED", "PROVIDER_ERROR"] } },
+          { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 200, default: 50 } },
+        ],
+        responses: { "200": ok("Delivery events returned"), "403": { $ref: "#/components/responses/Forbidden" } },
       },
     },
     "/api/v1/mail/admin/mailboxes/{mailboxId}/sending": {

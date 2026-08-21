@@ -4,7 +4,7 @@ import { auditService } from "../audit/audit.service.js";
 import { membershipRepository } from "../membership/membership.repository.js";
 import { tenantRepository } from "./tenant.repository.js";
 import { AuditEventTypes } from "../auth/auth.types.js";
-import type { UpdateTenantInput } from "./tenant.schema.js";
+import type { UpdateTenantInput, UpdateGeneralSettingsInput } from "./tenant.schema.js";
 
 interface TenantContext {
   tenantId: string;
@@ -63,7 +63,11 @@ export class TenantService {
       mailboxes,
       emailStats,
       emailVolume,
+      emailVolumeByStatusRows,
       apiVolume,
+      deliveryStats,
+      attachmentsAggregate,
+      topMailboxActivity,
       activeMembers,
       totalDomains,
       connectedAccounts,
@@ -88,22 +92,48 @@ export class TenantService {
       }),
       prisma.$queryRaw<{ date: Date; count: bigint }[]>(
         Prisma.sql`
-          SELECT DATE("createdAt") as date, COUNT(*) as count
-          FROM "EmailMessage"
-          WHERE "tenantId" = ${tenantId} AND "createdAt" >= ${since}
-          GROUP BY DATE("createdAt")
+          SELECT DATE("created_at") as date, COUNT(*) as count
+          FROM "email_messages"
+          WHERE "tenant_id" = ${tenantId}::uuid AND "created_at" >= ${since}
+          GROUP BY DATE("created_at")
+          ORDER BY date ASC
+        `
+      ),
+      prisma.$queryRaw<{ date: Date; status: string; count: bigint }[]>(
+        Prisma.sql`
+          SELECT DATE("created_at") as date, "status"::text as status, COUNT(*) as count
+          FROM "email_messages"
+          WHERE "tenant_id" = ${tenantId}::uuid AND "created_at" >= ${since}
+            AND "status" IN ('SENT', 'RECEIVED', 'FAILED')
+          GROUP BY DATE("created_at"), "status"
           ORDER BY date ASC
         `
       ),
       prisma.$queryRaw<{ date: Date; count: bigint }[]>(
         Prisma.sql`
-          SELECT DATE("createdAt") as date, COUNT(*) as count
-          FROM "AuditEvent"
-          WHERE "tenantId" = ${tenantId} AND "createdAt" >= ${since}
-          GROUP BY DATE("createdAt")
+          SELECT DATE("created_at") as date, COUNT(*) as count
+          FROM "audit_events"
+          WHERE "tenant_id" = ${tenantId}::uuid AND "created_at" >= ${since}
+          GROUP BY DATE("created_at")
           ORDER BY date ASC
         `
       ),
+      prisma.deliveryEvent.groupBy({
+        by: ["type"],
+        where: { tenantId, createdAt: { gte: since } },
+        _count: { id: true },
+      }),
+      prisma.messageAttachment.aggregate({
+        where: { tenantId },
+        _sum: { sizeBytes: true },
+      }),
+      prisma.mailboxMessage.groupBy({
+        by: ["mailboxId"],
+        where: { tenantId, createdAt: { gte: since } },
+        _count: { id: true },
+        orderBy: { _count: { mailboxId: "desc" } },
+        take: 5,
+      }),
       prisma.tenantMembership.count({
         where: { tenantId, status: "ACTIVE" },
       }),
@@ -130,6 +160,7 @@ export class TenantService {
       received: 0,
       failed: 0,
       draft: 0,
+      scheduled: 0,
     };
     for (const row of emailStats) {
       const count = Number(row._count.id);
@@ -137,13 +168,98 @@ export class TenantService {
       else if (row.status === "RECEIVED") emailCounts.received += count;
       else if (row.status === "FAILED") emailCounts.failed += count;
       else if (row.status === "DRAFT") emailCounts.draft += count;
+      else if (row.status === "SCHEDULED" || row.status === "SENDING")
+        emailCounts.scheduled += count;
     }
+
+    const volumeByStatus = new Map<
+      string,
+      { date: string; sent: number; received: number; failed: number }
+    >();
+    for (const row of emailVolumeByStatusRows) {
+      const date = row.date.toISOString().split("T")[0];
+      const entry = volumeByStatus.get(date) ?? {
+        date,
+        sent: 0,
+        received: 0,
+        failed: 0,
+      };
+      const count = Number(row.count);
+      if (row.status === "SENT") entry.sent += count;
+      else if (row.status === "RECEIVED") entry.received += count;
+      else if (row.status === "FAILED") entry.failed += count;
+      volumeByStatus.set(date, entry);
+    }
+
+    const deliveryCounts = {
+      delivered: 0,
+      bounced: 0,
+      failed: 0,
+      rejected: 0,
+      blocked: 0,
+      complained: 0,
+      deferred: 0,
+      rateLimited: 0,
+      providerErrors: 0,
+    };
+    for (const row of deliveryStats) {
+      const count = Number(row._count.id);
+      switch (row.type) {
+        case "DELIVERED":
+          deliveryCounts.delivered += count;
+          break;
+        case "BOUNCED":
+          deliveryCounts.bounced += count;
+          break;
+        case "FAILED":
+          deliveryCounts.failed += count;
+          break;
+        case "REJECTED":
+          deliveryCounts.rejected += count;
+          break;
+        case "BLOCKED":
+          deliveryCounts.blocked += count;
+          break;
+        case "COMPLAINED":
+          deliveryCounts.complained += count;
+          break;
+        case "DEFERRED":
+          deliveryCounts.deferred += count;
+          break;
+        case "RATE_LIMITED":
+          deliveryCounts.rateLimited += count;
+          break;
+        case "PROVIDER_ERROR":
+          deliveryCounts.providerErrors += count;
+          break;
+      }
+    }
+    const deliveryAttempts =
+      deliveryCounts.delivered +
+      deliveryCounts.bounced +
+      deliveryCounts.failed +
+      deliveryCounts.rejected +
+      deliveryCounts.blocked;
+    const deliverySuccessRate =
+      deliveryAttempts > 0 ? deliveryCounts.delivered / deliveryAttempts : null;
+
+    const addressById = new Map(mailboxes.map((m) => [m.id, m.address]));
+    const topMailboxes = topMailboxActivity
+      .map((row) => ({
+        address: addressById.get(row.mailboxId),
+        messageCount: Number(row._count.id),
+      }))
+      .filter((m): m is { address: string; messageCount: number } =>
+        Boolean(m.address)
+      );
 
     return {
       period: { days, since: since.toISOString() },
+      planCode: tenant.planCode,
       storage: {
         used: totalStorageUsed,
         limit: totalStorageLimit,
+        attachmentsBytes: attachmentsAggregate._sum.sizeBytes ?? 0,
         mailboxes: mailboxes.map((m) => ({
           address: m.address,
           used: Number(m.storageUsed),
@@ -158,10 +274,13 @@ export class TenantService {
         date: r.date.toISOString().split("T")[0],
         count: Number(r.count),
       })),
+      emailVolumeByStatus: [...volumeByStatus.values()],
       apiUsage: apiVolume.map((r) => ({
         date: r.date.toISOString().split("T")[0],
         count: Number(r.count),
       })),
+      delivery: { ...deliveryCounts, successRate: deliverySuccessRate },
+      topMailboxes,
       activeMembers,
       totalDomains,
       connectedAccounts: {
@@ -243,6 +362,63 @@ export class TenantService {
         tx
       );
       return tenant;
+    });
+  }
+
+  async getGeneralSettings(context: TenantContext) {
+    const tenant = await prisma.tenant.findUniqueOrThrow({
+      where: { id: context.tenantId },
+      select: { settings: true, timezone: true, language: true },
+    });
+    const stored = (tenant.settings ?? {}) as Record<string, unknown>;
+    const general = (stored.general ?? {}) as Record<string, unknown>;
+    return {
+      emailNotifications:
+        typeof general.emailNotifications === "boolean" ? general.emailNotifications : true,
+      digestFrequency:
+        general.digestFrequency === "weekly" || general.digestFrequency === "none"
+          ? general.digestFrequency
+          : "daily",
+      theme:
+        general.theme === "light" || general.theme === "dark" || general.theme === "system"
+          ? general.theme
+          : "system",
+      timezone: tenant.timezone ?? "UTC",
+      language: tenant.language ?? "en",
+    };
+  }
+
+  async updateGeneralSettings(input: UpdateGeneralSettingsInput, context: TenantContext) {
+    return prisma.$transaction(async (tx) => {
+      const tenant = await tx.tenant.findUniqueOrThrow({
+        where: { id: context.tenantId },
+        select: { settings: true },
+      });
+      const stored = (tenant.settings ?? {}) as Record<string, unknown>;
+      const merged = {
+        ...stored,
+        general: { ...((stored.general ?? {}) as Record<string, unknown>), ...input },
+      };
+      const updated = await tx.tenant.update({
+        where: { id: context.tenantId },
+        data: { settings: merged as Prisma.InputJsonValue },
+        select: tenantSelect,
+      });
+      await auditService.record(
+        {
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          eventType: "TENANT_SETTINGS_UPDATED",
+          targetType: "Tenant",
+          targetId: context.tenantId,
+          requestId: context.requestId,
+          ipAddress: context.ipAddress,
+          userAgent: context.userAgent,
+          metadata: { changedFields: Object.keys(input).map((k) => `general.${k}`) },
+        },
+        tx
+      );
+      return updated;
     });
   }
 

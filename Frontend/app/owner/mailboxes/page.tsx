@@ -1,13 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { ProtectedRoute } from "@/components/owner/ProtectedRoute";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { MailboxesTable } from "@/components/owner/mailboxes/MailboxesTable";
 import { CreateMailboxModal } from "@/components/owner/mailboxes/CreateMailboxModal";
 import { useCreateAdminMailbox, useMembers, useAdminMailboxes } from "@/lib/owner-hooks";
-import { ExternalLink } from "lucide-react";
 
 export default function MailboxesPage() {
   useEffect(() => { document.title = "Mailboxes | Zoiko Mail"; }, []);
@@ -27,15 +25,6 @@ export default function MailboxesPage() {
         <PageHeader
           title="Mailboxes"
           description="Create and manage mailboxes across your organization."
-          actions={
-            <Link
-              href="/mail"
-              className="zoiko-btn"
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-              Open Webmail
-            </Link>
-          }
         />
         <MailboxesTable onCreateMailbox={() => setCreateOpen(true)} />
         <CreateMailboxModal

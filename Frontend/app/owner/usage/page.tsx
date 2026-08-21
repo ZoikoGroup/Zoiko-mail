@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { useUsage } from "@/lib/owner-hooks";
+import type { UsageData } from "@/lib/owner-api";
 import {
   HardDrive,
   Mail,
@@ -18,6 +19,10 @@ import {
   FileText,
   Activity,
   Link2,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  ThumbsDown,
 } from "lucide-react";
 import {
   AreaChart,
@@ -27,6 +32,7 @@ import {
   Tooltip,
   ResponsiveContainer,
   CartesianGrid,
+  Legend,
 } from "recharts";
 
 function formatBytes(bytes: number): string {
@@ -52,6 +58,10 @@ const TIME_RANGES = [
 export default function UsagePage() {
   const [days, setDays] = useState(30);
   const { data: usage, isLoading, error, refetch } = useUsage(days);
+
+  const emailTotal = usage
+    ? Object.values(usage.emails).reduce((a, b) => a + b, 0)
+    : 0;
 
   return (
     <ProtectedRoute>
@@ -106,7 +116,7 @@ export default function UsagePage() {
                     icon={HardDrive}
                     label="Storage Used"
                     value={formatBytes(usage.storage.used)}
-                    sub={`${formatBytes(usage.storage.limit)} limit`}
+                    sub={`${formatBytes(usage.storage.attachmentsBytes)} in attachments`}
                     progress={
                       usage.storage.limit > 0
                         ? (usage.storage.used / usage.storage.limit) * 100
@@ -117,7 +127,7 @@ export default function UsagePage() {
                     icon={Mail}
                     label="Emails Sent"
                     value={formatNumber(usage.emails.sent)}
-                    sub={`${usage.emails.failed} failed`}
+                    sub={`${formatNumber(usage.emails.scheduled)} scheduled`}
                   />
                   <SummaryCard
                     icon={Users}
@@ -150,10 +160,9 @@ export default function UsagePage() {
                 </>
               ) : usage ? (
                 <>
-                  <VolumeChart
+                  <StackedVolumeChart
                     title="Email Volume"
-                    data={usage.emailVolume}
-                    color="var(--accent)"
+                    data={usage.emailVolumeByStatus}
                   />
                   <VolumeChart
                     title="API Activity"
@@ -164,7 +173,7 @@ export default function UsagePage() {
               ) : null}
             </div>
 
-            {/* Email Breakdown & Storage Breakdown */}
+            {/* Email Breakdown & Delivery Health */}
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
               {isLoading ? (
                 <>
@@ -188,33 +197,60 @@ export default function UsagePage() {
                         icon={Send}
                         label="Sent"
                         count={usage.emails.sent}
-                        total={Object.values(usage.emails).reduce((a, b) => a + b, 0)}
+                        total={emailTotal}
                         color="var(--accent)"
                       />
                       <BreakdownRow
                         icon={Inbox}
                         label="Received"
                         count={usage.emails.received}
-                        total={Object.values(usage.emails).reduce((a, b) => a + b, 0)}
+                        total={emailTotal}
                         color="var(--ok)"
                       />
                       <BreakdownRow
                         icon={AlertTriangle}
                         label="Failed"
                         count={usage.emails.failed}
-                        total={Object.values(usage.emails).reduce((a, b) => a + b, 0)}
+                        total={emailTotal}
                         color="var(--err)"
+                      />
+                      <BreakdownRow
+                        icon={Clock}
+                        label="Scheduled"
+                        count={usage.emails.scheduled}
+                        total={emailTotal}
+                        color="var(--warn)"
                       />
                       <BreakdownRow
                         icon={FileText}
                         label="Drafts"
                         count={usage.emails.draft}
-                        total={Object.values(usage.emails).reduce((a, b) => a + b, 0)}
+                        total={emailTotal}
                         color="var(--ink3)"
                       />
                     </div>
                   </div>
 
+                  <DeliveryHealthCard delivery={usage.delivery} days={days} />
+                </>
+              ) : null}
+            </div>
+
+            {/* Storage Breakdown & Top Mailboxes */}
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+              {isLoading ? (
+                <>
+                  <div className="zoiko-card p-6">
+                    <Skeleton className="mb-4 h-5 w-40" />
+                    <Skeleton className="h-40 w-full" />
+                  </div>
+                  <div className="zoiko-card p-6">
+                    <Skeleton className="mb-4 h-5 w-40" />
+                    <Skeleton className="h-40 w-full" />
+                  </div>
+                </>
+              ) : usage ? (
+                <>
                   <div className="zoiko-card p-6">
                     <h3 className="mb-4 text-sm font-semibold text-[var(--ink)]">
                       Storage by Mailbox
@@ -251,6 +287,43 @@ export default function UsagePage() {
                             </div>
                           </div>
                         ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="zoiko-card p-6">
+                    <h3 className="mb-4 text-sm font-semibold text-[var(--ink)]">
+                      Most Active Mailboxes ({days}d)
+                    </h3>
+                    <div className="space-y-3">
+                      {usage.topMailboxes.length === 0 ? (
+                        <p className="text-sm text-[var(--ink3)]">
+                          No mailbox activity in this period.
+                        </p>
+                      ) : (
+                        usage.topMailboxes.map((m) => {
+                          const max = usage.topMailboxes[0]?.messageCount || 1;
+                          return (
+                            <div key={m.address} className="space-y-1">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="truncate text-[var(--ink2)]">
+                                  {m.address}
+                                </span>
+                                <span className="text-[var(--ink3)]">
+                                  {formatNumber(m.messageCount)} messages
+                                </span>
+                              </div>
+                              <div className="h-1.5 overflow-hidden rounded-full bg-[var(--s3)]">
+                                <div
+                                  className="h-full rounded-full bg-[var(--accent)] transition-all"
+                                  style={{
+                                    width: `${Math.max((m.messageCount / max) * 100, 2)}%`,
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })
                       )}
                     </div>
                   </div>
@@ -355,6 +428,187 @@ function VolumeChart({
             </AreaChart>
           </ResponsiveContainer>
         </div>
+      )}
+    </div>
+  );
+}
+
+function StackedVolumeChart({
+  title,
+  data,
+}: {
+  title: string;
+  data: Array<{ date: string; sent: number; received: number; failed: number }>;
+}) {
+  return (
+    <div className="zoiko-card p-6">
+      <h3 className="mb-4 text-sm font-semibold text-[var(--ink)]">{title}</h3>
+      {data.length === 0 ? (
+        <div className="flex h-64 items-center justify-center text-sm text-[var(--ink3)]">
+          No data in this period.
+        </div>
+      ) : (
+        <div className="h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={data}>
+              <defs>
+                <linearGradient id="grad-ev-sent" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.3} />
+                  <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="grad-ev-received" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--ok)" stopOpacity={0.3} />
+                  <stop offset="100%" stopColor="var(--ok)" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="grad-ev-failed" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--err)" stopOpacity={0.3} />
+                  <stop offset="100%" stopColor="var(--err)" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis
+                dataKey="date"
+                tick={{ fontSize: 10, fill: "var(--ink3)" }}
+                tickFormatter={(v: string) => {
+                  const d = new Date(v);
+                  return `${d.getMonth() + 1}/${d.getDate()}`;
+                }}
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: "var(--ink3)" }}
+                width={40}
+                allowDecimals={false}
+              />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: "var(--surface)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  fontSize: 12,
+                }}
+              />
+              <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
+              <Area
+                type="monotone"
+                dataKey="sent"
+                stackId="1"
+                stroke="var(--accent)"
+                fill="url(#grad-ev-sent)"
+                strokeWidth={2}
+              />
+              <Area
+                type="monotone"
+                dataKey="received"
+                stackId="1"
+                stroke="var(--ok)"
+                fill="url(#grad-ev-received)"
+                strokeWidth={2}
+              />
+              <Area
+                type="monotone"
+                dataKey="failed"
+                stackId="1"
+                stroke="var(--err)"
+                fill="url(#grad-ev-failed)"
+                strokeWidth={2}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DeliveryHealthCard({
+  delivery,
+  days,
+}: {
+  delivery: UsageData["delivery"];
+  days: number;
+}) {
+  const total =
+    delivery.delivered +
+    delivery.bounced +
+    delivery.failed +
+    delivery.rejected +
+    delivery.blocked +
+    delivery.complained +
+    delivery.deferred +
+    delivery.rateLimited +
+    delivery.providerErrors;
+
+  return (
+    <div className="zoiko-card p-6">
+      <h3 className="mb-4 text-sm font-semibold text-[var(--ink)]">
+        Delivery Health ({days}d)
+      </h3>
+      {delivery.successRate === null ? (
+        <p className="text-sm text-[var(--ink3)]">
+          No delivery events in this period.
+        </p>
+      ) : (
+        <>
+          <div className="flex items-baseline gap-2">
+            <span className="text-3xl font-semibold text-[var(--ink)]">
+              {(delivery.successRate * 100).toFixed(1)}%
+            </span>
+            <span className="text-xs text-[var(--ink3)]">success rate</span>
+          </div>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--s3)]">
+            <div
+              className="h-full rounded-full transition-all"
+              style={{
+                width: `${Math.min(delivery.successRate * 100, 100)}%`,
+                backgroundColor:
+                  delivery.successRate >= 0.95 ? "var(--ok)" : "var(--warn)",
+              }}
+            />
+          </div>
+          <div className="mt-4 space-y-3">
+            <BreakdownRow
+              icon={CheckCircle2}
+              label="Delivered"
+              count={delivery.delivered}
+              total={total}
+              color="var(--ok)"
+            />
+            <BreakdownRow
+              icon={AlertTriangle}
+              label="Bounced"
+              count={delivery.bounced}
+              total={total}
+              color="var(--err)"
+            />
+            <BreakdownRow
+              icon={XCircle}
+              label="Failed"
+              count={delivery.failed}
+              total={total}
+              color="var(--err)"
+            />
+            <BreakdownRow
+              icon={ThumbsDown}
+              label="Complained"
+              count={delivery.complained}
+              total={total}
+              color="var(--warn)"
+            />
+          </div>
+          {delivery.rejected + delivery.blocked + delivery.deferred + delivery.rateLimited + delivery.providerErrors > 0 && (
+            <p className="mt-3 text-xs text-[var(--ink3)]">
+              Plus{" "}
+              {formatNumber(
+                delivery.rejected +
+                  delivery.blocked +
+                  delivery.deferred +
+                  delivery.rateLimited +
+                  delivery.providerErrors
+              )}{" "}
+              rejected/blocked/deferred events.
+            </p>
+          )}
+        </>
       )}
     </div>
   );

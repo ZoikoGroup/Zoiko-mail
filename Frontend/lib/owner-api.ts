@@ -98,6 +98,9 @@ export interface Domain {
   dkimStatus: "PENDING" | "VERIFIED" | "FAILED" | "NOT_CONFIGURED";
   dmarcStatus: "PENDING" | "VERIFIED" | "FAILED" | "NOT_CONFIGURED";
   isActive: boolean;
+  verificationToken: string;
+  lastCheckedAt: string | null;
+  errorDetails: Record<string, { code: string; message: string }>;
   createdAt: string;
 }
 
@@ -105,23 +108,32 @@ type DnsStatus = "PENDING" | "VERIFIED" | "FAILED" | "NOT_CONFIGURED";
 const mapDns = (s: string): DnsStatus =>
   s === "VALID" ? "VERIFIED" : s === "INVALID" ? "FAILED" : s === "NOT_CONFIGURED" ? "NOT_CONFIGURED" : "PENDING";
 
+interface DomainDto {
+  id: string; domainName: string; verificationStatus: string;
+  mxStatus: string; spfStatus: string; dkimStatus: string; dmarcStatus: string;
+  sendingEnabled: boolean; verificationToken?: string;
+  lastCheckedAt: string | null; errorDetails?: Record<string, { code: string; message: string }> | null;
+  createdAt: string;
+}
+
+const mapDomain = (d: DomainDto): Domain => ({
+  id: d.id,
+  domain: d.domainName,
+  verificationStatus: d.verificationStatus as Domain["verificationStatus"],
+  mxStatus: mapDns(d.mxStatus),
+  spfStatus: mapDns(d.spfStatus),
+  dkimStatus: mapDns(d.dkimStatus),
+  dmarcStatus: mapDns(d.dmarcStatus),
+  isActive: d.sendingEnabled,
+  verificationToken: d.verificationToken ?? "",
+  lastCheckedAt: d.lastCheckedAt,
+  errorDetails: d.errorDetails ?? {},
+  createdAt: d.createdAt,
+});
+
 export async function getDomains(): Promise<Domain[]> {
-  const res = await apiRequest<{ domains: Array<{
-    id: string; domainName: string; verificationStatus: string;
-    mxStatus: string; spfStatus: string; dkimStatus: string; dmarcStatus: string;
-    sendingEnabled: boolean; createdAt: string;
-  }> }>("/domains/");
-  return res.domains.map((d) => ({
-    id: d.id,
-    domain: d.domainName,
-    verificationStatus: d.verificationStatus as Domain["verificationStatus"],
-    mxStatus: mapDns(d.mxStatus),
-    spfStatus: mapDns(d.spfStatus),
-    dkimStatus: mapDns(d.dkimStatus),
-    dmarcStatus: mapDns(d.dmarcStatus),
-    isActive: d.sendingEnabled,
-    createdAt: d.createdAt,
-  }));
+  const res = await apiRequest<{ domains: DomainDto[] }>("/domains/");
+  return res.domains.map(mapDomain);
 }
 
 export interface AddDomainInput {
@@ -129,20 +141,37 @@ export interface AddDomainInput {
 }
 
 export async function addDomain(input: AddDomainInput): Promise<Domain> {
-  return apiRequest<Domain>("/domains/", {
+  const res = await apiRequest<DomainDto>("/domains/", {
     method: "POST",
-    body: input,
+    body: { domainName: input.domain },
   });
+  return mapDomain(res);
 }
 
-export async function runDiagnostics(domainId: string): Promise<Domain> {
-  return apiRequest<Domain>(`/domains/${domainId}/diagnostics`, { method: "POST" });
+export interface DomainDiagnosticsResult extends Domain {
+  records: {
+    verificationTxt: string;
+    dkimHost: string;
+    dmarcHost: string;
+  };
+}
+
+export async function runDiagnostics(domainId: string): Promise<DomainDiagnosticsResult> {
+  const res = await apiRequest<DomainDto & { records: DomainDiagnosticsResult["records"] }>(
+    `/domains/${domainId}/diagnostics`, { method: "POST" }
+  );
+  return { ...mapDomain(res), records: res.records };
 }
 
 export interface DomainCheck {
-  type: string;
-  status: string;
-  records: Record<string, unknown>[];
+  id: string;
+  verificationStatus: string;
+  mxStatus: string;
+  spfStatus: string;
+  dkimStatus: string;
+  dmarcStatus: string;
+  errorDetails: Record<string, { code: string; message: string }> | null;
+  checkedAt: string;
 }
 
 export async function getDomainChecks(domainId: string): Promise<DomainCheck[]> {
@@ -151,7 +180,12 @@ export async function getDomainChecks(domainId: string): Promise<DomainCheck[]> 
 }
 
 export async function activateDomain(domainId: string): Promise<Domain> {
-  return apiRequest<Domain>(`/domains/${domainId}/activate`, { method: "POST" });
+  const res = await apiRequest<DomainDto>(`/domains/${domainId}/activate`, { method: "POST" });
+  return mapDomain(res);
+}
+
+export async function deleteDomain(domainId: string): Promise<{ id: string; domainName: string }> {
+  return apiRequest<{ id: string; domainName: string }>(`/domains/${domainId}`, { method: "DELETE" });
 }
 
 // ─── Audit ────────────────────────────────────────────────────────────────────
@@ -273,6 +307,8 @@ export interface Tenant {
   name: string;
   slug: string;
   planCode: string;
+  timezone?: string | null;
+  language?: string | null;
   createdAt: string;
 }
 
@@ -282,6 +318,8 @@ export async function getCurrentTenant(): Promise<Tenant> {
 
 export interface UpdateTenantInput {
   name?: string;
+  timezone?: string;
+  language?: string;
 }
 
 export async function updateTenant(input: UpdateTenantInput): Promise<Tenant> {
@@ -289,6 +327,130 @@ export async function updateTenant(input: UpdateTenantInput): Promise<Tenant> {
     method: "PATCH",
     body: input,
   });
+}
+
+export interface GeneralWorkspaceSettings {
+  emailNotifications: boolean;
+  digestFrequency: "daily" | "weekly" | "none";
+  theme: "light" | "dark" | "system";
+  timezone: string;
+  language: string;
+}
+
+export type UpdateGeneralSettingsInput = Partial<
+  Pick<GeneralWorkspaceSettings, "emailNotifications" | "digestFrequency" | "theme">
+>;
+
+export async function getGeneralSettings(): Promise<GeneralWorkspaceSettings> {
+  return apiRequest<GeneralWorkspaceSettings>("/tenants/settings/general");
+}
+
+export async function updateGeneralSettings(
+  input: UpdateGeneralSettingsInput
+): Promise<Tenant> {
+  return apiRequest<Tenant>("/tenants/settings/general", {
+    method: "PATCH",
+    body: input,
+  });
+}
+
+// ─── Suppressions ─────────────────────────────────────────────────────────────
+
+export interface SuppressionEntry {
+  id: string;
+  emailHash: string;
+  reason: "HARD_BOUNCE" | "COMPLAINT" | "ADMIN";
+  sourceEventId: string | null;
+  active: boolean;
+  createdAt: string;
+}
+
+export async function getSuppressions(): Promise<SuppressionEntry[]> {
+  const res = await apiRequest<{ entries: SuppressionEntry[] }>(
+    "/delivery-protection/suppressions"
+  );
+  return res.entries;
+}
+
+export async function addSuppression(email: string): Promise<SuppressionEntry> {
+  return apiRequest<SuppressionEntry>("/delivery-protection/suppressions", {
+    method: "POST",
+    body: { email },
+  });
+}
+
+export async function deactivateSuppression(suppressionId: string): Promise<SuppressionEntry> {
+  return apiRequest<SuppressionEntry>(
+    `/delivery-protection/suppressions/${suppressionId}`,
+    { method: "DELETE" }
+  );
+}
+
+// ─── Delivery Events ──────────────────────────────────────────────────────────
+
+export type DeliveryEventType =
+  | "ACCEPTED" | "QUEUED" | "DELIVERED" | "DEFERRED" | "FAILED" | "BOUNCED"
+  | "COMPLAINED" | "REJECTED" | "BLOCKED" | "SUPPRESSED" | "RATE_LIMITED"
+  | "PROVIDER_ERROR";
+
+export interface DeliveryEventRow {
+  id: string;
+  type: DeliveryEventType;
+  failureCode: string | null;
+  failureReason: string | null;
+  providerEventId: string | null;
+  createdAt: string;
+  messageId: string | null;
+  subject: string | null;
+  fromAddress: string | null;
+  recipients: { email: string; type: string; deliveryStatus: string }[];
+}
+
+export async function getDeliveryEvents(
+  params: { type?: DeliveryEventType; limit?: number } = {}
+): Promise<DeliveryEventRow[]> {
+  const search = new URLSearchParams();
+  if (params.type) search.set("type", params.type);
+  if (params.limit) search.set("limit", String(params.limit));
+  const qs = search.toString();
+  const res = await apiRequest<{ events: DeliveryEventRow[] }>(
+    `/mail/admin/delivery-events${qs ? `?${qs}` : ""}`
+  );
+  return res.events;
+}
+
+// ─── Provider Events ──────────────────────────────────────────────────────────
+
+export type ProviderEventStatus = "RECEIVED" | "RETRY" | "PROCESSED" | "FAILED" | "DEAD_LETTER";
+export type ConnectorProvider = "GMAIL" | "MICROSOFT_365" | "IMAP_SMTP";
+
+export interface ProviderEventRow {
+  id: string;
+  providerEventId: string | null;
+  provider: ConnectorProvider;
+  accountEmail: string;
+  accountStatus: string;
+  eventType: string;
+  processingStatus: ProviderEventStatus;
+  errorCode: string | null;
+  attempts: number;
+  maxAttempts: number;
+  receivedAt: string;
+  processedAt: string | null;
+}
+
+export async function getProviderEvents(
+  params: { status?: ProviderEventStatus; provider?: ConnectorProvider; limit?: number } = {}
+): Promise<ProviderEventRow[]> {
+  const search = new URLSearchParams();
+  if (params.status) search.set("status", params.status);
+  if (params.provider) search.set("provider", params.provider);
+  if (params.limit) search.set("limit", String(params.limit));
+  const qs = search.toString();
+  const res = await apiRequest<{ events: ProviderEventRow[] }>(
+    `/connectors/provider-events${qs ? `?${qs}` : ""}`
+  );
+  return res.events;
 }
 
 // ─── Onboarding ─────────────────────────────────────────────────────────────
@@ -318,6 +480,7 @@ export async function getOnboardingStatus(): Promise<OnboardingStatus> {
 export interface UsageStorage {
   used: number;
   limit: number;
+  attachmentsBytes: number;
   mailboxes: Array<{ address: string; used: number; limit: number }>;
 }
 
@@ -326,6 +489,20 @@ export interface UsageEmails {
   received: number;
   failed: number;
   draft: number;
+  scheduled: number;
+}
+
+export interface UsageDelivery {
+  delivered: number;
+  bounced: number;
+  failed: number;
+  rejected: number;
+  blocked: number;
+  complained: number;
+  deferred: number;
+  rateLimited: number;
+  providerErrors: number;
+  successRate: number | null;
 }
 
 export interface UsageConnectedAccounts {
@@ -336,11 +513,15 @@ export interface UsageConnectedAccounts {
 
 export interface UsageData {
   period: { days: number; since: string };
+  planCode: string;
   storage: UsageStorage;
   mailboxes: { count: number };
   emails: UsageEmails;
   emailVolume: Array<{ date: string; count: number }>;
+  emailVolumeByStatus: Array<{ date: string; sent: number; received: number; failed: number }>;
   apiUsage: Array<{ date: string; count: number }>;
+  delivery: UsageDelivery;
+  topMailboxes: Array<{ address: string; messageCount: number }>;
   activeMembers: number;
   totalDomains: number;
   connectedAccounts: UsageConnectedAccounts;

@@ -144,5 +144,26 @@ export class DomainService {
       return activated;
     });
   }
+
+  async remove(domainId: string, tenantId: string, userId: string) {
+    return prisma.$transaction(async (tx) => {
+      const domain = await tx.mailDomain.findFirst({ where: { id: domainId, tenantId } });
+      if (!domain) throw new AppError("Domain not found", 404, ErrorCodes.NOT_FOUND);
+      if (domain.sendingEnabled) {
+        throw new AppError(
+          "Domain is active for sending and cannot be deleted",
+          409,
+          ErrorCodes.CONFLICT
+        );
+      }
+      await tx.mailDomain.delete({ where: { id: domain.id } });
+      await auditService.record({
+        tenantId, actorUserId: userId, eventType: "DOMAIN_REMOVED",
+        targetType: "MailDomain", targetId: domain.id,
+        metadata: { domainName: domain.domainName },
+      }, tx);
+      return { id: domain.id, domainName: domain.domainName };
+    });
+  }
 }
 export const domainService = new DomainService();
