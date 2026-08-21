@@ -8,7 +8,7 @@ import { isLoggedIn } from "@/lib/auth-storage";
 import { useMe, useLogout } from "@/lib/auth-hooks";
 import type { MeResponse } from "@/lib/auth-api";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
-import { useCan } from "@/lib/admin-capabilities";
+import { useCan, useCapabilities } from "@/lib/admin-capabilities";
 import { visibleNav, type AdminNavItem } from "@/lib/admin-nav";
 import { useActiveSupportGrant } from "@/lib/admin-hooks";
 import { Pill } from "@/components/admin/ui";
@@ -135,6 +135,7 @@ function SupportGrantBanner() {
 function Rail({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const can = useCan();
+  const { isLoading } = useCapabilities();
   const groups = visibleNav(can);
 
   return (
@@ -147,7 +148,16 @@ function Rail({ onNavigate }: { onNavigate?: () => void }) {
       </div>
 
       <nav className="flex-1 space-y-3 overflow-y-auto px-2 pb-4" aria-label="Admin sections">
-        {groups.map((group) => (
+        {/* Capabilities decide what belongs here, and `can` denies while the
+            query is in flight — deliberately, so nothing the server would
+            refuse ever renders. Without a placeholder that correctness shows
+            up as an empty rail on every load, so show its shape instead. */}
+        {isLoading &&
+          Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="mx-3 my-2 h-4 animate-pulse rounded bg-[var(--s3)]" />
+          ))}
+
+        {!isLoading && groups.map((group) => (
           <div key={group.group}>
             <div className="font-mono-num px-3 pb-1 pt-2 text-[9px] font-semibold uppercase tracking-[0.13em] text-[var(--ink3)]">
               {group.group}

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authenticate, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
+import { authenticate, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./mail.controller.js";
 import { attachmentUpload } from "./attachment.middleware.js";
 import { attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
@@ -25,9 +25,9 @@ mailRouter.put("/:messageId/labels/:labelId", validate(messageLabelParamsSchema,
 mailRouter.delete("/:messageId/labels/:labelId", validate(messageLabelParamsSchema, "params"), controller.removeLabel);
 
 // ─── Admin: Mailbox management (must be before /:messageId wildcard) ──────────
-mailRouter.get("/admin/mailboxes", requireRole("OWNER", "ADMIN"), controller.listAllMailboxes);
-mailRouter.post("/admin/mailboxes", requireRole("OWNER", "ADMIN"), controller.adminCreateMailbox);
-mailRouter.delete("/admin/mailboxes/:mailboxId", requireRole("OWNER", "ADMIN"), validate(mailboxIdParamsSchema, "params"), controller.adminDeleteMailbox);
+mailRouter.get("/admin/mailboxes", requireCapability("workspace.mailboxes.manage"), controller.listAllMailboxes);
+mailRouter.post("/admin/mailboxes", requireCapability("workspace.mailboxes.manage"), controller.adminCreateMailbox);
+mailRouter.delete("/admin/mailboxes/:mailboxId", requireCapability("workspace.mailboxes.manage"), validate(mailboxIdParamsSchema, "params"), controller.adminDeleteMailbox);
 mailRouter.patch(
   "/admin/mailboxes/:mailboxId/sending",
   requireRole("OWNER", "ADMIN"),

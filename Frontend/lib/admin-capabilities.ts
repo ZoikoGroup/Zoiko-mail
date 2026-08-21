@@ -1,17 +1,21 @@
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "./api-client";
+
 /**
  * Capability set for the signed-in member.
  *
  * The rule this file exists to enforce: **the UI checks capabilities, never
  * roles.** Nothing in the admin workspace should contain `role === "ADMIN"`.
- * Adding a fifth role then becomes a data change on the server rather than a
- * hunt through security-relevant branches in the client.
+ * Adding a fifth role is then a data change on the server rather than a hunt
+ * through security-relevant branches in the client.
  *
- * STATIC PHASE: `useCapabilities` returns a hardcoded Admin set. When roadmap
- * item 54 lands, the body becomes a `useQuery` against `GET /me/capabilities`
- * and the returned shape stays identical, so no component changes.
+ * Now served by `GET /users/me/capabilities`. The server reads the role from
+ * the membership row on every request, so a demotion takes effect on the next
+ * fetch rather than at the next sign-in — which is the reason this is a query
+ * and not something cached in a token or a store.
  */
-
-/** Mirrors the 25-row capability matrix. */
 export type Capability =
   // Own work
   | "mail.own.rw"
@@ -53,41 +57,79 @@ export interface CapabilityState {
   error: Error | null;
 }
 
+// The hardcoded Admin set that used to live here is gone on purpose. The
+// server's matrix is now the single source of truth, and a client-side copy
+// would be a second one — which drifts, and then the UI offers buttons the API
+// refuses. Backend tests/capabilities.test.ts pins the Admin set instead.
+
+/** One resolved capability, as the server reports it. */
+export interface CapabilityDecision {
+  capability: Capability;
+  kind: "ALLOW" | "DENY" | "READ_ONLY" | "OWN" | "STEP_UP" | "TWO_PERSON" | "GRANT" | null;
+  allowed: boolean;
+  reason: string;
+  requiresStepUp: boolean;
+  requiresSecondApprover: boolean;
+  requiresSupportGrant: boolean;
+  ownResourceOnly: boolean;
+  readOnly: boolean;
+  /** Which roles hold this — the "ask them instead" half of a denial. */
+  heldBy: string[];
+}
+
+export interface CapabilitiesResponse {
+  role: string;
+  capabilities: Capability[];
+  decisions: CapabilityDecision[];
+}
+
+async function fetchCapabilities(): Promise<CapabilitiesResponse> {
+  const res = await apiRequest<{ data: CapabilitiesResponse }>(
+    "/users/me/capabilities"
+  );
+  return res.data;
+}
+
 /**
- * What an Admin holds. Deliberately omits `people.invite.admin`,
- * `people.admin.manage`, `people.owner.manage`, `people.mfa.reset`,
- * `policy.security.write`, everything under billing, and `data.export` —
- * an Admin is not an Owner.
+ * The full server response, for surfaces that need more than a yes/no —
+ * the permissions matrix, and the reason text on a disabled control.
  */
-const ADMIN_CAPABILITIES: Capability[] = [
-  "mail.own.rw",
-  "commitments.own.manage",
-  "connector.own.connect",
-  "people.read",
-  "people.invite.member",
-  "people.member.manage",
-  "workspace.settings.read",
-  "workspace.settings.write",
-  "workspace.mailboxes.manage",
-  "workspace.domains.manage",
-  "workspace.groups.manage",
-  "policy.write",
-  "audit.read",
-  "support.grant.end",
-];
+export function useCapabilityDecisions() {
+  return useQuery({
+    queryKey: ["capabilities"],
+    queryFn: fetchCapabilities,
+    // A permission decision that is minutes stale is a permission bug, so this
+    // is deliberately not given a long stale time.
+    staleTime: 30_000,
+  });
+}
 
 export function useCapabilities(): CapabilityState {
-  // Swap point for roadmap item 54:
-  //   return useQuery({ queryKey: ["capabilities"], queryFn: fetchCapabilities });
+  const { data, isLoading, error } = useCapabilityDecisions();
   return {
-    data: new Set(ADMIN_CAPABILITIES),
-    isLoading: false,
-    error: null,
+    data: data ? new Set(data.capabilities) : undefined,
+    isLoading,
+    error: (error as Error) ?? null,
   };
 }
 
-/** Convenience guard for conditional rendering. */
+/**
+ * Convenience guard for conditional rendering.
+ *
+ * Denies while loading and on error. Failing closed matters: the alternative
+ * briefly renders controls the server will refuse, which reads to the user as
+ * a broken product rather than a permission boundary.
+ */
 export function useCan(): (capability: Capability) => boolean {
   const { data } = useCapabilities();
   return (capability: Capability) => data?.has(capability) ?? false;
+}
+
+/** The decision behind a denial, so a control can explain itself. */
+export function useCapabilityReason(): (
+  capability: Capability
+) => CapabilityDecision | undefined {
+  const { data } = useCapabilityDecisions();
+  return (capability: Capability) =>
+    data?.decisions.find((d) => d.capability === capability);
 }
