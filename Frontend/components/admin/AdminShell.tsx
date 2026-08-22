@@ -135,7 +135,7 @@ function SupportGrantBanner() {
 function Rail({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const can = useCan();
-  const { isLoading } = useCapabilities();
+  const { isLoading, error } = useCapabilities();
   const groups = visibleNav(can);
 
   return (
@@ -157,7 +157,29 @@ function Rail({ onNavigate }: { onNavigate?: () => void }) {
             <div key={i} className="mx-3 my-2 h-4 animate-pulse rounded bg-[var(--s3)]" />
           ))}
 
-        {!isLoading && groups.map((group) => (
+        {/* Failing closed is right, but it must never look like the workspace
+            lost its features. If permissions cannot be loaded, say so — an
+            unexplained empty rail reads as data loss, not as a failed fetch. */}
+        {!isLoading && error && (
+          <div className="mx-2 rounded-lg border border-[var(--crit)]/30 bg-[var(--crit-soft)] p-3">
+            <div className="text-[12px] font-semibold text-[var(--crit)]">
+              Permissions unavailable
+            </div>
+            <p className="mt-1 text-[11px] text-[var(--ink3)]">
+              Navigation is hidden until your permissions load. This is a
+              connection problem, not a change to your access.
+            </p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="zoiko-btn sm mt-2"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {!isLoading && !error && groups.map((group) => (
           <div key={group.group}>
             <div className="font-mono-num px-3 pb-1 pt-2 text-[9px] font-semibold uppercase tracking-[0.13em] text-[var(--ink3)]">
               {group.group}

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
++import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
@@ -30,7 +30,8 @@ describe("Tenant policy module", () => {
       .send({ type: "SENDING", context: { recipient: { external: true } } }).expect(200);
     expect(denied.body.data).toMatchObject({ effect: "DENY", reason: "CONDITION_MATCHED", version: 2 });
   });
-
+  n
+  
   it("fails closed without an active policy and prevents cross-tenant reads", async () => {
     const first = await registerUser(app, { email: "policy-boundary-one@zoiko.test" });
     const second = await registerUser(app, { email: "policy-boundary-two@zoiko.test" });
