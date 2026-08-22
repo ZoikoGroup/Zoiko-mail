@@ -18,14 +18,24 @@ function initials(name?: string, email?: string) {
 
 export function OwnerShell({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const { data } = useMe();
+  const { data, isLoading, error } = useMe();
   const me = data as MeResponse | undefined;
   const logout = useLogout();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
-    if (!isLoggedIn()) router.replace("/login");
+    if (!isLoggedIn()) {
+      router.replace("/login");
+      return;
+    }
   }, [router]);
+
+  // Redirect to login if /auth/me fails (expired/invalid token)
+  useEffect(() => {
+    if (!isLoading && error && isLoggedIn()) {
+      router.replace("/login");
+    }
+  }, [isLoading, error, router]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--ground)] text-[var(--ink)]">

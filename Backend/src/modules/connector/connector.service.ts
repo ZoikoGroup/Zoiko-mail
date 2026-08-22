@@ -148,6 +148,59 @@ export class ConnectorService {
     });
   }
 
+  /**
+   * Tenant-wide provider event feed for OWNER/ADMIN. Deliberately omits
+   * payloads (sanitizedPayload / normalized resource refs) — owners get
+   * routing metadata only; full payloads remain a platform-support concern.
+   */
+  async listProviderEvents(
+    input: { status?: string; provider?: string; limit?: number },
+    tenantId: string
+  ) {
+    const events = await prisma.providerEvent.findMany({
+      where: {
+        tenantId,
+        ...(input.status
+          ? { processingStatus: input.status as Prisma.ProviderEventWhereInput["processingStatus"] }
+          : {}),
+        ...(input.provider
+          ? { provider: input.provider as Prisma.ProviderEventWhereInput["provider"] }
+          : {}),
+      },
+      select: {
+        id: true,
+        providerEventId: true,
+        provider: true,
+        eventType: true,
+        processingStatus: true,
+        errorCode: true,
+        attempts: true,
+        maxAttempts: true,
+        receivedAt: true,
+        processedAt: true,
+        requestId: true,
+        connectedAccount: { select: { email: true, status: true } },
+      },
+      orderBy: { receivedAt: "desc" },
+      take: Math.min(input.limit ?? 50, 200),
+    });
+
+    return events.map((e) => ({
+      id: e.id,
+      providerEventId: e.providerEventId,
+      provider: e.provider,
+      accountEmail: e.connectedAccount.email,
+      accountStatus: e.connectedAccount.status,
+      eventType: e.eventType,
+      processingStatus: e.processingStatus,
+      errorCode: e.errorCode,
+      attempts: e.attempts,
+      maxAttempts: e.maxAttempts,
+      receivedAt: e.receivedAt,
+      processedAt: e.processedAt,
+    }));
+  }
+
   async receiveEvent(provider: ConnectorProvider, input: NormalizedCallback, requestId?: string) {
     const account = await prisma.connectedAccount.findUnique({
       where: { provider_providerAccountId: { provider, providerAccountId: input.providerAccountId } },

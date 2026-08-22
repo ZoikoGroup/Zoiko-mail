@@ -2,10 +2,18 @@ import { Router } from "express";
 import { authenticate, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./mail.controller.js";
 import { attachmentUpload } from "./attachment.middleware.js";
-import { attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
+import { attachmentParamsSchema, bulkMailboxActionSchema, adminDeliveryEventsQuerySchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
 
 const mailRouter = Router();
 mailRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBER"));
+// Admin literal paths MUST be registered before any /:messageId routes,
+// otherwise "/admin/delivery-events" is captured as messageId="admin".
+mailRouter.get(
+  "/admin/delivery-events",
+  requireRole("OWNER", "ADMIN"),
+  validate(adminDeliveryEventsQuerySchema, "query"),
+  controller.adminListDeliveryEvents
+);
 mailRouter.get("/", validate(listMailSchema, "query"), controller.list);
 mailRouter.post("/drafts", validate(createDraftSchema), controller.createDraft);
 mailRouter.patch("/bulk", validate(bulkMailboxActionSchema), controller.bulkAction);

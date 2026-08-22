@@ -113,6 +113,14 @@ export const listDeliveryEvents = asyncHandler(async (req: Request, res: Respons
     req.requestId
   );
 });
+export const adminListDeliveryEvents = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(
+    res,
+    200,
+    { events: await mailService.adminListDeliveryEvents(req.query as { type?: string; limit?: number }, context(req)) },
+    req.requestId
+  );
+});
 export const updateSendingStatus = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(
     res,

@@ -163,7 +163,7 @@ export async function createSupportAccessGrant(input: CreateSupportGrantInput): 
 }
 
 export async function revokeSupportAccessGrant(grantId: string): Promise<SupportAccessGrant> {
-  return apiRequest<SupportAccessGrant>(`/support/access-grants/${grantId}`, {
+  return apiRequest<SupportAccessGrant>(`/support/access-grants/${encodeURIComponent(grantId)}`, {
     method: "DELETE",
   });
 }
@@ -311,6 +311,98 @@ export interface PlatformAuditEvent {
   createdAt: string;
 }
 
+export interface PlatformMailbox {
+  id: string;
+  address: string;
+  tenantId: string;
+  tenantName: string;
+  tenantStatus: string;
+  memberName: string;
+  memberEmail: string;
+  suspended: boolean;
+  suspensionReason: string | null;
+  createdAt: string;
+  connectedAccounts: Array<{
+    id: string;
+    provider: string;
+    email: string;
+    status: string;
+    lastSyncedAt: string | null;
+    lastErrorCode: string | null;
+  }>;
+}
+
+export interface PlatformDomain {
+  id: string;
+  domainName: string;
+  verificationStatus: string;
+  mxStatus: string;
+  spfStatus: string;
+  dkimStatus: string;
+  dmarcStatus: string;
+  lastCheckedAt: string | null;
+  sendingEnabled: boolean;
+  activatedAt: string | null;
+  tenant: { id: string; name: string };
+}
+
+export interface PlatformDomainDetail {
+  domain: {
+    id: string;
+    domainName: string;
+    type: string | null;
+    verificationToken: string | null;
+    verificationStatus: string;
+    mxStatus: string;
+    spfStatus: string;
+    dkimStatus: string;
+    dmarcStatus: string;
+    firstCheckedAt: string | null;
+    lastCheckedAt: string | null;
+    errorDetails: string | null;
+    sendingEnabled: boolean;
+    activatedAt: string | null;
+    createdAt: string;
+    updatedAt: string;
+  };
+  checks: Array<{
+    id: string;
+    verificationStatus: string;
+    mxStatus: string;
+    spfStatus: string;
+    dkimStatus: string;
+    dmarcStatus: string;
+    errorDetails: unknown;
+    checkedAt: string;
+  }>;
+}
+
+export interface PlatformMailboxDetail {
+  mailbox: {
+    id: string;
+    address: string;
+    tenantId: string;
+    sendSuspendedAt: string | null;
+    sendSuspensionReason: string | null;
+    createdAt: string;
+    updatedAt: string;
+    member: { id: string; email: string; displayName: string; status: string; lastLoginAt: string | null } | null;
+    connectedAccounts: Array<{
+      id: string;
+      provider: string;
+      email: string;
+      status: string;
+      lastSyncedAt: string | null;
+      lastErrorCode: string | null;
+      createdAt: string;
+      watchExpiresAt: string | null;
+    }>;
+  };
+  syncJobs: Array<Record<string, unknown>>;
+  providerEvents: Array<Record<string, unknown>>;
+  deliveryEvents: Array<Record<string, unknown>>;
+}
+
 export interface PlatformGrant extends SupportAccessGrant {
   tenantId: string;
   tenantName: string;
@@ -371,7 +463,27 @@ export function searchPlatformTenants(q = "", limit = 50): Promise<{ tenants: Pl
 }
 
 export function fetchTenantOverview(tenantId: string): Promise<TenantOverview> {
-  return platformRequest<TenantOverview>(`/support/platform/tenants/${tenantId}`);
+  return platformRequest<TenantOverview>(`/support/platform/tenants/${encodeURIComponent(tenantId)}`);
+}
+
+export function searchPlatformMailboxes(q = "", limit = 50): Promise<{ mailboxes: PlatformMailbox[] }> {
+  return platformRequest<{ mailboxes: PlatformMailbox[] }>(`/support/platform/mailboxes${listQueryString({ q, limit })}`);
+}
+
+export function searchPlatformDomains(q = "", limit = 50): Promise<{ domains: PlatformDomain[] }> {
+  return platformRequest<{ domains: PlatformDomain[] }>(`/support/platform/domains${listQueryString({ q, limit })}`);
+}
+
+export function fetchPlatformDomainDetail(tenantId: string, domainId: string): Promise<PlatformDomainDetail> {
+  return platformRequest<PlatformDomainDetail>(
+    `/support/platform/tenants/${encodeURIComponent(tenantId)}/domains/${encodeURIComponent(domainId)}`,
+  );
+}
+
+export function fetchPlatformMailboxDetail(tenantId: string, mailboxId: string): Promise<PlatformMailboxDetail> {
+  return platformRequest<PlatformMailboxDetail>(
+    `/support/platform/tenants/${encodeURIComponent(tenantId)}/mailboxes/${encodeURIComponent(mailboxId)}`,
+  );
 }
 
 export function listPlatformProviderEvents(params: PlatformListParams): Promise<{ events: PlatformProviderEvent[] }> {
@@ -399,7 +511,7 @@ export function listPlatformGrants(): Promise<{ grants: PlatformGrant[] }> {
 }
 
 export function revokePlatformGrant(grantId: string): Promise<PlatformGrant> {
-  return platformRequest<PlatformGrant>(`/support/platform/grants/${grantId}`, { method: "DELETE" });
+  return platformRequest<PlatformGrant>(`/support/platform/grants/${encodeURIComponent(grantId)}`, { method: "DELETE" });
 }
 
 export function fetchPlatformDiagnostics(grantId: string): Promise<SupportDiagnosticsData> {

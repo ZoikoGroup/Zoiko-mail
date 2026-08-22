@@ -12,12 +12,22 @@ import {
   runDiagnostics,
   getDomainChecks,
   activateDomain,
+  deleteDomain,
   getAuditEvents,
   getPolicies,
   createPolicy,
   activatePolicy,
   getCurrentTenant,
   updateTenant,
+  getGeneralSettings,
+  updateGeneralSettings,
+  getSuppressions,
+  addSuppression,
+  deactivateSuppression,
+  getDeliveryEvents,
+  getProviderEvents,
+  getOnboardingStatus,
+  getUsage,
   getConnectors,
   deleteConnector,
   getConnectorHealth,
@@ -36,6 +46,10 @@ import {
   type AuditEventQuery,
   type CreatePolicyInput,
   type UpdateTenantInput,
+  type UpdateGeneralSettingsInput,
+  type DeliveryEventType,
+  type ProviderEventStatus,
+  type ConnectorProvider,
   type RequestExportInput,
   type RequestDeletionInput,
 } from "./owner-api";
@@ -125,6 +139,17 @@ export function useActivateDomain() {
   });
 }
 
+export function useDeleteDomain() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (domainId: string) => deleteDomain(domainId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["owner", "domains"] });
+      qc.invalidateQueries({ queryKey: ["owner", "domain-checks"] });
+    },
+  });
+}
+
 // ─── Audit ────────────────────────────────────────────────────────────────────
 
 export function useAuditEvents(query: AuditEventQuery = {}) {
@@ -176,7 +201,89 @@ export function useUpdateTenant() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: UpdateTenantInput) => updateTenant(input),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "tenant"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["owner", "tenant"] });
+      qc.invalidateQueries({ queryKey: ["owner", "general-settings"] });
+      qc.invalidateQueries({ queryKey: ["auth", "me"] });
+    },
+  });
+}
+
+export function useGeneralSettings() {
+  return useQuery({
+    queryKey: ["owner", "general-settings"],
+    queryFn: getGeneralSettings,
+    staleTime: 30_000,
+  });
+}
+
+export function useUpdateGeneralSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpdateGeneralSettingsInput) => updateGeneralSettings(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "general-settings"] }),
+  });
+}
+
+export function useSuppressions() {
+  return useQuery({
+    queryKey: ["owner", "suppressions"],
+    queryFn: getSuppressions,
+    staleTime: 30_000,
+  });
+}
+
+export function useAddSuppression() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (email: string) => addSuppression(email),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "suppressions"] }),
+  });
+}
+
+export function useDeactivateSuppression() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (suppressionId: string) => deactivateSuppression(suppressionId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "suppressions"] }),
+  });
+}
+
+export function useDeliveryEvents(params: { type?: DeliveryEventType; limit?: number } = {}) {
+  return useQuery({
+    queryKey: ["owner", "delivery-events", params],
+    queryFn: () => getDeliveryEvents(params),
+    staleTime: 15_000,
+  });
+}
+
+export function useProviderEvents(
+  params: { status?: ProviderEventStatus; provider?: ConnectorProvider; limit?: number } = {}
+) {
+  return useQuery({
+    queryKey: ["owner", "provider-events", params],
+    queryFn: () => getProviderEvents(params),
+    staleTime: 15_000,
+  });
+}
+
+// ─── Onboarding ────────────────────────────────────────────────────────────
+
+export function useOnboardingStatus() {
+  return useQuery({
+    queryKey: ["owner", "onboarding"],
+    queryFn: getOnboardingStatus,
+    staleTime: 30_000,
+  });
+}
+
+// ─── Usage ────────────────────────────────────────────────────────────────
+
+export function useUsage(days: number = 30) {
+  return useQuery({
+    queryKey: ["owner", "usage", days],
+    queryFn: () => getUsage(days),
+    staleTime: 60_000,
   });
 }
 

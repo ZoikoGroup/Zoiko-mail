@@ -34,7 +34,7 @@ describe("Membership invitations", () => {
       .send({ invitationToken: token })
       .expect(403);
 
-    const accepted = await request(app)
+    const accepted =     await request(app)
       .post("/api/v1/membership/invitations/accept")
       .set(authHeader(invitee.accessToken))
       .send({ invitationToken: token })
@@ -42,10 +42,21 @@ describe("Membership invitations", () => {
     expect(accepted.body.data.status).toBe("ACTIVE");
     expect(accepted.body.data.tenantId).toBe(owner.tenantId);
 
-    await request(app)
+    // Re-presenting the same email link is idempotent (double-click,
+    // StrictMode double-mount, mail-scanner prefetch) — not an error.
+    const repeat = await request(app)
       .post("/api/v1/membership/invitations/accept")
       .set(authHeader(invitee.accessToken))
       .send({ invitationToken: token })
+      .expect(200);
+    expect(repeat.body.data.status).toBe("ACTIVE");
+    expect(repeat.body.data.id).toBe(accepted.body.data.id);
+
+    // A token that was never issued stays invalid.
+    await request(app)
+      .post("/api/v1/membership/invitations/accept")
+      .set(authHeader(invitee.accessToken))
+      .send({ invitationToken: "bogus-token-that-was-never-issued-000000" })
       .expect(401);
 
     await request(app)

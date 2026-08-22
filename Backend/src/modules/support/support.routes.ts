@@ -47,13 +47,19 @@ function listQuery(req: Request): ListQuery {
     const v = req.query[k];
     return typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
   };
+  const rawLimit = req.query.limit;
+  const limit = typeof rawLimit === "number"
+    ? rawLimit
+    : typeof rawLimit === "string" && rawLimit.trim() !== ""
+      ? (Number(rawLimit) || 50)
+      : 50;
   return {
     tenantId: str("tenantId"),
     provider: str("provider"),
     status: str("status"),
     type: str("type"),
     q: str("q"),
-    limit: typeof req.query.limit === "number" ? req.query.limit : 50,
+    limit: Math.max(1, Math.min(Math.floor(limit), 200)),
   };
 }
 

@@ -41,6 +41,13 @@ export const listMailSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(25),
 });
+export const adminDeliveryEventsQuerySchema = z.object({
+  type: z.enum([
+    "ACCEPTED", "QUEUED", "DELIVERED", "DEFERRED", "FAILED", "BOUNCED",
+    "COMPLAINED", "REJECTED", "BLOCKED", "SUPPRESSED", "RATE_LIMITED", "PROVIDER_ERROR",
+  ]).optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
 export const updateMailboxItemSchema = z.object({
   isRead: z.boolean().optional(),
   isStarred: z.boolean().optional(),

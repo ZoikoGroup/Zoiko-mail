@@ -58,25 +58,11 @@ export function useLogin() {
       let href: string;
 
       if (data.state === "STAFF_CONSOLE") {
-        // Platform-scoped session (staff with platformRole but no tenant).
-        href = "/platform-console";
+        href = "/support";
       } else if (data.state === "SIGNED_IN") {
-        // Regular user — use the membership role from the backend session.
         const role = data.membership?.role;
         href = resolveWorkspaceHref(role);
-        // } else if (data.state === "NO_WORKSPACE") {
-        //   href = "/";
-        // } else if (data.state === "WORKSPACE_SELECTION") {
-        //   href = "/";
-        // } else {
-        //   href = "/login";
-        // }
-
       } else if (data.state === "WORKSPACE_SELECTION") {
-        // Stash the workspaces + selection token so /select-workspace can render
-        // the picker and call /auth/select-workspace without asking for the
-        // password again. sessionStorage (not localStorage) — selection token
-        // expires in 15 min and this isn't a real session.
         if (typeof window !== "undefined") {
           sessionStorage.setItem(
             "zoiko.selection_token",
@@ -92,28 +78,44 @@ export function useLogin() {
         data.state === "ACCOUNT_SUSPENDED" ||
         data.state === "ACCOUNT_DISABLED"
       ) {
-        // Account-level blocks — inform-only page, no workspace context needed.
         href = `/auth-status?state=${data.state}`;
       } else if (
         data.state === "MEMBERSHIP_SUSPENDED" ||
         data.state === "WORKSPACE_SUSPENDED" ||
         data.state === "WORKSPACE_DELETING"
       ) {
-        // All three carry a single workspace object with a `name` field.
         const workspaceName = encodeURIComponent(data.workspace?.name ?? "");
         href = `/auth-status?state=${data.state}&workspace=${workspaceName}`;
       } else if (data.state === "EMAIL_VERIFICATION_REQUIRED") {
-        // Backend requires OTP verification before session issuance. Stash the
-        // pending token + email in sessionStorage so /verify-email can pick them
-        // up. sessionStorage (not localStorage) because these are short-lived
-        // and not a real session — they die with the browser tab.
         if (typeof window !== "undefined") {
           sessionStorage.setItem("zoiko.pending_token", data.pendingToken ?? "");
           sessionStorage.setItem("zoiko.pending_email", data.user?.email ?? "");
         }
         href = "/verify-email";
+      } else if (data.state === "INVITATION_PENDING") {
+        const pendingToken = typeof window !== "undefined"
+          ? sessionStorage.getItem("pendingInvitationToken")
+          : null;
+        if (pendingToken) {
+          const { acceptInvitation } = await import("@/lib/owner-api");
+          try {
+            await acceptInvitation(pendingToken);
+            sessionStorage.removeItem("pendingInvitationToken");
+            href = resolveWorkspaceHref(data.membership?.role);
+          } catch {
+            href = "/inbox";
+          }
+        } else {
+          const names = (data.invitations ?? []).map((w: { name: string }) => w.name).join(",");
+          href = `/auth-status?state=INVITATION_PENDING${names ? `&invitations=${encodeURIComponent(names)}` : ""}`;
+        }
       } else {
         href = "/login";
+      }
+
+      if (data.state === "NO_WORKSPACE") {
+        router.replace("/login");
+        return;
       }
 
       router.replace(href);
@@ -173,7 +175,8 @@ export function useCreateWorkspace() {
         queryKey: ["me"],
       });
 
-      router.replace(resolveWorkspaceHref(data?.membership?.role));
+      // New workspace always needs onboarding
+      router.replace("/owner/onboarding");
     },
   });
 }

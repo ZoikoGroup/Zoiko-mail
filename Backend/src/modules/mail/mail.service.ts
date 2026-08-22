@@ -674,6 +674,55 @@ export class MailService {
     });
   }
 
+  /**
+   * Tenant-wide delivery event feed for OWNER/ADMIN (unlike the per-message
+   * variant above, which scopes to the authoring user). Read-only reporting:
+   * no payload bodies are exposed, only routing metadata.
+   */
+  async adminListDeliveryEvents(
+    input: { type?: string; limit?: number },
+    context: MailContext
+  ) {
+    const events = await prisma.deliveryEvent.findMany({
+      where: {
+        tenantId: context.tenantId,
+        ...(input.type ? { type: input.type as Prisma.DeliveryEventWhereInput["type"] } : {}),
+      },
+      select: {
+        id: true,
+        type: true,
+        failureCode: true,
+        failureReason: true,
+        providerEventId: true,
+        createdAt: true,
+        message: {
+          select: {
+            id: true,
+            subject: true,
+            fromAddress: true,
+            status: true,
+            recipients: { select: { email: true, type: true, deliveryStatus: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: Math.min(input.limit ?? 50, 200),
+    });
+
+    return events.map((e) => ({
+      id: e.id,
+      type: e.type,
+      failureCode: e.failureCode,
+      failureReason: e.failureReason,
+      providerEventId: e.providerEventId,
+      createdAt: e.createdAt,
+      messageId: e.message?.id ?? null,
+      subject: e.message?.subject ?? null,
+      fromAddress: e.message?.fromAddress ?? null,
+      recipients: e.message?.recipients ?? [],
+    }));
+  }
+
   async updateSendingStatus(
     mailboxId: string,
     input: { suspended: boolean; reason?: string },

@@ -6,6 +6,7 @@ import Image from "next/image";
 import { API_BASE } from "@/lib/config";
 import { resolveWorkspaceHref } from "@/lib/workspace";
 import { setTokens, setPlatformToken } from "@/lib/auth-storage";
+import { acceptInvitationById } from "@/lib/owner-api";
 
 // Matches the WorkspaceOption shape the backend returns in the login
 // WORKSPACE_SELECTION response.
@@ -26,6 +27,7 @@ export default function SelectWorkspacePage() {
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null);
   const [ready, setReady] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Read the stash left by useLogin's WORKSPACE_SELECTION branch. If someone
@@ -88,7 +90,7 @@ export default function SelectWorkspacePage() {
         } else if (data.state === "STAFF_CONSOLE") {
           if (data.platformToken) setPlatformToken(data.platformToken);
           clearStash();
-          router.replace("/platform-console");
+          router.replace("/support");
         } else if (
           data.state === "MEMBERSHIP_SUSPENDED" ||
           data.state === "WORKSPACE_SUSPENDED" ||
@@ -130,6 +132,32 @@ export default function SelectWorkspacePage() {
     clearStash();
     router.replace("/login");
   }, [clearStash, router]);
+
+  const handleAcceptInvitation = useCallback(
+    async (ws: Workspace) => {
+      if (acceptingId) return;
+      setAcceptingId(ws.membershipId);
+      setError(null);
+      try {
+        await acceptInvitationById(ws.membershipId);
+        // Update the workspace list in-place: mark as ACTIVE and selectable
+        setWorkspaces((prev) =>
+          prev
+            ? prev.map((w) =>
+                w.membershipId === ws.membershipId
+                  ? { ...w, membershipStatus: "ACTIVE", selectable: true }
+                  : w
+              )
+            : prev
+        );
+      } catch (e: any) {
+        setError(e?.message || "Failed to accept invitation");
+      } finally {
+        setAcceptingId(null);
+      }
+    },
+    [acceptingId]
+  );
 
   if (!ready || !workspaces) {
     return null;
@@ -179,33 +207,48 @@ export default function SelectWorkspacePage() {
                 : "Not available"
               : null;
 
+            const isInvited = ws.membershipStatus === "INVITED";
+            const isAccepting = acceptingId === ws.membershipId;
+
             return (
-              <button
-                key={ws.id}
-                onClick={() => handlePick(ws)}
-                disabled={disabled}
-                className={`w-full rounded-lg border p-4 text-left transition ${
-                  disabled
-                    ? "cursor-not-allowed border-slate-200 bg-slate-50 opacity-60 dark:border-slate-800 dark:bg-slate-900"
-                    : "border-slate-200 bg-white hover:border-teal-500 hover:bg-teal-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-teal-500 dark:hover:bg-slate-800"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium text-slate-900 dark:text-white">
-                      {ws.name}
-                    </p>
-                    <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                      {ws.role} · {ws.planCode}
-                    </p>
+              <div key={ws.id} className="rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+                <button
+                  onClick={() => handlePick(ws)}
+                  disabled={disabled}
+                  className={`w-full p-4 text-left transition ${
+                    disabled
+                      ? "cursor-not-allowed opacity-60"
+                      : "hover:border-teal-500 hover:bg-teal-50 dark:hover:border-teal-500 dark:hover:bg-slate-800"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium text-slate-900 dark:text-white">
+                        {ws.name}
+                      </p>
+                      <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                        {ws.role} · {ws.planCode}
+                      </p>
+                    </div>
+                    {reason && !isInvited && (
+                      <span className="shrink-0 rounded-full bg-slate-200 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                        {reason}
+                      </span>
+                    )}
                   </div>
-                  {reason && (
-                    <span className="shrink-0 rounded-full bg-slate-200 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-                      {reason}
-                    </span>
-                  )}
-                </div>
-              </button>
+                </button>
+                {isInvited && (
+                  <div className="border-t border-slate-100 px-4 py-2.5 dark:border-slate-800">
+                    <button
+                      onClick={() => handleAcceptInvitation(ws)}
+                      disabled={isAccepting || submitting}
+                      className="w-full rounded-md bg-teal-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+                    >
+                      {isAccepting ? "Accepting…" : "Accept Invitation"}
+                    </button>
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>
