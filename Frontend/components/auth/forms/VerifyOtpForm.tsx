@@ -8,6 +8,7 @@ import {
   useResendOtp,
 } from "@/lib/auth-hooks";
 
+import type { PendingInvitation } from "@/lib/auth-api";
 import { ApiError } from "@/lib/api-client";
 import { HiArrowLeft } from "react-icons/hi";
 import { MdEmail } from "react-icons/md";
@@ -23,7 +24,9 @@ interface VerifyOtpFormProps {
   token: string;
   email: string;
   onBack: () => void;
-  onSuccess: (token: string) => void;
+  /** `invitations` is non-empty when this email was invited to a workspace —
+   *  the caller then joins a workspace instead of creating one. */
+  onSuccess: (token: string, invitations: PendingInvitation[]) => void;
 }
 
 export default function VerifyOtpForm({
@@ -152,12 +155,15 @@ export default function VerifyOtpForm({
         onSuccess: (response) => {
           setError("");
 
+          const res = response as any;
           const nextToken =
-            (response as any)?.pendingToken ??
-            (response as any)?.data?.pendingToken ??
-            token;
+            res?.pendingToken ?? res?.data?.pendingToken ?? token;
+          const invitations: PendingInvitation[] =
+            res?.pendingInvitations ??
+            res?.data?.pendingInvitations ??
+            [];
 
-          onSuccess(nextToken); // moves OTP screen -> Create workspace step
+          onSuccess(nextToken, invitations); // moves OTP screen -> Join or Create workspace step
         },
 
         onError: (error) => {

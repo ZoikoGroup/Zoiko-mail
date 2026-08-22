@@ -9,6 +9,10 @@ import type { MeResponse } from "@/lib/auth-api";
 import { OwnerSidebar } from "./OwnerSidebar";
 import { GlobalSearch } from "./GlobalSearch";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
+import { AccessDenied } from "@/components/ui/AccessDenied";
+
+/** Roles allowed into the owner workspace shell. */
+const OWNER_SHELL_ROLES = ["OWNER", "ADMIN"];
 
 function initials(name?: string, email?: string) {
   const base = (name?.trim() || email || "?").trim();
@@ -36,6 +40,16 @@ export function OwnerShell({ children }: { children: ReactNode }) {
       router.replace("/login");
     }
   }, [isLoading, error, router]);
+
+  // Role guard: non-owner/admin roles get a warning instead of the
+  // owner workspace chrome (individual pages guard themselves too).
+  if (me && !OWNER_SHELL_ROLES.includes(me.membership.role)) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[var(--ground)] text-[var(--ink)]">
+        <AccessDenied role={me.membership.role} dashboard="owner" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--ground)] text-[var(--ink)]">

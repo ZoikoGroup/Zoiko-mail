@@ -13,6 +13,7 @@ import {
   verifyOtp,
   resendOtp,
   createWorkspace,
+  joinWorkspace,
   forgotPassword,
   resetPassword,
 
@@ -23,6 +24,7 @@ import {
   type VerifyOtpInput,
   type ResendOtpInput,
   type CreateWorkspaceInput,
+  type JoinWorkspaceInput,
   type ForgotPasswordInput,
   type ResetPasswordInput,
 } from "./auth-api";
@@ -93,22 +95,19 @@ export function useLogin() {
         }
         href = "/verify-email";
       } else if (data.state === "INVITATION_PENDING") {
-        const pendingToken = typeof window !== "undefined"
-          ? sessionStorage.getItem("pendingInvitationToken")
-          : null;
-        if (pendingToken) {
-          const { acceptInvitation } = await import("@/lib/owner-api");
-          try {
-            await acceptInvitation(pendingToken);
-            sessionStorage.removeItem("pendingInvitationToken");
-            href = resolveWorkspaceHref(data.membership?.role);
-          } catch {
-            href = "/inbox";
-          }
-        } else {
-          const names = (data.invitations ?? []).map((w: { name: string }) => w.name).join(",");
-          href = `/auth-status?state=INVITATION_PENDING${names ? `&invitations=${encodeURIComponent(names)}` : ""}`;
+        // No tenant session exists yet, so acceptance happens on the
+        // status screen using the backend-issued pending token (same
+        // mechanism as the post-registration join flow).
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem("zoiko.invite_pending_token", data.pendingToken ?? "");
+          sessionStorage.setItem(
+            "zoiko.invite_pending_list",
+            JSON.stringify(data.invitations ?? [])
+          );
+          sessionStorage.removeItem("pendingInvitationToken");
         }
+        const names = (data.invitations ?? []).map((w: { name: string }) => w.name).join(",");
+        href = `/auth-status?state=INVITATION_PENDING${names ? `&invitations=${encodeURIComponent(names)}` : ""}`;
       } else {
         href = "/login";
       }
@@ -177,6 +176,26 @@ export function useCreateWorkspace() {
 
       // New workspace always needs onboarding
       router.replace("/owner/onboarding");
+    },
+  });
+}
+
+// End of the invited-registration flow: accept the pending invitation and
+// land in the joined workspace under the invited role (ADMIN → /admin,
+// MEMBER → /inbox). The backend decides the role; never the client.
+export function useJoinWorkspace() {
+  const qc = useQueryClient();
+  const router = useRouter();
+
+  return useMutation({
+    mutationFn: (input: JoinWorkspaceInput) => joinWorkspace(input),
+
+    onSuccess: async (data) => {
+      await qc.invalidateQueries({
+        queryKey: ["me"],
+      });
+
+      router.replace(resolveWorkspaceHref(data.membership?.role));
     },
   });
 }

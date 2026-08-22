@@ -9,12 +9,14 @@ import {
   RegisterForm,
   VerifyOtpForm,
   CreateWorkspaceForm,
+  JoinWorkspaceForm,
   ForgotPasswordForm,
   ResetPasswordForm,
 } from "@/components/auth";
 // import VerifyOtpForm from "@/components/auth/forms/VerifyOtpForm";
 
 import type { AuthStep } from "@/components/auth";
+import type { PendingInvitation } from "@/lib/auth-api";
 import { useCreateWorkspace } from "@/lib/auth-hooks";
 
 export default function AuthPage() {
@@ -26,6 +28,10 @@ export default function AuthPage() {
   const createWorkspace = useCreateWorkspace();
   const [workspaceName, setWorkspaceName] = useState("");
   const [workspacePlan, setWorkspacePlan] = useState("starter");
+  // Invitations found for the registering email — non-empty means the
+  // account should join an existing workspace (ADMIN/MEMBER) instead of
+  // creating a new one as OWNER.
+  const [invitations, setInvitations] = useState<PendingInvitation[]>([]);
 
   const renderStep = () => {
     switch (step) {
@@ -62,11 +68,15 @@ export default function AuthPage() {
             token={pendingToken}
             email={verificationEmail}
             onBack={() => setStep("register")}
-            // onSuccess={(newToken) => {
-            //   setPendingToken(newToken);
-            //   setStep("workspace");
-            // }}
-            onSuccess={(newToken) => {
+            onSuccess={(newToken, pendingInvitations) => {
+              if (pendingInvitations.length > 0) {
+                // Invited account → join as ADMIN/MEMBER.
+                setPendingToken(newToken);
+                setInvitations(pendingInvitations);
+                setStep("joinWorkspace");
+                return;
+              }
+              // No invitations → own workspace as OWNER.
               createWorkspace.mutate(
                 {
                   token: newToken,
@@ -76,6 +86,15 @@ export default function AuthPage() {
                 { onError: () => alert("Couldn't finish setting up your account. Please try again.") }
               );
             }}
+          />
+        );
+
+      case "joinWorkspace":
+        return (
+          <JoinWorkspaceForm
+            token={pendingToken}
+            invitations={invitations}
+            onBack={() => setStep("login")}
           />
         );
 

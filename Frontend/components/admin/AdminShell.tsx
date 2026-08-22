@@ -12,6 +12,10 @@ import { useCan } from "@/lib/admin-capabilities";
 import { visibleNav, type AdminNavItem } from "@/lib/admin-nav";
 import { useActiveSupportGrant } from "@/lib/admin-hooks";
 import { Pill } from "@/components/admin/ui";
+import { AccessDenied } from "@/components/ui/AccessDenied";
+
+/** Roles allowed into the admin workspace; anyone else gets a warning. */
+const ADMIN_SHELL_ROLES = ["OWNER", "ADMIN", "SUPPORT"];
 
 function initials(name?: string, email?: string) {
   const base = (name?.trim() || email || "?").trim();
@@ -30,6 +34,16 @@ export function AdminShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!isLoggedIn()) router.replace("/login");
   }, [router]);
+
+  // Role guard: members without an admin-level role see a clear warning
+  // instead of the admin workspace (backend still enforces this per route).
+  if (me && !ADMIN_SHELL_ROLES.includes(me.membership.role)) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[var(--ground)] text-[var(--ink)]">
+        <AccessDenied role={me.membership.role} dashboard="admin" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--ground)] text-[var(--ink)]">

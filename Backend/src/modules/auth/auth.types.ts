@@ -67,3 +67,26 @@ export interface RegisterResponse {
   pendingToken: string;
   expiresIn: string;
 }
+
+/** A workspace invitation waiting for the (newly registered) user. */
+export interface PendingInvitationSummary {
+  membershipId: string;
+  tenantId: string;
+  tenantName: string;
+  role: string;
+}
+
+/**
+ * Returned by /verify-otp. When the verified email has pending invitations,
+ * the client skips workspace creation and joins an existing workspace as
+ * ADMIN/MEMBER instead of creating a new one as OWNER.
+ */
+export interface VerifyOtpResponse extends RegisterResponse {
+  emailVerified: boolean;
+  pendingInvitations: PendingInvitationSummary[];
+}
+
+/** Body of POST /auth/join-workspace (pending-token authenticated). */
+export interface JoinWorkspaceInput {
+  membershipId: string;
+}

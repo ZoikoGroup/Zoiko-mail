@@ -5,6 +5,7 @@ import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
 import { env } from "../../config/env.js";
 import { generateOpaqueToken, hashToken } from "../../common/utils/tokenHash.js";
+import { hashPassword } from "../../common/utils/password.js";
 import { systemMailer } from "../../common/mailer/system-mailer.js";
 import { logger } from "../../config/logger.js";
 import type { AcceptInvitationInput, AddMemberInput, CreateInvitationInput, UpdateMemberInput } from "./membership.schema.js";
@@ -124,9 +125,21 @@ export class MembershipService {
     );
 
     const membership = await prisma.$transaction(async (tx) => {
-      const user = await tx.appUser.findUnique({ where: { email: input.email } });
-      if (!user) throw new AppError("Registered user not found", 404, ErrorCodes.NOT_FOUND);
-      if (user.status !== "ACTIVE") {
+      let user = await tx.appUser.findUnique({ where: { email: input.email } });
+      if (!user) {
+        // The invitee hasn't signed up yet. Create a placeholder identity
+        // (random password, status INVITED) that /auth/register claims —
+        // the real password is chosen when the invitee registers.
+        user = await tx.appUser.create({
+          data: {
+            email: input.email,
+            passwordHash: await hashPassword(generateOpaqueToken()),
+            displayName: input.email.split("@")[0] ?? input.email,
+            status: "INVITED",
+          },
+        });
+      }
+      if (user.status !== "ACTIVE" && user.status !== "INVITED") {
         throw new AppError("User account is disabled", 409, ErrorCodes.CONFLICT);
       }
 

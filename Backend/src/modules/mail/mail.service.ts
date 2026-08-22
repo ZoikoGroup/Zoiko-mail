@@ -694,6 +694,7 @@ export class MailService {
         failureCode: true,
         failureReason: true,
         providerEventId: true,
+        metadata: true,
         createdAt: true,
         message: {
           select: {
@@ -715,6 +716,7 @@ export class MailService {
       failureCode: e.failureCode,
       failureReason: e.failureReason,
       providerEventId: e.providerEventId,
+      metadata: e.metadata ?? null,
       createdAt: e.createdAt,
       messageId: e.message?.id ?? null,
       subject: e.message?.subject ?? null,
@@ -773,6 +775,17 @@ export class MailService {
       ...(filters.labelId ? {
         labels: { some: { tenantId: context.tenantId, labelId: filters.labelId } },
       } : {}),
+      ...(filters.q ? {
+        message: {
+          OR: [
+            { subject: { contains: filters.q, mode: "insensitive" as const } },
+            { textBody: { contains: filters.q, mode: "insensitive" as const } },
+            { fromAddress: { contains: filters.q, mode: "insensitive" as const } },
+            { fromName: { contains: filters.q, mode: "insensitive" as const } },
+            { recipients: { some: { email: { contains: filters.q, mode: "insensitive" as const } } } },
+          ],
+        },
+      } : {}),
     };
     const [items, total] = await prisma.$transaction([
       prisma.mailboxMessage.findMany({
@@ -800,6 +813,28 @@ export class MailService {
       })),
       pagination: { ...filters, total, totalPages: Math.ceil(total / filters.limit) },
     };
+  }
+
+  /**
+   * Unread counts per folder for folder-rail badges. DRAFTS is excluded:
+   * draft rows are never marked read, so counting them would show a
+   * permanent phantom badge.
+   */
+  async unreadCounts(context: MailContext) {
+    const mailbox = await this.mailbox(context);
+    const grouped = await prisma.mailboxMessage.groupBy({
+      by: ["folder"],
+      where: {
+        tenantId: context.tenantId,
+        mailboxId: mailbox.id,
+        isRead: false,
+        folder: { not: "DRAFTS" },
+      },
+      _count: { _all: true },
+    });
+    const counts: Record<string, number> = {};
+    for (const row of grouped) counts[row.folder] = row._count._all;
+    return { counts };
   }
 
   async get(messageId: string, context: MailContext) {
