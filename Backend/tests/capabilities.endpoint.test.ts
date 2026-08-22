@@ -61,7 +61,7 @@ describe("GET /me/capabilities", () => {
     }
   });
 
-  it("gives an Admin exactly the fourteen capabilities the workspace expects", async () => {
+  it("serves an Admin the capabilities RBAC §2 assigns, and no others", async () => {
     const owner = await registerUser(app, { email: "caps-o2@zoiko.test" });
     const admin = await memberWithRole(
       owner.accessToken,
@@ -76,36 +76,65 @@ describe("GET /me/capabilities", () => {
       .expect(200);
 
     expect(res.body.data.role).toBe("ADMIN");
-    expect(res.body.data.capabilities).toHaveLength(14);
 
-    // The liability capabilities stay with the Owner.
+    // §2 "Assign roles" = Limited: an Admin acts on an Admin, never an Owner.
+    expect(res.body.data.capabilities).toContain("people.admin.manage");
+    expect(res.body.data.capabilities).toContain("people.invite.admin");
+
+    // Held in no form. `data.export` is absent from this list because §2
+    // grants it conditionally — it is asserted as step-up below instead.
     for (const withheld of [
       "billing.read",
-      "data.export",
       "tenant.delete",
       "policy.security.write",
       "people.owner.manage",
+      "people.invite.owner",
       "people.mfa.reset",
+      "mail.other.read",
     ]) {
       expect(res.body.data.capabilities).not.toContain(withheld);
     }
   });
 
-  it("keeps a step-up capability in the payload with its unmet condition", async () => {
+  it("reports an Admin export as step-up rather than omitting it", async () => {
     const owner = await registerUser(app, { email: "caps-stepup@zoiko.test" });
+    const admin = await memberWithRole(
+      owner.accessToken,
+      owner.tenantId,
+      "ADMIN",
+      "caps-stepup-admin@zoiko.test"
+    );
+
+    const res = await request(app)
+      .get("/api/v1/users/me/capabilities")
+      .set(authHeader(admin.token))
+      .expect(200);
+
+    const exportDecision = res.body.data.decisions.find(
+      (d: { capability: string }) => d.capability === "data.export"
+    );
+    // Reported rather than hidden: the Admin holds it, but not right now.
+    expect(exportDecision).toBeDefined();
+    expect(exportDecision.requiresStepUp).toBe(true);
+    expect(res.body.data.capabilities).not.toContain("data.export");
+  });
+
+  it("never offers private mailbox content to an Owner (AC-005)", async () => {
+    const owner = await registerUser(app, { email: "caps-ac005@zoiko.test" });
 
     const res = await request(app)
       .get("/api/v1/users/me/capabilities")
       .set(authHeader(owner.accessToken))
       .expect(200);
 
-    const readOthers = res.body.data.decisions.find(
-      (d: { capability: string }) => d.capability === "mail.other.read"
-    );
-    // Reported rather than hidden: the Owner holds it, but not right now.
-    expect(readOthers).toBeDefined();
-    expect(readOthers.requiresStepUp).toBe(true);
+    // Absent from the list and from the decisions: an Owner does not hold this
+    // in any form, so there is nothing for a client to prompt for.
     expect(res.body.data.capabilities).not.toContain("mail.other.read");
+    expect(
+      res.body.data.decisions.some(
+        (d: { capability: string }) => d.capability === "mail.other.read"
+      )
+    ).toBe(false);
   });
 
   it("requires authentication", async () => {

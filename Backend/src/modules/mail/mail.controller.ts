@@ -142,6 +142,15 @@ export const adminCreateMailbox = asyncHandler(async (req: Request, res: Respons
   sendSuccess(res, 201, await mailService.adminCreateMailbox(req.tenantContext!.tenantId, req.body.membershipId, context(req)), req.requestId);
 });
 
+export const adminUpdateMailbox = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailService.adminUpdateMailbox(
+    req.tenantContext!.tenantId,
+    String(req.params.mailboxId),
+    req.body,
+    context(req)
+  ), req.requestId);
+});
+
 export const adminDeleteMailbox = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await mailService.adminDeleteMailbox(req.tenantContext!.tenantId, String(req.params.mailboxId), context(req)), req.requestId);
 });

@@ -1181,6 +1181,77 @@ export class MailService {
     };
   }
 
+  // ─── Admin: Update mailbox attributes ───────────────────────────────────────
+
+  /**
+   * Adjusts quota and warm-up cap. Emits before/after values because Audit
+   * §6.2 requires them for material configuration changes — a quota cut that
+   * starts bouncing mail is only diagnosable if the prior value is on record.
+   */
+  async adminUpdateMailbox(
+    tenantId: string,
+    mailboxId: string,
+    input: { storageLimit?: number; customWarmupCap?: number | null },
+    context: MailContext
+  ) {
+    const existing = await prisma.mailbox.findFirst({
+      where: { id: mailboxId, tenantId },
+      select: { id: true, address: true, storageLimit: true, customWarmupCap: true, storageUsed: true },
+    });
+    if (!existing) throw new AppError("Mailbox not found", 404, ErrorCodes.NOT_FOUND);
+
+    // Refuse a quota below what the mailbox already holds. Accepting it would
+    // leave the mailbox instantly over limit with no way for the user to act.
+    if (input.storageLimit !== undefined && BigInt(input.storageLimit) < existing.storageUsed) {
+      throw new AppError(
+        `Quota cannot be below current usage (${existing.storageUsed} bytes)`,
+        409,
+        ErrorCodes.CONFLICT
+      );
+    }
+
+    const mailbox = await prisma.mailbox.update({
+      where: { id: mailboxId },
+      data: {
+        ...(input.storageLimit !== undefined ? { storageLimit: BigInt(input.storageLimit) } : {}),
+        ...(input.customWarmupCap !== undefined ? { customWarmupCap: input.customWarmupCap } : {}),
+      },
+      include: {
+        membership: {
+          include: { user: { select: { id: true, displayName: true, email: true } } },
+        },
+      },
+    });
+
+    await auditService.record({
+      tenantId,
+      actorUserId: context.userId,
+      eventType: "MAILBOX_SETTINGS_UPDATED",
+      targetType: "Mailbox",
+      targetId: mailbox.id,
+      requestId: context.requestId,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+      metadata: {
+        address: mailbox.address,
+        before: {
+          storageLimit: Number(existing.storageLimit),
+          customWarmupCap: existing.customWarmupCap,
+        },
+        after: {
+          storageLimit: Number(mailbox.storageLimit),
+          customWarmupCap: mailbox.customWarmupCap,
+        },
+      },
+    });
+
+    return {
+      ...mailbox,
+      storageUsed: Number(mailbox.storageUsed),
+      storageLimit: Number(mailbox.storageLimit),
+    };
+  }
+
   // ─── Admin: Delete a mailbox ────────────────────────────────────────────────
 
   async adminDeleteMailbox(tenantId: string, mailboxId: string, context: MailContext) {

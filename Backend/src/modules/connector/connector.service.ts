@@ -52,6 +52,38 @@ export class ConnectorService {
     });
   }
 
+  /**
+   * Every connected account in the tenant, for the admin provider-sync view.
+   *
+   * `list` above is deliberately caller-scoped — a Member sees only their own
+   * accounts — which is right for the member surface and useless for an
+   * operator triaging sync failures across the workspace. Rather than widen
+   * `list` and change what a Member sees, this is a separate read gated on a
+   * capability a Member does not hold.
+   *
+   * Includes the owning member, because a failing connector is only actionable
+   * if you know whose reauthorization to chase. Deliberately no tokens or
+   * secrets — the operator needs status, not credentials.
+   */
+  listForTenant(tenantId: string) {
+    return prisma.connectedAccount.findMany({
+      where: { tenantId },
+      select: {
+        id: true, provider: true, email: true, scopes: true, status: true,
+        watchExpiresAt: true, lastSyncedAt: true, lastErrorCode: true,
+        disconnectedAt: true, createdAt: true, updatedAt: true,
+        membership: {
+          select: {
+            id: true,
+            role: true,
+            user: { select: { id: true, email: true, displayName: true } },
+          },
+        },
+      },
+      orderBy: [{ status: "asc" }, { lastSyncedAt: "desc" }],
+    });
+  }
+
   async create(
     input: CreateAccountInput,
     context: { tenantId: string; membershipId: string; userId: string; requestId?: string }
