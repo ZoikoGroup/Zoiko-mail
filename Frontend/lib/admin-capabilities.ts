@@ -84,10 +84,17 @@ export interface CapabilitiesResponse {
 }
 
 async function fetchCapabilities(): Promise<CapabilitiesResponse> {
-  const res = await apiRequest<{ data: CapabilitiesResponse }>(
-    "/users/me/capabilities"
-  );
-  return res.data;
+  // apiRequest already unwraps the { success, data } envelope, so this is the
+  // payload itself — reading `.data` off it again yields undefined.
+  const res = await apiRequest<CapabilitiesResponse>("/users/me/capabilities");
+
+  // Throw rather than return a shape the caller will read as "no capabilities".
+  // A malformed response and an empty capability set are indistinguishable
+  // downstream, and one of them silently empties the whole workspace.
+  if (!res || !Array.isArray(res.capabilities)) {
+    throw new Error("Capability response was malformed");
+  }
+  return res;
 }
 
 /**
