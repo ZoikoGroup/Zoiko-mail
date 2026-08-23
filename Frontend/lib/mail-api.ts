@@ -79,6 +79,7 @@ export interface ListMailParams {
   folder?: MailFolder;
   starredOnly?: boolean;
   labelId?: string;
+  q?: string;
   page?: number;
   limit?: number;
 }
@@ -105,9 +106,15 @@ export async function listMail(params: ListMailParams = {}): Promise<ListMailRes
   q.set("folder", params.folder ?? "INBOX");
   if (params.starredOnly) q.set("starredOnly", "true");
   if (params.labelId) q.set("labelId", params.labelId);
+  if (params.q) q.set("q", params.q);
   q.set("page", String(params.page ?? 1));
   q.set("limit", String(params.limit ?? 25));
   return apiRequest<ListMailResponse>(`/mail?${q.toString()}`);
+}
+
+export async function fetchUnreadCounts(): Promise<Record<string, number>> {
+  const data = await apiRequest<{ counts: Record<string, number> }>("/mail/unread-counts");
+  return data.counts ?? {};
 }
 
 export async function getMessage(messageId: string): Promise<MailItem> {
@@ -117,6 +124,22 @@ export async function getMessage(messageId: string): Promise<MailItem> {
 export async function listLabels(): Promise<MailLabel[]> {
   const data = await apiRequest<{ labels: MailLabel[] }>("/mail/labels");
   return data.labels ?? [];
+}
+
+export async function createLabel(input: { name: string; color: string }): Promise<MailLabel> {
+  return apiRequest<MailLabel>("/mail/labels", { method: "POST", body: input });
+}
+
+export async function deleteLabel(labelId: string): Promise<void> {
+  await apiRequest(`/mail/labels/${labelId}`, { method: "DELETE" });
+}
+
+export async function assignLabel(messageId: string, labelId: string): Promise<void> {
+  await apiRequest(`/mail/${messageId}/labels/${labelId}`, { method: "PUT" });
+}
+
+export async function removeLabel(messageId: string, labelId: string): Promise<void> {
+  await apiRequest(`/mail/${messageId}/labels/${labelId}`, { method: "DELETE" });
 }
 
 // ---- Triage ----------------------------------------------------------------
@@ -129,6 +152,15 @@ export async function updateMailItem(
 
 export async function bulkMailAction(messageIds: string[], action: BulkAction) {
   return apiRequest(`/mail/bulk`, { method: "PATCH", body: { messageIds, action } });
+}
+
+// Permanent deletion (trash items only server-side) and empty-trash.
+export async function permanentlyDeleteMessage(messageId: string): Promise<void> {
+  await apiRequest(`/mail/${messageId}`, { method: "DELETE" });
+}
+
+export async function emptyTrash(): Promise<{ deletedCount: number }> {
+  return apiRequest<{ deletedCount: number }>("/mail/trash", { method: "DELETE" });
 }
 
 // ---- Compose / send (Track B — gated at runtime by policy/mailbox status) --
@@ -194,4 +226,51 @@ export async function downloadAttachment(
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+// ---- Threads --------------------------------------------------------------
+// The backend groups related messages into threads (subject + participants).
+// The list view returns one thread per row with only the most recent message
+// preview inside; the detail view returns the full message list chronologically.
+
+export interface MessageThread {
+  id: string;
+  subjectNormalized: string;
+  messageCount: number;
+  lastMessageAt: string;
+  createdAt: string;
+  // In list responses this contains only the most recent message (backend
+  // does `take: 1`). In detail responses it contains all messages in
+  // chronological order.
+  messages: EmailMessage[];
+}
+
+export interface ThreadPagination {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface ListThreadsResponse {
+  threads: MessageThread[];
+  pagination: ThreadPagination;
+}
+
+export interface ListThreadsParams {
+  page?: number;
+  limit?: number;
+  q?: string;
+}
+
+export async function listThreads(params: ListThreadsParams = {}): Promise<ListThreadsResponse> {
+  const q = new URLSearchParams();
+  q.set("page", String(params.page ?? 1));
+  q.set("limit", String(params.limit ?? 25));
+  if (params.q) q.set("q", params.q);
+  return apiRequest<ListThreadsResponse>(`/threads?${q.toString()}`);
+}
+
+export async function getThread(threadId: string): Promise<MessageThread> {
+  return apiRequest<MessageThread>(`/threads/${threadId}`);
 }

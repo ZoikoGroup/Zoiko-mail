@@ -9,6 +9,7 @@ import {
   callbackParamsSchema,
   connectedAccountIdSchema,
   createConnectedAccountSchema,
+  listProviderEventsQuerySchema,
   providerCallbackSchema,
   providerEventIdSchema,
 } from "./connector.schema.js";
@@ -92,6 +93,20 @@ connectorRouter.get("/dead-letter", requireRole("OWNER", "ADMIN"), asyncHandler(
     events: await connectorService.listDeadLetters(req.tenantContext!.tenantId),
   }, req.requestId);
 }));
+
+connectorRouter.get(
+  "/provider-events",
+  requireRole("OWNER", "ADMIN"),
+  validate(listProviderEventsQuerySchema, "query"),
+  asyncHandler(async (req, res) => {
+    sendSuccess(res, 200, {
+      events: await connectorService.listProviderEvents(
+        req.query as { status?: string; provider?: string; limit?: number },
+        req.tenantContext!.tenantId
+      ),
+    }, req.requestId);
+  })
+);
 
 connectorRouter.post(
   "/dead-letter/:eventId/replay",

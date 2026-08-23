@@ -89,6 +89,17 @@ export class SystemMailer {
       + `<p>It expires in ${ttlMinutes} minutes. If you didn't request this, ignore this email — your password won't change.</p>`,
   });
 }
+
+  async sendInvitationEmail(to: string, inviterName: string, workspaceName: string, acceptUrl: string): Promise<void> {
+    await this.send({
+      to,
+      subject: `You've been invited to join ${workspaceName} on Zoiko Mail`,
+      text: `${inviterName} has invited you to join ${workspaceName}. Click the link to accept: ${acceptUrl}`,
+      html: `<p><b>${inviterName}</b> has invited you to join <b>${workspaceName}</b> on Zoiko Mail.</p>`
+        + `<p style="margin:24px 0"><a href="${acceptUrl}" style="display:inline-block;padding:12px 24px;background:#0A7EA4;color:white;text-decoration:none;border-radius:8px;font-weight:600">Accept Invitation</a></p>`
+        + `<p style="color:#6C8092;font-size:12px">This invitation expires in ${env.INVITATION_EXPIRES_IN_HOURS} hours. If you didn't expect this, you can ignore this email.</p>`,
+    });
+  }
 }
 
 export const systemMailer = new SystemMailer();

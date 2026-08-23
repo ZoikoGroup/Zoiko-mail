@@ -13,6 +13,7 @@ import type {
   PendingTokenPayload,
   PlatformTokenPayload,
   RefreshTokenPayload,
+  SelectionTokenPayload,
 } from "../../common/types/jwt.js";
 import { auditService } from "../audit/audit.service.js";
 import { membershipRepository } from "../membership/membership.repository.js";
@@ -21,6 +22,7 @@ import { userRepository } from "../user/user.repository.js";
 import { tenantService } from "../tenant/tenant.service.js";
 import { otpService } from "./otp.service.js";
 import type { AuthState, PublicUser, WorkspaceOption } from "./auth.states.js";
+import type { PendingInvitationSummary, VerifyOtpResponse } from "./auth.types.js";
 import type {
   LoginInput,
   LogoutInput,
@@ -30,12 +32,17 @@ import type {
   RegisterInput,
   ForgotPasswordInput,
   ResetPasswordInput,
+  SelectWorkspaceInput,
 } from "./auth.schema.js";
 import {
   AuditEventTypes,
   SYSTEM_TENANT_ID,
 } from "./auth.types.js";
-import type { AuthSessionResponse, RegisterResponse } from "./auth.types.js";
+import type {
+  AuthSessionResponse,
+  JoinWorkspaceInput,
+  RegisterResponse,
+} from "./auth.types.js";
 
 interface RequestContext {
   requestId?: string;
@@ -72,6 +79,17 @@ function isPendingTokenPayload(value: unknown): value is PendingTokenPayload {
   if (!value || typeof value !== "object") return false;
   const payload = value as Record<string, unknown>;
   return typeof payload.sub === "string" && payload.type === "pending";
+}
+
+function isSelectionTokenPayload(value: unknown): value is SelectionTokenPayload {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "sub" in value &&
+    typeof (value as { sub: unknown }).sub === "string" &&
+    "type" in value &&
+    (value as { type: unknown }).type === "selection"
+  );
 }
 
 function parseDurationToMs(duration: string): number {
@@ -153,6 +171,30 @@ function buildPendingToken(userId: string): {
   });
 
   return { token, expiresIn: PENDING_TOKEN_EXPIRES_IN };
+}
+
+/**
+ * Issued during login when the user needs to pick a workspace. Short-lived
+ * (15 min) — enough time to show the picker and click. Only /auth/select-
+ * workspace accepts it, so leakage is bounded to swapping workspaces on
+ * an account the attacker already has *some* way to hit login for.
+ */
+const SELECTION_TOKEN_EXPIRES_IN = "15m";
+
+function buildSelectionToken(userId: string): {
+  token: string;
+  expiresIn: string;
+} {
+  const payload: SelectionTokenPayload = {
+    sub: userId,
+    type: "selection",
+  };
+
+  const token = jwt.sign(payload, env.JWT_ACCESS_SECRET, {
+    expiresIn: SELECTION_TOKEN_EXPIRES_IN,
+  });
+
+  return { token, expiresIn: SELECTION_TOKEN_EXPIRES_IN };
 }
 
 /**
@@ -266,7 +308,14 @@ export class AuthService {
     context: RequestContext
   ): Promise<RegisterResponse> {
     const existingUser = await userRepository.findByEmail(input.email);
-    if (existingUser) {
+
+    // Status INVITED marks a placeholder identity created when someone was
+    // invited before signing up. Registering claims it — the invitee sets
+    // their own password here, then joins the inviting workspace after
+    // email verification (see joinWorkspace). Any other existing account
+    // is a real registration conflict.
+    const isClaimingInvite = existingUser?.status === "INVITED";
+    if (existingUser && !isClaimingInvite) {
       throw new AppError(
         "Email is already registered",
         409,
@@ -278,8 +327,14 @@ export class AuthService {
 
     let otpCode = "";
     const user = await prisma.$transaction(async (tx) => {
-      const u = await tx.appUser.create({
-        data: {
+      const u = await tx.appUser.upsert({
+        where: { email: input.email },
+        update: {
+          passwordHash,
+          displayName: input.displayName,
+          status: "PENDING_VERIFICATION",
+        },
+        create: {
           email: input.email,
           passwordHash,
           displayName: input.displayName,
@@ -396,7 +451,9 @@ export class AuthService {
     );
     if (existingMemberships.length > 0) {
       throw new AppError(
-        "This account already belongs to a workspace",
+        existingMemberships.some((m) => m.status === "INVITED")
+          ? "This account has a pending workspace invitation — accept it from your invitation email instead of creating a new workspace"
+          : "This account already belongs to a workspace",
         409,
         ErrorCodes.CONFLICT
       );
@@ -425,6 +482,100 @@ export class AuthService {
   }
 
   /**
+   * Alternative end of onboarding for invited users: instead of creating a
+   * workspace (→ OWNER), accept a pending invitation and join the existing
+   * workspace under the invited role (ADMIN/MEMBER). Authenticated with the
+   * same pending token as createWorkspace — there is no tenant session yet.
+   * The whole accept+session runs in one transaction so tokens are only
+   * issued when the acceptance actually commits.
+   */
+  async joinWorkspace(
+    input: JoinWorkspaceInput,
+    pendingToken: string,
+    context: RequestContext
+  ): Promise<AuthSessionResponse> {
+    const userId = this.verifyPendingToken(pendingToken);
+
+    const session = await prisma.$transaction(async (tx) => {
+      const invitation = await tx.tenantMembership.findFirst({
+        where: { id: input.membershipId, userId, status: "INVITED" },
+        include: { tenant: true },
+      });
+      if (!invitation) {
+        throw new AppError("Invitation not found", 404, ErrorCodes.NOT_FOUND);
+      }
+      if (
+        !invitation.inviteExpiresAt ||
+        invitation.inviteExpiresAt <= new Date()
+      ) {
+        throw new AppError(
+          "Invitation has expired",
+          410,
+          ErrorCodes.INVITATION_EXPIRED
+        );
+      }
+      if (invitation.tenant.status !== "ACTIVE") {
+        throw new AppError(
+          "Tenant is not active",
+          403,
+          ErrorCodes.FORBIDDEN
+        );
+      }
+
+      const user = await tx.appUser.findUnique({ where: { id: userId } });
+      if (!user) {
+        throw new AppError("Account not found", 401, ErrorCodes.UNAUTHORIZED);
+      }
+      // Same activation rule as createWorkspace: verifying the OTP plus a
+      // successful join promotes a pending account to ACTIVE.
+      if (user.status === "PENDING_VERIFICATION") {
+        await tx.appUser.update({
+          where: { id: userId },
+          data: {
+            status: "ACTIVE",
+            emailVerifiedAt: user.emailVerifiedAt ?? new Date(),
+          },
+        });
+      }
+
+      await tx.tenantMembership.update({
+        where: { id: invitation.id },
+        data: { status: "ACTIVE", inviteExpiresAt: null },
+      });
+      await auditService.record(
+        {
+          tenantId: invitation.tenantId,
+          actorUserId: userId,
+          eventType: "MEMBERSHIP_INVITATION_ACCEPTED",
+          targetType: "TenantMembership",
+          targetId: invitation.id,
+          requestId: context.requestId,
+          ipAddress: context.ipAddress,
+          userAgent: context.userAgent,
+        },
+        tx
+      );
+
+      const membershipWithRelations = await membershipRepository.findByUserAndTenant(
+        userId,
+        invitation.tenantId,
+        tx
+      );
+      if (!membershipWithRelations) {
+        throw new AppError(
+          "Failed to establish membership after joining the workspace",
+          500,
+          ErrorCodes.INTERNAL_ERROR
+        );
+      }
+
+      return issueSession(membershipWithRelations, tx);
+    });
+
+    return session;
+  }
+
+  /**
    * Phase 3: verify the email OTP for a pending user. On success the user is
    * promoted to ACTIVE with emailVerifiedAt set (inside otpService.verify),
    * and a refreshed pending token is returned so they can proceed to
@@ -434,7 +585,7 @@ export class AuthService {
     pendingToken: string,
     code: string,
     context: RequestContext
-  ): Promise<RegisterResponse & { emailVerified: boolean }> {
+  ): Promise<VerifyOtpResponse> {
     const userId = this.verifyPendingToken(pendingToken);
     await otpService.verify(userId, code);
 
@@ -455,6 +606,26 @@ export class AuthService {
       userAgent: context.userAgent,
     });
 
+    // Surface any workspace invitations waiting on this email. A non-empty
+    // list tells the client to join an existing workspace (ADMIN/MEMBER)
+    // instead of creating a new one as OWNER.
+    const memberships = await membershipRepository.findByUserId(userId);
+    const now = new Date();
+    const pendingInvitations: PendingInvitationSummary[] = memberships
+      .filter(
+        (m) =>
+          m.status === "INVITED" &&
+          m.tenant.status === "ACTIVE" &&
+          m.inviteExpiresAt !== null &&
+          m.inviteExpiresAt > now
+      )
+      .map((m) => ({
+        membershipId: m.id,
+        tenantId: m.tenantId,
+        tenantName: m.tenant.name,
+        role: m.role,
+      }));
+
     const pending = buildPendingToken(userId);
     return {
       user: {
@@ -463,6 +634,7 @@ export class AuthService {
         displayName: user.displayName,
       },
       emailVerified: true,
+      pendingInvitations,
       pendingToken: pending.token,
       expiresIn: pending.expiresIn,
     };
@@ -623,7 +795,13 @@ export class AuthService {
 
     if (nonRemoved.length === 0) {
       if (invited.length > 0) {
-        return { state: "INVITATION_PENDING", user: publicUser, invitations: invited.map(toWorkspaceOption) };
+        const pending = buildPendingToken(user.id);
+        return {
+          state: "INVITATION_PENDING",
+          user: publicUser,
+          invitations: invited.map(toWorkspaceOption),
+          pendingToken: pending.token,
+        };
       }
       return { state: "NO_WORKSPACE", user: publicUser };
     }
@@ -631,8 +809,18 @@ export class AuthService {
     // 4. Explicit selection, or auto-resolve a single workspace.
     if (selectedTenantId) {
       const chosen = nonRemoved.find((m) => m.tenantId === selectedTenantId);
+      // if (!chosen) {
+      //   return { state: "WORKSPACE_SELECTION", user: publicUser, workspaces: nonRemoved.map(toWorkspaceOption) };
+      // }
       if (!chosen) {
-        return { state: "WORKSPACE_SELECTION", user: publicUser, workspaces: nonRemoved.map(toWorkspaceOption) };
+        const selection = buildSelectionToken(user.id);
+        return {
+          state: "WORKSPACE_SELECTION",
+          user: publicUser,
+          workspaces: nonRemoved.map(toWorkspaceOption),
+          selectionToken: selection.token,
+          expiresIn: selection.expiresIn,
+        };
       }
       return this.resolveSelectedWorkspace(user, chosen, publicUser, context);
     }
@@ -642,7 +830,42 @@ export class AuthService {
     }
 
     // 5. Multiple workspaces — let the client pick (statuses drive greying-out).
-    return { state: "WORKSPACE_SELECTION", user: publicUser, workspaces: nonRemoved.map(toWorkspaceOption) };
+    // return { state: "WORKSPACE_SELECTION", user: publicUser, workspaces: nonRemoved.map(toWorkspaceOption) };
+
+    // Issue a short-lived selection token so the client can call /auth/select-
+    // workspace without asking the user for their password again.
+    const selection = buildSelectionToken(user.id);
+    return {
+      state: "WORKSPACE_SELECTION",
+      user: publicUser,
+      workspaces: nonRemoved.map(toWorkspaceOption),
+      selectionToken: selection.token,
+      expiresIn: selection.expiresIn,
+    };
+  }
+  
+  /**
+  * Second half of the split login flow. Called after /auth/login returned
+  * WORKSPACE_SELECTION with a selectionToken; the client picked a workspace
+  * and now we complete auth without asking for the password again.
+  */
+  async selectWorkspace(
+    input: SelectWorkspaceInput,
+    context: RequestContext
+  ): Promise<AuthState> {
+    // 1. Verify the selection token and extract userId.
+    const userId = this.verifySelectionToken(input.selectionToken);
+
+    // 2. Fetch the user record.
+    const user = await userRepository.findById(userId);
+    if (!user) {
+      throw new AppError("User not found", 404, ErrorCodes.NOT_FOUND);
+    }
+
+    // 3. Delegate to the shared resolver with the chosen tenantId. All the
+    //    membership-lookup, account-status, tenant-status, and membership-
+    //    status logic lives there — we just point it at the picked workspace.
+    return this.resolveAuthState(user, input.tenantId, context);
   }
 
   /** Evaluate one chosen workspace: tenant status first, then membership status. */
@@ -661,7 +884,13 @@ export class AuthService {
       return { state: "WORKSPACE_SUSPENDED", user: publicUser, workspace };
     }
     if (membership.status === "INVITED") {
-      return { state: "INVITATION_PENDING", user: publicUser, invitations: [workspace] };
+      const pending = buildPendingToken(user.id);
+      return {
+        state: "INVITATION_PENDING",
+        user: publicUser,
+        invitations: [workspace],
+        pendingToken: pending.token,
+      };
     }
     if (membership.status === "SUSPENDED") {
       return { state: "MEMBERSHIP_SUSPENDED", user: publicUser, workspace };
@@ -936,6 +1165,29 @@ export class AuthService {
 
     if (!isPendingTokenPayload(payload)) {
       throw new AppError("Invalid pending session", 401, ErrorCodes.TOKEN_INVALID);
+    }
+
+    return payload.sub;
+  }
+
+  private verifySelectionToken(token: string): string {
+    let payload: unknown;
+
+    try {
+      payload = jwt.verify(token, env.JWT_ACCESS_SECRET);
+    } catch (error) {
+      if (error instanceof jwt.TokenExpiredError) {
+        throw new AppError(
+          "Workspace selection expired, please sign in again",
+          401,
+          ErrorCodes.TOKEN_EXPIRED
+        );
+      }
+      throw new AppError("Invalid selection token", 401, ErrorCodes.TOKEN_INVALID);
+    }
+
+    if (!isSelectionTokenPayload(payload)) {
+      throw new AppError("Invalid selection token", 401, ErrorCodes.TOKEN_INVALID);
     }
 
     return payload.sub;

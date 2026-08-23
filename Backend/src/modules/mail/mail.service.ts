@@ -674,6 +674,57 @@ export class MailService {
     });
   }
 
+  /**
+   * Tenant-wide delivery event feed for OWNER/ADMIN (unlike the per-message
+   * variant above, which scopes to the authoring user). Read-only reporting:
+   * no payload bodies are exposed, only routing metadata.
+   */
+  async adminListDeliveryEvents(
+    input: { type?: string; limit?: number },
+    context: MailContext
+  ) {
+    const events = await prisma.deliveryEvent.findMany({
+      where: {
+        tenantId: context.tenantId,
+        ...(input.type ? { type: input.type as Prisma.DeliveryEventWhereInput["type"] } : {}),
+      },
+      select: {
+        id: true,
+        type: true,
+        failureCode: true,
+        failureReason: true,
+        providerEventId: true,
+        metadata: true,
+        createdAt: true,
+        message: {
+          select: {
+            id: true,
+            subject: true,
+            fromAddress: true,
+            status: true,
+            recipients: { select: { email: true, type: true, deliveryStatus: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: Math.min(input.limit ?? 50, 200),
+    });
+
+    return events.map((e) => ({
+      id: e.id,
+      type: e.type,
+      failureCode: e.failureCode,
+      failureReason: e.failureReason,
+      providerEventId: e.providerEventId,
+      metadata: e.metadata ?? null,
+      createdAt: e.createdAt,
+      messageId: e.message?.id ?? null,
+      subject: e.message?.subject ?? null,
+      fromAddress: e.message?.fromAddress ?? null,
+      recipients: e.message?.recipients ?? [],
+    }));
+  }
+
   async updateSendingStatus(
     mailboxId: string,
     input: { suspended: boolean; reason?: string },
@@ -724,6 +775,17 @@ export class MailService {
       ...(filters.labelId ? {
         labels: { some: { tenantId: context.tenantId, labelId: filters.labelId } },
       } : {}),
+      ...(filters.q ? {
+        message: {
+          OR: [
+            { subject: { contains: filters.q, mode: "insensitive" as const } },
+            { textBody: { contains: filters.q, mode: "insensitive" as const } },
+            { fromAddress: { contains: filters.q, mode: "insensitive" as const } },
+            { fromName: { contains: filters.q, mode: "insensitive" as const } },
+            { recipients: { some: { email: { contains: filters.q, mode: "insensitive" as const } } } },
+          ],
+        },
+      } : {}),
     };
     const [items, total] = await prisma.$transaction([
       prisma.mailboxMessage.findMany({
@@ -751,6 +813,28 @@ export class MailService {
       })),
       pagination: { ...filters, total, totalPages: Math.ceil(total / filters.limit) },
     };
+  }
+
+  /**
+   * Unread counts per folder for folder-rail badges. DRAFTS is excluded:
+   * draft rows are never marked read, so counting them would show a
+   * permanent phantom badge.
+   */
+  async unreadCounts(context: MailContext) {
+    const mailbox = await this.mailbox(context);
+    const grouped = await prisma.mailboxMessage.groupBy({
+      by: ["folder"],
+      where: {
+        tenantId: context.tenantId,
+        mailboxId: mailbox.id,
+        isRead: false,
+        folder: { not: "DRAFTS" },
+      },
+      _count: { _all: true },
+    });
+    const counts: Record<string, number> = {};
+    for (const row of grouped) counts[row.folder] = row._count._all;
+    return { counts };
   }
 
   async get(messageId: string, context: MailContext) {

@@ -32,7 +32,7 @@ export const createInvitation = asyncHandler(async (req: Request, res: Response)
 
 export const acceptInvitation = asyncHandler(async (req: Request, res: Response) => {
   const membership = await membershipService.acceptInvitation(req.body, {
-    userId: req.auth!.sub,
+    userId: req.auth?.sub ?? "",
     requestId: req.requestId,
     ipAddress: req.ip ?? null,
     userAgent: req.header("user-agent") ?? null,

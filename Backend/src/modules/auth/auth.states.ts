@@ -27,12 +27,18 @@ export interface WorkspaceOption {
 /** Discriminated union: every post-auth login outcome maps to one screen. */
 export type AuthState =
   | { state: "SIGNED_IN"; session: AuthSessionResponse }
-  | { state: "WORKSPACE_SELECTION"; user: PublicUser; workspaces: WorkspaceOption[] }
+  // | { state: "WORKSPACE_SELECTION"; user: PublicUser; workspaces: WorkspaceOption[] }
+  | { state: "WORKSPACE_SELECTION"; user: PublicUser; workspaces: WorkspaceOption[]; selectionToken: string; expiresIn: string }
   | { state: "NO_WORKSPACE"; user: PublicUser }
   | { state: "EMAIL_VERIFICATION_REQUIRED"; user: PublicUser; pendingToken: string; expiresIn: string }
   | { state: "ACCOUNT_SUSPENDED"; user: PublicUser }
   | { state: "ACCOUNT_DISABLED"; user: PublicUser }
-  | { state: "INVITATION_PENDING"; user: PublicUser; invitations: WorkspaceOption[] }
+  | { state: "INVITATION_PENDING"; user: PublicUser; invitations: WorkspaceOption[]; /**
+     * Short-lived token letting an unauthenticated client accept an
+     * invitation via POST /auth/join-workspace (same trust level as the
+     * selection token: issued only after a successful password check).
+     */
+    pendingToken?: string }
   | { state: "MEMBERSHIP_SUSPENDED"; user: PublicUser; workspace: WorkspaceOption }
   | { state: "WORKSPACE_SUSPENDED"; user: PublicUser; workspace: WorkspaceOption }
   | { state: "WORKSPACE_DELETING"; user: PublicUser; workspace: WorkspaceOption }

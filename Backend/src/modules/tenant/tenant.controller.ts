@@ -22,3 +22,20 @@ export const getCurrent = asyncHandler(async (req: Request, res: Response) => {
 export const updateCurrent = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await tenantService.updateCurrent(req.body, context(req)), req.requestId);
 });
+
+export const getOnboardingStatus = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await tenantService.getOnboardingStatus(context(req)), req.requestId);
+});
+
+export const getUsage = asyncHandler(async (req: Request, res: Response) => {
+  const days = Math.min(Math.max(parseInt(req.query.days as string) || 30, 1), 365);
+  sendSuccess(res, 200, await tenantService.getUsage(context(req), days), req.requestId);
+});
+
+export const getGeneralSettings = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await tenantService.getGeneralSettings(context(req)), req.requestId);
+});
+
+export const updateGeneralSettings = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await tenantService.updateGeneralSettings(req.body, context(req)), req.requestId);
+});

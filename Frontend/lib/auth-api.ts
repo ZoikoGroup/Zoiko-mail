@@ -20,15 +20,22 @@ export interface VerifyOtpInput {
   token: string;
 }
 
+/** A workspace invitation waiting for this freshly-verified account. */
+export interface PendingInvitation {
+  membershipId: string;
+  tenantId: string;
+  tenantName: string;
+  role: string;
+}
+
 export interface VerifyOtpResponse {
-  cooldownMs: number;
-  pendingToken(pendingToken: any): unknown;
-  success: boolean;
-  data: {
-    emailVerified: boolean;
-    pendingToken: string;
-    expiresIn: string;
-  };
+  user: { id: string; email: string; displayName: string };
+  emailVerified: boolean;
+  // Non-empty → the client should join an invited workspace as
+  // ADMIN/MEMBER instead of creating a new one as OWNER.
+  pendingInvitations: PendingInvitation[];
+  pendingToken: string;
+  expiresIn: string;
 }
 
 export interface ResendOtpInput {
@@ -47,6 +54,12 @@ export interface CreateWorkspaceInput {
   token: string;
   tenantName: string;
   planCode: string;
+}
+
+export interface JoinWorkspaceInput {
+  /** Pending-token (Bearer) used to authenticate the request. */
+  token: string;
+  membershipId: string;
 }
 
 // export interface CreateWorkspaceResponse {
@@ -110,6 +123,10 @@ interface Tokens {
 //   register        -> tokens NESTED under data.tokens (data.tokens.accessToken)
 // AuthResponse models both so callers can read either.
 export interface AuthResponse {
+  workspaces: Array<{ id: string; name: string; planCode?: string; role?: string; reason?: string }>;
+  selectionToken: string;
+  invitations: Array<{ id: string; name: string; planCode?: string; role?: string }>;
+  workspace: any;
   pendingToken: any;
   data: any;
   user: { id: string; email: string; displayName: string };
@@ -278,6 +295,34 @@ export async function createWorkspace(
     data.accessToken,
     data.refreshToken
   );
+
+  return data;
+}
+
+// Accept a pending invitation for a just-registered account. Authenticated
+// with the pending token (no tenant session exists yet). Returns the same
+// session shape as createWorkspace — membership.role is ADMIN or MEMBER.
+export async function joinWorkspace(
+  input: JoinWorkspaceInput
+): Promise<CreateWorkspaceResponse> {
+  const data = await apiRequest<CreateWorkspaceResponse>(
+    "/auth/join-workspace",
+    {
+      method: "POST",
+
+      headers: {
+        Authorization: `Bearer ${input.token}`,
+      },
+
+      body: {
+        membershipId: input.membershipId,
+      },
+
+      auth: false,
+    }
+  );
+
+  setTokens(data.accessToken, data.refreshToken);
 
   return data;
 }

@@ -112,6 +112,7 @@ export default function AuditLogsPage() {
           data={filtered}
           keyExtractor={(row) => row.id}
           pageSize={15}
+          loading={isLoading}
           emptyMessage={isLoading ? "Loading audit events…" : "No audit events match your filters."}
         />
         {total > 15 && (

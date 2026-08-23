@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ProtectedRoute } from "@/components/owner/ProtectedRoute";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { MailboxesTable } from "@/components/owner/mailboxes/MailboxesTable";
@@ -8,6 +8,7 @@ import { CreateMailboxModal } from "@/components/owner/mailboxes/CreateMailboxMo
 import { useCreateAdminMailbox, useMembers, useAdminMailboxes } from "@/lib/owner-hooks";
 
 export default function MailboxesPage() {
+  useEffect(() => { document.title = "Mailboxes | Zoiko Mail"; }, []);
   const [createOpen, setCreateOpen] = useState(false);
 
   const createMailbox = useCreateAdminMailbox();

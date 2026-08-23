@@ -12,11 +12,13 @@ import {
   loginSchema,
   changePasswordSchema,
   createWorkspaceSchema,
+  joinWorkspaceSchema,
   logoutSchema,
   refreshSchema,
   registerSchema,
   forgotPasswordSchema,
-  resetPasswordSchema
+  resetPasswordSchema,
+  selectWorkspaceSchema
 } from "./auth.schema.js";
 import * as authController from "./auth.controller.js";
 import { verifyOtpSchema } from "./otp.schema.js";
@@ -41,6 +43,15 @@ authRouter.post(
   authController.createWorkspace
 );
 
+// Same pending-token auth as /create-workspace: the caller just verified
+// their email and is joining an invited workspace instead of creating one.
+authRouter.post(
+  "/join-workspace",
+  registerRateLimit,
+  validate(joinWorkspaceSchema),
+  authController.joinWorkspace
+);
+
 authRouter.post(
   "/verify-otp",
   registerRateLimit,
@@ -52,6 +63,13 @@ authRouter.post(
   "/resend-otp",
   registerRateLimit,
   authController.resendOtp
+);
+
+authRouter.post(
+  "/select-workspace",
+  loginRateLimit,
+  validate(selectWorkspaceSchema),
+  authController.selectWorkspace
 );
 
 authRouter.post("/login", loginRateLimit, validate(loginSchema), authController.login);

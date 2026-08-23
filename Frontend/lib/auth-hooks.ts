@@ -13,6 +13,7 @@ import {
   verifyOtp,
   resendOtp,
   createWorkspace,
+  joinWorkspace,
   forgotPassword,
   resetPassword,
 
@@ -23,10 +24,11 @@ import {
   type VerifyOtpInput,
   type ResendOtpInput,
   type CreateWorkspaceInput,
+  type JoinWorkspaceInput,
   type ForgotPasswordInput,
   type ResetPasswordInput,
 } from "./auth-api";
-import { isLoggedIn } from "./auth-storage";
+import { getPlatformToken, isLoggedIn } from "./auth-storage";
 import { resolveWorkspaceHref } from "./workspace";
 
 // Server state (the logged-in user) lives in TanStack Query, keyed by ['me'].
@@ -34,7 +36,8 @@ export function useMe() {
   return useQuery({
     queryKey: ["me"],
     queryFn: getMe,
-    enabled: isLoggedIn(), // don't call /auth/me if we have no token
+    // enabled: isLoggedIn(), 
+    enabled: isLoggedIn() && !getPlatformToken(), // don't call /auth/me for anonymous or staff sessions
     retry: false,
     staleTime: 60_000,
   });
@@ -57,20 +60,61 @@ export function useLogin() {
       let href: string;
 
       if (data.state === "STAFF_CONSOLE") {
-        // Platform-scoped session (staff with platformRole but no tenant).
-        href = "/platform-console";
+        href = "/support";
       } else if (data.state === "SIGNED_IN") {
-        // Regular user — use the membership role from the backend session.
         const role = data.membership?.role;
         href = resolveWorkspaceHref(role);
-      } else if (data.state === "NO_WORKSPACE") {
-        href = "/";
       } else if (data.state === "WORKSPACE_SELECTION") {
-        // Multiple workspaces — show workspace chooser (not implemented here;
-        // the backend already returned the options).
-        href = "/";
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem(
+            "zoiko.selection_token",
+            data.selectionToken ?? ""
+          );
+          sessionStorage.setItem(
+            "zoiko.selection_workspaces",
+            JSON.stringify(data.workspaces ?? [])
+          );
+        }
+        href = "/select-workspace";
+      } else if (
+        data.state === "ACCOUNT_SUSPENDED" ||
+        data.state === "ACCOUNT_DISABLED"
+      ) {
+        href = `/auth-status?state=${data.state}`;
+      } else if (
+        data.state === "MEMBERSHIP_SUSPENDED" ||
+        data.state === "WORKSPACE_SUSPENDED" ||
+        data.state === "WORKSPACE_DELETING"
+      ) {
+        const workspaceName = encodeURIComponent(data.workspace?.name ?? "");
+        href = `/auth-status?state=${data.state}&workspace=${workspaceName}`;
+      } else if (data.state === "EMAIL_VERIFICATION_REQUIRED") {
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem("zoiko.pending_token", data.pendingToken ?? "");
+          sessionStorage.setItem("zoiko.pending_email", data.user?.email ?? "");
+        }
+        href = "/verify-email";
+      } else if (data.state === "INVITATION_PENDING") {
+        // No tenant session exists yet, so acceptance happens on the
+        // status screen using the backend-issued pending token (same
+        // mechanism as the post-registration join flow).
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem("zoiko.invite_pending_token", data.pendingToken ?? "");
+          sessionStorage.setItem(
+            "zoiko.invite_pending_list",
+            JSON.stringify(data.invitations ?? [])
+          );
+          sessionStorage.removeItem("pendingInvitationToken");
+        }
+        const names = (data.invitations ?? []).map((w: { name: string }) => w.name).join(",");
+        href = `/auth-status?state=INVITATION_PENDING${names ? `&invitations=${encodeURIComponent(names)}` : ""}`;
       } else {
         href = "/login";
+      }
+
+      if (data.state === "NO_WORKSPACE") {
+        router.replace("/login");
+        return;
       }
 
       router.replace(href);
@@ -130,7 +174,28 @@ export function useCreateWorkspace() {
         queryKey: ["me"],
       });
 
-      router.replace(resolveWorkspaceHref(data?.membership?.role));
+      // New workspace always needs onboarding
+      router.replace("/owner/onboarding");
+    },
+  });
+}
+
+// End of the invited-registration flow: accept the pending invitation and
+// land in the joined workspace under the invited role (ADMIN → /admin,
+// MEMBER → /inbox). The backend decides the role; never the client.
+export function useJoinWorkspace() {
+  const qc = useQueryClient();
+  const router = useRouter();
+
+  return useMutation({
+    mutationFn: (input: JoinWorkspaceInput) => joinWorkspace(input),
+
+    onSuccess: async (data) => {
+      await qc.invalidateQueries({
+        queryKey: ["me"],
+      });
+
+      router.replace(resolveWorkspaceHref(data.membership?.role));
     },
   });
 }
@@ -170,7 +235,7 @@ export function useLogout() {
   return useMutation({
     mutationFn: () => logout(),
     onSettled: () => {
-      qc.clear(); 
+      qc.clear();
       router.replace("/login");
     },
   });

@@ -43,6 +43,19 @@ export const resetPasswordSchema = z.object({
   newPassword: z.string().min(8, "Password must be at least 8 characters").max(128),
 });
 
+// POST /auth/select-workspace body: pick a tenant from the WORKSPACE_SELECTION
+// response using the short-lived selection token issued by /auth/login.
+export const selectWorkspaceSchema = z.object({
+  selectionToken: z.string().min(1),
+  tenantId: z.string().uuid(),
+});
+
+// POST /auth/join-workspace body: accept a pending invitation for the newly
+// registered (and now email-verified) user, authenticated by pending token.
+export const joinWorkspaceSchema = z.object({
+  membershipId: z.string().uuid(),
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type CreateWorkspaceInput = z.infer<typeof createWorkspaceSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
@@ -51,3 +64,5 @@ export type LogoutInput = z.infer<typeof logoutSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+export type SelectWorkspaceInput = z.infer<typeof selectWorkspaceSchema>;
+export type JoinWorkspaceInput = z.infer<typeof joinWorkspaceSchema>;

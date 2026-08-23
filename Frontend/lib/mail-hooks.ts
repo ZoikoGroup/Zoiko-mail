@@ -6,29 +6,51 @@ import {
   listMail,
   getMessage,
   listLabels,
+  createLabel,
+  deleteLabel,
+  assignLabel,
+  removeLabel,
   updateMailItem,
   bulkMailAction,
+  permanentlyDeleteMessage,
+  emptyTrash,
   createDraft,
   sendDraft,
   scheduleDraft,
+  deleteDraft,
   reply as replyApi,
   replyAll as replyAllApi,
   forward as forwardApi,
+  fetchUnreadCounts,
   type ListMailParams,
   type ListMailResponse,
   type MailItem,
   type BulkAction,
   type Recipients,
+  listThreads,
+  getThread,
+  type ListThreadsParams,
 } from "./mail-api";
 
 const listKey = (params: ListMailParams) =>
-  ["mail", "list", params.folder ?? "INBOX", params.starredOnly ?? false, params.labelId ?? null, params.page ?? 1] as const;
+  ["mail", "list", params.folder ?? "INBOX", params.starredOnly ?? false, params.labelId ?? null, params.q ?? "", params.page ?? 1] as const;
 
 export function useMailList(params: ListMailParams) {
   return useQuery({
     queryKey: listKey(params),
     queryFn: () => listMail(params),
     staleTime: 15_000,
+    // Light polling keeps the inbox fresh without a websocket layer.
+    refetchInterval: 30_000,
+  });
+}
+
+export function useUnreadCounts() {
+  return useQuery({
+    queryKey: ["mail", "unread-counts"],
+    queryFn: fetchUnreadCounts,
+    staleTime: 15_000,
+    refetchInterval: 30_000,
   });
 }
 
@@ -43,6 +65,47 @@ export function useMessage(messageId: string | null) {
 
 export function useMailLabels() {
   return useQuery({ queryKey: ["mail", "labels"], queryFn: listLabels, staleTime: 60_000 });
+}
+
+export function useCreateLabel() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { name: string; color: string }) => createLabel(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["mail", "labels"] }),
+  });
+}
+
+export function useDeleteLabel() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (labelId: string) => deleteLabel(labelId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["mail", "labels"] });
+      qc.invalidateQueries({ queryKey: ["mail", "list"] });
+    },
+  });
+}
+
+export function useAssignLabel() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { messageId: string; labelId: string }) => assignLabel(v.messageId, v.labelId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["mail", "list"] });
+      qc.invalidateQueries({ queryKey: ["mail", "message"] });
+    },
+  });
+}
+
+export function useRemoveLabel() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { messageId: string; labelId: string }) => removeLabel(v.messageId, v.labelId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["mail", "list"] });
+      qc.invalidateQueries({ queryKey: ["mail", "message"] });
+    },
+  });
 }
 
 // Triage a single item (read / star / move). Optimistically patches every
@@ -66,10 +129,10 @@ export function useUpdateMailItem() {
           items: data.items.map((it) =>
             it.messageId === v.messageId
               ? {
-                  ...it,
-                  isRead: v.isRead ?? it.isRead,
-                  isStarred: v.isStarred ?? it.isStarred,
-                }
+                ...it,
+                isRead: v.isRead ?? it.isRead,
+                isStarred: v.isStarred ?? it.isStarred,
+              }
               : it
           ),
         });
@@ -89,6 +152,30 @@ export function useBulkMailAction() {
     mutationFn: (v: { messageIds: string[]; action: BulkAction }) =>
       bulkMailAction(v.messageIds, v.action),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["mail", "list"] }),
+  });
+}
+
+export function usePermanentlyDelete() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (messageId: string) => permanentlyDeleteMessage(messageId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["mail"] }),
+  });
+}
+
+export function useEmptyTrash() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: emptyTrash,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["mail"] }),
+  });
+}
+
+export function useDeleteDraft() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (messageId: string) => deleteDraft(messageId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["mail"] }),
   });
 }
 
@@ -172,3 +259,27 @@ export function useComposerSubmit() {
 }
 
 export type { MailItem };
+
+// ---- Threads --------------------------------------------------------------
+// staleTime: 15s matches useMailList — threads change at the same cadence
+// as mail (new incoming messages create/update threads).
+
+const threadsListKey = (params: ListThreadsParams) =>
+  ["mail", "threads", "list", params.page ?? 1, params.limit ?? 25, params.q ?? ""] as const;
+
+export function useThreads(params: ListThreadsParams) {
+  return useQuery({
+    queryKey: threadsListKey(params),
+    queryFn: () => listThreads(params),
+    staleTime: 15_000,
+  });
+}
+
+export function useThread(threadId: string | null) {
+  return useQuery({
+    queryKey: ["mail", "threads", "detail", threadId],
+    queryFn: () => getThread(threadId as string),
+    enabled: Boolean(threadId),
+    staleTime: 15_000,
+  });
+}

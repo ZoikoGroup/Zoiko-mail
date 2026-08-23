@@ -3,5 +3,6 @@ export type AuthStep =
   | "register"
   | "verifyOtp"
   | "workspace"
+  | "joinWorkspace"
   | "forgotPassword"
   | "resetPassword";

@@ -43,6 +43,16 @@ export const createWorkspace = asyncHandler(async (req: Request, res: Response) 
   sendSuccess(res, 201, result, req.requestId);
 });
 
+export const joinWorkspace = asyncHandler(async (req: Request, res: Response) => {
+  const pendingToken = getBearerToken(req);
+  const result = await authService.joinWorkspace(
+    req.body,
+    pendingToken,
+    getRequestContext(req)
+  );
+  sendSuccess(res, 201, result, req.requestId);
+});
+
 export const login = asyncHandler(async (req: Request, res: Response) => {
   const result = await authService.login(req.body, getRequestContext(req));
 
@@ -129,4 +139,9 @@ export const forgotPassword = asyncHandler(async (req: Request, res: Response) =
 export const resetPassword = asyncHandler(async (req: Request, res: Response) => {
   const result = await authService.resetPassword(req.body, getRequestContext(req));
   sendSuccess(res, 200, result, req.requestId);
+});
+
+export const selectWorkspace = asyncHandler(async (req: Request, res: Response) => {
+  const result = await authService.selectWorkspace(req.body, getRequestContext(req));
+  res.json({ success: true, data: result });
 });
