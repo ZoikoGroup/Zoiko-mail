@@ -6,7 +6,6 @@ import Image from "next/image";
 import { API_BASE } from "@/lib/config";
 import { resolveWorkspaceHref } from "@/lib/workspace";
 import { setTokens, setPlatformToken } from "@/lib/auth-storage";
-import { acceptInvitationById } from "@/lib/owner-api";
 
 // Matches the WorkspaceOption shape the backend returns in the login
 // WORKSPACE_SELECTION response.
@@ -135,28 +134,52 @@ export default function SelectWorkspacePage() {
 
   const handleAcceptInvitation = useCallback(
     async (ws: Workspace) => {
-      if (acceptingId) return;
+      if (!token || acceptingId) return;
       setAcceptingId(ws.membershipId);
       setError(null);
       try {
-        await acceptInvitationById(ws.membershipId);
-        // Update the workspace list in-place: mark as ACTIVE and selectable
-        setWorkspaces((prev) =>
-          prev
-            ? prev.map((w) =>
-                w.membershipId === ws.membershipId
-                  ? { ...w, membershipStatus: "ACTIVE", selectable: true }
-                  : w
-              )
-            : prev
-        );
+        // No tenant session exists during workspace selection, so
+        // acceptance goes through the pending-token flow: selecting the
+        // invited workspace returns INVITATION_PENDING + a short-lived
+        // token, which /auth/join-workspace exchanges for a session.
+        const selectRes = await fetch(`${API_BASE}/auth/select-workspace`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ selectionToken: token, tenantId: ws.id }),
+        });
+        const selectJson = await selectRes.json();
+        if (!selectRes.ok || !selectJson.success) {
+          throw new Error(selectJson?.error?.message ?? "Failed to select workspace");
+        }
+        const inviteState = selectJson.data;
+        if (inviteState.state !== "INVITATION_PENDING" || !inviteState.pendingToken) {
+          throw new Error("This invitation can no longer be accepted here.");
+        }
+
+        const joinRes = await fetch(`${API_BASE}/auth/join-workspace`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${inviteState.pendingToken}`,
+          },
+          body: JSON.stringify({ membershipId: ws.membershipId }),
+        });
+        const joinJson = await joinRes.json();
+        if (!joinRes.ok || !joinJson.success) {
+          throw new Error(joinJson?.error?.message ?? "Failed to accept invitation");
+        }
+        const session = joinJson.data;
+        if (session.accessToken) {
+          setTokens(session.accessToken, session.refreshToken);
+        }
+        clearStash();
+        router.replace(resolveWorkspaceHref(session.membership?.role));
       } catch (e: any) {
         setError(e?.message || "Failed to accept invitation");
-      } finally {
         setAcceptingId(null);
       }
     },
-    [acceptingId]
+    [token, acceptingId, clearStash, router]
   );
 
   if (!ready || !workspaces) {

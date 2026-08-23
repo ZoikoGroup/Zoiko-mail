@@ -74,8 +74,10 @@ export default function RegisterForm({
       newErrors.email = "Enter a valid email address.";
     }
 
-    if (!formData.tenantName.trim()) {
-      newErrors.tenantName = "Workspace name is required.";
+    // Workspace name is optional: invited users join an existing workspace
+    // instead of creating one, so they won't have a name to type.
+    if (formData.tenantName.trim().length > 120) {
+      newErrors.tenantName = "Workspace name must be at most 120 characters.";
     }
 
     if (!formData.password) {
@@ -112,7 +114,7 @@ export default function RegisterForm({
       {
         displayName: formData.displayName,
         email: formData.email,
-        tenantName: formData.tenantName,
+        tenantName: workspaceName || "(joining an invited workspace)",
         planCode: formData.planCode,
         password: formData.password,
       },
@@ -163,9 +165,9 @@ export default function RegisterForm({
         />
 
         <FormInput
-          label="Workspace Name"
+          label="Workspace Name (optional)"
           icon={FaBuilding}
-          placeholder="Acme Support Team"
+          placeholder="Leave blank if you were invited to a team"
           value={formData.tenantName}
           onChange={(e) => handleChange("tenantName", e.target.value)}
           error={errors.tenantName}

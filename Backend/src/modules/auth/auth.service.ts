@@ -22,6 +22,7 @@ import { userRepository } from "../user/user.repository.js";
 import { tenantService } from "../tenant/tenant.service.js";
 import { otpService } from "./otp.service.js";
 import type { AuthState, PublicUser, WorkspaceOption } from "./auth.states.js";
+import type { PendingInvitationSummary, VerifyOtpResponse } from "./auth.types.js";
 import type {
   LoginInput,
   LogoutInput,
@@ -37,7 +38,11 @@ import {
   AuditEventTypes,
   SYSTEM_TENANT_ID,
 } from "./auth.types.js";
-import type { AuthSessionResponse, RegisterResponse } from "./auth.types.js";
+import type {
+  AuthSessionResponse,
+  JoinWorkspaceInput,
+  RegisterResponse,
+} from "./auth.types.js";
 
 interface RequestContext {
   requestId?: string;
@@ -303,7 +308,14 @@ export class AuthService {
     context: RequestContext
   ): Promise<RegisterResponse> {
     const existingUser = await userRepository.findByEmail(input.email);
-    if (existingUser) {
+
+    // Status INVITED marks a placeholder identity created when someone was
+    // invited before signing up. Registering claims it — the invitee sets
+    // their own password here, then joins the inviting workspace after
+    // email verification (see joinWorkspace). Any other existing account
+    // is a real registration conflict.
+    const isClaimingInvite = existingUser?.status === "INVITED";
+    if (existingUser && !isClaimingInvite) {
       throw new AppError(
         "Email is already registered",
         409,
@@ -315,8 +327,14 @@ export class AuthService {
 
     let otpCode = "";
     const user = await prisma.$transaction(async (tx) => {
-      const u = await tx.appUser.create({
-        data: {
+      const u = await tx.appUser.upsert({
+        where: { email: input.email },
+        update: {
+          passwordHash,
+          displayName: input.displayName,
+          status: "PENDING_VERIFICATION",
+        },
+        create: {
           email: input.email,
           passwordHash,
           displayName: input.displayName,
@@ -433,7 +451,9 @@ export class AuthService {
     );
     if (existingMemberships.length > 0) {
       throw new AppError(
-        "This account already belongs to a workspace",
+        existingMemberships.some((m) => m.status === "INVITED")
+          ? "This account has a pending workspace invitation — accept it from your invitation email instead of creating a new workspace"
+          : "This account already belongs to a workspace",
         409,
         ErrorCodes.CONFLICT
       );
@@ -462,6 +482,100 @@ export class AuthService {
   }
 
   /**
+   * Alternative end of onboarding for invited users: instead of creating a
+   * workspace (→ OWNER), accept a pending invitation and join the existing
+   * workspace under the invited role (ADMIN/MEMBER). Authenticated with the
+   * same pending token as createWorkspace — there is no tenant session yet.
+   * The whole accept+session runs in one transaction so tokens are only
+   * issued when the acceptance actually commits.
+   */
+  async joinWorkspace(
+    input: JoinWorkspaceInput,
+    pendingToken: string,
+    context: RequestContext
+  ): Promise<AuthSessionResponse> {
+    const userId = this.verifyPendingToken(pendingToken);
+
+    const session = await prisma.$transaction(async (tx) => {
+      const invitation = await tx.tenantMembership.findFirst({
+        where: { id: input.membershipId, userId, status: "INVITED" },
+        include: { tenant: true },
+      });
+      if (!invitation) {
+        throw new AppError("Invitation not found", 404, ErrorCodes.NOT_FOUND);
+      }
+      if (
+        !invitation.inviteExpiresAt ||
+        invitation.inviteExpiresAt <= new Date()
+      ) {
+        throw new AppError(
+          "Invitation has expired",
+          410,
+          ErrorCodes.INVITATION_EXPIRED
+        );
+      }
+      if (invitation.tenant.status !== "ACTIVE") {
+        throw new AppError(
+          "Tenant is not active",
+          403,
+          ErrorCodes.FORBIDDEN
+        );
+      }
+
+      const user = await tx.appUser.findUnique({ where: { id: userId } });
+      if (!user) {
+        throw new AppError("Account not found", 401, ErrorCodes.UNAUTHORIZED);
+      }
+      // Same activation rule as createWorkspace: verifying the OTP plus a
+      // successful join promotes a pending account to ACTIVE.
+      if (user.status === "PENDING_VERIFICATION") {
+        await tx.appUser.update({
+          where: { id: userId },
+          data: {
+            status: "ACTIVE",
+            emailVerifiedAt: user.emailVerifiedAt ?? new Date(),
+          },
+        });
+      }
+
+      await tx.tenantMembership.update({
+        where: { id: invitation.id },
+        data: { status: "ACTIVE", inviteExpiresAt: null },
+      });
+      await auditService.record(
+        {
+          tenantId: invitation.tenantId,
+          actorUserId: userId,
+          eventType: "MEMBERSHIP_INVITATION_ACCEPTED",
+          targetType: "TenantMembership",
+          targetId: invitation.id,
+          requestId: context.requestId,
+          ipAddress: context.ipAddress,
+          userAgent: context.userAgent,
+        },
+        tx
+      );
+
+      const membershipWithRelations = await membershipRepository.findByUserAndTenant(
+        userId,
+        invitation.tenantId,
+        tx
+      );
+      if (!membershipWithRelations) {
+        throw new AppError(
+          "Failed to establish membership after joining the workspace",
+          500,
+          ErrorCodes.INTERNAL_ERROR
+        );
+      }
+
+      return issueSession(membershipWithRelations, tx);
+    });
+
+    return session;
+  }
+
+  /**
    * Phase 3: verify the email OTP for a pending user. On success the user is
    * promoted to ACTIVE with emailVerifiedAt set (inside otpService.verify),
    * and a refreshed pending token is returned so they can proceed to
@@ -471,7 +585,7 @@ export class AuthService {
     pendingToken: string,
     code: string,
     context: RequestContext
-  ): Promise<RegisterResponse & { emailVerified: boolean }> {
+  ): Promise<VerifyOtpResponse> {
     const userId = this.verifyPendingToken(pendingToken);
     await otpService.verify(userId, code);
 
@@ -492,6 +606,26 @@ export class AuthService {
       userAgent: context.userAgent,
     });
 
+    // Surface any workspace invitations waiting on this email. A non-empty
+    // list tells the client to join an existing workspace (ADMIN/MEMBER)
+    // instead of creating a new one as OWNER.
+    const memberships = await membershipRepository.findByUserId(userId);
+    const now = new Date();
+    const pendingInvitations: PendingInvitationSummary[] = memberships
+      .filter(
+        (m) =>
+          m.status === "INVITED" &&
+          m.tenant.status === "ACTIVE" &&
+          m.inviteExpiresAt !== null &&
+          m.inviteExpiresAt > now
+      )
+      .map((m) => ({
+        membershipId: m.id,
+        tenantId: m.tenantId,
+        tenantName: m.tenant.name,
+        role: m.role,
+      }));
+
     const pending = buildPendingToken(userId);
     return {
       user: {
@@ -500,6 +634,7 @@ export class AuthService {
         displayName: user.displayName,
       },
       emailVerified: true,
+      pendingInvitations,
       pendingToken: pending.token,
       expiresIn: pending.expiresIn,
     };
@@ -660,7 +795,13 @@ export class AuthService {
 
     if (nonRemoved.length === 0) {
       if (invited.length > 0) {
-        return { state: "INVITATION_PENDING", user: publicUser, invitations: invited.map(toWorkspaceOption) };
+        const pending = buildPendingToken(user.id);
+        return {
+          state: "INVITATION_PENDING",
+          user: publicUser,
+          invitations: invited.map(toWorkspaceOption),
+          pendingToken: pending.token,
+        };
       }
       return { state: "NO_WORKSPACE", user: publicUser };
     }
@@ -743,7 +884,13 @@ export class AuthService {
       return { state: "WORKSPACE_SUSPENDED", user: publicUser, workspace };
     }
     if (membership.status === "INVITED") {
-      return { state: "INVITATION_PENDING", user: publicUser, invitations: [workspace] };
+      const pending = buildPendingToken(user.id);
+      return {
+        state: "INVITATION_PENDING",
+        user: publicUser,
+        invitations: [workspace],
+        pendingToken: pending.token,
+      };
     }
     if (membership.status === "SUSPENDED") {
       return { state: "MEMBERSHIP_SUSPENDED", user: publicUser, workspace };

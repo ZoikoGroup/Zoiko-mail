@@ -26,6 +26,7 @@ import {
   deactivateSuppression,
   getDeliveryEvents,
   getProviderEvents,
+  replayDeadLetter,
   getOnboardingStatus,
   getUsage,
   getConnectors,
@@ -264,6 +265,14 @@ export function useProviderEvents(
     queryKey: ["owner", "provider-events", params],
     queryFn: () => getProviderEvents(params),
     staleTime: 15_000,
+  });
+}
+
+export function useReplayProviderEvent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (eventId: string) => replayDeadLetter(eventId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "provider-events"] }),
   });
 }
 

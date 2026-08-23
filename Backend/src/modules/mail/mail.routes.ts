@@ -14,6 +14,8 @@ mailRouter.get(
   validate(adminDeliveryEventsQuerySchema, "query"),
   controller.adminListDeliveryEvents
 );
+// Same rule for the unread-count badge endpoint.
+mailRouter.get("/unread-counts", controller.unreadCounts);
 mailRouter.get("/", validate(listMailSchema, "query"), controller.list);
 mailRouter.post("/drafts", validate(createDraftSchema), controller.createDraft);
 mailRouter.patch("/bulk", validate(bulkMailboxActionSchema), controller.bulkAction);

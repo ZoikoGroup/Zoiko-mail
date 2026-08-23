@@ -38,6 +38,7 @@ export const listMailSchema = z.object({
   folder: z.enum(["DRAFTS", "INBOX", "ARCHIVE", "SENT", "TRASH", "QUARANTINE"]).default("INBOX"),
   starredOnly: z.coerce.boolean().default(false),
   labelId: z.string().uuid().optional(),
+  q: z.string().trim().min(1).max(200).optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(25),
 });

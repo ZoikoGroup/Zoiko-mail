@@ -38,6 +38,9 @@ export const cancelSchedule = asyncHandler(async (req: Request, res: Response) =
 export const list = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await mailService.list(req.query as never, context(req)), req.requestId);
 });
+export const unreadCounts = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailService.unreadCounts(context(req)), req.requestId);
+});
 export const get = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await mailService.get(String(req.params.messageId), context(req)), req.requestId);
 });

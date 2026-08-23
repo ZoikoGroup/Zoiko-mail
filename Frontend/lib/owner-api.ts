@@ -399,6 +399,7 @@ export interface DeliveryEventRow {
   failureCode: string | null;
   failureReason: string | null;
   providerEventId: string | null;
+  metadata: Record<string, unknown> | null;
   createdAt: string;
   messageId: string | null;
   subject: string | null;
@@ -451,6 +452,10 @@ export async function getProviderEvents(
     `/connectors/provider-events${qs ? `?${qs}` : ""}`
   );
   return res.events;
+}
+
+export async function replayDeadLetter(eventId: string): Promise<void> {
+  await apiRequest(`/connectors/dead-letter/${eventId}/replay`, { method: "POST" });
 }
 
 // ─── Onboarding ─────────────────────────────────────────────────────────────

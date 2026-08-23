@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { isLoggedIn } from "@/lib/auth-storage";
 import { useMe } from "@/lib/auth-hooks";
 import type { MeResponse } from "@/lib/auth-api";
+import { AccessDenied } from "@/components/ui/AccessDenied";
 
 interface ProtectedRouteProps {
   allowedRoles?: string[];
@@ -19,12 +20,8 @@ export function ProtectedRoute({ allowedRoles = ["OWNER", "ADMIN"], children }: 
   useEffect(() => {
     if (!isLoggedIn()) {
       router.replace("/login");
-      return;
     }
-    if (!isLoading && me && !allowedRoles.includes(me.membership.role)) {
-      router.replace("/");
-    }
-  }, [router, isLoading, me, allowedRoles]);
+  }, [router]);
 
   if (isLoading) {
     return (
@@ -34,15 +31,13 @@ export function ProtectedRoute({ allowedRoles = ["OWNER", "ADMIN"], children }: 
     );
   }
 
-  if (me && !allowedRoles.includes(me.membership.role)) {
-    return (
-      <div className="flex h-64 flex-col items-center justify-center text-center">
-        <p className="text-sm font-medium text-[var(--ink)]">Access Denied</p>
-        <p className="mt-1 text-sm text-[var(--ink3)]">
-          You do not have permission to access this page.
-        </p>
-      </div>
-    );
+  // Not logged in (or /auth/me failed) — the effect above sends to login.
+  if (!me) return null;
+
+  // Authenticated but not permitted: show a clear warning instead of
+  // silently redirecting or rendering restricted content.
+  if (!allowedRoles.includes(me.membership.role)) {
+    return <AccessDenied role={me.membership.role} />;
   }
 
   return <>{children}</>;

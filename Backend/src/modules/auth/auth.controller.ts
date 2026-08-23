@@ -43,6 +43,16 @@ export const createWorkspace = asyncHandler(async (req: Request, res: Response) 
   sendSuccess(res, 201, result, req.requestId);
 });
 
+export const joinWorkspace = asyncHandler(async (req: Request, res: Response) => {
+  const pendingToken = getBearerToken(req);
+  const result = await authService.joinWorkspace(
+    req.body,
+    pendingToken,
+    getRequestContext(req)
+  );
+  sendSuccess(res, 201, result, req.requestId);
+});
+
 export const login = asyncHandler(async (req: Request, res: Response) => {
   const result = await authService.login(req.body, getRequestContext(req));
 

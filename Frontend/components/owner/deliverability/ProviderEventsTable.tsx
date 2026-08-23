@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 import { DataTable, type Column } from "@/components/ui/DataTable";
-import { useProviderEvents } from "@/lib/owner-hooks";
+import { DropdownMenu, DropdownItem } from "@/components/ui/DropdownMenu";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { useProviderEvents, useReplayProviderEvent } from "@/lib/owner-hooks";
 import type { ProviderEventRow, ProviderEventStatus, ConnectorProvider } from "@/lib/owner-api";
-import { Radio } from "lucide-react";
+import { Radio, RotateCcw } from "lucide-react";
 
 const STATUSES: (ProviderEventStatus | "")[] = ["", "FAILED", "DEAD_LETTER", "RETRY", "RECEIVED", "PROCESSED"];
 const PROVIDERS: (ConnectorProvider | "")[] = ["", "GMAIL", "MICROSOFT_365", "IMAP_SMTP"];
@@ -27,10 +29,23 @@ function fmtDate(iso: string) {
 export function ProviderEventsTable() {
   const [status, setStatus] = useState<ProviderEventStatus | "">("");
   const [provider, setProvider] = useState<ConnectorProvider | "">("");
+  const [confirmReplay, setConfirmReplay] = useState<ProviderEventRow | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const { data: events = [], isLoading } = useProviderEvents({
     ...(status ? { status } : {}),
     ...(provider ? { provider } : {}),
   });
+  const replayEvent = useReplayProviderEvent();
+
+  const handleReplay = () => {
+    if (!confirmReplay) return;
+    setActionError(null);
+    replayEvent.mutate(confirmReplay.id, {
+      onSuccess: () => setConfirmReplay(null),
+      onError: (err) =>
+        setActionError(err instanceof Error ? err.message : "Failed to replay event."),
+    });
+  };
 
   const columns: Column<ProviderEventRow>[] = [
     { key: "provider", label: "Provider", render: (row) => <span className="text-sm text-[var(--ink2)]">{row.provider}</span> },
@@ -103,6 +118,12 @@ export function ProviderEventsTable() {
         </select>
       </div>
 
+      {actionError && (
+        <div className="rounded-lg border border-[var(--crit)]/30 bg-[var(--crit-soft)] px-3 py-2 text-sm text-[var(--crit)]">
+          {actionError}
+        </div>
+      )}
+
       <DataTable
         columns={columns}
         data={events}
@@ -110,6 +131,28 @@ export function ProviderEventsTable() {
         pageSize={15}
         loading={isLoading}
         emptyMessage={isLoading ? "Loading provider events…" : "No provider events recorded."}
+        actions={(row) =>
+          row.processingStatus === "DEAD_LETTER" ? (
+            <DropdownMenu>
+              <DropdownItem onClick={() => setConfirmReplay(row)}>
+                <RotateCcw className="h-3.5 w-3.5" /> Replay
+              </DropdownItem>
+            </DropdownMenu>
+          ) : undefined
+        }
+      />
+
+      <ConfirmDialog
+        open={!!confirmReplay}
+        onClose={() => setConfirmReplay(null)}
+        onConfirm={handleReplay}
+        title="Replay Provider Event"
+        message={`Requeue this ${confirmReplay?.eventType ?? ""} event from ${
+          confirmReplay?.accountEmail ?? "the connected account"
+        }? It will be processed again immediately.`}
+        confirmLabel="Replay"
+        variant="warning"
+        loading={replayEvent.isPending}
       />
     </div>
   );

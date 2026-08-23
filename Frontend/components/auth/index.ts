@@ -11,6 +11,7 @@ export { default as AuthContainer } from "./layout/AuthContainer";
 export { default as AuthShowcase } from "./layout/AuthShowcase";
 export { default as VerifyOtpForm } from "./forms/VerifyOtpForm";
 export { default as CreateWorkspaceForm } from "./forms/CreateWorkspaceForm";
+export { default as JoinWorkspaceForm } from "./forms/JoinWorkspaceForm";
 export { default as ForgotPasswordForm } from "./forms/ForgotPasswordForm";
 export { default as ResetPasswordForm } from "./forms/ResetPasswordForm";
 export type { AuthStep } from "./types";
