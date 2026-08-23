@@ -8,7 +8,7 @@ import { isLoggedIn } from "@/lib/auth-storage";
 import { useMe, useLogout } from "@/lib/auth-hooks";
 import type { MeResponse } from "@/lib/auth-api";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
-import { useCan } from "@/lib/admin-capabilities";
+import { useCan, useCapabilities } from "@/lib/admin-capabilities";
 import { visibleNav, type AdminNavItem } from "@/lib/admin-nav";
 import { useActiveSupportGrant } from "@/lib/admin-hooks";
 import { Pill } from "@/components/admin/ui";
@@ -149,6 +149,7 @@ function SupportGrantBanner() {
 function Rail({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const can = useCan();
+  const { isLoading, error } = useCapabilities();
   const groups = visibleNav(can);
 
   return (
@@ -161,7 +162,38 @@ function Rail({ onNavigate }: { onNavigate?: () => void }) {
       </div>
 
       <nav className="flex-1 space-y-3 overflow-y-auto px-2 pb-4" aria-label="Admin sections">
-        {groups.map((group) => (
+        {/* Capabilities decide what belongs here, and `can` denies while the
+            query is in flight — deliberately, so nothing the server would
+            refuse ever renders. Without a placeholder that correctness shows
+            up as an empty rail on every load, so show its shape instead. */}
+        {isLoading &&
+          Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="mx-3 my-2 h-4 animate-pulse rounded bg-[var(--s3)]" />
+          ))}
+
+        {/* Failing closed is right, but it must never look like the workspace
+            lost its features. If permissions cannot be loaded, say so — an
+            unexplained empty rail reads as data loss, not as a failed fetch. */}
+        {!isLoading && error && (
+          <div className="mx-2 rounded-lg border border-[var(--crit)]/30 bg-[var(--crit-soft)] p-3">
+            <div className="text-[12px] font-semibold text-[var(--crit)]">
+              Permissions unavailable
+            </div>
+            <p className="mt-1 text-[11px] text-[var(--ink3)]">
+              Navigation is hidden until your permissions load. This is a
+              connection problem, not a change to your access.
+            </p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="zoiko-btn sm mt-2"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {!isLoading && !error && groups.map((group) => (
           <div key={group.group}>
             <div className="font-mono-num px-3 pb-1 pt-2 text-[9px] font-semibold uppercase tracking-[0.13em] text-[var(--ink3)]">
               {group.group}

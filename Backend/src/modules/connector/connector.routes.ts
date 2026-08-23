@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { Router, type RequestHandler } from "express";
 import rateLimit from "express-rate-limit";
 import { env } from "../../config/env.js";
-import { authenticate, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
+import { authenticate, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
 import {
@@ -62,6 +62,18 @@ connectorRouter.get("/", asyncHandler(async (req, res) => {
     ),
   }, req.requestId);
 }));
+
+// The workspace-wide view for the admin provider-sync surface. Declared before
+// the "/:accountId" routes so "admin" is not read as an account id.
+connectorRouter.get(
+  "/admin",
+  requireCapability("workspace.mailboxes.manage"),
+  asyncHandler(async (req, res) => {
+    sendSuccess(res, 200, {
+      accounts: await connectorService.listForTenant(req.tenantContext!.tenantId),
+    }, req.requestId);
+  })
+);
 
 connectorRouter.post("/", validate(createConnectedAccountSchema), asyncHandler(async (req, res) => {
   sendSuccess(res, 201, await connectorService.create(req.body, {

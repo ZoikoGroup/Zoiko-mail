@@ -1,8 +1,8 @@
 import { Router } from "express";
-import { authenticate, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
+import { authenticate, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./mail.controller.js";
 import { attachmentUpload } from "./attachment.middleware.js";
-import { attachmentParamsSchema, bulkMailboxActionSchema, adminDeliveryEventsQuerySchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
+import { adminDeliveryEventsQuerySchema, adminUpdateMailboxSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
 
 const mailRouter = Router();
 mailRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBER"));
@@ -35,15 +35,24 @@ mailRouter.put("/:messageId/labels/:labelId", validate(messageLabelParamsSchema,
 mailRouter.delete("/:messageId/labels/:labelId", validate(messageLabelParamsSchema, "params"), controller.removeLabel);
 
 // ─── Admin: Mailbox management (must be before /:messageId wildcard) ──────────
-mailRouter.get("/admin/mailboxes", requireRole("OWNER", "ADMIN"), controller.listAllMailboxes);
-mailRouter.post("/admin/mailboxes", requireRole("OWNER", "ADMIN"), controller.adminCreateMailbox);
-mailRouter.delete("/admin/mailboxes/:mailboxId", requireRole("OWNER", "ADMIN"), validate(mailboxIdParamsSchema, "params"), controller.adminDeleteMailbox);
+mailRouter.get("/admin/mailboxes", requireCapability("workspace.mailboxes.manage"), controller.listAllMailboxes);
+mailRouter.post("/admin/mailboxes", requireCapability("workspace.mailboxes.manage"), controller.adminCreateMailbox);
+mailRouter.delete("/admin/mailboxes/:mailboxId", requireCapability("workspace.mailboxes.manage"), validate(mailboxIdParamsSchema, "params"), controller.adminDeleteMailbox);
+// Declared before the ":mailboxId" patch so "sending" is not read as an update
+// field set on the mailbox itself.
 mailRouter.patch(
   "/admin/mailboxes/:mailboxId/sending",
-  requireRole("OWNER", "ADMIN"),
+  requireCapability("workspace.mailboxes.manage"),
   validate(mailboxIdParamsSchema, "params"),
   validate(updateSendingStatusSchema),
   controller.updateSendingStatus
+);
+mailRouter.patch(
+  "/admin/mailboxes/:mailboxId",
+  requireCapability("workspace.mailboxes.manage"),
+  validate(mailboxIdParamsSchema, "params"),
+  validate(adminUpdateMailboxSchema),
+  controller.adminUpdateMailbox
 );
 
 mailRouter.get("/:messageId", validate(messageIdParamsSchema, "params"), controller.get);

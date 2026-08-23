@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
+import type { DeliveryEventType } from "@prisma/client";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
 import { authHeader, registerUser } from "./helpers.js";
@@ -27,7 +28,9 @@ async function seedMessageWithEvents(
   tenantId: string,
   authorUserId: string,
   subject: string,
-  events: { type: "DELIVERED" | "BOUNCED"; failureCode?: string; createdAt?: Date }[]
+  // Typed to the Prisma enum rather than a hand-written union: the tests below
+  // seed DEFERRED and FAILED events too, which the narrower literal rejected.
+  events: { type: DeliveryEventType; failureCode?: string; createdAt?: Date }[]
 ) {
   const message = await prisma.emailMessage.create({
     data: {

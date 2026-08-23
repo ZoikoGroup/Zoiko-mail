@@ -26,6 +26,56 @@ export interface AuditEventFilters {
 
 const sensitiveMetadataKey = /password|token|secret|authorization|cookie/i;
 
+/**
+ * What "Limited" means for an Admin reading the audit log.
+ *
+ * RBAC §2 records "View audit log" as Owner = Yes, Admin = **Limited**, and
+ * leaves the word undefined. The reading that follows from the rest of the
+ * matrix: an Admin may audit everything they could have done, and may not
+ * audit the governance decisions taken over their head. Those are exactly the
+ * capabilities the matrix withholds from Admin — billing, tenant lifecycle,
+ * ownership transfer and support-grant approval.
+ *
+ * This is a withholding, not a security boundary: the events still exist and
+ * the Owner sees them. It stops an Admin from reading, for example, the
+ * commercial terms of the tenancy or the deliberations around their own
+ * removal. Prefix matching keeps it stable as event names are added.
+ *
+ * Deliberately still visible to an Admin: support access events. Audit §11
+ * requires support-access evidence to be "available to Owner/Admin", and the
+ * Admin holds `support.grant.end`, so hiding those would break a capability
+ * they do have.
+ */
+export const ADMIN_AUDIT_EXCLUDED_PREFIXES = [
+  "BILLING_",
+  "PLAN_",
+  "SUBSCRIPTION_",
+  "INVOICE_",
+  "TENANT_DELETION",
+  "TENANT_SUSPENDED",
+  "TENANT_OWNERSHIP",
+  "OWNERSHIP_TRANSFER",
+] as const;
+
+/** Roles that read the whole tenant log. Everyone else is scoped. */
+type AuditReaderRole = "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT";
+
+/**
+ * The exclusion clause for a reader, or undefined when they see everything.
+ * Kept separate from `list` so the same rule can be applied to exports and to
+ * any future audit surface without being reimplemented.
+ */
+export function auditScopeFor(
+  role: AuditReaderRole | null | undefined
+): Prisma.AuditEventWhereInput | undefined {
+  if (role !== "ADMIN") return undefined;
+  return {
+    NOT: ADMIN_AUDIT_EXCLUDED_PREFIXES.map((prefix) => ({
+      eventType: { startsWith: prefix },
+    })),
+  };
+}
+
 export function redactMetadata(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redactMetadata);
   if (value && typeof value === "object") {
@@ -59,7 +109,12 @@ export class AuditService {
     });
   }
 
-  async list(tenantId: string, filters: AuditEventFilters) {
+  async list(
+    tenantId: string,
+    filters: AuditEventFilters,
+    readerRole?: AuditReaderRole | null
+  ) {
+    const scope = auditScopeFor(readerRole);
     const where: Prisma.AuditEventWhereInput = {
       tenantId,
       eventType: filters.eventType,
@@ -73,6 +128,9 @@ export class AuditService {
               ...(filters.to ? { lte: new Date(filters.to) } : {}),
             }
           : undefined,
+      // Applied after the caller's filters so an explicit eventType filter
+      // cannot be used to reach past the scope.
+      ...(scope ?? {}),
     };
 
     const [events, total] = await prisma.$transaction([
@@ -102,9 +160,14 @@ export class AuditService {
     };
   }
 
-  async getById(tenantId: string, eventId: string) {
+  async getById(
+    tenantId: string,
+    eventId: string,
+    readerRole?: AuditReaderRole | null
+  ) {
+    // Same scope as `list`, or an Admin could read a withheld event by id.
     const event = await prisma.auditEvent.findFirst({
-      where: { id: eventId, tenantId },
+      where: { id: eventId, tenantId, ...(auditScopeFor(readerRole) ?? {}) },
       include: {
         actor: { select: { id: true, email: true, displayName: true } },
       },
