@@ -5,6 +5,9 @@ import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
 import { env } from "../../config/env.js";
 import { generateOpaqueToken, hashToken } from "../../common/utils/tokenHash.js";
+import { hashPassword } from "../../common/utils/password.js";
+import { systemMailer } from "../../common/mailer/system-mailer.js";
+import { logger } from "../../config/logger.js";
 import type { AcceptInvitationInput, AddMemberInput, CreateInvitationInput, UpdateMemberInput } from "./membership.schema.js";
 
 interface ActorContext {
@@ -122,9 +125,21 @@ export class MembershipService {
     );
 
     const membership = await prisma.$transaction(async (tx) => {
-      const user = await tx.appUser.findUnique({ where: { email: input.email } });
-      if (!user) throw new AppError("Registered user not found", 404, ErrorCodes.NOT_FOUND);
-      if (user.status !== "ACTIVE") {
+      let user = await tx.appUser.findUnique({ where: { email: input.email } });
+      if (!user) {
+        // The invitee hasn't signed up yet. Create a placeholder identity
+        // (random password, status INVITED) that /auth/register claims —
+        // the real password is chosen when the invitee registers.
+        user = await tx.appUser.create({
+          data: {
+            email: input.email,
+            passwordHash: await hashPassword(generateOpaqueToken()),
+            displayName: input.email.split("@")[0] ?? input.email,
+            status: "INVITED",
+          },
+        });
+      }
+      if (user.status !== "ACTIVE" && user.status !== "INVITED") {
         throw new AppError("User account is disabled", 409, ErrorCodes.CONFLICT);
       }
 
@@ -161,22 +176,64 @@ export class MembershipService {
       return result;
     });
 
+    // Send invitation email (fire-and-forget — don't block the response)
+    const tenant = await prisma.tenant.findUnique({ where: { id: context.tenantId }, select: { name: true } });
+    const actor = await prisma.appUser.findUnique({ where: { id: context.userId }, select: { displayName: true, email: true } });
+    const acceptUrl = `${env.APP_URL}/accept-invitation?token=${invitationToken}`;
+    systemMailer.sendInvitationEmail(
+      input.email,
+      actor?.displayName ?? actor?.email ?? "A team member",
+      tenant?.name ?? "the workspace",
+      acceptUrl,
+    ).catch((err) => logger.error({ err }, "Failed to send invitation email"));
+
     return { membership, invitationToken, expiresAt: inviteExpiresAt };
   }
 
   async acceptInvitation(input: AcceptInvitationInput, context: InviteeContext) {
-    const tokenHash = hashToken(input.invitationToken);
     return prisma.$transaction(async (tx) => {
-      const invitation = await tx.tenantMembership.findUnique({
-        where: { inviteToken: tokenHash },
-        include: { tenant: true },
-      });
-      if (!invitation || invitation.status !== "INVITED") {
-        throw new AppError("Invitation is invalid", 401, ErrorCodes.INVITATION_INVALID);
+      // Resolve the invitation — either by hashed token or by membershipId + userId ownership
+      let invitation;
+      if (input.invitationToken) {
+        const tokenHash = hashToken(input.invitationToken);
+        invitation = await tx.tenantMembership.findUnique({
+          where: { inviteToken: tokenHash },
+          include: { tenant: true },
+        });
+        if (!invitation) {
+          throw new AppError("Invitation is invalid", 401, ErrorCodes.INVITATION_INVALID);
+        }
+        // Token-based accept: skip userId check — the token IS the proof of identity.
+        // If user is authenticated, also verify ownership for extra safety.
+        if (context.userId && invitation.userId !== context.userId) {
+          throw new AppError("Invitation belongs to another user", 403, ErrorCodes.FORBIDDEN);
+        }
+        // Idempotent re-accept. Email links get triggered twice in practice —
+        // React StrictMode double-mounts the accept page, mail scanners
+        // prefetch URLs, users click again after a slow response. The invite
+        // token is deliberately kept on the membership after activation so a
+        // second presentment of the SAME token resolves instead of failing.
+        if (invitation.status === "ACTIVE") {
+          const current = await tx.tenantMembership.findUnique({
+            where: { id: invitation.id },
+            select: memberSelect,
+          });
+          return current!;
+        }
+        if (invitation.status !== "INVITED") {
+          throw new AppError("Invitation is invalid", 401, ErrorCodes.INVITATION_INVALID);
+        }
+      } else {
+        // membershipId path — used by the UI accept button
+        invitation = await tx.tenantMembership.findFirst({
+          where: { id: input.membershipId!, userId: context.userId, status: "INVITED" },
+          include: { tenant: true },
+        });
+        if (!invitation) {
+          throw new AppError("Invitation not found", 404, ErrorCodes.NOT_FOUND);
+        }
       }
-      if (invitation.userId !== context.userId) {
-        throw new AppError("Invitation belongs to another user", 403, ErrorCodes.FORBIDDEN);
-      }
+
       if (!invitation.inviteExpiresAt || invitation.inviteExpiresAt <= new Date()) {
         await tx.tenantMembership.update({
           where: { id: invitation.id },
@@ -190,13 +247,16 @@ export class MembershipService {
 
       const membership = await tx.tenantMembership.update({
         where: { id: invitation.id },
-        data: { status: "ACTIVE", inviteToken: null, inviteExpiresAt: null },
+        // inviteToken is intentionally preserved (not nulled) so presenting
+        // the same email link again stays idempotent; it is cleared on
+        // cancel, removal and re-invitation.
+        data: { status: "ACTIVE", inviteExpiresAt: null },
         select: memberSelect,
       });
       await auditService.record(
         {
           tenantId: invitation.tenantId,
-          actorUserId: context.userId,
+          actorUserId: context.userId || invitation.userId,
           eventType: "MEMBERSHIP_INVITATION_ACCEPTED",
           targetType: "TenantMembership",
           targetId: invitation.id,

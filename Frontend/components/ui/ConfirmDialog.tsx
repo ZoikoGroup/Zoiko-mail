@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Modal } from "./Modal";
 
@@ -12,6 +13,7 @@ interface ConfirmDialogProps {
   confirmLabel?: string;
   variant?: "danger" | "warning";
   loading?: boolean;
+  children?: ReactNode;
 }
 
 export function ConfirmDialog({
@@ -23,6 +25,7 @@ export function ConfirmDialog({
   confirmLabel = "Confirm",
   variant = "danger",
   loading,
+  children,
 }: ConfirmDialogProps) {
   return (
     <Modal
@@ -60,6 +63,7 @@ export function ConfirmDialog({
         </span>
         <p className="text-sm text-[var(--ink2)]">{message}</p>
       </div>
+      {children}
     </Modal>
   );
 }

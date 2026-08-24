@@ -674,6 +674,57 @@ export class MailService {
     });
   }
 
+  /**
+   * Tenant-wide delivery event feed for OWNER/ADMIN (unlike the per-message
+   * variant above, which scopes to the authoring user). Read-only reporting:
+   * no payload bodies are exposed, only routing metadata.
+   */
+  async adminListDeliveryEvents(
+    input: { type?: string; limit?: number },
+    context: MailContext
+  ) {
+    const events = await prisma.deliveryEvent.findMany({
+      where: {
+        tenantId: context.tenantId,
+        ...(input.type ? { type: input.type as Prisma.DeliveryEventWhereInput["type"] } : {}),
+      },
+      select: {
+        id: true,
+        type: true,
+        failureCode: true,
+        failureReason: true,
+        providerEventId: true,
+        metadata: true,
+        createdAt: true,
+        message: {
+          select: {
+            id: true,
+            subject: true,
+            fromAddress: true,
+            status: true,
+            recipients: { select: { email: true, type: true, deliveryStatus: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: Math.min(input.limit ?? 50, 200),
+    });
+
+    return events.map((e) => ({
+      id: e.id,
+      type: e.type,
+      failureCode: e.failureCode,
+      failureReason: e.failureReason,
+      providerEventId: e.providerEventId,
+      metadata: e.metadata ?? null,
+      createdAt: e.createdAt,
+      messageId: e.message?.id ?? null,
+      subject: e.message?.subject ?? null,
+      fromAddress: e.message?.fromAddress ?? null,
+      recipients: e.message?.recipients ?? [],
+    }));
+  }
+
   async updateSendingStatus(
     mailboxId: string,
     input: { suspended: boolean; reason?: string },
@@ -725,6 +776,17 @@ export class MailService {
       ...(filters.labelId ? {
         labels: { some: { tenantId: context.tenantId, labelId: filters.labelId } },
       } : {}),
+      ...(filters.q ? {
+        message: {
+          OR: [
+            { subject: { contains: filters.q, mode: "insensitive" as const } },
+            { textBody: { contains: filters.q, mode: "insensitive" as const } },
+            { fromAddress: { contains: filters.q, mode: "insensitive" as const } },
+            { fromName: { contains: filters.q, mode: "insensitive" as const } },
+            { recipients: { some: { email: { contains: filters.q, mode: "insensitive" as const } } } },
+          ],
+        },
+      } : {}),
     };
     const [items, total] = await prisma.$transaction([
       prisma.mailboxMessage.findMany({
@@ -752,6 +814,28 @@ export class MailService {
       })),
       pagination: { ...filters, total, totalPages: Math.ceil(total / filters.limit) },
     };
+  }
+
+  /**
+   * Unread counts per folder for folder-rail badges. DRAFTS is excluded:
+   * draft rows are never marked read, so counting them would show a
+   * permanent phantom badge.
+   */
+  async unreadCounts(context: MailContext) {
+    const mailbox = await this.mailbox(context);
+    const grouped = await prisma.mailboxMessage.groupBy({
+      by: ["folder"],
+      where: {
+        tenantId: context.tenantId,
+        mailboxId: mailbox.id,
+        isRead: false,
+        folder: { not: "DRAFTS" },
+      },
+      _count: { _all: true },
+    });
+    const counts: Record<string, number> = {};
+    for (const row of grouped) counts[row.folder] = row._count._all;
+    return { counts };
   }
 
   async get(messageId: string, context: MailContext) {
@@ -1173,6 +1257,77 @@ export class MailService {
       ipAddress: context.ipAddress,
       userAgent: context.userAgent,
       metadata: { address: mailbox.address, membershipId },
+    });
+
+    return {
+      ...mailbox,
+      storageUsed: Number(mailbox.storageUsed),
+      storageLimit: Number(mailbox.storageLimit),
+    };
+  }
+
+  // ─── Admin: Update mailbox attributes ───────────────────────────────────────
+
+  /**
+   * Adjusts quota and warm-up cap. Emits before/after values because Audit
+   * §6.2 requires them for material configuration changes — a quota cut that
+   * starts bouncing mail is only diagnosable if the prior value is on record.
+   */
+  async adminUpdateMailbox(
+    tenantId: string,
+    mailboxId: string,
+    input: { storageLimit?: number; customWarmupCap?: number | null },
+    context: MailContext
+  ) {
+    const existing = await prisma.mailbox.findFirst({
+      where: { id: mailboxId, tenantId },
+      select: { id: true, address: true, storageLimit: true, customWarmupCap: true, storageUsed: true },
+    });
+    if (!existing) throw new AppError("Mailbox not found", 404, ErrorCodes.NOT_FOUND);
+
+    // Refuse a quota below what the mailbox already holds. Accepting it would
+    // leave the mailbox instantly over limit with no way for the user to act.
+    if (input.storageLimit !== undefined && BigInt(input.storageLimit) < existing.storageUsed) {
+      throw new AppError(
+        `Quota cannot be below current usage (${existing.storageUsed} bytes)`,
+        409,
+        ErrorCodes.CONFLICT
+      );
+    }
+
+    const mailbox = await prisma.mailbox.update({
+      where: { id: mailboxId },
+      data: {
+        ...(input.storageLimit !== undefined ? { storageLimit: BigInt(input.storageLimit) } : {}),
+        ...(input.customWarmupCap !== undefined ? { customWarmupCap: input.customWarmupCap } : {}),
+      },
+      include: {
+        membership: {
+          include: { user: { select: { id: true, displayName: true, email: true } } },
+        },
+      },
+    });
+
+    await auditService.record({
+      tenantId,
+      actorUserId: context.userId,
+      eventType: "MAILBOX_SETTINGS_UPDATED",
+      targetType: "Mailbox",
+      targetId: mailbox.id,
+      requestId: context.requestId,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+      metadata: {
+        address: mailbox.address,
+        before: {
+          storageLimit: Number(existing.storageLimit),
+          customWarmupCap: existing.customWarmupCap,
+        },
+        after: {
+          storageLimit: Number(mailbox.storageLimit),
+          customWarmupCap: mailbox.customWarmupCap,
+        },
+      },
     });
 
     return {

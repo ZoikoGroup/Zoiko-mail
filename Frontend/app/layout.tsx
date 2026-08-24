@@ -22,7 +22,10 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: "Zoiko Mail — Action Inbox",
+  title: {
+    default: "Zoiko Mail",
+    template: "%s | Zoiko Mail",
+  },
   description: "Business email that turns communication into accountable work.",
 };
 

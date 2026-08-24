@@ -33,7 +33,12 @@ export type AuthState =
   | { state: "EMAIL_VERIFICATION_REQUIRED"; user: PublicUser; pendingToken: string; expiresIn: string }
   | { state: "ACCOUNT_SUSPENDED"; user: PublicUser }
   | { state: "ACCOUNT_DISABLED"; user: PublicUser }
-  | { state: "INVITATION_PENDING"; user: PublicUser; invitations: WorkspaceOption[] }
+  | { state: "INVITATION_PENDING"; user: PublicUser; invitations: WorkspaceOption[]; /**
+     * Short-lived token letting an unauthenticated client accept an
+     * invitation via POST /auth/join-workspace (same trust level as the
+     * selection token: issued only after a successful password check).
+     */
+    pendingToken?: string }
   | { state: "MEMBERSHIP_SUSPENDED"; user: PublicUser; workspace: WorkspaceOption }
   | { state: "WORKSPACE_SUSPENDED"; user: PublicUser; workspace: WorkspaceOption }
   | { state: "WORKSPACE_DELETING"; user: PublicUser; workspace: WorkspaceOption }

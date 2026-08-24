@@ -4,6 +4,7 @@ export { asyncHandler } from "./asyncHandler.js";
 export { errorHandler, notFoundHandler } from "./errorHandler.js";
 export { requestIdMiddleware } from "./requestId.js";
 export { requireRole, tenantContext } from "./tenantContext.js";
+export { requireCapability, capabilityContext } from "./requireCapability.js";
 export { requireSupportAccess } from "./requireSupportAccess.js";
 export { validate } from "./validate.js";
 export { loginRateLimit, refreshRateLimit, registerRateLimit , passwordResetRateLimit } from "./authRateLimit.js";

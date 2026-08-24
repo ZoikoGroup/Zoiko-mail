@@ -12,6 +12,7 @@ import {
   loginSchema,
   changePasswordSchema,
   createWorkspaceSchema,
+  joinWorkspaceSchema,
   logoutSchema,
   refreshSchema,
   registerSchema,
@@ -40,6 +41,15 @@ authRouter.post(
   registerRateLimit,
   validate(createWorkspaceSchema),
   authController.createWorkspace
+);
+
+// Same pending-token auth as /create-workspace: the caller just verified
+// their email and is joining an invited workspace instead of creating one.
+authRouter.post(
+  "/join-workspace",
+  registerRateLimit,
+  validate(joinWorkspaceSchema),
+  authController.joinWorkspace
 );
 
 authRouter.post(

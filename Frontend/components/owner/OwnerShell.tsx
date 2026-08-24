@@ -9,6 +9,10 @@ import type { MeResponse } from "@/lib/auth-api";
 import { OwnerSidebar } from "./OwnerSidebar";
 import { GlobalSearch } from "./GlobalSearch";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
+import { AccessDenied } from "@/components/ui/AccessDenied";
+
+/** Roles allowed into the owner workspace shell. */
+const OWNER_SHELL_ROLES = ["OWNER", "ADMIN"];
 
 function initials(name?: string, email?: string) {
   const base = (name?.trim() || email || "?").trim();
@@ -18,14 +22,34 @@ function initials(name?: string, email?: string) {
 
 export function OwnerShell({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const { data } = useMe();
+  const { data, isLoading, error } = useMe();
   const me = data as MeResponse | undefined;
   const logout = useLogout();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
-    if (!isLoggedIn()) router.replace("/login");
+    if (!isLoggedIn()) {
+      router.replace("/login");
+      return;
+    }
   }, [router]);
+
+  // Redirect to login if /auth/me fails (expired/invalid token)
+  useEffect(() => {
+    if (!isLoading && error && isLoggedIn()) {
+      router.replace("/login");
+    }
+  }, [isLoading, error, router]);
+
+  // Role guard: non-owner/admin roles get a warning instead of the
+  // owner workspace chrome (individual pages guard themselves too).
+  if (me && !OWNER_SHELL_ROLES.includes(me.membership.role)) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[var(--ground)] text-[var(--ink)]">
+        <AccessDenied role={me.membership.role} dashboard="owner" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--ground)] text-[var(--ink)]">

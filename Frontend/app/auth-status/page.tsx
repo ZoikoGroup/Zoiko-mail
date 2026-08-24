@@ -1,9 +1,13 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+
+import { API_BASE } from "@/lib/config";
+import { resolveWorkspaceHref } from "@/lib/workspace";
+import { setTokens } from "@/lib/auth-storage";
 
 // Copy for each state we handle. Add more entries here later without
 // creating new files or routes.
@@ -44,17 +48,92 @@ const STATE_CONFIG: Record<
   INVITATION_PENDING: {
     title: "You have pending invitations",
     message:
-      "You have been invited to one or more workspaces. Check your email for the acceptance link to join.",
+      "Accept an invitation below to join the workspace. You can also use the acceptance link from your email.",
   },
 };
 
+/** Workspace invitation as stashed by the login flow (useLogin). */
+interface StashedInvitation {
+  membershipId: string;
+  tenantId: string;
+  tenantName: string;
+  role: string;
+}
+
 const SUPPORT_EMAIL = "support@zoiko.com";
+
+/**
+ * Acceptance UI for INVITATION_PENDING: the login flow stashes the
+ * backend-issued pending token plus the invitation list; accepting calls
+ * /auth/join-workspace (pending-token auth — no tenant session exists yet)
+ * and continues into the joined workspace under the invited role.
+ */
+function useInvitationStash() {
+  const [stash, setStash] = useState<{
+    token: string;
+    invitations: StashedInvitation[];
+  } | null>(null);
+
+  useEffect(() => {
+    const t = sessionStorage.getItem("zoiko.invite_pending_token");
+    const raw = sessionStorage.getItem("zoiko.invite_pending_list");
+    if (!t || !raw) return;
+    try {
+      const parsed = JSON.parse(raw) as StashedInvitation[];
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        setStash({ token: t, invitations: parsed });
+      }
+    } catch {
+      // Malformed stash — fall back to email-link acceptance only.
+    }
+  }, []);
+
+  return stash;
+}
 
 function AuthStatusInner() {
   const params = useSearchParams();
+  const router = useRouter();
   const state = params.get("state") ?? "";
   const workspace = params.get("workspace") ?? "";
   const invitations = params.get("invitations") ?? "";
+
+  const inviteStash = useInvitationStash();
+  const [acceptingId, setAcceptingId] = useState<string | null>(null);
+  const [acceptError, setAcceptError] = useState<string | null>(null);
+
+  const handleAccept = useCallback(
+    async (invitation: StashedInvitation) => {
+      if (!inviteStash || acceptingId) return;
+      setAcceptingId(invitation.membershipId);
+      setAcceptError(null);
+      try {
+        const res = await fetch(`${API_BASE}/auth/join-workspace`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${inviteStash.token}`,
+          },
+          body: JSON.stringify({ membershipId: invitation.membershipId }),
+        });
+        const json = await res.json();
+        if (!res.ok || !json.success) {
+          throw new Error(json?.error?.message ?? "Failed to accept the invitation");
+        }
+        const session = json.data;
+        if (session.accessToken) {
+          setTokens(session.accessToken, session.refreshToken);
+        }
+        sessionStorage.removeItem("zoiko.invite_pending_token");
+        sessionStorage.removeItem("zoiko.invite_pending_list");
+        router.replace(resolveWorkspaceHref(session.membership?.role));
+      } catch (e) {
+        setAcceptError(e instanceof Error ? e.message : "Failed to accept the invitation");
+        setAcceptingId(null);
+      }
+    },
+    [inviteStash, acceptingId, router]
+  );
 
   const config = STATE_CONFIG[state];
 
@@ -112,7 +191,38 @@ function AuthStatusInner() {
           </p>
         )}
 
-        {state === "INVITATION_PENDING" && invitations && (
+        {state === "INVITATION_PENDING" && inviteStash && (
+          <div className="space-y-2">
+            {inviteStash.invitations.map((invitation) => (
+              <div
+                key={invitation.membershipId}
+                className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-slate-900 dark:text-white">
+                    {invitation.tenantName}
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Invited as {invitation.role.toLowerCase()}
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleAccept(invitation)}
+                  disabled={acceptingId !== null}
+                  className="shrink-0 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+                >
+                  {acceptingId === invitation.membershipId ? "Joining…" : "Accept"}
+                </button>
+              </div>
+            ))}
+            {acceptError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+                {acceptError}
+              </div>
+            )}
+          </div>
+        )}
+        {state === "INVITATION_PENDING" && !inviteStash && invitations && (
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900">
             <p className="text-xs font-medium uppercase text-slate-500 dark:text-slate-400">
               Pending invitations

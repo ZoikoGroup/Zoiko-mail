@@ -16,11 +16,12 @@
 
 "use client";
 
+import { useEffect } from "react";
 import { AppShell } from "@/components/shell/AppShell";
 import { ActionInbox } from "@/components/inbox/ActionInbox";
 
-// The shell handles the auth guard, so the page just composes shell + content.
 export default function InboxPage() {
+  useEffect(() => { document.title = "Inbox | Zoiko Mail"; }, []);
   return (
     <AppShell>
       <ActionInbox />

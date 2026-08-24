@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ProtectedRoute } from "@/components/owner/ProtectedRoute";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { useMe, useChangePassword } from "@/lib/auth-hooks";
 import type { MeResponse } from "@/lib/auth-api";
-import { UserCircle, Save, Lock, Mail } from "lucide-react";
+import { Save, Lock, Mail } from "lucide-react";
 
 function initials(name?: string, email?: string) {
   const base = (name?.trim() || email || "?").trim();
@@ -14,15 +15,23 @@ function initials(name?: string, email?: string) {
 }
 
 export default function ProfilePage() {
-  const { data } = useMe();
+  const { data, isLoading, error } = useMe();
   const me = data as MeResponse | undefined;
   const changePassword = useChangePassword();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [pwSaved, setPwSaved] = useState(false);
+  const [pwError, setPwError] = useState("");
+
+  useEffect(() => {
+    if (changePassword.isError) {
+      setPwError(changePassword.error?.message || "Failed to update password.");
+    }
+  }, [changePassword.isError, changePassword.error]);
 
   const handlePasswordChange = () => {
+    setPwError("");
     if (!currentPassword || !newPassword || newPassword !== confirmPassword) return;
     changePassword.mutate(
       { currentPassword, newPassword },
@@ -37,6 +46,47 @@ export default function ProfilePage() {
       }
     );
   };
+
+  if (isLoading) {
+    return (
+      <ProtectedRoute>
+        <div className="mx-auto max-w-3xl space-y-6 px-4 py-8 sm:px-6">
+          <PageHeader title="Profile" description="Manage your personal account settings." />
+          <div className="zoiko-card p-6">
+            <div className="flex items-center gap-4 mb-6">
+              <Skeleton variant="circle" className="h-16 w-16" />
+              <div className="space-y-2">
+                <Skeleton className="h-5 w-40" />
+                <Skeleton className="h-4 w-56" />
+                <Skeleton className="h-5 w-16 rounded-full" />
+              </div>
+            </div>
+          </div>
+          <div className="zoiko-card p-6">
+            <Skeleton className="h-5 w-32 mb-4" />
+            <div className="space-y-4 max-w-sm">
+              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-9 w-full" />
+            </div>
+          </div>
+        </div>
+      </ProtectedRoute>
+    );
+  }
+
+  if (error) {
+    return (
+      <ProtectedRoute>
+        <div className="mx-auto max-w-3xl space-y-6 px-4 py-8 sm:px-6">
+          <PageHeader title="Profile" description="Manage your personal account settings." />
+          <div className="zoiko-card p-6 text-center">
+            <p className="text-sm text-[var(--crit)]">Failed to load profile. Please try again.</p>
+          </div>
+        </div>
+      </ProtectedRoute>
+    );
+  }
 
   return (
     <ProtectedRoute>
@@ -104,6 +154,9 @@ export default function ProfilePage() {
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 className="h-9 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
               />
+              {newPassword && confirmPassword && newPassword !== confirmPassword && (
+                <p className="mt-1 text-[11px] text-[var(--crit)]">Passwords do not match.</p>
+              )}
             </div>
           </div>
 
@@ -117,6 +170,7 @@ export default function ProfilePage() {
               {changePassword.isPending ? "Updating…" : "Update Password"}
             </button>
             {pwSaved && <span className="text-xs text-[var(--ok)]">Password updated successfully.</span>}
+            {pwError && <span className="text-xs text-[var(--crit)]">{pwError}</span>}
           </div>
         </div>
       </div>

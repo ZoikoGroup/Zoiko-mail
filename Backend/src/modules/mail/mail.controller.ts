@@ -38,6 +38,9 @@ export const cancelSchedule = asyncHandler(async (req: Request, res: Response) =
 export const list = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await mailService.list(req.query as never, context(req)), req.requestId);
 });
+export const unreadCounts = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailService.unreadCounts(context(req)), req.requestId);
+});
 export const get = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await mailService.get(String(req.params.messageId), context(req)), req.requestId);
 });
@@ -113,6 +116,14 @@ export const listDeliveryEvents = asyncHandler(async (req: Request, res: Respons
     req.requestId
   );
 });
+export const adminListDeliveryEvents = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(
+    res,
+    200,
+    { events: await mailService.adminListDeliveryEvents(req.query as { type?: string; limit?: number }, context(req)) },
+    req.requestId
+  );
+});
 export const updateSendingStatus = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(
     res,
@@ -140,6 +151,15 @@ export const listAllMailboxes = asyncHandler(async (req: Request, res: Response)
 
 export const adminCreateMailbox = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 201, await mailService.adminCreateMailbox(req.tenantContext!.tenantId, req.body.membershipId, context(req)), req.requestId);
+});
+
+export const adminUpdateMailbox = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailService.adminUpdateMailbox(
+    req.tenantContext!.tenantId,
+    String(req.params.mailboxId),
+    req.body,
+    context(req)
+  ), req.requestId);
 });
 
 export const adminDeleteMailbox = asyncHandler(async (req: Request, res: Response) => {

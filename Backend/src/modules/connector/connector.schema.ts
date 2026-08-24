@@ -57,3 +57,9 @@ export const providerCallbackSchema = z.object({
   occurredAt: z.string().datetime(),
   cursor: z.string().trim().min(1).max(1024).optional(),
 });
+
+export const listProviderEventsQuerySchema = z.object({
+  status: z.enum(["RECEIVED", "RETRY", "PROCESSED", "FAILED", "DEAD_LETTER"]).optional(),
+  provider: z.enum(["GMAIL", "MICROSOFT_365", "IMAP_SMTP"]).optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});

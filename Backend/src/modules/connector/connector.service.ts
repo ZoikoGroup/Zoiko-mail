@@ -52,6 +52,38 @@ export class ConnectorService {
     });
   }
 
+  /**
+   * Every connected account in the tenant, for the admin provider-sync view.
+   *
+   * `list` above is deliberately caller-scoped — a Member sees only their own
+   * accounts — which is right for the member surface and useless for an
+   * operator triaging sync failures across the workspace. Rather than widen
+   * `list` and change what a Member sees, this is a separate read gated on a
+   * capability a Member does not hold.
+   *
+   * Includes the owning member, because a failing connector is only actionable
+   * if you know whose reauthorization to chase. Deliberately no tokens or
+   * secrets — the operator needs status, not credentials.
+   */
+  listForTenant(tenantId: string) {
+    return prisma.connectedAccount.findMany({
+      where: { tenantId },
+      select: {
+        id: true, provider: true, email: true, scopes: true, status: true,
+        watchExpiresAt: true, lastSyncedAt: true, lastErrorCode: true,
+        disconnectedAt: true, createdAt: true, updatedAt: true,
+        membership: {
+          select: {
+            id: true,
+            role: true,
+            user: { select: { id: true, email: true, displayName: true } },
+          },
+        },
+      },
+      orderBy: [{ status: "asc" }, { lastSyncedAt: "desc" }],
+    });
+  }
+
   async create(
     input: CreateAccountInput,
     context: { tenantId: string; membershipId: string; userId: string; requestId?: string }
@@ -146,6 +178,59 @@ export class ConnectorService {
       orderBy: { receivedAt: "desc" },
       take: 100,
     });
+  }
+
+  /**
+   * Tenant-wide provider event feed for OWNER/ADMIN. Deliberately omits
+   * payloads (sanitizedPayload / normalized resource refs) — owners get
+   * routing metadata only; full payloads remain a platform-support concern.
+   */
+  async listProviderEvents(
+    input: { status?: string; provider?: string; limit?: number },
+    tenantId: string
+  ) {
+    const events = await prisma.providerEvent.findMany({
+      where: {
+        tenantId,
+        ...(input.status
+          ? { processingStatus: input.status as Prisma.ProviderEventWhereInput["processingStatus"] }
+          : {}),
+        ...(input.provider
+          ? { provider: input.provider as Prisma.ProviderEventWhereInput["provider"] }
+          : {}),
+      },
+      select: {
+        id: true,
+        providerEventId: true,
+        provider: true,
+        eventType: true,
+        processingStatus: true,
+        errorCode: true,
+        attempts: true,
+        maxAttempts: true,
+        receivedAt: true,
+        processedAt: true,
+        requestId: true,
+        connectedAccount: { select: { email: true, status: true } },
+      },
+      orderBy: { receivedAt: "desc" },
+      take: Math.min(input.limit ?? 50, 200),
+    });
+
+    return events.map((e) => ({
+      id: e.id,
+      providerEventId: e.providerEventId,
+      provider: e.provider,
+      accountEmail: e.connectedAccount.email,
+      accountStatus: e.connectedAccount.status,
+      eventType: e.eventType,
+      processingStatus: e.processingStatus,
+      errorCode: e.errorCode,
+      attempts: e.attempts,
+      maxAttempts: e.maxAttempts,
+      receivedAt: e.receivedAt,
+      processedAt: e.processedAt,
+    }));
   }
 
   async receiveEvent(provider: ConnectorProvider, input: NormalizedCallback, requestId?: string) {

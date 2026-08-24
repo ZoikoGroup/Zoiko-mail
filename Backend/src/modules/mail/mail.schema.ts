@@ -34,13 +34,51 @@ export const updateSendingStatusSchema = z.object({
     context.addIssue({ code: "custom", path: ["reason"], message: "Reason is required when suspending sending" });
   }
 });
+/**
+ * Admin-editable mailbox attributes.
+ *
+ * Deliberately narrow. `address` is absent because it is the mailbox's
+ * identity — renaming it would break routing and the tenant-unique
+ * constraint, so a rename is a create-and-migrate, not a patch. The counters
+ * (storageUsed, bounceCount, warmupDailyCount, …) are system-maintained; an
+ * operator editing them would be falsifying the record the abuse controls read.
+ * Sending suspension has its own route because it requires a reason.
+ *
+ * At least one field must be present, so an empty body is a 400 rather than a
+ * silent no-op that reads as success.
+ */
+export const adminUpdateMailboxSchema = z
+  .object({
+    // Bytes. Floor is 1 MiB; a zero-quota mailbox would bounce everything.
+    storageLimit: z.coerce
+      .number()
+      .int()
+      .min(1_048_576)
+      .max(1_099_511_627_776)
+      .optional(),
+    // Per-day send cap overriding the warm-up ladder. Null clears the override
+    // and returns the mailbox to the standard schedule.
+    customWarmupCap: z.coerce.number().int().min(1).max(100_000).nullable().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "Provide at least one field to update",
+  });
+
 export const listMailSchema = z.object({
   folder: z.enum(["DRAFTS", "INBOX", "ARCHIVE", "SENT", "TRASH", "QUARANTINE"]).default("INBOX"),
   starredOnly: z.coerce.boolean().default(false),
   unreadOnly: z.coerce.boolean().default(false),
   labelId: z.string().uuid().optional(),
+  q: z.string().trim().min(1).max(200).optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(25),
+});
+export const adminDeliveryEventsQuerySchema = z.object({
+  type: z.enum([
+    "ACCEPTED", "QUEUED", "DELIVERED", "DEFERRED", "FAILED", "BOUNCED",
+    "COMPLAINED", "REJECTED", "BLOCKED", "SUPPRESSED", "RATE_LIMITED", "PROVIDER_ERROR",
+  ]).optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
 });
 export const updateMailboxItemSchema = z.object({
   isRead: z.boolean().optional(),

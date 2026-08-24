@@ -26,9 +26,11 @@ const OWNER: RoleMatrix = {
   "mail.own.rw": "OWN",
   "commitments.own.manage": "OWN",
   "connector.own.connect": "OWN",
-  // Reading someone else's mail is legitimate for an Owner and still the most
-  // invasive thing they can do, so it costs a re-authentication every time.
-  "mail.other.read": "STEP_UP",
+  // `mail.other.read` is deliberately absent. RBAC §2 records Owner = No and
+  // Admin = No for "Read private user mailbox": AC-005 denies both by default,
+  // and no amount of re-authentication changes that. Only the Support path,
+  // via an approved grant, can reach private content at all. Treating this as
+  // step-up would have let an Owner read any mailbox by confirming a password.
   // People — an Owner is the only principal that may act on another Owner.
   "people.read": "ALLOW",
   "people.invite.member": "ALLOW",
@@ -59,10 +61,13 @@ const OWNER: RoleMatrix = {
 };
 
 /**
- * Exactly the fourteen capabilities Frontend/lib/admin-capabilities.ts grants
- * an Admin. Deliberately absent: everything under billing, `data.export`,
- * `policy.security.write`, `people.mfa.reset`, `mail.other.read`, the three
- * senior people capabilities, and both destructive tenant capabilities.
+ * Admin — the bounded operator, transcribed from the RBAC §2 matrix.
+ *
+ * Deliberately absent, each because the matrix says so: `people.owner.manage`
+ * and `people.invite.owner` ("Admin cannot grant/alter Owner"), everything
+ * under billing, `policy.security.write`, `tenant.delete`,
+ * `tenant.ownership.transfer` ("Owner only, highly destructive"), and
+ * `mail.other.read` (AC-005 denies Admin by default).
  */
 const ADMIN: RoleMatrix = {
   "mail.own.rw": "OWN",
@@ -70,14 +75,30 @@ const ADMIN: RoleMatrix = {
   "connector.own.connect": "OWN",
   "people.read": "ALLOW",
   "people.invite.member": "ALLOW",
+  // §2 "Invite users": Admin = Yes, with no restriction on the invited role
+  // except Owner, which is withheld separately.
+  "people.invite.admin": "ALLOW",
   "people.member.manage": "ALLOW",
+  // §2 "Assign roles": Admin = Limited — "Admin cannot grant/alter Owner".
+  // Limited means an Admin may act on another Admin; only the Owner row is
+  // out of reach. The route gate opens on this capability and the service's
+  // admin boundary refuses an Owner target, because seniority is a property
+  // of the target row rather than of the capability.
+  "people.admin.manage": "ALLOW",
   "workspace.settings.read": "ALLOW",
   "workspace.settings.write": "ALLOW",
   "workspace.mailboxes.manage": "ALLOW",
   "workspace.domains.manage": "ALLOW",
   "workspace.groups.manage": "ALLOW",
   "policy.write": "ALLOW",
+  // §2 "View audit log": Admin = Limited. The capability is held; the scoping
+  // lives in the audit service, which withholds the Owner-reserved
+  // governance categories. See ADMIN_AUDIT_EXCLUDED_PREFIXES.
   "audit.read": "ALLOW",
+  // §2 "Request export": Admin = "By policy" + Step-up. Step-up is expressed
+  // here; the policy half is evaluation step 8 and belongs to the policy gate,
+  // not to the matrix.
+  "data.export": "STEP_UP",
   // Support cannot end its own session — that would be self-marking homework.
   // The tenant-side principal watching the session is the one who can stop it.
   "support.grant.end": "ALLOW",
@@ -98,6 +119,15 @@ const MEMBER: RoleMatrix = {
 const SUPPORT: RoleMatrix = {
   "support.standing": "GRANT",
   "support.workspace.access": "GRANT",
+  /**
+   * The only path to private mail content anywhere in the matrix, and even
+   * here it is not routine: §2 marks Support "⏱ grant", while §4 adds
+   * "blocked by default; exceptional security-approved path only". GRANT
+   * expresses the time-boxed approval; the security-approved exception is an
+   * additional control that does not belong in a role matrix. Owner and Admin
+   * hold this in no form at all.
+   */
+  "mail.other.read": "GRANT",
 };
 
 export const CAPABILITY_MATRIX: Record<MembershipRole, RoleMatrix> = {

@@ -27,4 +27,15 @@ export const updateTenantSchema = z
     message: "At least one tenant setting is required",
   });
 
+export const updateGeneralSettingsSchema = z
+  .object({
+    emailNotifications: z.boolean().optional(),
+    digestFrequency: z.enum(["daily", "weekly", "none"]).optional(),
+    theme: z.enum(["light", "dark", "system"]).optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one general setting is required",
+  });
+
 export type UpdateTenantInput = z.infer<typeof updateTenantSchema>;
+export type UpdateGeneralSettingsInput = z.infer<typeof updateGeneralSettingsSchema>;

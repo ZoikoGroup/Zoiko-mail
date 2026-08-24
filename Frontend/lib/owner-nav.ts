@@ -2,6 +2,7 @@ import {
   LayoutDashboard,
   Users,
   Mail,
+  Inbox,
   Link2,
   Settings,
   Globe,
@@ -13,6 +14,10 @@ import {
   Trash2,
   Sliders,
   UserCircle,
+  BarChart3,
+  Activity,
+  Webhook,
+  Ban,
   type LucideIcon,
 } from "lucide-react";
 
@@ -28,9 +33,13 @@ export interface OwnerNavItem {
 
 export const OWNER_NAV: OwnerNavItem[] = [
   { section: "Dashboard", label: "Overview", href: "/owner", icon: LayoutDashboard },
+  { section: "Dashboard", label: "Usage", href: "/owner/usage", icon: BarChart3 },
+  { section: "Dashboard", label: "Delivery Events", href: "/owner/delivery-events", icon: Activity, ownerOnly: true },
+  { section: "Dashboard", label: "Provider Events", href: "/owner/provider-events", icon: Webhook, ownerOnly: true },
 
   { section: "Workspace", label: "Users & Roles", href: "/owner/users", icon: Users },
   { section: "Workspace", label: "Mailboxes", href: "/owner/mailboxes", icon: Mail },
+  { section: "Workspace", label: "Inbox", href: "/owner/inbox", icon: Inbox },
   { section: "Workspace", label: "Connected Accounts", href: "/owner/connected-accounts", icon: Link2 },
 
   { section: "Organization", label: "Organization Settings", href: "/owner/organization-settings", icon: Settings, ownerOnly: true },
@@ -40,6 +49,7 @@ export const OWNER_NAV: OwnerNavItem[] = [
   { section: "Security", label: "Audit Logs", href: "/owner/audit-logs", icon: FileText, ownerOnly: true },
   { section: "Security", label: "Security Alerts", href: "/owner/security-alerts", icon: ShieldAlert, ownerOnly: true },
   { section: "Security", label: "Policies", href: "/owner/policies", icon: ShieldCheck, ownerOnly: true },
+  { section: "Security", label: "Suppressions", href: "/owner/suppressions", icon: Ban, ownerOnly: true },
 
   { section: "Data Management", label: "Export Data", href: "/owner/export-data", icon: Download, ownerOnly: true },
   { section: "Data Management", label: "Deletion Requests", href: "/owner/deletion-requests", icon: Trash2, ownerOnly: true },
