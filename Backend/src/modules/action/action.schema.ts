@@ -14,3 +14,13 @@ export const updateActionSchema = z.object({
 }).superRefine((value, ctx) => {
   if (value.status === "SNOOZED" && !value.snoozedUntil) ctx.addIssue({ code: "custom", path: ["snoozedUntil"], message: "Required when snoozing" });
 });
+
+export const listActionsSchema = z.object({
+  status: z.enum(["OPEN", "IN_PROGRESS", "SNOOZED", "COMPLETED", "DISMISSED"]).optional(),
+  since: z.iso.datetime().optional(),      // createdAt >= since
+  until: z.iso.datetime().optional(),      // createdAt <= until
+  dueBefore: z.iso.datetime().optional(),  // dueAt <= dueBefore  (for overdue / due-today)
+  dueAfter: z.iso.datetime().optional(),   // dueAt >= dueAfter   (for upcoming)
+});
+
+export type ListActionsInput = z.infer<typeof listActionsSchema>;
