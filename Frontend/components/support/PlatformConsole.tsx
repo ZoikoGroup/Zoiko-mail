@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ApiError } from "@/lib/api-client";
-import { getPlatformToken, isLoggedIn } from "@/lib/auth-storage";
+import { ApiError, apiRequest } from "@/lib/api-client";
+import { getPlatformToken, isLoggedIn, setPlatformToken } from "@/lib/auth-storage";
 // import { useLogout } from "@/lib/auth-hooks";
 import { useLogout, useMe } from "@/lib/auth-hooks";
 import { resolveWorkspaceHref } from "@/lib/workspace";
@@ -1558,6 +1558,12 @@ export default function PlatformConsole() {
   const me = isPlatform ? undefined : meQuery.data;
   const meLoading = isPlatform ? false : meQuery.isLoading;
 
+  // TEMP(dev-only): teammates can't easily obtain a staff platform token yet,
+  // so on localhost in development we auto-login the seeded support account
+  // and store ONLY the platform token (tenant sessions stay untouched).
+  // TODO: remove this bypass once the staff login flow is sorted.
+  const [devBypass, setDevBypass] = useState(false);
+
   const loadOverview = useCallback(async () => {
     setOverviewLoading(true);
     setOverviewError(null);
@@ -1571,22 +1577,50 @@ export default function PlatformConsole() {
   }, []);
 
   useEffect(() => {
-    if (!isLoggedIn()) {
-      router.replace("/login");
-      return;
-    }
-    loadOverview();
+    let cancelled = false;
+    (async () => {
+      if (!getPlatformToken()) {
+        const host = window.location.hostname;
+        const isLocalDev =
+          process.env.NODE_ENV === "development" &&
+          (host === "localhost" || host === "127.0.0.1");
+        if (isLocalDev) {
+          setDevBypass(true);
+          try {
+            const data = await apiRequest<any>("/auth/login", {
+              method: "POST",
+              body: { email: "jordan@zoikosupport.test", password: "Password123!" },
+              auth: false,
+            });
+            const src = data?.session ?? data?.tokens ?? data ?? {};
+            const platformToken = src?.platformToken ?? data?.platformToken;
+            if (platformToken) setPlatformToken(platformToken);
+          } catch {
+            // fall through — the isLoggedIn() check below redirects to /login
+          }
+        }
+      }
+      if (cancelled) return;
+      if (!isLoggedIn()) {
+        router.replace("/login");
+        return;
+      }
+      loadOverview();
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [router, loadOverview]);
 
   // Backend's requireSupportAccess only allows a staff platform token OR a
   // tenant member with role SUPPORT — OWNER/ADMIN/MEMBER get a 403 from every
   // call on this page. Match that here so they never see the shell either.
   useEffect(() => {
-    if (isPlatform) return; // staff platform token — always allowed, no member role check needed
+    if (isPlatform || devBypass) return; // staff platform token — always allowed, no member role check needed
     if (!meLoading && me && me.membership.role !== "SUPPORT") {
       router.replace(resolveWorkspaceHref(me.membership.role));
     }
-  }, [isPlatform, me, meLoading, router]);
+  }, [isPlatform, devBypass, me, meLoading, router]);
 
   const openTenant = useCallback((tenantId: string) => {
     setPendingTenant(tenantId);
