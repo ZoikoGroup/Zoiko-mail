@@ -4,8 +4,9 @@ import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
 import { notificationService } from "../notification/notification.service.js";
 import type { z } from "zod";
-import type { createActionSchema, updateActionSchema } from "./action.schema.js";
+import type { createActionSchema, updateActionSchema, listActionsSchema } from "./action.schema.js";
 type Create = z.infer<typeof createActionSchema>; type Update = z.infer<typeof updateActionSchema>;
+type ListFilters = z.infer<typeof listActionsSchema>;
 export class ActionService {
   async create(input: Create, tenantId: string, userId: string, membershipId: string) {
     const ownerUserId = input.ownerUserId ?? userId;
@@ -21,9 +22,29 @@ export class ActionService {
       return action;
     });
   }
-  list(tenantId: string, userId: string) {
-    return prisma.commitment.findMany({ where: { tenantId, ownerUserId: userId }, orderBy: [{ dueAt: "asc" }, { createdAt: "desc" }] });
+
+  // list(tenantId: string, userId: string) {
+  //   return prisma.commitment.findMany({ where: { tenantId, ownerUserId: userId }, orderBy: [{ dueAt: "asc" }, { createdAt: "desc" }] });
+  // }
+
+  list(tenantId: string, userId: string, filters?: ListFilters) {
+    const where: Record<string, unknown> = { tenantId, ownerUserId: userId };
+    if (filters?.status) where.status = filters.status;
+    if (filters?.since || filters?.until) {
+      where.createdAt = {
+        ...(filters.since && { gte: new Date(filters.since) }),
+        ...(filters.until && { lte: new Date(filters.until) }),
+      };
+    }
+    if (filters?.dueBefore || filters?.dueAfter) {
+      where.dueAt = {
+        ...(filters.dueBefore && { lte: new Date(filters.dueBefore) }),
+        ...(filters.dueAfter && { gte: new Date(filters.dueAfter) }),
+      };
+    }
+    return prisma.commitment.findMany({ where, orderBy: [{ dueAt: "asc" }, { createdAt: "desc" }] });
   }
+
   async update(id: string, input: Update, tenantId: string, userId: string) {
     const action = await prisma.commitment.findFirst({ where: { id, tenantId, ownerUserId: userId } });
     if (!action) throw new AppError("Commitment not found", 404, ErrorCodes.NOT_FOUND);
