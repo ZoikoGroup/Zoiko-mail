@@ -25,6 +25,7 @@ function initials(name?: string, email?: string) {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { data, isLoading: meLoading } = useMe();
   const me = data as MeResponse | undefined;
   const logout = useLogout();
@@ -50,7 +51,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (meLoading || !me) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--ground)]">
-        <div className="text-sm text-[var(--ink3)]">Loading…</div>
+        <div className="h-7 w-7 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
       </div>
     );
   }
@@ -122,7 +123,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto">{children}</main>
+        {/* Keyed by pathname: remounts + fades in on every route change
+            while the sidebar/header stay mounted (see .page-enter CSS). */}
+        <main key={pathname} className="page-enter flex-1 overflow-y-auto">{children}</main>
       </div>
     </div>
   );
