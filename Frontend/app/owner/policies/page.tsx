@@ -7,23 +7,23 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Tabs } from "@/components/ui/Tabs";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { usePolicies, useActivatePolicy } from "@/lib/owner-hooks";
-import { ShieldCheck, Sparkles, Mail, Gauge, Lock } from "lucide-react";
+import { ShieldAlert, Sparkles, Mail, Clock, Trash2 } from "lucide-react";
 
 const categories = [
   { id: "all", label: "All Policies" },
   { id: "AI_FEATURES", label: "AI Features" },
   { id: "SENDING", label: "Sending" },
-  { id: "RATE_LIMITS", label: "Rate Limits" },
-  { id: "DATA_HANDLING", label: "Data Handling" },
-  { id: "SECURITY", label: "Security" },
+  { id: "RETENTION", label: "Retention" },
+  { id: "DELETION", label: "Deletion" },
+  { id: "ABUSE", label: "Abuse" },
 ];
 
 const categoryIcons: Record<string, typeof Sparkles> = {
   AI_FEATURES: Sparkles,
   SENDING: Mail,
-  RATE_LIMITS: Gauge,
-  DATA_HANDLING: Lock,
-  SECURITY: ShieldCheck,
+  RETENTION: Clock,
+  DELETION: Trash2,
+  ABUSE: ShieldAlert,
 };
 
 export default function PoliciesPage() {
@@ -40,7 +40,7 @@ export default function PoliciesPage() {
       <div className="mx-auto max-w-4xl space-y-6 px-4 py-8 sm:px-6">
         <PageHeader
           title="Policies"
-          description="Manage AI features, sending policies, rate limits, and security settings."
+          description="Manage AI features, sending policies, retention, deletion, and abuse protection."
         />
 
         <Tabs
@@ -61,7 +61,7 @@ export default function PoliciesPage() {
             <div className="py-8 text-center text-sm text-[var(--ink3)]">No policies found.</div>
           )}
           {filtered.map((policy) => {
-            const Icon = categoryIcons[policy.category] ?? ShieldCheck;
+            const Icon = categoryIcons[policy.category] ?? Sparkles;
             return (
               <div key={policy.id} className="zoiko-card flex items-center gap-4 p-4">
                 <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--s3)] text-[var(--ink3)]">

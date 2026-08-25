@@ -518,6 +518,9 @@ model ConnectedAccount {
   email             String
   scopes            String[]
   status            ConnectedAccountStatus @default(PENDING)
+  accessToken       String?                @map("access_token")
+  refreshToken      String?                @map("refresh_token")
+  tokenExpiresAt    DateTime?              @map("token_expires_at")
   watchExpiresAt    DateTime?              @map("watch_expires_at")
   lastSyncedAt      DateTime?              @map("last_synced_at")
   lastErrorCode     String?                @map("last_error_code")

@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { Router, type RequestHandler } from "express";
 import rateLimit from "express-rate-limit";
+import jwt from "jsonwebtoken";
 import { env } from "../../config/env.js";
 import { authenticate, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
@@ -9,6 +10,8 @@ import {
   callbackParamsSchema,
   connectedAccountIdSchema,
   createConnectedAccountSchema,
+  googleAuthQuerySchema,
+  googleCallbackQuerySchema,
   listProviderEventsQuerySchema,
   providerCallbackSchema,
   providerEventIdSchema,
@@ -36,6 +39,69 @@ const verifyCallbackSignature: RequestHandler = (req, res, next) => {
 
 export const connectorRouter = Router();
 
+// ─── Google OAuth (unauthenticated — placed before authenticate middleware) ───
+
+connectorRouter.get(
+  "/auth/google",
+  authenticate,
+  tenantContext,
+  requireRole("OWNER", "ADMIN", "MEMBER"),
+  validate(googleAuthQuerySchema, "query"),
+  asyncHandler(async (req, res) => {
+    const statePayload = {
+      tenantId: req.tenantContext!.tenantId,
+      membershipId: req.tenantContext!.membershipId,
+      userId: req.tenantContext!.userId,
+    };
+    const state = jwt.sign(statePayload, env.JWT_ACCESS_SECRET, { expiresIn: "10m" });
+    const url = connectorService.getGoogleAuthUrl(state);
+    sendSuccess(res, 200, { url }, req.requestId);
+  })
+);
+
+connectorRouter.get(
+  "/callback/google",
+  validate(googleCallbackQuerySchema, "query"),
+  asyncHandler(async (req, res) => {
+    const { code, state, error, error_description } = req.query as {
+      code?: string; state?: string; error?: string; error_description?: string;
+    };
+
+    const frontendUrl = env.APP_URL || "http://localhost:3000";
+
+    if (error) {
+      const desc = error_description || error;
+      res.redirect(`${frontendUrl}/connected-accounts?error=${encodeURIComponent(desc)}`);
+      return;
+    }
+
+    if (!code || !state) {
+      res.redirect(`${frontendUrl}/connected-accounts?error=missing_parameters`);
+      return;
+    }
+
+    // Verify state token
+    let payload: { tenantId: string; membershipId: string; userId: string };
+    try {
+      payload = jwt.verify(state, env.JWT_ACCESS_SECRET) as { tenantId: string; membershipId: string; userId: string };
+    } catch {
+      res.redirect(`${frontendUrl}/connected-accounts?error=invalid_state`);
+      return;
+    }
+
+    const account = await connectorService.handleGoogleCallback(code, {
+      tenantId: payload.tenantId,
+      membershipId: payload.membershipId,
+      userId: payload.userId,
+      requestId: req.requestId,
+    });
+
+    res.redirect(`${frontendUrl}/connected-accounts?connected=true&provider=GMAIL`);
+  })
+);
+
+// ─── Provider webhook callback (unauthenticated, HMAC-verified) ──────────────
+
 connectorRouter.post(
   "/callbacks/:provider",
   rateLimit({ windowMs: 60_000, max: 120, standardHeaders: true, legacyHeaders: false }),
@@ -51,6 +117,8 @@ connectorRouter.post(
     sendSuccess(res, result.duplicate ? 200 : 202, result, req.requestId);
   })
 );
+
+// ─── Authenticated routes ────────────────────────────────────────────────────
 
 connectorRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBER"));
 
