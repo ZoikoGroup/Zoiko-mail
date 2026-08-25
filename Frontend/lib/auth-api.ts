@@ -1,5 +1,5 @@
 import { apiRequest } from "./api-client";
-import { setTokens, setPlatformToken, clearTokens, getRefreshToken } from "./auth-storage";
+import { setTokens, setPlatformToken, clearTokens, getRefreshToken, clearPlatformToken } from "./auth-storage";
 
 export interface LoginInput {
   email: string;
@@ -173,10 +173,12 @@ function extractTokens(data: any): { accessToken?: string; refreshToken?: string
 //     body: input,
 //     auth: false,
 //   });
-//   const { accessToken, refreshToken } = extractTokens(data);
+//   const { accessToken, refreshToken, platformToken } = extractTokens(data);
 //   if (accessToken) setTokens(accessToken, refreshToken);
+//   if (platformToken) setPlatformToken(platformToken);
 //   return data;
 // }
+
 export async function login(input: LoginInput): Promise<AuthResponse> {
   const data = await apiRequest<AuthResponse>("/auth/login", {
     method: "POST",
@@ -184,6 +186,16 @@ export async function login(input: LoginInput): Promise<AuthResponse> {
     auth: false,
   });
   const { accessToken, refreshToken, platformToken } = extractTokens(data);
+
+  // A new login must replace ANY previous session state. Otherwise a stale
+  // platform token from a prior staff session disables useMe() for the
+  // new tenant user (useMe checks `!getPlatformToken()`), leaving the
+  // member dashboard permanently stuck on "Loading…" because me never
+  // resolves. Same problem in reverse if tenant tokens outlive a staff
+  // login. Clear everything, then set what the new response gave us.
+  clearTokens();
+  clearPlatformToken();
+
   if (accessToken) setTokens(accessToken, refreshToken);
   if (platformToken) setPlatformToken(platformToken);
   return data;
@@ -219,6 +231,7 @@ export async function logout(): Promise<void> {
     // even if the server call fails, clear locally
   } finally {
     clearTokens();
+    clearPlatformToken();
   }
 }
 
