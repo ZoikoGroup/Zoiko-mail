@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { OWNER_NAV, OWNER_SECTIONS } from "@/lib/owner-nav";
 import type { OwnerNavItem } from "@/lib/owner-nav";
+import Image from "next/image";
 
 interface OwnerSidebarProps {
   onNavigate?: () => void;
@@ -19,7 +20,8 @@ export function OwnerSidebar({ onNavigate, role }: OwnerSidebarProps) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 px-5 py-4">
-        <img src="/ZoikoMail_Logo_DarkBG_PNG.png" className="h-8 w-auto" alt="Zoiko Mail" />
+        {/* <img src="/ZoikoMail_Logo_DarkBG_PNG.png" className="h-8 w-auto" alt="Zoiko Mail" /> */}
+        <Image src="/ZoikoMail_Logo_DarkBG_PNG.png" width={400} height={100} className="h-10 w-auto" alt="Zoiko Mail" priority />
       </div>
 
       <nav className="flex-1 space-y-4 overflow-y-auto px-3 pb-4">

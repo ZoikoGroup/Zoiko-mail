@@ -5,13 +5,15 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { Menu, X, LogOut } from "lucide-react";
-import { isLoggedIn } from "@/lib/auth-storage";
+// import { isLoggedIn } from "@/lib/auth-storage";
+import { isLoggedIn, getPlatformToken } from "@/lib/auth-storage";
 import { useMe, useLogout } from "@/lib/auth-hooks";
 import type { MeResponse } from "@/lib/auth-api";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 // import { DASHBOARD_ITEM, NAV, SECTIONS } from "@/lib/nav";
 import { DASHBOARD_ITEM, MEMBER_NAV, sectionsFor } from "@/lib/nav";
 import { resolveWorkspaceHref } from "@/lib/workspace";
+import { AccessDenied } from "@/components/ui/AccessDenied";
 
 // Roles that belong on the member dashboard. SUPPORT has its own dashboard
 // at /support-workspace and should never land here.
@@ -35,14 +37,24 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (!isLoggedIn()) router.replace("/login");
   }, [router]);
 
+  // Staff-token guard: a user with a platform token (staff) has no tenant
+  // membership, so useMe() will never resolve on this page and the loading
+  // gate below would hang forever. Send them to /support where their token
+  // is actually valid. Runs on mount only; token doesn't change mid-session.
+  useEffect(() => {
+    if (getPlatformToken()) {
+      router.replace("/support");
+    }
+  }, [router]);
+
   // Role guard: a SUPPORT member (or any future role that isn't OWNER/ADMIN/
   // MEMBER) should never see this dashboard's nav or pages — send them to
   // the one their role actually resolves to.
-  useEffect(() => {
-    if (me && !MEMBER_DASHBOARD_ROLES.includes(me.membership.role)) {
-      router.replace(resolveWorkspaceHref(me.membership.role));
-    }
-  }, [me, router]);
+  // useEffect(() => {
+  //   if (me && !MEMBER_DASHBOARD_ROLES.includes(me.membership.role)) {
+  //     router.replace(resolveWorkspaceHref(me.membership.role));
+  //   }
+  // }, [me, router]);
 
   // Loading gate: don't render the shell until we know the user's role.
   // Without this, a SUPPORT user would briefly see the member dashboard nav
@@ -54,8 +66,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
     );
   }
+  // if (!MEMBER_DASHBOARD_ROLES.includes(me.membership.role)) {
+  //   return null;
+  // }
   if (!MEMBER_DASHBOARD_ROLES.includes(me.membership.role)) {
-    return null;
+    return <AccessDenied role={me.membership.role} dashboard="member" />;
   }
 
   return (
