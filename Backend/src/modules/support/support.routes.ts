@@ -1,6 +1,6 @@
 import type { Request } from "express";
 import { Router } from "express";
-import { authenticate, authenticateStaff, requireRole, requireSupportAccess, tenantContext, validate } from "../../common/middleware/index.js";
+import { authenticate, authenticateStaff, requireCapability, requireRole, requireSupportAccess, tenantContext, validate } from "../../common/middleware/index.js";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
 import { createGrantSchema, domainParamSchema, grantIdSchema, mailboxParamSchema, platformListQuerySchema, tenantParamSchema } from "./support.schema.js";
@@ -18,9 +18,9 @@ supportRouter.get("/diagnostics", asyncHandler(async (req, res) => {
   const result = await supportService.diagnostics(grantId, c.tenantId, c.membershipId, c.userId);
   sendSuccess(res, 200, result, req.requestId);
 }));
-supportRouter.get("/access-grants", requireRole("OWNER"), asyncHandler(async(req,res)=>{sendSuccess(res,200,{grants:await supportService.list(req.tenantContext!.tenantId)},req.requestId);}));
+supportRouter.get("/access-grants", requireRole("OWNER", "ADMIN"), asyncHandler(async(req,res)=>{sendSuccess(res,200,{grants:await supportService.list(req.tenantContext!.tenantId)},req.requestId);}));
 supportRouter.post("/access-grants", requireRole("OWNER"), validate(createGrantSchema), asyncHandler(async(req,res)=>{const c=req.tenantContext!;sendSuccess(res,201,await supportService.create(req.body,c.tenantId,c.userId),req.requestId);}));
-supportRouter.delete("/access-grants/:grantId", requireRole("OWNER"), validate(grantIdSchema,"params"), asyncHandler(async(req,res)=>{const c=req.tenantContext!;sendSuccess(res,200,await supportService.revoke(String(req.params.grantId),c.tenantId,c.userId),req.requestId);}));
+supportRouter.delete("/access-grants/:grantId", requireCapability("support.grant.end"), validate(grantIdSchema,"params"), asyncHandler(async(req,res)=>{const c=req.tenantContext!;sendSuccess(res,200,await supportService.revoke(String(req.params.grantId),c.tenantId,c.userId),req.requestId);}));
 
 // ---------------------------------------------------------------------------
 // Platform support console (read-only operational investigation).
