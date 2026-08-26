@@ -45,8 +45,29 @@ export interface UpdateActionInput {
   snoozedUntil?: string | null;
 }
 
-export async function listActions(): Promise<ActionItem[]> {
-  const data = await apiRequest<ListActionsResponse>("/actions");
+export interface ListActionsParams {
+  status?: ActionStatus;
+  since?: string;      // ISO datetime, filters createdAt >= since
+  until?: string;      // ISO datetime, filters createdAt <= until
+  dueBefore?: string;  // ISO datetime, filters dueAt <= dueBefore
+  dueAfter?: string;   // ISO datetime, filters dueAt >= dueAfter
+}
+
+// export async function listActions(): Promise<ActionItem[]> {
+//   const data = await apiRequest<ListActionsResponse>("/actions");
+//   return data.actions ?? [];
+// }
+
+export async function listActions(params?: ListActionsParams): Promise<ActionItem[]> {
+  const query = new URLSearchParams();
+  if (params?.status) query.set("status", params.status);
+  if (params?.since) query.set("since", params.since);
+  if (params?.until) query.set("until", params.until);
+  if (params?.dueBefore) query.set("dueBefore", params.dueBefore);
+  if (params?.dueAfter) query.set("dueAfter", params.dueAfter);
+  const qs = query.toString();
+  const path = qs ? `/actions?${qs}` : "/actions";
+  const data = await apiRequest<ListActionsResponse>(path);
   return data.actions ?? [];
 }
 

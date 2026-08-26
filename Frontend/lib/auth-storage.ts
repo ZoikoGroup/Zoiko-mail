@@ -34,6 +34,13 @@ export function setPlatformToken(platformToken: string): void {
   if (!hasWindow()) return;
   window.localStorage.setItem(PLATFORM_KEY, platformToken);
 }
+
+export function clearPlatformToken() {
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("zoiko.platform_token");
+  }
+}
+
 export function clearTokens(): void {
   if (!hasWindow()) return;
   window.localStorage.removeItem(ACCESS_KEY);

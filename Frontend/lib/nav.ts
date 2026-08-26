@@ -51,10 +51,10 @@ export const MEMBER_NAV: NavItem[] = [
     section: "Track A · Intelligence", label: "Notifications", href: "/notifications", icon: Bell, status: "live",
     desc: "Alerts, digests, and other activity from your workspace."
   },
-  // {
-  //   section: "Track A · Intelligence", label: "Daily digest", href: "/digest", icon: Bell, status: "soon",
-  //   desc: "A once-a-day summary of what needs your attention."
-  // },
+  {
+    section: "Track A · Intelligence", label: "Daily digest", href: "/digest", icon: LayoutDashboard, status: "live",
+    desc: "A once-a-day summary of what needs your attention."
+  },
   {
     section: "Track A · Intelligence", label: "AI drafting & summaries", href: "/ai", icon: Sparkles, status: "live",
     desc: "Draft replies and summarize threads — you always send."
@@ -84,29 +84,29 @@ export const MEMBER_NAV: NavItem[] = [
 // array is defined here so the teammate building it has one place to plug
 // in extra items without touching the member config.
 // ---------------------------------------------------------------------------
-export const ADMIN_NAV: NavItem[] = [
-  ...MEMBER_NAV,
+// export const ADMIN_NAV: NavItem[] = [
+//   ...MEMBER_NAV,
 
-  // Domain management (extends Track B)
-  {
-    section: "Track B · Hosted mail", label: "Domains & DNS", href: "/domains", icon: Globe, status: "soon",
-    desc: "Add a domain and verify MX / SPF / DKIM / DMARC."
-  },
+  
+//   {
+//     section: "Track B · Hosted mail", label: "Domains & DNS", href: "/domains", icon: Globe, status: "soon",
+//     desc: "Add a domain and verify MX / SPF / DKIM / DMARC."
+//   },
 
-  // Team & governance — admin-only
-  {
-    section: "Team & governance", label: "Members & roles", href: "/members", icon: Users, status: "soon",
-    desc: "Invite teammates and manage roles."
-  },
-  {
-    section: "Team & governance", label: "Policies", href: "/policies", icon: ShieldCheck, status: "soon",
-    desc: "Control AI and data-handling policy for the workspace."
-  },
-  {
-    section: "Team & governance", label: "Audit log", href: "/audit", icon: FileText, status: "soon",
-    desc: "Every privileged and AI action, append-only."
-  },
-];
+  
+//   {
+//     section: "Team & governance", label: "Members & roles", href: "/members", icon: Users, status: "soon",
+//     desc: "Invite teammates and manage roles."
+//   },
+//   {
+//     section: "Team & governance", label: "Policies", href: "/policies", icon: ShieldCheck, status: "soon",
+//     desc: "Control AI and data-handling policy for the workspace."
+//   },
+//   {
+//     section: "Team & governance", label: "Audit log", href: "/audit", icon: FileText, status: "soon",
+//     desc: "Every privileged and AI action, append-only."
+//   },
+// ];
 
 // Ordered, de-duplicated section names for grouped rendering.
 // Takes a nav array so callers pass whichever role's nav they're rendering.

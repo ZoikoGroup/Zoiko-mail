@@ -32,8 +32,11 @@ import {
   type ListThreadsParams,
 } from "./mail-api";
 
+// const listKey = (params: ListMailParams) =>
+//   ["mail", "list", params.folder ?? "INBOX", params.starredOnly ?? false, params.labelId ?? null, params.page ?? 1] as const;
+
 const listKey = (params: ListMailParams) =>
-  ["mail", "list", params.folder ?? "INBOX", params.starredOnly ?? false, params.labelId ?? null, params.q ?? "", params.page ?? 1] as const;
+  ["mail", "list", params.folder ?? "INBOX", params.starredOnly ?? false, params.unreadOnly ?? false, params.labelId ?? null, params.page ?? 1] as const;
 
 export function useMailList(params: ListMailParams) {
   return useQuery({
