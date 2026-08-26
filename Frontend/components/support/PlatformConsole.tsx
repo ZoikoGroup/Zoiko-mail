@@ -7,6 +7,7 @@ import { getPlatformToken, isLoggedIn, setPlatformToken } from "@/lib/auth-stora
 // import { useLogout } from "@/lib/auth-hooks";
 import { useLogout, useMe } from "@/lib/auth-hooks";
 import { resolveWorkspaceHref } from "@/lib/workspace";
+import Image from "next/image";
 import {
   fetchPlatformDiagnostics,
   fetchPlatformDomainDetail,
@@ -42,6 +43,7 @@ import {
 } from "@/lib/support-api";
 import { supportStyles } from "@/components/support/support-styles";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
+import { AccessDenied } from "@/components/ui/AccessDenied";
 
 type PageId = "overview" | "tenants" | "mailboxes" | "domains" | "suppressions" | "provider-events" | "delivery-events" | "jobs" | "audit" | "grants";
 
@@ -705,11 +707,11 @@ function TenantsPage({
   }, []);
 
   if (domainLoading) return <div><button className="btn sm" onClick={() => setDomainDetail(null)}>← Back to tenant</button><Spinner /></div>;
-  if (domainError) return <div><button className="btn sm" onClick={() => { setDomainError(null); setDomainDetail(null); }}>← Back to tenant</button><LoadErr error={domainError} onRetry={() => {}} /></div>;
+  if (domainError) return <div><button className="btn sm" onClick={() => { setDomainError(null); setDomainDetail(null); }}>← Back to tenant</button><LoadErr error={domainError} onRetry={() => { }} /></div>;
   if (domainDetail) return <DomainDetail data={domainDetail} onBack={() => setDomainDetail(null)} />;
 
   if (mailboxLoading) return <div><button className="btn sm" onClick={() => setMailboxDetail(null)}>← Back to tenant</button><Spinner /></div>;
-  if (mailboxError) return <div><button className="btn sm" onClick={() => { setMailboxError(null); setMailboxDetail(null); }}>← Back to tenant</button><LoadErr error={mailboxError} onRetry={() => {}} /></div>;
+  if (mailboxError) return <div><button className="btn sm" onClick={() => { setMailboxError(null); setMailboxDetail(null); }}>← Back to tenant</button><LoadErr error={mailboxError} onRetry={() => { }} /></div>;
   if (mailboxDetail) return <MailboxDetail data={mailboxDetail} onBack={() => setMailboxDetail(null)} />;
 
   if (detailLoading) return <Spinner />;
@@ -1550,7 +1552,7 @@ export default function PlatformConsole() {
 
   const isPlatform = !!getPlatformToken();
   // const { data: me, isLoading: meLoading } = useMe();
-  
+
   // Only fetch /auth/me when we're a tenant user. Staff platform tokens are
   // not valid for /auth/me, and calling it triggers a 401 -> refresh-fail ->
   // clearTokens() cascade that wipes the platform token itself.
@@ -1615,12 +1617,12 @@ export default function PlatformConsole() {
   // Backend's requireSupportAccess only allows a staff platform token OR a
   // tenant member with role SUPPORT — OWNER/ADMIN/MEMBER get a 403 from every
   // call on this page. Match that here so they never see the shell either.
-  useEffect(() => {
-    if (isPlatform || devBypass) return; // staff platform token — always allowed, no member role check needed
-    if (!meLoading && me && me.membership.role !== "SUPPORT") {
-      router.replace(resolveWorkspaceHref(me.membership.role));
-    }
-  }, [isPlatform, devBypass, me, meLoading, router]);
+  // useEffect(() => {
+  //   if (isPlatform) return;
+  //   if (!meLoading && me && me.membership.role !== "SUPPORT") {
+  //     router.replace(resolveWorkspaceHref(me.membership.role));
+  //   }
+  // }, [isPlatform, me, meLoading, router]);
 
   const openTenant = useCallback((tenantId: string) => {
     setPendingTenant(tenantId);
@@ -1638,8 +1640,13 @@ export default function PlatformConsole() {
       </div>
     );
   }
+  // if (!isPlatform && me && me.membership.role !== "SUPPORT") {
+  //   return null;
+  // }
+
+  // Loading gate change:
   if (!isPlatform && me && me.membership.role !== "SUPPORT") {
-    return null;
+    return <AccessDenied role={me.membership.role} dashboard="support" />;
   }
 
   return (
@@ -1650,7 +1657,8 @@ export default function PlatformConsole() {
 
       <div className="topbar">
         <div className="brand">
-          <img src="/ZoikoMail_Logo_DarkBG_PNG.png" alt="Zoiko Mail" style={{ height: 28, width: "auto" }} />
+          {/* <img src="/ZoikoMail_Logo_DarkBG_PNG.png" alt="Zoiko Mail" style={{ height: 28, width: "auto" }} /> */}
+          <Image src="/ZoikoMail_Logo_DarkBG_PNG.png" width={400} height={100} alt="Zoiko Mail" style={{ height: 28, width: "auto" }} priority />
         </div>
         <div className="gsearch" style={{ flex: 1, maxWidth: 420, marginLeft: 16 }}>
           <span>⌕</span>
