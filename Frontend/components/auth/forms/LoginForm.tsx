@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { FaEnvelope, FaGoogle } from "react-icons/fa";
+import { FaEnvelope } from "react-icons/fa";
 
 import { ApiError } from "@/lib/api-client";
 import { useLogin } from "@/lib/auth-hooks";
@@ -204,33 +204,6 @@ export default function LoginForm({
         </button>
 
         {/* =====================================================
-            Divider
-        ====================================================== */}
-
-        <div className="relative">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-slate-200 dark:border-slate-700" />
-          </div>
-
-          <div className="relative flex justify-center">
-            <span className="bg-white px-4 text-sm text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-              OR
-            </span>
-          </div>
-        </div>
-
-        {/* =====================================================
-            Google Login
-        ====================================================== */}
-
-        <button
-          type="button"
-          className="flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-slate-300 bg-white text-sm font-medium text-slate-700 transition-all duration-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-        >
-          <FaGoogle className="text-lg text-red-500" />
-
-          Continue with Google
-        </button>        {/* =====================================================
             Register Link
         ====================================================== */}
 
