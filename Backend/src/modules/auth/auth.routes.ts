@@ -9,6 +9,7 @@ import {
   passwordResetRateLimit
 } from "../../common/middleware/index.js";
 import {
+  googleLoginSchema,
   loginSchema,
   changePasswordSchema,
   createWorkspaceSchema,
@@ -73,6 +74,14 @@ authRouter.post(
 );
 
 authRouter.post("/login", loginRateLimit, validate(loginSchema), authController.login);
+
+// Same rate limit as password login: a sign-in attempt is a sign-in attempt
+// however it is authenticated, and the Google path reaches the same account.
+authRouter.post("/google", loginRateLimit, validate(googleLoginSchema), authController.googleLogin);
+
+// Unauthenticated on purpose — the client needs to know whether to render the
+// Google button before anyone has signed in. Exposes only the public client id.
+authRouter.get("/providers", authController.authProviders);
 
 authRouter.post("/forgot-password", passwordResetRateLimit, validate(forgotPasswordSchema), authController.forgotPassword);
 authRouter.post("/reset-password", passwordResetRateLimit, validate(resetPasswordSchema), authController.resetPassword);

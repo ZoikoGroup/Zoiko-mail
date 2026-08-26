@@ -68,6 +68,12 @@ const envSchema = z.object({
   MAIL_PROVIDER_FROM_ADDRESS: z.preprocess(blankAsUndefined, z.string().email().optional()),
   MAIL_PROVIDER_TENANT_ID: z.preprocess(blankAsUndefined, z.string().uuid().optional()),
   MAIL_PROVIDER_MEMBERSHIP_ID: z.preprocess(blankAsUndefined, z.string().uuid().optional()),
+  // Google as an *identity* provider — separate from the Gmail mail connector
+  // above, which is IMAP/SMTP. Both optional: without them the app still boots
+  // and the sign-in endpoint reports itself unconfigured rather than failing
+  // validation at startup.
+  GOOGLE_OAUTH_CLIENT_ID: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  GOOGLE_OAUTH_CLIENT_SECRET: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
   MAIL_PROVIDER_SYNC_INTERVAL_MS: z.coerce.number().int().min(60_000).default(300_000),
   MAIL_PROVIDER_CONNECTION_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(15_000),
   // Floor is 4 so the test suite can hash cheaply; anything below 10 is rejected
