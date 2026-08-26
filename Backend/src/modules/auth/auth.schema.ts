@@ -20,15 +20,6 @@ export const loginSchema = z.object({
   tenantId: z.string().uuid().optional(),
 });
 
-/**
- * The Google popup returns a single-use authorization code, not a token. The
- * server exchanges it; nothing here is trusted as an identity assertion.
- */
-export const googleLoginSchema = z.object({
-  code: z.string().min(10).max(2048),
-  tenantId: z.string().uuid().optional(),
-});
-
 export const refreshSchema = z.object({
   refreshToken: z.string().min(1),
 });

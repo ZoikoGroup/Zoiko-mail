@@ -10,8 +10,6 @@ import {
   logoutAll,
   changePassword,
   getMe,
-  loginWithGoogle,
-  fetchAuthProviders,
   verifyOtp,
   resendOtp,
   createWorkspace,
@@ -45,18 +43,14 @@ export function useMe() {
   });
 }
 
-/**
- * Where a completed sign-in goes next.
- *
- * Shared by password and Google sign-in. The backend's AuthState decides,
- * so both routes must read it identically — a second copy of this ladder is
- * a second place for a state like INVITATION_PENDING to be forgotten.
- */
-async function routeAfterAuth(
-  data: Awaited<ReturnType<typeof login>>,
-  qc: ReturnType<typeof useQueryClient>,
-  router: ReturnType<typeof useRouter>
-): Promise<void> {
+export function useLogin() {
+  const qc = useQueryClient();
+  const router = useRouter();
+
+  return useMutation({
+    mutationFn: (input: LoginInput) => login(input),
+
+    onSuccess: async (data) => {
       await qc.invalidateQueries({
         queryKey: ["me"],
       });
@@ -124,37 +118,9 @@ async function routeAfterAuth(
       }
 
       router.replace(href);
-}
-
-export function useLogin() {
-  const qc = useQueryClient();
-  const router = useRouter();
-  return useMutation({
-    mutationFn: (input: LoginInput) => login(input),
-    onSuccess: (data) => routeAfterAuth(data, qc, router),
+    },
   });
 }
-
-/** Sign in with a Google authorization code from the popup flow. */
-export function useGoogleLogin() {
-  const qc = useQueryClient();
-  const router = useRouter();
-  return useMutation({
-    mutationFn: (code: string) => loginWithGoogle(code),
-    onSuccess: (data) => routeAfterAuth(data, qc, router),
-  });
-}
-
-/** Whether this server offers Google sign-in, and its public client id. */
-export function useAuthProviders() {
-  return useQuery({
-    queryKey: ["auth-providers"],
-    queryFn: fetchAuthProviders,
-    staleTime: 5 * 60_000,
-    retry: false,
-  });
-}
-
 
 // export function useRegister() {
 //   const qc = useQueryClient();

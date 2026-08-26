@@ -201,44 +201,6 @@ export async function login(input: LoginInput): Promise<AuthResponse> {
   return data;
 }
 
-export interface AuthProviders {
-  google: { enabled: boolean; clientId: string | null };
-}
-
-/**
- * Which third-party sign-in methods this server actually supports. Asked
- * before rendering the buttons so the page never offers a route that cannot
- * complete — a "Continue with Google" button with nothing behind it is worse
- * than no button.
- */
-export async function fetchAuthProviders(): Promise<AuthProviders> {
-  return apiRequest<AuthProviders>("/auth/providers", { auth: false });
-}
-
-/**
- * Sign in with a Google authorization code.
- *
- * Sends the single-use code, never a token: the server exchanges it with its
- * own client secret, so nothing the browser supplies is trusted as proof of
- * identity. Session handling is identical to `login` for the same reason it
- * must be — the response is the same AuthState union.
- */
-export async function loginWithGoogle(code: string, tenantId?: string): Promise<AuthResponse> {
-  const data = await apiRequest<AuthResponse>("/auth/google", {
-    method: "POST",
-    body: tenantId ? { code, tenantId } : { code },
-    auth: false,
-  });
-  const { accessToken, refreshToken, platformToken } = extractTokens(data);
-
-  // Same reasoning as `login`: a new session must replace any previous one.
-  clearTokens();
-  clearPlatformToken();
-  if (accessToken) setTokens(accessToken, refreshToken);
-  if (platformToken) setPlatformToken(platformToken);
-  return data;
-}
-
 export async function register(input: RegisterInput): Promise<AuthResponse> {
   const data = await apiRequest<AuthResponse>("/auth/register", {
     method: "POST",

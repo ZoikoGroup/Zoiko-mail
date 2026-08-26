@@ -16,7 +16,6 @@ import type {
   SelectionTokenPayload,
 } from "../../common/types/jwt.js";
 import { auditService } from "../audit/audit.service.js";
-import { resolveGoogleIdentity } from "./google.service.js";
 import { membershipRepository } from "../membership/membership.repository.js";
 import type { MembershipWithRelations } from "../membership/membership.repository.js";
 import { userRepository } from "../user/user.repository.js";
@@ -731,44 +730,6 @@ export class AuthService {
     // Credentials are valid — from here we return typed states, never generic
     // errors, so the client can render the right screen.
     return this.resolveAuthState(user, input.tenantId, context);
-  }
-
-  /**
-   * Sign in with Google.
-   *
-   * Only the proof of identity differs from `login`. Once the email is known
-   * and verified, this hands off to the same guard chain, so suspension,
-   * pending invitations, workspace selection and every other state behave
-   * identically however the person authenticated. Duplicating that chain for a
-   * second sign-in route is how the two drift apart and one of them ends up
-   * missing a guard.
-   *
-   * Deliberately does **not** provision anything. An unknown Google address is
-   * refused rather than turned into a new user or a new tenant: access to this
-   * product comes from an invitation, and a sign-in button that silently
-   * creates accounts is a self-service door nobody chose to open.
-   */
-  async loginWithGoogle(
-    code: string,
-    context: RequestContext,
-    tenantId?: string
-  ): Promise<AuthState> {
-    const identity = await resolveGoogleIdentity(code);
-
-    const user = await userRepository.findByEmail(identity.email);
-    if (!user) {
-      await this.recordLoginFailure(null, identity.email, "google_unknown_email", context);
-      throw new AppError(
-        "No Zoiko Mail account exists for this Google address. Ask an administrator for an invitation.",
-        401,
-        ErrorCodes.UNAUTHORIZED
-      );
-    }
-
-    // A local account with no password is not possible today, but if one ever
-    // is, Google having verified the address is enough — the point of this
-    // branch is that we never compare against passwordHash here at all.
-    return this.resolveAuthState(user, tenantId, context);
   }
 
   /** Ordered guard chain. First matching guard decides the state. */

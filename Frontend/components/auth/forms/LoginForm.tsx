@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { FaEnvelope } from "react-icons/fa";
+import { FaEnvelope, FaGoogle } from "react-icons/fa";
 
 import { ApiError } from "@/lib/api-client";
 import { useLogin } from "@/lib/auth-hooks";
@@ -11,7 +11,6 @@ import {
   FormInput,
   PasswordInput,
 } from "@/components/auth";
-import GoogleSignInButton from "@/components/auth/GoogleSignInButton";
 
 interface LoginFormProps {
   onRegister: () => void;
@@ -224,9 +223,14 @@ export default function LoginForm({
             Google Login
         ====================================================== */}
 
-        <GoogleSignInButton />
+        <button
+          type="button"
+          className="flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-slate-300 bg-white text-sm font-medium text-slate-700 transition-all duration-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+        >
+          <FaGoogle className="text-lg text-red-500" />
 
-        {/* =====================================================
+          Continue with Google
+        </button>        {/* =====================================================
             Register Link
         ====================================================== */}
 
