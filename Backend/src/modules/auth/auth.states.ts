@@ -29,26 +29,29 @@ export type AuthState =
   | { state: "SIGNED_IN"; session: AuthSessionResponse }
   // | { state: "WORKSPACE_SELECTION"; user: PublicUser; workspaces: WorkspaceOption[] }
   | { state: "WORKSPACE_SELECTION"; user: PublicUser; workspaces: WorkspaceOption[]; selectionToken: string; expiresIn: string }
-  | { state: "NO_WORKSPACE"; user: PublicUser }
+  // | { state: "NO_WORKSPACE"; user: PublicUser }
+  | { state: "NO_WORKSPACE"; user: PublicUser; pendingToken: string; expiresIn: string }
   | { state: "EMAIL_VERIFICATION_REQUIRED"; user: PublicUser; pendingToken: string; expiresIn: string }
   | { state: "ACCOUNT_SUSPENDED"; user: PublicUser }
   | { state: "ACCOUNT_DISABLED"; user: PublicUser }
-  | { state: "INVITATION_PENDING"; user: PublicUser; invitations: WorkspaceOption[]; /**
+  | {
+    state: "INVITATION_PENDING"; user: PublicUser; invitations: WorkspaceOption[]; /**
      * Short-lived token letting an unauthenticated client accept an
      * invitation via POST /auth/join-workspace (same trust level as the
      * selection token: issued only after a successful password check).
      */
-    pendingToken?: string }
+    pendingToken?: string
+  }
   | { state: "MEMBERSHIP_SUSPENDED"; user: PublicUser; workspace: WorkspaceOption }
   | { state: "WORKSPACE_SUSPENDED"; user: PublicUser; workspace: WorkspaceOption }
   | { state: "WORKSPACE_DELETING"; user: PublicUser; workspace: WorkspaceOption }
   | {
-      state: "STAFF_CONSOLE";
-      user: PublicUser;
-      platformRole: PlatformRole;
-      /** Access-only platform session token (no refresh yet — see jwt.ts). */
-      platformToken: string;
-      expiresIn: string;
-    };
+    state: "STAFF_CONSOLE";
+    user: PublicUser;
+    platformRole: PlatformRole;
+    /** Access-only platform session token (no refresh yet — see jwt.ts). */
+    platformToken: string;
+    expiresIn: string;
+  };
 
 export type AuthStateName = AuthState["state"];

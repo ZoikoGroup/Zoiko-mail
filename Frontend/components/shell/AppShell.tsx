@@ -191,7 +191,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       </div> */}
       <Image
         src="/ZoikoMail_Logo_DarkBG_PNG.png"
-        width={360}
+        width={300}
         height={120}
         className="h-10 w-auto m-2"
         alt="Zoiko Mail"

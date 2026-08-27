@@ -18,10 +18,12 @@ import {
   registerSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
-  selectWorkspaceSchema
+  selectWorkspaceSchema,
+  googleLoginSchema
 } from "./auth.schema.js";
 import * as authController from "./auth.controller.js";
 import { verifyOtpSchema } from "./otp.schema.js";
+import { requireFlag } from "../../common/flags/index.js";
 
 const authRouter = Router();
 
@@ -73,6 +75,14 @@ authRouter.post(
 );
 
 authRouter.post("/login", loginRateLimit, validate(loginSchema), authController.login);
+
+authRouter.post(
+  "/google",
+  loginRateLimit,
+  requireFlag("google_login_enabled"),
+  validate(googleLoginSchema),
+  authController.loginWithGoogle
+);
 
 authRouter.post("/forgot-password", passwordResetRateLimit, validate(forgotPasswordSchema), authController.forgotPassword);
 authRouter.post("/reset-password", passwordResetRateLimit, validate(resetPasswordSchema), authController.resetPassword);

@@ -78,6 +78,10 @@ const envSchema = z.object({
   // "gcp" routes through Secret Manager and fails loudly until it is wired.
   SECRET_STORE: z.enum(["env", "gcp"]).default("env"),
   SECRET_CACHE_TTL_MS: z.coerce.number().int().min(0).max(3_600_000).default(300_000),
+  // Google OAuth 2.0 client ID and allowed hosted domain for login.
+  GOOGLE_CLIENT_ID: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  GOOGLE_ALLOWED_HD: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  FLAG_GOOGLE_LOGIN_ENABLED: boolFlag("false"),
   // Feature flags and kill switches — Infrastructure spec §15. A global "false"
   // is a kill switch: no tenant/domain/mailbox override can re-enable it.
   // Track B capabilities default off so hosted mail ships built-but-disabled.
@@ -116,6 +120,13 @@ const envSchema = z.object({
     if (!value.IMAP_SECURE || !value.SMTP_SECURE) {
       context.addIssue({ code: "custom", path: ["MAIL_PROVIDER_ENABLED"], message: "IMAP and SMTP TLS must remain enabled" });
     }
+  }
+  if (value.FLAG_GOOGLE_LOGIN_ENABLED && !value.GOOGLE_CLIENT_ID) {
+    context.addIssue({
+      code: "custom",
+      path: ["GOOGLE_CLIENT_ID"],
+      message: "is required when FLAG_GOOGLE_LOGIN_ENABLED=true",
+    });
   }
 });
 

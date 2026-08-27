@@ -56,6 +56,11 @@ export const joinWorkspaceSchema = z.object({
   membershipId: z.string().uuid(),
 });
 
+export const googleLoginSchema = z.object({
+  credential: z.string().trim().min(1).max(4096),
+  tenantId: z.string().uuid().optional(),
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type CreateWorkspaceInput = z.infer<typeof createWorkspaceSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
@@ -66,3 +71,4 @@ export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 export type SelectWorkspaceInput = z.infer<typeof selectWorkspaceSchema>;
 export type JoinWorkspaceInput = z.infer<typeof joinWorkspaceSchema>;
+export type GoogleLoginInput = z.infer<typeof googleLoginSchema>;

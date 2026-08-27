@@ -50,7 +50,7 @@ model Tenant {
 model AppUser {
   id                      String                 @id @default(uuid()) @db.Uuid
   email                   String                 @unique
-  passwordHash            String                 @map("password_hash")
+  passwordHash            String?                 @map("password_hash")
   displayName             String                 @map("display_name")
   avatarUrl               String?                @map("avatar_url")
   phoneNumber             String?                @map("phone_number")
@@ -79,8 +79,23 @@ model AppUser {
   lifecycleRequests       DataLifecycleRequest[] @relation("LifecycleRequester")
   approvedSupportGrants   SupportAccessGrant[]   @relation("SupportApprover")
   connectedAccounts       ConnectedAccount[]
-
+  identities              UserIdentity[]
   @@map("app_users")
+}
+
+model UserIdentity {
+  id             String           @id @default(uuid()) @db.Uuid
+  userId         String           @map("user_id") @db.Uuid
+  provider       IdentityProvider
+  providerUserId String           @map("provider_user_id")
+  email          String
+  lastUsedAt     DateTime?        @map("last_used_at")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  user           AppUser          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUserId])
+  @@index([userId])
+  @@map("user_identities")
 }
 
 model EmailOtp {
@@ -647,6 +662,11 @@ enum PlatformRole {
   NONE
   SUPPORT
   SUPER_ADMIN
+}
+
+enum IdentityProvider {
+  GOOGLE
+  MICROSOFT
 }
 
 enum OtpPurpose {

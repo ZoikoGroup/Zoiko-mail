@@ -1,5 +1,6 @@
 "use client";
-
+import { GoogleLogin } from "@react-oauth/google";
+import { useGoogleLogin } from "@/lib/auth-hooks";
 import { useState } from "react";
 import Link from "next/link";
 import { FaEnvelope, FaGoogle } from "react-icons/fa";
@@ -22,12 +23,14 @@ type FormErrors = {
   password?: string;
 };
 
+
+
 export default function LoginForm({
   onRegister,
   onForgotPassword,
 }: LoginFormProps) {
   const loginMutation = useLogin();
-
+  const googleLogin = useGoogleLogin();
   const [rememberMe, setRememberMe] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -97,8 +100,8 @@ export default function LoginForm({
     loginMutation.error instanceof ApiError
       ? loginMutation.error.message
       : loginMutation.error
-      ? "Something went wrong."
-      : null;
+        ? "Something went wrong."
+        : null;
 
   return (
     <>
@@ -152,7 +155,7 @@ export default function LoginForm({
           }
           error={errors.password}
         />
-                {/* =====================================================
+        {/* =====================================================
             Remember Me / Forgot Password
         ====================================================== */}
 
@@ -223,14 +226,38 @@ export default function LoginForm({
             Google Login
         ====================================================== */}
 
-        <button
+        {/* <button
           type="button"
           className="flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-slate-300 bg-white text-sm font-medium text-slate-700 transition-all duration-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
         >
           <FaGoogle className="text-lg text-red-500" />
 
           Continue with Google
-        </button>        {/* =====================================================
+        </button>  */}
+
+        <div className="flex w-full justify-center [&>div]:w-full">
+          <GoogleLogin
+            onSuccess={(cr) => {
+              if (cr.credential) googleLogin.mutate({ credential: cr.credential });
+            }}
+            onError={() => console.error("Google sign-in failed")}
+            theme="outline"
+            size="large"
+            shape="rectangular"
+            text="continue_with"
+            width="100%"
+          />
+        </div>
+
+        {googleLogin.isError && (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+            {googleLogin.error instanceof ApiError
+              ? googleLogin.error.message
+              : "Google sign-in failed. Please try again."}
+          </div>
+        )}
+
+        {/* =====================================================
             Register Link
         ====================================================== */}
 
