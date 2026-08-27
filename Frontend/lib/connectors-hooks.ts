@@ -6,6 +6,7 @@ import {
   createConnector,
   disconnectConnector,
   getConnectorHealth,
+  getGoogleAuthUrl,
   listDeadLetter,
   replayDeadLetter,
   type Connector,
@@ -42,6 +43,12 @@ export function useDisconnectConnector() {
       if (ctx?.prev) qc.setQueryData(KEY, ctx.prev);
     },
     onSettled: () => qc.invalidateQueries({ queryKey: KEY }),
+  });
+}
+
+export function useGoogleAuth() {
+  return useMutation({
+    mutationFn: () => getGoogleAuthUrl(),
   });
 }
 

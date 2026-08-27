@@ -20,6 +20,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
+import { RouteProgress } from "@/components/shell/RouteProgress";
 
 export const metadata: Metadata = {
   title: {
@@ -46,7 +47,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body>
-        <Providers>{children}</Providers>
+        <Providers>
+          <RouteProgress />
+          {children}
+        </Providers>
       </body>
     </html>
   );

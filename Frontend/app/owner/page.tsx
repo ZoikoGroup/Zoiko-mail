@@ -3,8 +3,8 @@
 import { ProtectedRoute } from "@/components/owner/ProtectedRoute";
 import { WelcomeSection } from "@/components/owner/overview/WelcomeSection";
 import { SummaryCards } from "@/components/owner/overview/SummaryCards";
-import { RecentActivity } from "@/components/owner/overview/RecentActivity";
-import { OrganizationHealth } from "@/components/owner/overview/OrganizationHealth";
+import { MailActivityChart } from "@/components/owner/overview/MailActivityChart";
+import { SetupChecklist } from "@/components/owner/overview/SetupChecklist";
 import { QuickActions } from "@/components/owner/overview/QuickActions";
 
 export default function OwnerOverviewPage() {
@@ -15,8 +15,8 @@ export default function OwnerOverviewPage() {
         <SummaryCards />
         <QuickActions />
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <RecentActivity />
-          <OrganizationHealth />
+          <MailActivityChart />
+          <SetupChecklist />
         </div>
       </div>
     </ProtectedRoute>

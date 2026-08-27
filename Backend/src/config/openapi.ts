@@ -10,7 +10,7 @@ export const openApiDocument = {
     description: "Multi-tenant Zoiko Mail API. Tenant context is always derived from the verified access token.",
   },
   servers: [{ url: "http://localhost:5000", description: "Local development" }],
-  tags: ["System", "Authentication", "Users", "Tenants", "Memberships", "Policies", "Mail", "Messages", "Threads", "Domains", "AI", "Actions", "Notifications", "Integrations", "Connectors", "Delivery Protection", "Lifecycle", "Support", "Audit"].map((name) => ({ name })),
+  tags: ["System", "Authentication", "Users", "Tenants", "Memberships", "Policies", "Mail", "Messages", "Threads", "Domains", "AI", "Actions", "Notifications", "Integrations", "Connectors", "Delivery Protection", "Lifecycle", "Support", "Audit", "Billing"].map((name) => ({ name })),
   paths: {
     "/api/health": {
       get: { tags: ["System"], summary: "Health check", responses: { "200": ok("API is healthy") } },
@@ -790,6 +790,51 @@ export const openApiDocument = {
         responses: { "200": ok("Event returned"), "404": { $ref: "#/components/responses/NotFound" } },
       },
     },
+    "/api/v1/billing/plans": {
+      get: {
+        tags: ["Billing"], summary: "List active workspace plans", security: bearer,
+        description: "Plans are loaded from the database (source of truth for name, price and limits). Any OWNER/ADMIN may view.",
+        responses: { "200": { description: "Active plans returned" }, "401": { $ref: "#/components/responses/Unauthorized" }, "403": { $ref: "#/components/responses/Forbidden" } },
+      },
+    },
+    "/api/v1/billing/subscription": {
+      get: {
+        tags: ["Billing"], summary: "Get the tenant's current subscription and workspace info", security: bearer, description: "Read-only; the tenant (not the user) owns the subscription.", responses: { "200": { description: "Current subscription or null state returned" }, "401": { $ref: "#/components/responses/Unauthorized" }, "403": { $ref: "#/components/responses/Forbidden" } },
+      },
+    },
+    "/api/v1/billing/checkout": {
+      post: {
+        tags: ["Billing"], summary: "Start a Stripe Checkout session for the tenant", security: bearer, description: "Owner-only. Accepts only planCode; the Stripe Price, price and limits are always resolved from the DB.",
+        requestBody: jsonBody({ $ref: "#/components/schemas/CheckoutRequest" }),
+        responses: { "200": { description: "Checkout URL returned" }, "400": { $ref: "#/components/responses/ValidationError" }, "401": { $ref: "#/components/responses/Unauthorized" }, "403": { $ref: "#/components/responses/Forbidden" }, "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/billing/portal": {
+      get: {
+        tags: ["Billing"], summary: "Create a Stripe Customer Portal session for the tenant", security: bearer, description: "Owner-only. Opens Stripe-hosted billing management for the tenant's Stripe Customer.", responses: { "200": { description: "Portal URL returned" }, "401": { $ref: "#/components/responses/Unauthorized" }, "403": { $ref: "#/components/responses/Forbidden" }, "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/billing/cancel": {
+      post: {
+        tags: ["Billing"], summary: "Cancel the tenant's subscription at period end", security: bearer, description: "Owner-only. Sets cancel_at_period_end=true in Stripe (status is not immediately canceled).", responses: { "200": { description: "Cancel scheduled" }, "401": { $ref: "#/components/responses/Unauthorized" }, "403": { $ref: "#/components/responses/Forbidden" }, "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/billing/reactivate": {
+      patch: {
+        tags: ["Billing"], summary: "Reactivate a subscription pending cancellation", security: bearer, description: "Owner-only. Clears cancel_at_period_end in Stripe.", responses: { "200": { description: "Reactivated" }, "401": { $ref: "#/components/responses/Unauthorized" }, "403": { $ref: "#/components/responses/Forbidden" }, "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/billing/invoices": {
+      get: {
+        tags: ["Billing"], summary: "List the tenant's invoices", security: bearer, description: "Real invoices stored from Stripe webhooks; any OWNER/ADMIN may view.", responses: { "200": { description: "Invoices returned" }, "401": { $ref: "#/components/responses/Unauthorized" }, "403": { $ref: "#/components/responses/Forbidden" } },
+      },
+    },
+    "/api/v1/billing/webhook": {
+      post: {
+        tags: ["Billing"], summary: "Receive Stripe webhook events", description: "Public. Requires the Stripe-Signature header; signature-verified using STRIPE_WEBHOOK_SECRET. Idempotent per Stripe event id.",
+        responses: { "200": ok("Webhook accepted") }, security: [],
+      },
+    },
   },
   components: {
     securitySchemes: { bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" } },
@@ -869,6 +914,32 @@ export const openApiDocument = {
         type: "object", minProperties: 1,
         properties: { isRead: { type: "boolean" }, folder: { type: "string", enum: ["INBOX", "TRASH"] } },
       },
+      CheckoutRequest: {
+        type: "object", required: ["planCode"],
+        properties: { planCode: { type: "string", enum: ["starter", "business_starter", "business_pro", "enterprise"], example: "business_pro" } },
+      },
+      Plan: {
+        type: "object",
+        properties: { id: { type: "string" }, code: { type: "string" }, name: { type: "string" }, priceMonthly: { type: "integer", description: "Price in cents" }, userLimit: { type: "integer" }, mailboxLimit: { type: "integer" }, storageLimitGb: { type: "integer" } },
+      },
+      SubscriptionInfo: {
+        type: "object",
+        properties: {
+          workspace: { type: "object", properties: { id: { type: "string" }, name: { type: "string" } } },
+          id: { type: "string", nullable: true }, status: { type: "string", nullable: true },
+          currentPeriodEnd: { type: "string", format: "date-time", nullable: true }, trialEnd: { type: "string", format: "date-time", nullable: true },
+          cancelAtPeriodEnd: { type: "boolean" }, stripeCustomerId: { type: "string", nullable: true }, plan: { $ref: "#/components/schemas/Plan" },
+        },
+      },
+      InvoiceInfo: {
+        type: "object",
+        properties: {
+          id: { type: "string" }, number: { type: "string", nullable: true }, amountDue: { type: "integer" }, currency: { type: "string" },
+          status: { type: "string" }, periodStart: { type: "string", nullable: true }, periodEnd: { type: "string", nullable: true },
+          hostedInvoiceUrl: { type: "string", nullable: true }, invoicePdfUrl: { type: "string", nullable: true }, createdAt: { type: "string" },
+        },
+      },
+      CheckoutUrl: { type: "object", properties: { url: { type: "string", format: "uri" } } },
     },
   },
 } as const;
