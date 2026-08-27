@@ -117,6 +117,24 @@ async function main(): Promise<void> {
     create: { id: SYSTEM_TENANT_ID, name: "System", status: "ACTIVE", planCode: "system" },
   });
 
+  // ── Billing plans ───────────────────────────────────────────────────────
+  // The single source of truth for plan limits. `stripePriceId` is left blank
+  // here; operators set it in the DB (or via a Stripe Dashboard sync) so the
+  // checkout derives the real Stripe price, never one trusted from the client.
+  const plans = [
+    { code: "starter", name: "Starter", priceMonthly: 4900, userLimit: 10, mailboxLimit: 10, storageLimitGb: 10 },
+    { code: "business_starter", name: "Business Starter", priceMonthly: 14900, userLimit: 25, mailboxLimit: 25, storageLimitGb: 50 },
+    { code: "business_pro", name: "Business Pro", priceMonthly: 24900, userLimit: 50, mailboxLimit: 75, storageLimitGb: 100 },
+    { code: "enterprise", name: "Enterprise", priceMonthly: 49900, userLimit: 200, mailboxLimit: 200, storageLimitGb: 500 },
+  ];
+  for (const plan of plans) {
+    await prisma.plan.upsert({
+      where: { code: plan.code },
+      update: { name: plan.name, priceMonthly: plan.priceMonthly, userLimit: plan.userLimit, mailboxLimit: plan.mailboxLimit, storageLimitGb: plan.storageLimitGb, active: true },
+      create: { ...plan, active: true },
+    });
+  }
+
   await resetAcmeFixture();
 
   const tenant = await prisma.tenant.create({
@@ -124,7 +142,7 @@ async function main(): Promise<void> {
       id: ACME_TENANT_ID,
       name: "Acme Corp",
       status: "ACTIVE",
-      planCode: "growth",
+      planCode: "business_pro",
       timezone: "Europe/London",
       language: "en",
       allowedDomains: ["acme.test"],

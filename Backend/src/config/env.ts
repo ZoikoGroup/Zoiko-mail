@@ -87,6 +87,11 @@ const envSchema = z.object({
   GOOGLE_REDIRECT_URI: z.preprocess(blankAsUndefined, z.string().url().optional()),
   // Encryption key for token-at-rest (64 hex chars = 32 bytes for AES-256-GCM)
   ENCRYPTION_KEY: z.preprocess(blankAsUndefined, z.string().length(64).optional()),
+  // Stripe — used for subscription & billing (TEST mode). All three are optional:
+  // checkout/portal/webhook fail closed until configured.
+  STRIPE_SECRET_KEY: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  STRIPE_WEBHOOK_SECRET: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  STRIPE_PUBLISHABLE_KEY: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
   FLAG_CONNECTOR_GMAIL_ENABLED: boolFlag("true"),
   FLAG_CONNECTOR_M365_ENABLED: boolFlag("true"),
   FLAG_AI_EXTRACTION_ENABLED: boolFlag("true"),
