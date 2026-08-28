@@ -68,9 +68,9 @@ export default function AuthShowcase() {
           */}
           <Image
             src="/zoiko-wordmark-dark.png"
-            width={370}
-            height={48}
-            className="h-11 w-auto"
+            width={277}
+            height={36}
+            className="h-9 w-auto"
             alt="Zoiko Mail"
             priority
           />
