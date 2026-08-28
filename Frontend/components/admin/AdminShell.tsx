@@ -26,6 +26,7 @@ function initials(name?: string, email?: string) {
 
 export function AdminShell({ children }: { children: ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { data } = useMe();
   const me = data as MeResponse | undefined;
   const logout = useLogout();
@@ -125,7 +126,8 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
         <SupportGrantBanner />
 
-        <main className="flex-1 overflow-y-auto px-5 py-5 sm:px-7">
+        {/* Keyed by pathname: fades the page in on navigation (see .page-enter CSS). */}
+        <main key={pathname} className="page-enter flex-1 overflow-y-auto px-5 py-5 sm:px-7">
           <div className="mx-auto max-w-[1180px]">{children}</div>
         </main>
       </div>

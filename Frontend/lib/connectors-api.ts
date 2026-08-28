@@ -50,6 +50,11 @@ export async function disconnectConnector(accountId: string): Promise<void> {
   await apiRequest(`/connectors/${accountId}`, { method: "DELETE" });
 }
 
+// ---- OAuth endpoints -------------------------------------------------------
+export async function getGoogleAuthUrl(): Promise<{ url: string }> {
+  return apiRequest<{ url: string }>("/connectors/auth/google");
+}
+
 // ---- admin endpoints (OWNER/ADMIN) ----------------------------------------
 // Response shapes not yet confirmed, so these return `unknown` and the UI reads
 // them defensively. Tighten the types once the real responses are captured.

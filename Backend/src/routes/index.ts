@@ -17,6 +17,7 @@ import { lifecycleRouter } from "../modules/lifecycle/lifecycle.routes.js";
 import { supportPlatformRouter, supportRouter } from "../modules/support/support.routes.js";
 import { connectorRouter } from "../modules/connector/connector.routes.js";
 import { deliveryProtectionRouter } from "../modules/delivery-protection/delivery-protection.routes.js";
+import { billingRouter } from "../modules/billing/billing.routes.js";
 
 const apiRouter = Router();
 
@@ -43,5 +44,6 @@ apiRouter.use("/support/platform", supportPlatformRouter);
 apiRouter.use("/support", supportRouter);
 apiRouter.use("/connectors", connectorRouter);
 apiRouter.use("/delivery-protection", deliveryProtectionRouter);
+apiRouter.use("/billing", billingRouter);
 
 export { apiRouter };

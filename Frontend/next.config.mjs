@@ -1,6 +1,17 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {};
-export default nextConfig;
+const nextConfig = {
+  /**
+   * lucide-react / react-icons / recharts are barrel packages: importing one
+   * icon pulls thousands of modules into the dev compiler and the client
+   * bundle. optimizePackageImports rewrites those imports to per-module paths,
+   * which cuts route-compile time dramatically (the main cause of slow
+   * page-to-page navigation while developing) and shrinks production JS.
+   */
+  experimental: {
+    optimizePackageImports: ["lucide-react", "react-icons", "recharts"],
+  },
+};
+
 /**
  * Security headers are configuration, not application code, so they live
  * here rather than in middleware. The CSP closes one of the five gaps the

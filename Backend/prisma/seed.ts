@@ -90,11 +90,22 @@ const CONNECTORS: Array<{ local: string; provider: "GMAIL" | "MICROSOFT_365"; st
 ];
 
 async function resetAcmeFixture(): Promise<void> {
+  // audit_events is fully append-only (DELETE, UPDATE, TRUNCATE triggers).
+  // Temporarily disable all three, re-seed, then re-enable.
+  await prisma.$executeRawUnsafe(`ALTER TABLE audit_events DISABLE TRIGGER audit_events_no_delete`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE audit_events DISABLE TRIGGER audit_events_no_update`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE audit_events DISABLE TRIGGER audit_events_no_truncate`);
+
   // Deleting the tenant cascades memberships, mailboxes, domains, connectors,
   // audit events, notifications, grants and policies.
   await prisma.tenant.deleteMany({ where: { id: ACME_TENANT_ID } });
   await prisma.appUser.deleteMany({ where: { email: { endsWith: "@acme.test" } } });
   await prisma.appUser.deleteMany({ where: { email: { endsWith: "@zoikosupport.test" } } });
+
+  // Re-enable the triggers.
+  await prisma.$executeRawUnsafe(`ALTER TABLE audit_events ENABLE TRIGGER audit_events_no_delete`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE audit_events ENABLE TRIGGER audit_events_no_update`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE audit_events ENABLE TRIGGER audit_events_no_truncate`);
 }
 
 async function main(): Promise<void> {
@@ -106,6 +117,24 @@ async function main(): Promise<void> {
     create: { id: SYSTEM_TENANT_ID, name: "System", status: "ACTIVE", planCode: "system" },
   });
 
+  // ── Billing plans ───────────────────────────────────────────────────────
+  // The single source of truth for plan limits. `stripePriceId` is left blank
+  // here; operators set it in the DB (or via a Stripe Dashboard sync) so the
+  // checkout derives the real Stripe price, never one trusted from the client.
+  const plans = [
+    { code: "starter", name: "Starter", priceMonthly: 4900, userLimit: 10, mailboxLimit: 10, storageLimitGb: 10 },
+    { code: "business_starter", name: "Business Starter", priceMonthly: 14900, userLimit: 25, mailboxLimit: 25, storageLimitGb: 50 },
+    { code: "business_pro", name: "Business Pro", priceMonthly: 24900, userLimit: 50, mailboxLimit: 75, storageLimitGb: 100 },
+    { code: "enterprise", name: "Enterprise", priceMonthly: 49900, userLimit: 200, mailboxLimit: 200, storageLimitGb: 500 },
+  ];
+  for (const plan of plans) {
+    await prisma.plan.upsert({
+      where: { code: plan.code },
+      update: { name: plan.name, priceMonthly: plan.priceMonthly, userLimit: plan.userLimit, mailboxLimit: plan.mailboxLimit, storageLimitGb: plan.storageLimitGb, active: true },
+      create: { ...plan, active: true },
+    });
+  }
+
   await resetAcmeFixture();
 
   const tenant = await prisma.tenant.create({
@@ -113,7 +142,7 @@ async function main(): Promise<void> {
       id: ACME_TENANT_ID,
       name: "Acme Corp",
       status: "ACTIVE",
-      planCode: "growth",
+      planCode: "business_pro",
       timezone: "Europe/London",
       language: "en",
       allowedDomains: ["acme.test"],
@@ -301,44 +330,150 @@ async function main(): Promise<void> {
   });
 
   // ── Policies ──────────────────────────────────────────────────────────
+  const policyCommon = { tenantId: tenant.id, createdByUserId: userByLocal.get("alex")! };
+
+  // AI — ACTIVE
   await prisma.tenantPolicy.create({
     data: {
+      ...policyCommon,
       id: fixtureId("policy", 0),
-      tenantId: tenant.id,
       type: "AI",
-      name: "AI processing policy",
-      description: "Commitment detection and drafting with human-approved send.",
+      name: "AI Processing Policy",
+      description: "Commitment detection, summarisation and drafting with human-approved send.",
       version: 1,
       status: "ACTIVE",
       rules: {
-        commitmentDetection: true,
-        threadSummarisation: true,
-        draftReply: true,
-        restrictedMailboxesExcluded: true,
-        trainingOnCustomerData: false,
+        defaultEffect: "ALLOW",
+        conditions: [
+          { field: "source", operator: "NOT_EQUALS", value: "restricted_mailbox", effect: "DENY" },
+          { field: "training_on_customer_data", operator: "EQUALS", value: false, effect: "DENY" },
+        ],
       },
-      createdByUserId: userByLocal.get("alex")!,
       activatedAt: ago(20 * DAY),
     },
   });
 
+  // AI — DRAFT
   await prisma.tenantPolicy.create({
     data: {
+      ...policyCommon,
       id: fixtureId("policy", 1),
-      tenantId: tenant.id,
+      type: "AI",
+      name: "AI Data Isolation Policy",
+      description: "Restrict AI processing from HR, legal and compliance mailboxes.",
+      version: 2,
+      status: "DRAFT",
+      rules: {
+        defaultEffect: "DENY",
+        conditions: [
+          { field: "mailbox.tags", operator: "IN", value: ["hr", "legal", "compliance"], effect: "DENY" },
+        ],
+      },
+    },
+  });
+
+  // SENDING — ACTIVE
+  await prisma.tenantPolicy.create({
+    data: {
+      ...policyCommon,
+      id: fixtureId("policy", 2),
       type: "SENDING",
-      name: "Sending policy",
-      description: "Rate-limited sending with new-domain warm-up.",
+      name: "Sending Policy",
+      description: "Rate-limited sending with new-domain warm-up. Autonomous external sending blocked.",
       version: 1,
       status: "ACTIVE",
       rules: {
-        rateLimitedSending: true,
-        newDomainWarmup: true,
-        templateBasedSending: false,
-        autonomousExternalSending: false,
+        defaultEffect: "ALLOW",
+        conditions: [
+          { field: "sending_type", operator: "EQUALS", value: "autonomous_external", effect: "DENY" },
+          { field: "daily_volume", operator: "GREATER_THAN", value: 500, effect: "DENY" },
+          { field: "is_new_domain", operator: "EQUALS", value: true, effect: "ALLOW" },
+        ],
       },
-      createdByUserId: userByLocal.get("alex")!,
       activatedAt: ago(20 * DAY),
+    },
+  });
+
+  // SENDING — DRAFT
+  await prisma.tenantPolicy.create({
+    data: {
+      ...policyCommon,
+      id: fixtureId("policy", 3),
+      type: "SENDING",
+      name: "Template-Based Sending",
+      description: "Require admin-approved templates for bulk sends exceeding 100 recipients.",
+      version: 2,
+      status: "DRAFT",
+      rules: {
+        defaultEffect: "ALLOW",
+        conditions: [
+          { field: "recipient_count", operator: "GREATER_THAN_OR_EQUAL", value: 100, effect: "ALLOW" },
+          { field: "template_id", operator: "EQUALS", value: null, effect: "DENY" },
+        ],
+      },
+    },
+  });
+
+  // RETENTION — ACTIVE
+  await prisma.tenantPolicy.create({
+    data: {
+      ...policyCommon,
+      id: fixtureId("policy", 4),
+      type: "RETENTION",
+      name: "Data Retention Policy",
+      description: "Retain sent and received messages for 90 days. Attachments excluded after 30 days.",
+      version: 1,
+      status: "ACTIVE",
+      rules: {
+        defaultEffect: "ALLOW",
+        conditions: [
+          { field: "message.age_days", operator: "GREATER_THAN_OR_EQUAL", value: 90, effect: "DENY" },
+          { field: "message.has_attachment", operator: "EQUALS", value: true, effect: "ALLOW" },
+        ],
+      },
+      activatedAt: ago(15 * DAY),
+    },
+  });
+
+  // DELETION — DRAFT
+  await prisma.tenantPolicy.create({
+    data: {
+      ...policyCommon,
+      id: fixtureId("policy", 5),
+      type: "DELETION",
+      name: "Data Deletion Policy",
+      description: "Soft-delete with 30-day grace period. Permanent purge requires owner confirmation.",
+      version: 1,
+      status: "DRAFT",
+      rules: {
+        defaultEffect: "ALLOW",
+        conditions: [
+          { field: "deletion.type", operator: "EQUALS", value: "permanent", effect: "DENY" },
+          { field: "deletion.requestor_role", operator: "NOT_EQUALS", value: "OWNER", effect: "DENY" },
+        ],
+      },
+    },
+  });
+
+  // ABUSE — ACTIVE
+  await prisma.tenantPolicy.create({
+    data: {
+      ...policyCommon,
+      id: fixtureId("policy", 6),
+      type: "ABUSE",
+      name: "Abuse Detection Policy",
+      description: "Flag phishing, spam and rate abuse. Auto-block after 3 consecutive failures.",
+      version: 1,
+      status: "ACTIVE",
+      rules: {
+        defaultEffect: "ALLOW",
+        conditions: [
+          { field: "spam_score", operator: "GREATER_THAN_OR_EQUAL", value: 0.8, effect: "DENY" },
+          { field: "consecutive_failures", operator: "GREATER_THAN_OR_EQUAL", value: 3, effect: "DENY" },
+          { field: "phishing_detected", operator: "EQUALS", value: true, effect: "DENY" },
+        ],
+      },
+      activatedAt: ago(10 * DAY),
     },
   });
 
@@ -467,7 +602,7 @@ async function main(): Promise<void> {
   }
 
   // ── Report ────────────────────────────────────────────────────────────
-  const [people, invited, mailboxes, domains, connectors, audits, notes] = await Promise.all([
+  const [people, invited, mailboxes, domains, connectors, audits, notes, policies] = await Promise.all([
     prisma.tenantMembership.count({ where: { tenantId: tenant.id, status: "ACTIVE", role: { not: "SUPPORT" } } }),
     prisma.tenantMembership.count({ where: { tenantId: tenant.id, status: "INVITED" } }),
     prisma.mailbox.count({ where: { tenantId: tenant.id } }),
@@ -475,6 +610,7 @@ async function main(): Promise<void> {
     prisma.connectedAccount.count({ where: { tenantId: tenant.id } }),
     prisma.auditEvent.count({ where: { tenantId: tenant.id } }),
     prisma.notification.count({ where: { tenantId: tenant.id } }),
+    prisma.tenantPolicy.count({ where: { tenantId: tenant.id, status: "ACTIVE" } }),
   ]);
 
   console.log(`\nSeed completed — ${tenant.name} (${tenant.id})\n`);
@@ -486,7 +622,7 @@ async function main(): Promise<void> {
   console.log(`  audit events           ${audits}/8`);
   console.log(`  notifications          ${notes}/4`);
   console.log(`  active support grants  1  expires in ~2h47m`);
-  console.log(`  active policies        2  (AI, SENDING)`);
+  console.log(`  active policies        ${policies}  (AI, SENDING, RETENTION, ABUSE)`);
   console.log("\n  Logins — password for every seeded user: Password123!");
   console.log("    owner   alex@acme.test");
   console.log("    owner   helena@acme.test");

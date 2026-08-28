@@ -63,3 +63,14 @@ export const listProviderEventsQuerySchema = z.object({
   provider: z.enum(["GMAIL", "MICROSOFT_365", "IMAP_SMTP"]).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
 });
+
+export const googleAuthQuerySchema = z.object({
+  tenantId: z.string().uuid().optional(),
+});
+
+export const googleCallbackQuerySchema = z.object({
+  code: z.string().min(1).optional(),
+  state: z.string().min(1).optional(),
+  error: z.string().optional(),
+  error_description: z.string().optional(),
+});

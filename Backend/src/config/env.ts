@@ -28,7 +28,6 @@ const envSchema = z.object({
   JWT_REFRESH_EXPIRES_IN: z.string().regex(/^\d+[smhd]$/).default("7d"),
   APP_URL: z.string().url().default("http://localhost:3000"),
   CORS_ORIGIN: z.string().default("http://localhost:3000"),
-  GOOGLE_CLIENT_ID: z.string().min(1).optional(),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900_000),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
   AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900_000),
@@ -82,6 +81,17 @@ const envSchema = z.object({
   // Feature flags and kill switches — Infrastructure spec §15. A global "false"
   // is a kill switch: no tenant/domain/mailbox override can re-enable it.
   // Track B capabilities default off so hosted mail ships built-but-disabled.
+  // Google OAuth — used for connecting Gmail accounts via OAuth 2.0
+  GOOGLE_CLIENT_ID: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  GOOGLE_CLIENT_SECRET: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  GOOGLE_REDIRECT_URI: z.preprocess(blankAsUndefined, z.string().url().optional()),
+  // Encryption key for token-at-rest (64 hex chars = 32 bytes for AES-256-GCM)
+  ENCRYPTION_KEY: z.preprocess(blankAsUndefined, z.string().length(64).optional()),
+  // Stripe — used for subscription & billing (TEST mode). All three are optional:
+  // checkout/portal/webhook fail closed until configured.
+  STRIPE_SECRET_KEY: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  STRIPE_WEBHOOK_SECRET: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  STRIPE_PUBLISHABLE_KEY: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
   FLAG_CONNECTOR_GMAIL_ENABLED: boolFlag("true"),
   FLAG_CONNECTOR_M365_ENABLED: boolFlag("true"),
   FLAG_AI_EXTRACTION_ENABLED: boolFlag("true"),
@@ -117,6 +127,26 @@ const envSchema = z.object({
     if (!value.IMAP_SECURE || !value.SMTP_SECURE) {
       context.addIssue({ code: "custom", path: ["MAIL_PROVIDER_ENABLED"], message: "IMAP and SMTP TLS must remain enabled" });
     }
+  }
+  // One client id serves two different Google features, and they need
+  // different things:
+  //
+  //   Connecting a Gmail mailbox is an authorization-code flow, so it needs
+  //   the secret and a registered redirect URI as well.
+  //   Signing in verifies an ID token against Google's keys, which needs
+  //   nothing but the client id.
+  //
+  // So a half-configured connector is still an error, but requiring the
+  // secret merely because a client id exists would break sign-in, which is
+  // legitimately configured with the id alone. The trio is demanded only
+  // once something connector-specific has been set.
+  const connectorVars = [value.GOOGLE_CLIENT_SECRET, value.GOOGLE_REDIRECT_URI] as const;
+  if (connectorVars.some(Boolean) && !(value.GOOGLE_CLIENT_ID && connectorVars.every(Boolean))) {
+    context.addIssue({
+      code: "custom",
+      path: ["GOOGLE_CLIENT_SECRET"],
+      message: "GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI configure the Gmail connector and require GOOGLE_CLIENT_ID too; sign-in alone needs only GOOGLE_CLIENT_ID",
+    });
   }
 });
 

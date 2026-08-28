@@ -14,6 +14,7 @@ import {
 } from "./common/middleware/index.js";
 import { apiRouter } from "./routes/index.js";
 import { openApiDocument } from "./config/openapi.js";
+import { billingController } from "./modules/billing/billing.controller.js";
 import { prisma } from "./config/prisma.js";
 import { asyncHandler } from "./common/middleware/asyncHandler.js";
 import { attachmentStorage } from "./modules/mail/attachment.storage.js";
@@ -52,6 +53,15 @@ export function createApp() {
       credentials: true,
     })
   );
+  // Stripe webhook must receive the raw, unparsed request body so the
+  // signature can be verified before any parsing. Registered before the global
+  // JSON parser so the stream has not been consumed yet.
+  app.post(
+    "/api/v1/billing/webhook",
+    express.raw({ type: "application/json" }),
+    billingController.webhook
+  );
+
   app.use(express.json({ limit: env.JSON_BODY_LIMIT }));
   app.use(
     rateLimit({
