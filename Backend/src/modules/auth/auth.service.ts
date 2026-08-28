@@ -816,6 +816,22 @@ export class AuthService {
         });
         existingUser.googleId = googleUser.googleId;
       }
+      // Google asserted email_verified, which is precisely the fact the
+      // pending-verification state is waiting for. Leaving the account
+      // pending would send someone Google just verified off to a "verify
+      // your email" screen, and the sign-in could never proceed.
+      if (existingUser.status === "PENDING_VERIFICATION" || !existingUser.emailVerifiedAt) {
+        const promoted = await prisma.appUser.update({
+          where: { id: existingUser.id },
+          data: {
+            emailVerifiedAt: existingUser.emailVerifiedAt ?? new Date(),
+            status: existingUser.status === "PENDING_VERIFICATION" ? "ACTIVE" : existingUser.status,
+          },
+        });
+        existingUser.status = promoted.status;
+        existingUser.emailVerifiedAt = promoted.emailVerifiedAt;
+      }
+
       // Google has proved the address; the product still asks for a code
       // before opening a session. Guard states are evaluated first — a
       // suspended account must be told so, not sent a code it can never use.

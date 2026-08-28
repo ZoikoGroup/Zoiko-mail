@@ -164,6 +164,7 @@ export default function RegisterForm({
 
       <GoogleSignInButton
         onSuccess={(idToken) => googleLoginMutation.mutate({ idToken })}
+        label="Sign up with Google"
         disabled={registerMutation.isPending || googleLoginMutation.isPending}
       />
 
