@@ -2,6 +2,7 @@ export { default as AuthCard } from "./AuthCard";
 export { default as AuthTabs } from "./AuthTabs";
 export { default as FormInput } from "./inputs/FormInput";
 export { default as PasswordInput } from "./inputs/PasswordInput";
+export { default as GoogleSignInButton } from "./GoogleSignInButton";
 
 export { default as LoginForm } from "./forms/LoginForm";
 export { default as RegisterForm } from "./forms/RegisterForm";

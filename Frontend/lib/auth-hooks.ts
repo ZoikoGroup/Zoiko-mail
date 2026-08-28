@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 
 import {
   login,
+  googleLogin,
+  googleVerifyOtp,
+  googleResendOtp,
   register,
   logout,
   logoutAll,
@@ -29,7 +32,7 @@ import {
   type ResetPasswordInput,
 } from "./auth-api";
 import { getPlatformToken, isLoggedIn } from "./auth-storage";
-import { resolveWorkspaceHref } from "./workspace";
+import { resolveWorkspaceHref, USER_WORKSPACE_HREF } from "./workspace";
 
 // Server state (the logged-in user) lives in TanStack Query, keyed by ['me'].
 export function useMe() {
@@ -122,6 +125,60 @@ export function useLogin() {
   });
 }
 
+/**
+ * Second leg of Google sign-in.
+ *
+ * Shares useGoogleLogin's redirect handling, because a verified code produces
+ * exactly the same AuthState a password login does, so the destination logic
+ * must be the same rather than a parallel copy that can drift.
+ */
+export function useGoogleVerifyOtp() {
+  const qc = useQueryClient();
+  const router = useRouter();
+
+  return useMutation({
+    mutationFn: ({ pendingToken, code }: { pendingToken: string; code: string }) =>
+      googleVerifyOtp(pendingToken, code),
+
+    onSuccess: async (data) => {
+      await qc.invalidateQueries({ queryKey: ["me"] });
+
+      let href: string;
+      if (data.state === "STAFF_CONSOLE") {
+        href = "/support";
+      } else if (data.state === "SIGNED_IN") {
+        // Google sign-in lands in the user's own workspace, whatever their role.
+        href = USER_WORKSPACE_HREF;
+      } else if (data.state === "WORKSPACE_SELECTION") {
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem("zoiko.selection_token", data.selectionToken ?? "");
+          sessionStorage.setItem(
+            "zoiko.selection_workspaces",
+            JSON.stringify(data.workspaces ?? [])
+          );
+        }
+        href = "/select-workspace";
+      } else if (
+        data.state === "ACCOUNT_SUSPENDED" ||
+        data.state === "ACCOUNT_DISABLED"
+      ) {
+        href = `/auth-status?state=${data.state}`;
+      } else {
+        href = "/login";
+      }
+
+      router.replace(href);
+    },
+  });
+}
+
+/** Re-request the sign-in code. Bounded server-side by a cooldown and hourly cap. */
+export function useGoogleResendOtp() {
+  return useMutation({
+    mutationFn: (pendingToken: string) => googleResendOtp(pendingToken),
+  });
+}
+
 // export function useRegister() {
 //   const qc = useQueryClient();
 //   const router = useRouter();
@@ -138,6 +195,80 @@ export function useLogin() {
 //     },
 //   });
 // }
+
+export function useGoogleLogin() {
+  const qc = useQueryClient();
+  const router = useRouter();
+
+  return useMutation({
+    mutationFn: ({ idToken }: { idToken: string }) => googleLogin(idToken),
+
+    onSuccess: async (data) => {
+      await qc.invalidateQueries({
+        queryKey: ["me"],
+      });
+
+      let href: string;
+
+      if (data.state === "STAFF_CONSOLE") {
+        href = "/support";
+      } else if (data.state === "SIGNED_IN") {
+        // Google sign-in lands in the user's own workspace, whatever their role.
+        href = USER_WORKSPACE_HREF;
+      } else if (data.state === "WORKSPACE_SELECTION") {
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem(
+            "zoiko.selection_token",
+            data.selectionToken ?? ""
+          );
+          sessionStorage.setItem(
+            "zoiko.selection_workspaces",
+            JSON.stringify(data.workspaces ?? [])
+          );
+        }
+        href = "/select-workspace";
+      } else if (
+        data.state === "ACCOUNT_SUSPENDED" ||
+        data.state === "ACCOUNT_DISABLED"
+      ) {
+        href = `/auth-status?state=${data.state}`;
+      } else if (
+        data.state === "MEMBERSHIP_SUSPENDED" ||
+        data.state === "WORKSPACE_SUSPENDED" ||
+        data.state === "WORKSPACE_DELETING"
+      ) {
+        const workspaceName = encodeURIComponent(data.workspace?.name ?? "");
+        href = `/auth-status?state=${data.state}&workspace=${workspaceName}`;
+      } else if (data.state === "EMAIL_VERIFICATION_REQUIRED") {
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem("zoiko.pending_token", data.pendingToken ?? "");
+          sessionStorage.setItem("zoiko.pending_email", data.user?.email ?? "");
+        }
+        href = "/verify-email";
+      } else if (data.state === "INVITATION_PENDING") {
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem("zoiko.invite_pending_token", data.pendingToken ?? "");
+          sessionStorage.setItem(
+            "zoiko.invite_pending_list",
+            JSON.stringify(data.invitations ?? [])
+          );
+          sessionStorage.removeItem("pendingInvitationToken");
+        }
+        const names = (data.invitations ?? []).map((w: { name: string }) => w.name).join(",");
+        href = `/auth-status?state=INVITATION_PENDING${names ? `&invitations=${encodeURIComponent(names)}` : ""}`;
+      } else {
+        href = "/login";
+      }
+
+      if (data.state === "NO_WORKSPACE") {
+        router.replace("/login");
+        return;
+      }
+
+      router.replace(href);
+    },
+  });
+}
 
 export function useRegister() {
   return useMutation({

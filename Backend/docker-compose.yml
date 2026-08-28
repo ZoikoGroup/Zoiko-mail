@@ -31,6 +31,9 @@ services:
       OPERATIONS_KEY: ${OPERATIONS_KEY:?Set OPERATIONS_KEY}
       PROVIDER_CALLBACK_SECRET: ${PROVIDER_CALLBACK_SECRET:?Set PROVIDER_CALLBACK_SECRET}
       CORS_ORIGIN: ${CORS_ORIGIN:?Set CORS_ORIGIN}
+      # Google as an identity provider. Optional: unset means the sign-in
+      # route reports itself unconfigured instead of failing at startup.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       ATTACHMENT_STORAGE_PATH: /app/storage/attachments
       EXPORT_STORAGE_PATH: /app/storage/exports
       TRUST_PROXY: ${TRUST_PROXY:-1}

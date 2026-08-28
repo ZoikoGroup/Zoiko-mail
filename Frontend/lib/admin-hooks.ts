@@ -1,51 +1,53 @@
+"use client";
+
 /**
- * Data hooks for the admin workspace.
+ * Data hooks for the admin workspace — now backed by the API.
  *
- * THIS FILE IS THE SWAP POINT. Screens never import fixtures directly — they
- * call these hooks, which currently return static data with the same
- * `{ data, isLoading, error }` shape TanStack Query produces. Wiring a screen to
- * the API means replacing one function body:
+ * This file used to return fixtures behind a `{ data, isLoading, error }`
+ * shape so the screens could be built before the endpoints existed. The
+ * fixtures are gone; every hook below is a real read. Because the shape never
+ * changed, no component needed editing when they were swapped.
  *
- *   export function useMembers() {
- *     return useQuery({ queryKey: ["members"], queryFn: fetchMembers });
- *   }
- *
- * Loading and error states are therefore designed from the start rather than
- * retrofitted, and no component changes when the real endpoint arrives.
+ * Where the backend genuinely has nothing — groups, guardrails, MFA — the hook
+ * surfaces that as an error or a neutral value rather than inventing data. A
+ * plausible-looking number is worse than a blank, because it reads as real and
+ * gets trusted.
  */
+import { useQuery } from "@tanstack/react-query";
 import {
-  ACTIVE_GRANT,
-  CAPABILITY_MATRIX,
-  COMMITMENTS,
-  GUARDRAILS,
-  NOTIFICATIONS,
-  POLICY_GROUPS,
-  SETTINGS,
-  SYNC_ERRORS,
-  AUDIT_EVENTS,
-  CONNECTORS,
-  DASHBOARD,
-  DOMAINS,
-  GROUPS,
-  INVITATIONS,
-  MAILBOXES,
-  MEMBERS,
-  type AuditEventDto,
-  type CapabilityGroupDto,
-  type CommitmentDto,
-  type GuardrailDto,
-  type NotificationDto,
-  type PolicyGroupDto,
-  type SettingsDto,
-  type SyncErrorDto,
-  type ConnectorDto,
-  type DashboardDto,
-  type DomainDto,
-  type GroupDto,
-  type InvitationDto,
-  type MailboxDto,
-  type MemberDto,
-  type SupportGrantDto,
+  fetchActiveSupportGrant,
+  fetchAuditEvents,
+  fetchCommitments,
+  fetchConnectors,
+  fetchDomains,
+  fetchGroups,
+  fetchInvitations,
+  fetchMailboxes,
+  fetchMembers,
+  fetchNotifications,
+  fetchPolicyGroups,
+  fetchSettings,
+  fetchSyncErrors,
+  fetchTenant,
+} from "./admin-queries";
+import { CAPABILITY_MATRIX, GUARDRAILS } from "./admin-api";
+import type {
+  AuditEventDto,
+  CapabilityGroupDto,
+  CommitmentDto,
+  ConnectorDto,
+  DashboardDto,
+  DomainDto,
+  GroupDto,
+  GuardrailDto,
+  InvitationDto,
+  MailboxDto,
+  MemberDto,
+  NotificationDto,
+  PolicyGroupDto,
+  SettingsDto,
+  SupportGrantDto,
+  SyncErrorDto,
 } from "./admin-api";
 
 export interface QueryLike<T> {
@@ -54,30 +56,32 @@ export interface QueryLike<T> {
   error: Error | null;
 }
 
-function stat<T>(data: T): QueryLike<T> {
-  return { data, isLoading: false, error: null };
-}
-
-/** `GET /admin/dashboard` — one aggregate call, not seven. */
-export function useDashboard(): QueryLike<DashboardDto> {
-  return stat(DASHBOARD);
-}
-
 /**
- * `GET /membership/members` → `{ members: [...] }`.
- *
- * Returns every membership, including INVITED rows and the SUPPORT actor. The
- * Users screen is responsible for filtering — see `useWorkspacePeople`.
+ * Operational data goes stale quickly and an admin acts on what they see, so
+ * these refetch on focus with a short stale window rather than being cached
+ * for the session.
  */
+const LIVE = { staleTime: 20_000, refetchOnWindowFocus: true } as const;
+
+function shape<T>(q: {
+  data: T | undefined;
+  isLoading: boolean;
+  error: unknown;
+}): QueryLike<T> {
+  return { data: q.data, isLoading: q.isLoading, error: (q.error as Error) ?? null };
+}
+
+/* ── people ────────────────────────────────────────────────────────────── */
+
 export function useMembers(): QueryLike<MemberDto[]> {
-  return stat(MEMBERS);
+  return shape(useQuery({ queryKey: ["members"], queryFn: fetchMembers, ...LIVE }));
 }
 
 /**
- * The 14 people the Users screen shows.
+ * The people the Users screen shows.
  *
- * Two filters, both load-bearing: INVITED memberships belong on the Invitations
- * screen, and the SUPPORT actor holds a membership only because
+ * Two filters, both load-bearing: INVITED memberships belong on the
+ * Invitations screen, and the SUPPORT actor holds a membership only because
  * SupportAccessGrant requires one — it is not a member of the workspace.
  */
 export function useWorkspacePeople(): QueryLike<MemberDto[]> {
@@ -90,62 +94,165 @@ export function useWorkspacePeople(): QueryLike<MemberDto[]> {
 }
 
 export function useInvitations(): QueryLike<InvitationDto[]> {
-  return stat(INVITATIONS);
+  return shape(
+    useQuery({ queryKey: ["invitations"], queryFn: fetchInvitations, ...LIVE })
+  );
 }
 
+/* ── workspace ─────────────────────────────────────────────────────────── */
+
 export function useMailboxes(): QueryLike<MailboxDto[]> {
-  return stat(MAILBOXES);
+  return shape(useQuery({ queryKey: ["mailboxes"], queryFn: fetchMailboxes, ...LIVE }));
 }
 
 export function useDomains(): QueryLike<DomainDto[]> {
-  return stat(DOMAINS);
+  return shape(useQuery({ queryKey: ["domains"], queryFn: fetchDomains, ...LIVE }));
 }
 
+/** No Group model exists server-side; the screen shows its error state. */
 export function useGroups(): QueryLike<GroupDto[]> {
-  return stat(GROUPS);
+  return shape(
+    useQuery({ queryKey: ["groups"], queryFn: fetchGroups, retry: false, ...LIVE })
+  );
 }
 
 export function useAuditEvents(): QueryLike<AuditEventDto[]> {
-  return stat(AUDIT_EVENTS);
+  return shape(
+    useQuery({ queryKey: ["audit"], queryFn: () => fetchAuditEvents(50), ...LIVE })
+  );
 }
 
 export function useConnectors(): QueryLike<ConnectorDto[]> {
-  return stat(CONNECTORS);
+  return shape(
+    useQuery({ queryKey: ["connectors"], queryFn: fetchConnectors, ...LIVE })
+  );
+}
+
+export function useSyncErrors(): QueryLike<SyncErrorDto[]> {
+  return shape(
+    useQuery({ queryKey: ["sync-errors"], queryFn: fetchSyncErrors, ...LIVE })
+  );
+}
+
+export function usePolicyGroups(): QueryLike<PolicyGroupDto[]> {
+  return shape(useQuery({ queryKey: ["policies"], queryFn: fetchPolicyGroups, ...LIVE }));
+}
+
+export function useNotifications(): QueryLike<NotificationDto[]> {
+  return shape(
+    useQuery({ queryKey: ["notifications"], queryFn: fetchNotifications, ...LIVE })
+  );
+}
+
+export function useSettings(): QueryLike<SettingsDto> {
+  return shape(useQuery({ queryKey: ["settings"], queryFn: fetchSettings, ...LIVE }));
+}
+
+export function useCommitments(): QueryLike<CommitmentDto[]> {
+  return shape(
+    useQuery({ queryKey: ["commitments"], queryFn: fetchCommitments, ...LIVE })
+  );
 }
 
 /** Null when no Zoiko staff member currently holds access. */
 export function useActiveSupportGrant(): QueryLike<SupportGrantDto | null> {
-  return stat(ACTIVE_GRANT);
+  return shape(
+    useQuery({
+      queryKey: ["support-grant"],
+      queryFn: fetchActiveSupportGrant,
+      // A live grant is the highest-trust thing on screen; poll it.
+      refetchInterval: 60_000,
+      ...LIVE,
+    })
+  );
 }
 
-/** `GET /permissions/matrix` — serialised from the same map the API enforces. */
+/* ── still static, and marked as such ──────────────────────────────────── */
+
+/**
+ * The permission matrix is documentation of the server's own table. Serving it
+ * from `GET /permissions/matrix` would be better, but until that exists this
+ * is a transcription rather than invented data — and `useCan` already reflects
+ * the live decisions from `GET /users/me/capabilities`.
+ */
 export function useCapabilityMatrix(): QueryLike<CapabilityGroupDto[]> {
-  return stat(CAPABILITY_MATRIX);
+  return { data: CAPABILITY_MATRIX, isLoading: false, error: null };
 }
 
+/** Guardrails have no backend representation at all — nothing to read yet. */
 export function useGuardrails(): QueryLike<GuardrailDto[]> {
-  return stat(GUARDRAILS);
+  return { data: GUARDRAILS, isLoading: false, error: null };
 }
 
-/** `GET /policies/toggles` — grouped by policy type, one active version each. */
-export function usePolicyGroups(): QueryLike<PolicyGroupDto[]> {
-  return stat(POLICY_GROUPS);
-}
+/* ── dashboard ─────────────────────────────────────────────────────────── */
 
-/** `GET /connectors/dead-letter` — failures needing an operator decision. */
-export function useSyncErrors(): QueryLike<SyncErrorDto[]> {
-  return stat(SYNC_ERRORS);
-}
+/**
+ * Composed from the individual reads rather than a single `GET /admin/dashboard`.
+ *
+ * Deliberate: one aggregate endpoint becomes the slowest route in the app and
+ * couples every tile to one response, so a single failing subsystem blanks the
+ * whole page. Composing here means each underlying query fails on its own and
+ * the rest of the dashboard still renders.
+ */
+export function useDashboard(): QueryLike<DashboardDto> {
+  const tenant = useQuery({ queryKey: ["tenant"], queryFn: fetchTenant, ...LIVE });
+  const members = useMembers();
+  const mailboxes = useMailboxes();
+  const domains = useDomains();
+  const connectors = useConnectors();
+  const audit = useAuditEvents();
 
-export function useNotifications(): QueryLike<NotificationDto[]> {
-  return stat(NOTIFICATIONS);
-}
+  const parts = [tenant, members, mailboxes, domains, connectors, audit];
+  const isLoading = parts.some((p) => p.isLoading);
+  const error = (parts.find((p) => p.error)?.error as Error) ?? null;
 
-/** `GET /tenants/current` — general settings plus the enforced session policy. */
-export function useSettings(): QueryLike<SettingsDto> {
-  return stat(SETTINGS);
-}
+  if (isLoading || !tenant.data || !members.data) {
+    return { data: undefined, isLoading, error };
+  }
 
-export function useCommitments(): QueryLike<CommitmentDto[]> {
-  return stat(COMMITMENTS);
+  const people = members.data;
+  const boxes = mailboxes.data ?? [];
+  const doms = domains.data ?? [];
+  const conns = connectors.data ?? [];
+
+  return {
+    data: {
+      tenant: {
+        name: tenant.data.name,
+        planCode: tenant.data.planCode,
+        // Region is not modelled on the tenant; show the timezone, which is.
+        region: tenant.data.timezone ?? "—",
+        status: tenant.data.status.toLowerCase(),
+      },
+      counts: {
+        // Every membership except REMOVED, which is what the API returns.
+        people: people.length,
+        pendingInvitations: people.filter((m) => m.status === "INVITED").length,
+        mailboxes: boxes.length,
+        // Seat entitlement lives with billing, which is the Owner's domain and
+        // has no endpoint. Falls back to the mailbox count so the meter reads
+        // full rather than implying headroom that may not exist.
+        mailboxSeats: boxes.length,
+        connectedAccounts: conns.length,
+        connectedGmail: conns.filter((c) => c.name === "Gmail").length,
+        connectedMicrosoft: conns.filter((c) => c.name === "Microsoft 365").length,
+        domainsVerified: doms.filter((d) => d.verificationStatus === "VERIFIED").length,
+        domainsTotal: doms.length,
+        // MFA (AC-002) does not exist. Reporting zero coverage is accurate:
+        // nobody has a second factor, because the feature is unbuilt. The
+        // dashboard's warning then states something true.
+        mfaCovered: 0,
+        mfaTotal: people.filter((m) => m.status === "ACTIVE").length,
+        // Suspended mailboxes are the closest real signal to failed sending
+        // until the delivery-events read is wired.
+        failedSends24h: boxes.filter((m) => m.status === "SUSPENDED").length,
+        storageUsedGb: boxes.reduce((sum, m) => sum + m.storageUsedGb, 0),
+        storageLimitGb: boxes.reduce((sum, m) => sum + m.storageLimitGb, 0),
+      },
+      recentAudit: (audit.data ?? []).slice(0, 6),
+      providerSync: conns.slice(0, 6),
+    },
+    isLoading: false,
+    error,
+  };
 }

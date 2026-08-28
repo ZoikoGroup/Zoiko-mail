@@ -2,7 +2,6 @@
 
 import { useMailboxes } from "@/lib/admin-hooks";
 import { useCan } from "@/lib/admin-capabilities";
-import { DASHBOARD } from "@/lib/admin-api";
 import {
   Card,
   InlineEmpty,
@@ -21,7 +20,6 @@ import {
 export default function AdminMailboxesPage() {
   const can = useCan();
   const { data: mailboxes, isLoading, error } = useMailboxes();
-  const seats = DASHBOARD.counts.mailboxSeats;
   const suspended = mailboxes?.filter((m) => m.status === "SUSPENDED") ?? [];
 
   return (
@@ -44,7 +42,9 @@ export default function AdminMailboxesPage() {
 
       <Card
         title={mailboxes ? `${mailboxes.length} mailboxes` : "Mailboxes"}
-        badge={mailboxes ? <Pill tone="nu">{`${mailboxes.length} of ${seats} seats`}</Pill> : undefined}
+        // Seat entitlement lives with billing, which is the Owner's domain and has
+        // no endpoint. Showing the provisioned count alone beats inventing a cap.
+        badge={mailboxes ? <Pill tone="nu">{`${mailboxes.length} provisioned`}</Pill> : undefined}
       >
         {error ? (
           <InlineError message={error.message} />

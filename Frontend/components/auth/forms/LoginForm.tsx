@@ -2,15 +2,17 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { FaEnvelope, FaGoogle } from "react-icons/fa";
+import { FaEnvelope } from "react-icons/fa";
 
 import { ApiError } from "@/lib/api-client";
-import { useLogin } from "@/lib/auth-hooks";
+import { useLogin, useGoogleLogin } from "@/lib/auth-hooks";
 
 import {
   FormInput,
   PasswordInput,
+  GoogleSignInButton,
 } from "@/components/auth";
+import GoogleOtpStep from "@/components/auth/GoogleOtpStep";
 
 interface LoginFormProps {
   onRegister: () => void;
@@ -27,6 +29,12 @@ export default function LoginForm({
   onForgotPassword,
 }: LoginFormProps) {
   const loginMutation = useLogin();
+  const googleLoginMutation = useGoogleLogin();
+
+  // Set when Google sign-in comes back asking for a code. Holding it here
+  // keeps the whole two-leg flow on one screen, so a refresh mid-flow lands
+  // back on a clean login rather than a half-authenticated dead end.
+  const [googleOtp, setGoogleOtp] = useState<{ pendingToken: string; sentTo: string } | null>(null);
 
   const [rememberMe, setRememberMe] = useState(false);
 
@@ -98,7 +106,21 @@ export default function LoginForm({
       ? loginMutation.error.message
       : loginMutation.error
       ? "Something went wrong."
+      : googleLoginMutation.error instanceof ApiError
+      ? googleLoginMutation.error.message
+      : googleLoginMutation.error
+      ? "Something went wrong."
       : null;
+
+  if (googleOtp) {
+    return (
+      <GoogleOtpStep
+        pendingToken={googleOtp.pendingToken}
+        sentTo={googleOtp.sentTo}
+        onCancel={() => setGoogleOtp(null)}
+      />
+    );
+  }
 
   return (
     <>
@@ -120,6 +142,36 @@ export default function LoginForm({
       {/* ================================================
           FORM
       ================================================= */}
+
+      <GoogleSignInButton
+        onSuccess={(idToken) =>
+          googleLoginMutation.mutate(
+            { idToken },
+            {
+              onSuccess: (data) => {
+                if (data.state === "OTP_REQUIRED") {
+                  setGoogleOtp({
+            pendingToken: data.pendingToken,
+            // Falls back to the typed address so the screen always names
+            // somewhere, even if an older API omits the echo.
+            sentTo: data.sentTo ?? data.user?.email ?? formData.email,
+          });
+                }
+              },
+            }
+          )
+        }
+        disabled={loginMutation.isPending || googleLoginMutation.isPending}
+      />
+
+      <div className="relative my-4">
+        <div className="absolute inset-0 flex items-center">
+          <div className="w-full border-t border-slate-200 dark:border-slate-700" />
+        </div>
+        <div className="relative flex justify-center text-xs uppercase">
+          <span className="bg-white px-2 text-slate-500 dark:bg-slate-950 dark:text-slate-400">or</span>
+        </div>
+      </div>
 
       <form
         onSubmit={onSubmit}
@@ -195,7 +247,7 @@ export default function LoginForm({
 
         <button
           type="submit"
-          disabled={loginMutation.isPending}
+          disabled={loginMutation.isPending || googleLoginMutation.isPending}
           className="flex h-12 w-full items-center justify-center rounded-xl bg-teal-600 text-sm font-semibold text-white transition-all duration-300 hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {loginMutation.isPending
@@ -204,33 +256,6 @@ export default function LoginForm({
         </button>
 
         {/* =====================================================
-            Divider
-        ====================================================== */}
-
-        <div className="relative">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-slate-200 dark:border-slate-700" />
-          </div>
-
-          <div className="relative flex justify-center">
-            <span className="bg-white px-4 text-sm text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-              OR
-            </span>
-          </div>
-        </div>
-
-        {/* =====================================================
-            Google Login
-        ====================================================== */}
-
-        <button
-          type="button"
-          className="flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-slate-300 bg-white text-sm font-medium text-slate-700 transition-all duration-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-        >
-          <FaGoogle className="text-lg text-red-500" />
-
-          Continue with Google
-        </button>        {/* =====================================================
             Register Link
         ====================================================== */}
 

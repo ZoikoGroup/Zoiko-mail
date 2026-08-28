@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { LogOut, Menu, X } from "lucide-react";
 import { isLoggedIn } from "@/lib/auth-storage";
@@ -80,11 +81,24 @@ export function AdminShell({ children }: { children: ReactNode }) {
             <Menu className="h-5 w-5" />
           </button>
 
-          <div className="min-w-0 flex-1">
-            <span className="truncate text-sm text-[var(--ink3)]">
-              {me ? me.tenant.name : "Zoiko Mail"}
+          {/* Only on mobile: the rail carries the wordmark on desktop, so
+              showing the icon there too would state the brand twice. */}
+          <Image
+            src="/zoiko-icon.png"
+            alt="Zoiko Mail"
+            width={28}
+            height={28}
+            className="h-7 w-7 shrink-0 rounded-[7px] md:hidden"
+          />
+
+          {/* Tenant first and weighted, workspace second and quiet: they are a
+              name and a label, not one sentence, so they need different
+              emphasis and a real gap between them. */}
+          <div className="flex min-w-0 flex-1 items-baseline gap-2">
+            <span className="truncate text-sm font-medium text-[var(--ink2)]">
+              {me?.tenant.name ?? ""}
             </span>
-            <span className="font-mono-num ml-2 text-[9px] uppercase tracking-[0.11em] text-[var(--ink3)]">
+            <span className="font-mono-num shrink-0 text-[9px] uppercase tracking-[0.11em] text-[var(--ink3)]">
               Admin workspace
             </span>
           </div>
@@ -156,12 +170,37 @@ function Rail({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 px-4 py-4">
-        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[var(--accent)] font-bold text-white">
-          Z
-        </div>
-        <span className="font-editorial text-lg font-semibold text-[var(--ink)]">Zoiko Mail</span>
-      </div>
+      {/*
+        The brandmark, not a letter tile. Two files rather than one recoloured
+        by CSS: the wordmark is two-tone, so a filter that lifted the navy for
+        dark mode would drag the blue with it. The dark lockup instead has the
+        navy swapped for the theme ink and the interior of the envelope dropped
+        out, so the surface shows through exactly as it does in the light one.
+      */}
+      <Link
+        href="/admin"
+        onClick={onNavigate}
+        aria-label="Zoiko Mail — Admin workspace"
+        className="flex items-center px-4 py-4 outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+      >
+        <Image
+          src="/zoiko-wordmark.png"
+          alt="Zoiko Mail"
+          width={185}
+          height={24}
+          priority
+          className="h-6 w-auto dark:hidden"
+        />
+        <Image
+          src="/zoiko-wordmark-dark.png"
+          alt=""
+          aria-hidden
+          width={185}
+          height={24}
+          priority
+          className="hidden h-6 w-auto dark:block"
+        />
+      </Link>
 
       <nav className="flex-1 space-y-3 overflow-y-auto px-2 pb-4" aria-label="Admin sections">
         {/* Capabilities decide what belongs here, and `can` denies while the
