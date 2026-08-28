@@ -12,6 +12,17 @@ export function resolveWorkspaceHref(role?: string): string {
   return "/inbox";
 }
 
+/**
+ * The user's own workspace: their mailbox, not an administration console.
+ *
+ * Google sign-in always lands here regardless of role. The admin and owner
+ * consoles are entered deliberately from inside the product, so a social
+ * sign-in should not drop an Admin straight into a console they did not ask
+ * for. Role still decides what those consoles allow once opened; it just no
+ * longer decides where a Google sign-in arrives.
+ */
+export const USER_WORKSPACE_HREF = "/inbox";
+
 // Lightweight workspace option for display purposes (no role stored).
 export interface WorkspaceOption {
   id: string;

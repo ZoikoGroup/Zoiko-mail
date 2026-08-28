@@ -32,7 +32,7 @@ import {
   type ResetPasswordInput,
 } from "./auth-api";
 import { getPlatformToken, isLoggedIn } from "./auth-storage";
-import { resolveWorkspaceHref } from "./workspace";
+import { resolveWorkspaceHref, USER_WORKSPACE_HREF } from "./workspace";
 
 // Server state (the logged-in user) lives in TanStack Query, keyed by ['me'].
 export function useMe() {
@@ -147,7 +147,8 @@ export function useGoogleVerifyOtp() {
       if (data.state === "STAFF_CONSOLE") {
         href = "/support";
       } else if (data.state === "SIGNED_IN") {
-        href = resolveWorkspaceHref(data.membership?.role);
+        // Google sign-in lands in the user's own workspace, whatever their role.
+        href = USER_WORKSPACE_HREF;
       } else if (data.state === "WORKSPACE_SELECTION") {
         if (typeof window !== "undefined") {
           sessionStorage.setItem("zoiko.selection_token", data.selectionToken ?? "");
@@ -212,8 +213,8 @@ export function useGoogleLogin() {
       if (data.state === "STAFF_CONSOLE") {
         href = "/support";
       } else if (data.state === "SIGNED_IN") {
-        const role = data.membership?.role;
-        href = resolveWorkspaceHref(role);
+        // Google sign-in lands in the user's own workspace, whatever their role.
+        href = USER_WORKSPACE_HREF;
       } else if (data.state === "WORKSPACE_SELECTION") {
         if (typeof window !== "undefined") {
           sessionStorage.setItem(
