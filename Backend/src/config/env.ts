@@ -85,6 +85,17 @@ const envSchema = z.object({
   // Feature flags and kill switches — Infrastructure spec §15. A global "false"
   // is a kill switch: no tenant/domain/mailbox override can re-enable it.
   // Track B capabilities default off so hosted mail ships built-but-disabled.
+  // Google OAuth — used for connecting Gmail accounts via OAuth 2.0
+  // GOOGLE_CLIENT_ID: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  GOOGLE_CLIENT_SECRET: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  GOOGLE_REDIRECT_URI: z.preprocess(blankAsUndefined, z.string().url().optional()),
+  // Encryption key for token-at-rest (64 hex chars = 32 bytes for AES-256-GCM)
+  ENCRYPTION_KEY: z.preprocess(blankAsUndefined, z.string().length(64).optional()),
+  // Stripe — used for subscription & billing (TEST mode). All three are optional:
+  // checkout/portal/webhook fail closed until configured.
+  STRIPE_SECRET_KEY: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  STRIPE_WEBHOOK_SECRET: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  STRIPE_PUBLISHABLE_KEY: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
   FLAG_CONNECTOR_GMAIL_ENABLED: boolFlag("true"),
   FLAG_CONNECTOR_M365_ENABLED: boolFlag("true"),
   FLAG_AI_EXTRACTION_ENABLED: boolFlag("true"),
@@ -128,6 +139,11 @@ const envSchema = z.object({
       message: "is required when FLAG_GOOGLE_LOGIN_ENABLED=true",
     });
   }
+  // Google OAuth vars must all be present or all absent
+  // const googleVars = [value.GOOGLE_CLIENT_ID, value.GOOGLE_CLIENT_SECRET, value.GOOGLE_REDIRECT_URI] as const;
+  // if (googleVars.some(Boolean) && !googleVars.every(Boolean)) {
+  //   context.addIssue({ code: "custom", path: ["GOOGLE_CLIENT_ID"], message: "GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI must all be set together" });
+  // }
 });
 
 export type Env = z.infer<typeof envSchema>;

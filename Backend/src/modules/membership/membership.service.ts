@@ -3,6 +3,7 @@ import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
+import { billingService } from "../billing/billing.service.js";
 import { env } from "../../config/env.js";
 import { generateOpaqueToken, hashToken } from "../../common/utils/tokenHash.js";
 import { hashPassword } from "../../common/utils/password.js";
@@ -85,6 +86,8 @@ export class MembershipService {
 
   async add(input: AddMemberInput, context: ActorContext) {
     assertAdminBoundary(context.role, input.role);
+    // Enforce the tenant-level user limit before activating a new member.
+    await billingService.assertUserWithinLimit(context.tenantId, 1);
     return prisma.$transaction(async (tx) => {
       const user = await tx.appUser.findUnique({ where: { email: input.email } });
       if (!user) throw new AppError("Registered user not found", 404, ErrorCodes.NOT_FOUND);
@@ -244,6 +247,9 @@ export class MembershipService {
       if (invitation.tenant.status !== "ACTIVE") {
         throw new AppError("Tenant is not active", 403, ErrorCodes.FORBIDDEN);
       }
+
+      // Enforce the tenant-level user limit before the invitee becomes active.
+      await billingService.assertUserWithinLimit(invitation.tenantId, 1);
 
       const membership = await tx.tenantMembership.update({
         where: { id: invitation.id },

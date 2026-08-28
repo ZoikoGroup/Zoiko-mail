@@ -4,6 +4,7 @@ import { env } from "../../config/env.js";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
+import { billingService } from "../billing/billing.service.js";
 import { policyService } from "../policy/policy.service.js";
 import { attachmentStorage } from "./attachment.storage.js";
 import { normalizeSubject, uniqueParticipants } from "../message/message.utils.js";
@@ -1231,6 +1232,9 @@ export class MailService {
     });
     if (!membership) throw new AppError("Active membership not found", 404, ErrorCodes.NOT_FOUND);
     if (membership.mailbox) throw new AppError("Mailbox already exists for this member", 409, ErrorCodes.CONFLICT);
+
+    // Enforce the tenant-level mailbox limit before provisioning a new mailbox.
+    await billingService.assertMailboxWithinLimit(tenantId);
 
     const mailbox = await prisma.mailbox.create({
       data: {

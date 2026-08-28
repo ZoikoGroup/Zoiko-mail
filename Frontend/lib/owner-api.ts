@@ -255,13 +255,31 @@ export interface Policy {
   id: string;
   name: string;
   description: string;
-  category: "AI_FEATURES" | "SENDING" | "RATE_LIMITS" | "DATA_HANDLING" | "SECURITY";
+  category: "AI_FEATURES" | "SENDING" | "RETENTION" | "DELETION" | "ABUSE";
   isEnabled: boolean;
   config: Record<string, unknown>;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
 }
+
+/** Backend PolicyType → frontend category */
+const TYPE_TO_CATEGORY: Record<string, Policy["category"]> = {
+  AI: "AI_FEATURES",
+  SENDING: "SENDING",
+  RETENTION: "RETENTION",
+  DELETION: "DELETION",
+  ABUSE: "ABUSE",
+};
+
+/** Frontend category → backend PolicyType */
+const CATEGORY_TO_TYPE: Record<Policy["category"], string> = {
+  AI_FEATURES: "AI",
+  SENDING: "SENDING",
+  RETENTION: "RETENTION",
+  DELETION: "DELETION",
+  ABUSE: "ABUSE",
+};
 
 export async function getPolicies(): Promise<Policy[]> {
   const res = await apiRequest<{ policies: Array<{
@@ -273,7 +291,7 @@ export async function getPolicies(): Promise<Policy[]> {
     id: p.id,
     name: p.name,
     description: p.description ?? "",
-    category: p.type as Policy["category"],
+    category: TYPE_TO_CATEGORY[p.type] ?? "AI_FEATURES",
     isEnabled: p.status === "ACTIVE",
     config: p.rules,
     createdBy: p.createdByUserId,
@@ -292,7 +310,12 @@ export interface CreatePolicyInput {
 export async function createPolicy(input: CreatePolicyInput): Promise<Policy> {
   return apiRequest<Policy>("/policies/", {
     method: "POST",
-    body: input,
+    body: {
+      type: CATEGORY_TO_TYPE[input.category],
+      name: input.name,
+      description: input.description,
+      rules: input.config,
+    },
   });
 }
 

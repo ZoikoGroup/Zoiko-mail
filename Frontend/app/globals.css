@@ -166,3 +166,52 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--bstrong); }
+
+/* ---- Page transitions ------------------------------------------------------
+   Applied to each shell's <main>, keyed by pathname so the content fades and
+   settles on every route change while sidebars/headers stay put. */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.page-enter {
+  animation: page-enter 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ---- Top loading bar --------------------------------------------------------
+   Fixed accent-colored bar shown while a navigation is in flight. */
+.route-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 3px;
+  width: 100%;
+  z-index: 10000;
+  pointer-events: none;
+  background: linear-gradient(90deg, var(--accent), var(--ai));
+  box-shadow: 0 0 8px rgb(from var(--accent) r g b / 0.55);
+}
+.route-progress[data-phase="running"] {
+  transform-origin: left center;
+  animation: route-progress-run 7s cubic-bezier(0.1, 0.55, 0.3, 1) both;
+}
+.route-progress[data-phase="finishing"] {
+  transform-origin: left center;
+  animation: route-progress-done 0.35s ease-in both;
+}
+@keyframes route-progress-run {
+  from { transform: scaleX(0); opacity: 1; }
+  55%  { transform: scaleX(0.65); }
+  to   { transform: scaleX(0.85); opacity: 1; }
+}
+@keyframes route-progress-done {
+  from { transform: scaleX(0.85); opacity: 1; }
+  30%  { transform: scaleX(1); opacity: 1; }
+  to   { transform: scaleX(1); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter { animation-duration: 0.01s; }
+  .route-progress[data-phase="running"] { animation-duration: 0.6s; }
+  .route-progress[data-phase="finishing"] { animation-duration: 0.01s; }
+}

@@ -43,6 +43,8 @@ model Tenant {
   providerEvents      ProviderEvent[]
   suppressionEntries  SuppressionEntry[]
   domainDnsChecks     DomainDnsCheck[]
+  subscriptions       Subscription[]
+  invoices            Invoice[]
 
   @@map("tenants")
 }
@@ -533,6 +535,9 @@ model ConnectedAccount {
   email             String
   scopes            String[]
   status            ConnectedAccountStatus @default(PENDING)
+  accessToken       String?                @map("access_token")
+  refreshToken      String?                @map("refresh_token")
+  tokenExpiresAt    DateTime?              @map("token_expires_at")
   watchExpiresAt    DateTime?              @map("watch_expires_at")
   lastSyncedAt      DateTime?              @map("last_synced_at")
   lastErrorCode     String?                @map("last_error_code")
@@ -926,4 +931,75 @@ enum ProviderEventStatus {
   PROCESSED
   FAILED
   DEAD_LETTER
+}
+
+model Plan {
+  id            String         @id @default(uuid()) @db.Uuid
+  code          String         @unique
+  name          String
+  priceMonthly  Int
+  userLimit     Int
+  mailboxLimit  Int
+  storageLimitGb Int
+  stripePriceId String?        @map("stripe_price_id")
+  active        Boolean        @default(true)
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  subscriptions Subscription[]
+
+  @@index([active])
+  @@map("plans")
+}
+
+model Subscription {
+  id                    String       @id @default(uuid()) @db.Uuid
+  tenantId              String       @map("tenant_id") @db.Uuid
+  planId                String       @map("plan_id") @db.Uuid
+  stripeCustomerId      String?      @map("stripe_customer_id")
+  stripeSubscriptionId  String?      @unique @map("stripe_subscription_id")
+  status                String
+  currentPeriodEnd      DateTime?    @map("current_period_end")
+  trialEnd              DateTime?    @map("trial_end")
+  cancelAtPeriodEnd     Boolean      @default(false) @map("cancel_at_period_end")
+  createdAt             DateTime     @default(now()) @map("created_at")
+  updatedAt             DateTime     @updatedAt @map("updated_at")
+  tenant                Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan                  Plan         @relation(fields: [planId], references: [id])
+  invoices              Invoice[]
+
+  @@index([tenantId])
+  @@index([status])
+  @@map("subscriptions")
+}
+
+model Invoice {
+  id               String           @id @default(uuid()) @db.Uuid
+  tenantId         String           @map("tenant_id") @db.Uuid
+  subscriptionId   String?          @map("subscription_id") @db.Uuid
+  stripeInvoiceId  String?          @unique @map("stripe_invoice_id")
+  number           String?
+  amountDue        Int              @map("amount_due")
+  currency         String           @default("usd")
+  status           String
+  periodStart      DateTime?        @map("period_start")
+  periodEnd        DateTime?        @map("period_end")
+  hostedInvoiceUrl String?          @map("hosted_invoice_url")
+  invoicePdfUrl    String?          @map("invoice_pdf_url")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subscription     Subscription?    @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([status])
+  @@map("invoices")
+}
+
+model StripeWebhookEvent {
+  id            String    @id @default(uuid()) @db.Uuid
+  stripeEventId String    @unique @map("stripe_event_id")
+  eventType     String    @map("event_type")
+  processedAt   DateTime  @default(now()) @map("processed_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@map("stripe_webhook_events")
 }

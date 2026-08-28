@@ -175,8 +175,12 @@ export default function CreateWorkspaceForm({
               Starter
             </option>
 
-            <option value="professional">
-              Professional
+            <option value="business_starter">
+              Business Starter
+            </option>
+
+            <option value="business_pro">
+              Business Pro
             </option>
 
             <option value="enterprise">

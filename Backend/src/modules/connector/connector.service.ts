@@ -6,6 +6,12 @@ import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
 import { env } from "../../config/env.js";
 import { deliveryProtectionService } from "../delivery-protection/delivery-protection.service.js";
+import { encrypt, decrypt } from "../../common/utils/encryption.js";
+
+const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
+const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo";
+const GOOGLE_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"];
 
 interface CreateAccountInput {
   provider: ConnectorProvider;
@@ -320,6 +326,221 @@ export class ConnectorService {
       orderBy: { receivedAt: "desc" },
       take: 100,
     });
+  }
+
+  // ─── Google OAuth ────────────────────────────────────────────────────────────
+
+  getGoogleAuthUrl(state: string): string {
+    if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_REDIRECT_URI) {
+      throw new AppError(
+        "Google OAuth is not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI in the backend .env file.",
+        503,
+        "OAUTH_NOT_CONFIGURED"
+      );
+    }
+    const params = new URLSearchParams({
+      client_id: env.GOOGLE_CLIENT_ID,
+      redirect_uri: env.GOOGLE_REDIRECT_URI,
+      response_type: "code",
+      scope: GOOGLE_SCOPES.join(" "),
+      access_type: "offline",
+      prompt: "consent",
+      state,
+    });
+    return `${GOOGLE_AUTH_URL}?${params.toString()}`;
+  }
+
+  async handleGoogleCallback(
+    code: string,
+    context: { tenantId: string; membershipId: string; userId: string; requestId?: string }
+  ): Promise<{ id: string; provider: string; email: string; status: string }> {
+    if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET || !env.GOOGLE_REDIRECT_URI) {
+      throw new AppError(
+        "Google OAuth is not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI in the backend .env file.",
+        503,
+        "OAUTH_NOT_CONFIGURED"
+      );
+    }
+
+    // Exchange authorization code for tokens
+    const tokenResponse = await fetch(GOOGLE_TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: env.GOOGLE_CLIENT_ID,
+        client_secret: env.GOOGLE_CLIENT_SECRET,
+        redirect_uri: env.GOOGLE_REDIRECT_URI,
+        grant_type: "authorization_code",
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      const error = await tokenResponse.text();
+      throw new AppError(`Google token exchange failed: ${error}`, 400, ErrorCodes.VALIDATION_ERROR);
+    }
+
+    const tokens = await tokenResponse.json() as {
+      access_token: string;
+      refresh_token?: string;
+      expires_in: number;
+      token_type: string;
+      scope: string;
+    };
+
+    // Get user info from Google
+    const userinfoResponse = await fetch(GOOGLE_USERINFO_URL, {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+
+    if (!userinfoResponse.ok) {
+      throw new AppError("Failed to fetch Google user info", 400, ErrorCodes.VALIDATION_ERROR);
+    }
+
+    const userinfo = await userinfoResponse.json() as {
+      id: string;
+      email: string;
+      name: string;
+      picture?: string;
+    };
+
+    // Encrypt tokens before storage
+    const encryptedAccessToken = encrypt(tokens.access_token);
+    const encryptedRefreshToken = tokens.refresh_token ? encrypt(tokens.refresh_token) : null;
+    const tokenExpiresAt = new Date(Date.now() + tokens.expires_in * 1000);
+
+    // Upsert connected account
+    const account = await prisma.$transaction(async (tx) => {
+      const existing = await tx.connectedAccount.findUnique({
+        where: { provider_providerAccountId: { provider: "GMAIL", providerAccountId: userinfo.id } },
+      });
+
+      if (existing) {
+        // Update existing account with new tokens
+        const updated = await tx.connectedAccount.update({
+          where: { id: existing.id },
+          data: {
+            status: "ACTIVE",
+            accessToken: encryptedAccessToken,
+            refreshToken: encryptedRefreshToken ?? existing.refreshToken,
+            tokenExpiresAt,
+            email: userinfo.email,
+            lastErrorCode: null,
+            disconnectedAt: null,
+          },
+          select: {
+            id: true, provider: true, email: true, status: true,
+          },
+        });
+        await auditService.record({
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          eventType: "CONNECTED_ACCOUNT_UPDATED",
+          targetType: "ConnectedAccount",
+          targetId: updated.id,
+          requestId: context.requestId,
+          metadata: { provider: "GMAIL", email: userinfo.email },
+        }, tx);
+        return updated;
+      }
+
+      // Create new account
+      const created = await tx.connectedAccount.create({
+        data: {
+          tenantId: context.tenantId,
+          membershipId: context.membershipId,
+          userId: context.userId,
+          provider: "GMAIL",
+          providerAccountId: userinfo.id,
+          email: userinfo.email,
+          scopes: GOOGLE_SCOPES,
+          status: "ACTIVE",
+          accessToken: encryptedAccessToken,
+          refreshToken: encryptedRefreshToken,
+          tokenExpiresAt,
+        },
+        select: {
+          id: true, provider: true, email: true, status: true,
+        },
+      });
+      await auditService.record({
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        eventType: "CONNECTED_ACCOUNT_CREATED",
+        targetType: "ConnectedAccount",
+        targetId: created.id,
+        requestId: context.requestId,
+        metadata: { provider: "GMAIL", scopes: GOOGLE_SCOPES },
+      }, tx);
+      return created;
+    });
+
+    return account;
+  }
+
+  async refreshGoogleToken(accountId: string): Promise<void> {
+    const account = await prisma.connectedAccount.findUnique({ where: { id: accountId } });
+    if (!account) throw new AppError("Connected account not found", 404, ErrorCodes.NOT_FOUND);
+    if (account.provider !== "GMAIL") throw new AppError("Not a Google account", 400, ErrorCodes.VALIDATION_ERROR);
+    if (!account.refreshToken) throw new AppError("No refresh token available", 400, ErrorCodes.VALIDATION_ERROR);
+    if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
+      throw new AppError("Google OAuth is not configured", 500, ErrorCodes.INTERNAL_ERROR);
+    }
+
+    const refreshToken = decrypt(account.refreshToken);
+    const tokenResponse = await fetch(GOOGLE_TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: env.GOOGLE_CLIENT_ID,
+        client_secret: env.GOOGLE_CLIENT_SECRET,
+        refresh_token: refreshToken,
+        grant_type: "refresh_token",
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      // Refresh token may have been revoked
+      await prisma.connectedAccount.update({
+        where: { id: accountId },
+        data: { status: "REAUTH_REQUIRED", lastErrorCode: "TOKEN_REFRESH_FAILED" },
+      });
+      throw new AppError("Token refresh failed — reauthorization required", 401, ErrorCodes.UNAUTHORIZED);
+    }
+
+    const tokens = await tokenResponse.json() as {
+      access_token: string;
+      expires_in: number;
+    };
+
+    await prisma.connectedAccount.update({
+      where: { id: accountId },
+      data: {
+        accessToken: encrypt(tokens.access_token),
+        tokenExpiresAt: new Date(Date.now() + tokens.expires_in * 1000),
+        status: "ACTIVE",
+        lastErrorCode: null,
+      },
+    });
+  }
+
+  async getGoogleAccessToken(accountId: string, tenantId: string): Promise<string> {
+    const account = await prisma.connectedAccount.findFirst({
+      where: { id: accountId, tenantId, provider: "GMAIL" },
+    });
+    if (!account) throw new AppError("Connected account not found", 404, ErrorCodes.NOT_FOUND);
+    if (!account.accessToken) throw new AppError("No access token available", 400, ErrorCodes.VALIDATION_ERROR);
+
+    // Check if token is expired (with 5 min buffer)
+    if (account.tokenExpiresAt && account.tokenExpiresAt.getTime() < Date.now() + 5 * 60 * 1000) {
+      await this.refreshGoogleToken(accountId);
+      // Re-fetch after refresh
+      const refreshed = await prisma.connectedAccount.findUnique({ where: { id: accountId } });
+      if (!refreshed?.accessToken) throw new AppError("Token refresh failed", 500, ErrorCodes.INTERNAL_ERROR);
+      return decrypt(refreshed.accessToken);
+    }
+
+    return decrypt(account.accessToken);
   }
 
   async replayDeadLetter(eventId: string, tenantId: string, userId: string, requestId?: string) {

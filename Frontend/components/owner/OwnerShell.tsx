@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Menu, X, LogOut } from "lucide-react";
 import { isLoggedIn } from "@/lib/auth-storage";
 import { useMe, useLogout } from "@/lib/auth-hooks";
@@ -22,6 +22,7 @@ function initials(name?: string, email?: string) {
 
 export function OwnerShell({ children }: { children: ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { data, isLoading, error } = useMe();
   const me = data as MeResponse | undefined;
   const logout = useLogout();
@@ -120,7 +121,8 @@ export function OwnerShell({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto">{children}</main>
+        {/* Keyed by pathname: fades the page in on navigation (see .page-enter CSS). */}
+        <main key={pathname} className="page-enter flex-1 overflow-y-auto">{children}</main>
       </div>
     </div>
   );
