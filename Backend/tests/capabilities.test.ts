@@ -1,3 +1,4 @@
+
 import { describe, expect, it } from "vitest";
 import {
   CAPABILITIES,
@@ -8,7 +9,6 @@ import {
   rolesHolding,
   type Capability,
 } from "../src/common/capabilities/index.js";
-
 /**
  * Admin's column, transcribed from the RBAC Permission Matrix §2.
  *

@@ -121,6 +121,43 @@ export class OtpService {
   }
 
   /** Issue a password-reset code (cooldown + hourly cap). No status side effects. */
+  /**
+   * Re-sends a sign-in code.
+   *
+   * Deliberately not `resend`, which refuses once emailVerifiedAt is set
+   * because it exists for registration. Every established account has a
+   * verified address, so that check would make a sign-in code impossible to
+   * re-request. The rate limits are the part that matters here and are kept
+   * identical: without them this endpoint would spray mail at any address
+   * that owns an account.
+   */
+  async resendForSignIn(userId: string): Promise<{ cooldownMs: number }> {
+    const user = await prisma.appUser.findUniqueOrThrow({
+      where: { id: userId },
+      select: { email: true },
+    });
+
+    const hourAgo = new Date(Date.now() - 3_600_000);
+    const sentLastHour = await prisma.emailOtp.count({
+      where: { userId, purpose: PURPOSE, createdAt: { gte: hourAgo } },
+    });
+    if (sentLastHour >= env.OTP_RESEND_MAX_PER_HOUR) {
+      throw new AppError("Too many code requests; try again later", 429, ErrorCodes.OTP_RESEND_LIMIT);
+    }
+
+    const last = await prisma.emailOtp.findFirst({
+      where: { userId, purpose: PURPOSE },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true },
+    });
+    if (last && Date.now() - last.createdAt.getTime() < env.OTP_RESEND_COOLDOWN_MS) {
+      throw new AppError("Please wait before requesting another code", 429, ErrorCodes.OTP_COOLDOWN);
+    }
+
+    const { code } = await this.issue(userId);
+    await this.sendOtpEmail(user.email, code);
+    return { cooldownMs: env.OTP_RESEND_COOLDOWN_MS };
+  }
   async issuePasswordReset(userId: string, email: string): Promise<{ cooldownMs: number }> {
     const hourAgo = new Date(Date.now() - 3_600_000);
     const sentLastHour = await prisma.emailOtp.count({
