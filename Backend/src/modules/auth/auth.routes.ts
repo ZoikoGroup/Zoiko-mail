@@ -19,7 +19,9 @@ import {
   forgotPasswordSchema,
   resetPasswordSchema,
   selectWorkspaceSchema,
-  googleLoginSchema
+  googleLoginSchema,
+  googleResendOtpSchema,
+  googleVerifyOtpSchema
 } from "./auth.schema.js";
 import * as authController from "./auth.controller.js";
 import { verifyOtpSchema } from "./otp.schema.js";
@@ -83,6 +85,14 @@ authRouter.post(
   validate(googleLoginSchema),
   authController.loginWithGoogle
 );
+authRouter.post("/google", loginRateLimit, validate(googleLoginSchema), authController.googleLogin);
+
+// Second leg: the emailed code in exchange for a session. Rate limited like
+// login, because a guessable code is a credential.
+authRouter.post("/google/verify-otp", loginRateLimit, validate(googleVerifyOtpSchema), authController.googleVerifyOtp);
+
+// Re-send, bounded by otpService's own cooldown and hourly cap on top of this.
+authRouter.post("/google/resend-otp", loginRateLimit, validate(googleResendOtpSchema), authController.googleResendOtp);
 
 authRouter.post("/forgot-password", passwordResetRateLimit, validate(forgotPasswordSchema), authController.forgotPassword);
 authRouter.post("/reset-password", passwordResetRateLimit, validate(resetPasswordSchema), authController.resetPassword);

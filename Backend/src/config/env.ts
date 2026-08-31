@@ -139,6 +139,27 @@ const envSchema = z.object({
       message: "is required when FLAG_GOOGLE_LOGIN_ENABLED=true",
     });
   }
+
+  // One client id serves two different Google features, and they need
+  // different things:
+  //
+  //   Connecting a Gmail mailbox is an authorization-code flow, so it needs
+  //   the secret and a registered redirect URI as well.
+  //   Signing in verifies an ID token against Google's keys, which needs
+  //   nothing but the client id.
+  //
+  // So a half-configured connector is still an error, but requiring the
+  // secret merely because a client id exists would break sign-in, which is
+  // legitimately configured with the id alone. The trio is demanded only
+  // once something connector-specific has been set.
+  const connectorVars = [value.GOOGLE_CLIENT_SECRET, value.GOOGLE_REDIRECT_URI] as const;
+  if (connectorVars.some(Boolean) && !(value.GOOGLE_CLIENT_ID && connectorVars.every(Boolean))) {
+    context.addIssue({
+      code: "custom",
+      path: ["GOOGLE_CLIENT_SECRET"],
+      message: "GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI configure the Gmail connector and require GOOGLE_CLIENT_ID too; sign-in alone needs only GOOGLE_CLIENT_ID",
+    });
+  }
   // Google OAuth vars must all be present or all absent
   // const googleVars = [value.GOOGLE_CLIENT_ID, value.GOOGLE_CLIENT_SECRET, value.GOOGLE_REDIRECT_URI] as const;
   // if (googleVars.some(Boolean) && !googleVars.every(Boolean)) {

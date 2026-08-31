@@ -142,6 +142,10 @@ export interface AuthResponse {
   state?: string;
   platformRole?: string;
   platformToken?: string;
+  // OTP_REQUIRED: Google verified the identity, the code is still owed.
+  // The address is echoed back so the code screen can name it without
+  // the client having to remember which account was picked.
+  sentTo?: string;
 }
 
 export interface MeResponse {
@@ -213,9 +217,65 @@ export async function loginWithGoogle(input: GoogleLoginInput): Promise<AuthResp
     auth: false,
   });
   const { accessToken, refreshToken, platformToken } = extractTokens(data);
+
+  clearTokens();
+  clearPlatformToken();
+
   if (accessToken) setTokens(accessToken, refreshToken);
   if (platformToken) setPlatformToken(platformToken);
   return data;
+}
+
+export async function googleLogin(idToken: string): Promise<AuthResponse> {
+  const data = await apiRequest<AuthResponse>("/auth/google", {
+    method: "POST",
+    body: { idToken },
+    auth: false,
+  });
+  const { accessToken, refreshToken, platformToken } = extractTokens(data);
+
+  clearTokens();
+  clearPlatformToken();
+
+  if (accessToken) setTokens(accessToken, refreshToken);
+  if (platformToken) setPlatformToken(platformToken);
+  return data;
+}
+
+/**
+ * Second leg of Google sign-in: the emailed code in exchange for a session.
+ *
+ * Session handling is identical to `login` and `googleLogin` because the
+ * response is the same AuthState union — this is where a Google sign-in
+ * actually becomes a session, so it is the first point tokens exist.
+ */
+export async function googleVerifyOtp(
+  pendingToken: string,
+  code: string
+): Promise<AuthResponse> {
+  const data = await apiRequest<AuthResponse>("/auth/google/verify-otp", {
+    method: "POST",
+    body: { pendingToken, code },
+    auth: false,
+  });
+  const { accessToken, refreshToken, platformToken } = extractTokens(data);
+
+  // A new session must replace any previous one, for the same reason as login.
+  clearTokens();
+  clearPlatformToken();
+  if (accessToken) setTokens(accessToken, refreshToken);
+  if (platformToken) setPlatformToken(platformToken);
+  return data;
+}
+
+export async function googleResendOtp(
+  pendingToken: string
+): Promise<{ cooldownMs: number }> {
+  return apiRequest<{ cooldownMs: number }>("/auth/google/resend-otp", {
+    method: "POST",
+    body: { pendingToken },
+    auth: false,
+  });
 }
 
 export async function register(input: RegisterInput): Promise<AuthResponse> {

@@ -91,8 +91,26 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, result, req.requestId);
 });
 
-export const loginWithGoogle = asyncHandler(async (req: Request, res: Response) => {
-  const result = await authService.loginWithGoogle(req.body, getRequestContext(req));
+// export const loginWithGoogle = asyncHandler(async (req: Request, res: Response) => {
+//   const result = await authService.loginWithGoogle(req.body, getRequestContext(req));
+/**
+ * Serialises a Google sign-in outcome onto the response.
+ *
+ * Shared by both legs — the token exchange and the code verification — so
+ * the client sees one shape throughout. A second copy of this dispatch is a
+ * second place for a state to go unhandled, which is how one leg ends up
+ * silently dropping a guard the other honours.
+ */
+function respondWithGoogleAuthState(
+  req: Request,
+  res: Response,
+  result: Awaited<ReturnType<typeof authService.googleLogin>>
+): void {
+
+  if (!("state" in result)) {
+    sendSuccess(res, 201, result, req.requestId);
+    return;
+  }
 
   if (result.state === "SIGNED_IN") {
     sendSuccess(
@@ -122,6 +140,38 @@ export const loginWithGoogle = asyncHandler(async (req: Request, res: Response) 
     return;
   }
 
+  sendSuccess(res, 200, result, req.requestId);
+}
+
+export const loginWithGoogle = asyncHandler(async (req: Request, res: Response) => {
+  const result = await authService.loginWithGoogle(req.body, getRequestContext(req));
+  respondWithGoogleAuthState(req, res, result);
+});
+
+export const googleLogin = asyncHandler(async (req: Request, res: Response) => {
+  const result = await authService.googleLogin(req.body, getRequestContext(req));
+  respondWithGoogleAuthState(req, res, result);
+});
+
+/**
+ * Second leg of Google sign-in: the code in exchange for a session.
+ *
+ * Reuses the same response shape as googleLogin, because the outcome is an
+ * AuthState either way — success is SIGNED_IN, and a suspension discovered
+ * between sending and entering the code still surfaces as its own state.
+ */
+export const googleVerifyOtp = asyncHandler(async (req: Request, res: Response) => {
+  const result = await authService.verifyGoogleOtp(
+    req.body.pendingToken,
+    req.body.code,
+    getRequestContext(req),
+    req.body.tenantId
+  );
+  respondWithGoogleAuthState(req, res, result);
+});
+
+export const googleResendOtp = asyncHandler(async (req: Request, res: Response) => {
+  const result = await authService.resendGoogleOtp(req.body.pendingToken);
   sendSuccess(res, 200, result, req.requestId);
 });
 

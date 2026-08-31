@@ -1,17 +1,19 @@
 "use client";
 import { GoogleLogin } from "@react-oauth/google";
-import { useGoogleLogin } from "@/lib/auth-hooks";
+// import { useGoogleLogin } from "@/lib/auth-hooks";
 import { useState } from "react";
 import Link from "next/link";
-import { FaEnvelope, FaGoogle } from "react-icons/fa";
+import { FaEnvelope } from "react-icons/fa";
 
 import { ApiError } from "@/lib/api-client";
-import { useLogin } from "@/lib/auth-hooks";
+import { useLogin, useGoogleLogin } from "@/lib/auth-hooks";
 
 import {
   FormInput,
   PasswordInput,
+  GoogleSignInButton,
 } from "@/components/auth";
+import GoogleOtpStep from "@/components/auth/GoogleOtpStep";
 
 interface LoginFormProps {
   onRegister: () => void;
@@ -31,6 +33,13 @@ export default function LoginForm({
 }: LoginFormProps) {
   const loginMutation = useLogin();
   const googleLogin = useGoogleLogin();
+  const googleLoginMutation = useGoogleLogin();
+
+  // Set when Google sign-in comes back asking for a code. Holding it here
+  // keeps the whole two-leg flow on one screen, so a refresh mid-flow lands
+  // back on a clean login rather than a half-authenticated dead end.
+  const [googleOtp, setGoogleOtp] = useState<{ pendingToken: string; sentTo: string } | null>(null);
+
   const [rememberMe, setRememberMe] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -101,7 +110,23 @@ export default function LoginForm({
       ? loginMutation.error.message
       : loginMutation.error
         ? "Something went wrong."
-        : null;
+        // : null;
+        // ? "Something went wrong."
+        : googleLoginMutation.error instanceof ApiError
+          ? googleLoginMutation.error.message
+          : googleLoginMutation.error
+            ? "Something went wrong."
+            : null;
+
+  if (googleOtp) {
+    return (
+      <GoogleOtpStep
+        pendingToken={googleOtp.pendingToken}
+        sentTo={googleOtp.sentTo}
+        onCancel={() => setGoogleOtp(null)}
+      />
+    );
+  }
 
   return (
     <>
@@ -120,9 +145,72 @@ export default function LoginForm({
         </p>
       </div>
 
+      <div className="mt-3">
+        <GoogleSignInButton
+          onSuccess={(idToken) =>
+            googleLoginMutation.mutate(
+              { idToken },
+              {
+                onSuccess: (data) => {
+                  if (data.state === "OTP_REQUIRED") {
+                    setGoogleOtp({
+                      pendingToken: data.pendingToken,
+                      // Falls back to the typed address so the screen always names
+                      // somewhere, even if an older API omits the echo.
+                      sentTo: data.sentTo ?? data.user?.email ?? formData.email,
+                    });
+                  }
+                },
+              }
+            )
+          }
+          disabled={loginMutation.isPending || googleLoginMutation.isPending}
+        />
+
+        {googleLogin.isError && (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+            {googleLogin.error instanceof ApiError
+              ? googleLogin.error.message
+              : "Google sign-in failed. Please try again."}
+          </div>
+        )}
+      </div>
+
+      <div className="relative m-2">
+        <div className="absolute inset-0 flex items-center">
+          <div className="w-full border-t border-slate-200 dark:border-slate-700" />
+        </div>
+
+        <div className="relative flex justify-center">
+          <span className="bg-white px-4 text-sm text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+            OR
+          </span>
+        </div>
+      </div>
       {/* ================================================
           FORM
       ================================================= */}
+
+      {/* <GoogleSignInButton
+        onSuccess={(idToken) =>
+          googleLoginMutation.mutate(
+            { idToken },
+            {
+              onSuccess: (data) => {
+                if (data.state === "OTP_REQUIRED") {
+                  setGoogleOtp({
+            pendingToken: data.pendingToken,
+            // Falls back to the typed address so the screen always names
+            // somewhere, even if an older API omits the echo.
+            sentTo: data.sentTo ?? data.user?.email ?? formData.email,
+          });
+                }
+              },
+            }
+          )
+        }
+        disabled={loginMutation.isPending || googleLoginMutation.isPending}
+      /> */}
 
       <form
         onSubmit={onSubmit}
@@ -198,7 +286,7 @@ export default function LoginForm({
 
         <button
           type="submit"
-          disabled={loginMutation.isPending}
+          disabled={loginMutation.isPending || googleLoginMutation.isPending}
           className="flex h-12 w-full items-center justify-center rounded-xl bg-teal-600 text-sm font-semibold text-white transition-all duration-300 hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {loginMutation.isPending
@@ -210,7 +298,7 @@ export default function LoginForm({
             Divider
         ====================================================== */}
 
-        <div className="relative">
+        {/* <div className="relative">
           <div className="absolute inset-0 flex items-center">
             <div className="w-full border-t border-slate-200 dark:border-slate-700" />
           </div>
@@ -220,82 +308,95 @@ export default function LoginForm({
               OR
             </span>
           </div>
-        </div>
+        </div> */}
 
         {/* =====================================================
             Google Login
         ====================================================== */}
 
-        {/* <button
-          type="button"
-          className="flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-slate-300 bg-white text-sm font-medium text-slate-700 transition-all duration-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-        >
-          <FaGoogle className="text-lg text-red-500" />
-
-          Continue with Google
-        </button>  */}
-
-        <div className="flex w-full justify-center [&>div]:w-full">
+        {/* <div className="flex w-full justify-center [&>div]:w-full">
           <GoogleLogin
             onSuccess={(cr) => {
-              if (cr.credential) googleLogin.mutate({ credential: cr.credential });
+              if (cr.credential) googleLogin.mutate({ idToken: cr.credential });
             }}
             onError={() => console.error("Google sign-in failed")}
             theme="outline"
             size="large"
             shape="rectangular"
             text="continue_with"
+            logo_alignment="center"
             width="100%"
           />
-        </div>
+        </div> */}
+        {/* <div className="mt-3">
+          <GoogleSignInButton
+            onSuccess={(idToken) =>
+              googleLoginMutation.mutate(
+                { idToken },
+                {
+                  onSuccess: (data) => {
+                    if (data.state === "OTP_REQUIRED") {
+                      setGoogleOtp({
+                        pendingToken: data.pendingToken,
+                        // Falls back to the typed address so the screen always names
+                        // somewhere, even if an older API omits the echo.
+                        sentTo: data.sentTo ?? data.user?.email ?? formData.email,
+                      });
+                    }
+                  },
+                }
+              )
+            }
+            disabled={loginMutation.isPending || googleLoginMutation.isPending}
+          />
 
-        {googleLogin.isError && (
-          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
-            {googleLogin.error instanceof ApiError
-              ? googleLogin.error.message
-              : "Google sign-in failed. Please try again."}
-          </div>
-        )}
+          {googleLogin.isError && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+              {googleLogin.error instanceof ApiError
+                ? googleLogin.error.message
+                : "Google sign-in failed. Please try again."}
+            </div>
+          )}
+        </div> */}
+      </form>
 
-        {/* =====================================================
+      {/* =====================================================
             Register Link
         ====================================================== */}
+      <div className="text-center mt-3">
+        <p className="text-sm text-slate-600 dark:text-slate-400">
+          Don&apos;t have an account?{" "}
+          <button
+            type="button"
+            onClick={onRegister}
+            className="font-semibold text-teal-600 transition-colors hover:text-teal-700 dark:text-teal-400 dark:hover:text-teal-300"
+          >
+            Create one
+          </button>
+        </p>
+      </div>
 
-        <div className="text-center">
-          <p className="text-sm text-slate-600 dark:text-slate-400">
-            Don&apos;t have an account?{" "}
-            <button
-              type="button"
-              onClick={onRegister}
-              className="font-semibold text-teal-600 transition-colors hover:text-teal-700 dark:text-teal-400 dark:hover:text-teal-300"
-            >
-              Create one
-            </button>
-          </p>
-        </div>
-
-        {/* =====================================================
+      {/* =====================================================
             Terms
         ====================================================== */}
 
-        <div className="text-center text-xs leading-6 text-slate-500 dark:text-slate-500">
-          By continuing you agree to our{" "}
-          <Link
-            href="/terms"
-            className="font-medium text-teal-600 hover:underline dark:text-teal-400"
-          >
-            Terms of Service
-          </Link>{" "}
-          and{" "}
-          <Link
-            href="/privacy"
-            className="font-medium text-teal-600 hover:underline dark:text-teal-400"
-          >
-            Privacy Policy
-          </Link>
-          .
-        </div>
-      </form>
+      <div className="text-center text-xs leading-6 text-slate-500 dark:text-slate-500 mt-2">
+        By continuing you agree to our{" "}
+        <Link
+          href="/terms"
+          className="font-medium text-teal-600 hover:underline dark:text-teal-400"
+        >
+          Terms of Service
+        </Link>{" "}
+        and{" "}
+        <Link
+          href="/privacy"
+          className="font-medium text-teal-600 hover:underline dark:text-teal-400"
+        >
+          Privacy Policy
+        </Link>
+        .
+      </div>
     </>
   );
 }

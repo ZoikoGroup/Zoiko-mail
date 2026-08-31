@@ -56,16 +56,26 @@ export default function AuthShowcase() {
             <Image src="/ZoikoMail_Logo_DarkBG_PNG.png" width={40} height={40} className="h-10 w-auto" alt="Zoiko Mail" />
           </div>
         </div> */}
-        <div className="mb-6 text-left">
+        <div className="mb-8 text-left">
+          {/*
+            The light lockup, because this panel is a dark teal gradient in both
+            themes. The default asset is navy ink on an opaque white field inside
+            a rounded border -- a standalone lockup, so dropping it here rendered
+            a white card floating on the gradient. This variant is the same
+            artwork with the frame removed, the background made transparent, and
+            the navy lifted to near-white so it sits on the panel rather than on
+            top of it.
+          */}
           <Image
-            src="/ZoikoMail_Logo_DarkBG_PNG.png"
-            width={400}
-            height={100}
-            className=" h-12 w-auto"
+            src="/zoiko-wordmark-dark.png"
+            width={277}
+            height={36}
+            className="h-9 w-auto"
             alt="Zoiko Mail"
             priority
           />
-          <p className="mt-2 text-sm md:text-base text-slate-700 dark:text-slate-400">
+          {/* Was slate-700, which is near-invisible on this gradient. */}
+          <p className="mt-3 max-w-sm text-sm text-white/70 md:text-base">
             Securely access your workspace
           </p>
         </div>
