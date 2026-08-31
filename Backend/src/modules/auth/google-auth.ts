@@ -12,16 +12,23 @@ export interface GoogleUserInfo {
 }
 
 export async function verifyGoogleToken(idToken: string): Promise<GoogleUserInfo> {
-  if (!env.GOOGLE_CLIENT_ID) {
+  // Accept either the backend's connector client id or the browser's
+  // Sign in with Google client id — the two Google features are legitimately
+  // configured with different clients (see env.ts GOOGLE_SIGNIN_CLIENT_ID).
+  const audiences = [env.GOOGLE_CLIENT_ID, env.GOOGLE_SIGNIN_CLIENT_ID]
+    .filter((value): value is string => Boolean(value))
+    .filter((value, index, all) => all.indexOf(value) === index);
+
+  if (audiences.length === 0) {
     throw new AppError("Google OAuth is not configured on the server", 500, ErrorCodes.INTERNAL_ERROR);
   }
 
-  const client = new OAuth2Client(env.GOOGLE_CLIENT_ID);
+  const client = new OAuth2Client(audiences[0]);
 
   try {
     const ticket = await client.verifyIdToken({
       idToken,
-      audience: env.GOOGLE_CLIENT_ID,
+      audience: audiences,
     });
     
     const payload = ticket.getPayload();

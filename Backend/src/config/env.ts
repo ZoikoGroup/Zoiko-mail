@@ -85,6 +85,12 @@ const envSchema = z.object({
   GOOGLE_CLIENT_ID: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
   GOOGLE_CLIENT_SECRET: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
   GOOGLE_REDIRECT_URI: z.preprocess(blankAsUndefined, z.string().url().optional()),
+  // The client ID the browser's Sign In with Google button is initialized
+  // with (NEXT_PUBLIC_GOOGLE_CLIENT_ID). It can differ from GOOGLE_CLIENT_ID:
+  // the ID-token leg only needs the public client ID, while the Gmail
+  // connector needs the secret + redirect URI. ID tokens issued for this
+  // audience are accepted on /auth/google alongside GOOGLE_CLIENT_ID.
+  GOOGLE_SIGNIN_CLIENT_ID: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
   // Encryption key for token-at-rest (64 hex chars = 32 bytes for AES-256-GCM)
   ENCRYPTION_KEY: z.preprocess(blankAsUndefined, z.string().length(64).optional()),
   // Stripe — used for subscription & billing (TEST mode). All three are optional:
