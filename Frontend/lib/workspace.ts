@@ -2,11 +2,12 @@
 // The backend is the source of truth for role determination — never email,
 // localStorage, URL parameters, or frontend dropdowns.
 export function resolveWorkspaceHref(role?: string): string {
-  if (role === "SUPPORT") return "/support";
+  // A tenant-scoped SUPPORT member lands on the read-only tenant support
+  // page — NOT the global /support platform console (staff only).
+  if (role === "SUPPORT") return "/tenant-support";
   // Admin and Owner land on the admin workspace. Owner holds every Admin
   // capability plus more, so /admin is a valid subset view until the Owner
   // workspace exists; the Accountable group is added there later.
-  // if (role === "ADMIN" || role === "OWNER") return "/admin";
   if (role === "OWNER") return "/owner";
   if (role === "ADMIN") return "/admin";
   return "/inbox";

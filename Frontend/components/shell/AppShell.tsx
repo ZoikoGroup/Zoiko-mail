@@ -48,14 +48,14 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
   }, [router]);
 
-  // Role guard: a SUPPORT member (or any future role that isn't OWNER/ADMIN/
-  // MEMBER) should never see this dashboard's nav or pages — send them to
-  // the one their role actually resolves to.
-  // useEffect(() => {
-  //   if (me && !MEMBER_DASHBOARD_ROLES.includes(me.membership.role)) {
-  //     router.replace(resolveWorkspaceHref(me.membership.role));
-  //   }
-  // }, [me, router]);
+  // Role guard: a SUPPORT member should never see this dashboard's nav or
+  // pages — redirect them to the tenant-scoped support workspace. Any other
+  // non-member role falls through to the AccessDenied warning below.
+  useEffect(() => {
+    if (me && me.membership.role === "SUPPORT") {
+      router.replace(resolveWorkspaceHref(me.membership.role));
+    }
+  }, [me, router]);
 
   // Loading gate: don't render the shell until we know the user's role.
   // Without this, a SUPPORT user would briefly see the member dashboard nav
@@ -70,6 +70,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   // if (!MEMBER_DASHBOARD_ROLES.includes(me.membership.role)) {
   //   return null;
   // }
+  // A SUPPORT user is already being redirected by the effect above; the
+  // in-render guard below catches any other non-member role.
+  if (me.membership.role === "SUPPORT") {
+    return null;
+  }
   if (!MEMBER_DASHBOARD_ROLES.includes(me.membership.role)) {
     return <AccessDenied role={me.membership.role} dashboard="member" />;
   }

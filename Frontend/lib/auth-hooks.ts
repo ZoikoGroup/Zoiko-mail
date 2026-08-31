@@ -32,7 +32,7 @@ import {
   type ResetPasswordInput,
 } from "./auth-api";
 import { getPlatformToken, isLoggedIn } from "./auth-storage";
-import { resolveWorkspaceHref, USER_WORKSPACE_HREF } from "./workspace";
+import { resolveWorkspaceHref } from "./workspace";
 
 // Server state (the logged-in user) lives in TanStack Query, keyed by ['me'].
 export function useMe() {
@@ -147,8 +147,10 @@ export function useGoogleVerifyOtp() {
       if (data.state === "STAFF_CONSOLE") {
         href = "/support";
       } else if (data.state === "SIGNED_IN") {
-        // Google sign-in lands in the user's own workspace, whatever their role.
-        href = USER_WORKSPACE_HREF;
+        // Google sign-in still lands in the user's own role-resolved
+        // workspace (SUPPORT → /tenant-support, ADMIN → /admin, etc.).
+        const role = data.membership?.role;
+        href = resolveWorkspaceHref(role);
       } else if (data.state === "WORKSPACE_SELECTION") {
         if (typeof window !== "undefined") {
           sessionStorage.setItem("zoiko.selection_token", data.selectionToken ?? "");
@@ -213,8 +215,9 @@ export function useGoogleLogin() {
       if (data.state === "STAFF_CONSOLE") {
         href = "/support";
       } else if (data.state === "SIGNED_IN") {
-        // Google sign-in lands in the user's own workspace, whatever their role.
-        href = USER_WORKSPACE_HREF;
+        // Google sign-in lands in the user's role-resolved workspace.
+        const role = data.membership?.role;
+        href = resolveWorkspaceHref(role);
       } else if (data.state === "WORKSPACE_SELECTION") {
         if (typeof window !== "undefined") {
           sessionStorage.setItem(

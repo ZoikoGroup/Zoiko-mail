@@ -15,8 +15,10 @@ import { useActiveSupportGrant } from "@/lib/admin-hooks";
 import { Pill } from "@/components/admin/ui";
 import { AccessDenied } from "@/components/ui/AccessDenied";
 
-/** Roles allowed into the admin workspace; anyone else gets a warning. */
-const ADMIN_SHELL_ROLES = ["OWNER", "ADMIN", "SUPPORT"];
+/** Roles allowed into the admin workspace; anyone else gets a warning.
+ *  A tenant SUPPORT member lands on /tenant-support and must not manage
+ *  users/domains/billing here. */
+const ADMIN_SHELL_ROLES = ["OWNER", "ADMIN"];
 
 function initials(name?: string, email?: string) {
   const base = (name?.trim() || email || "?").trim();

@@ -29,6 +29,25 @@ async function setupSupport(owner: RegisteredUser, email: string) {
   return { support, membership, token };
 }
 
+/**
+ * Mints a real staff PLATFORM token by promoting a registered account to
+ * SUPER_ADMIN and logging in — the STAFF_CONSOLE login issues a platform
+ * token carrying platformRole. The global /support/platform console is staff
+ * only, so the platform-console tests exercise it with genuine staff sessions
+ * (a tenant-scoped SUPPORT membership is verified to be DENIED elsewhere).
+ */
+async function staffPlatformToken(email: string): Promise<string> {
+  const staff = await registerUser(app, { email });
+  await prisma.appUser.update({ where: { id: staff.userId }, data: { platformRole: "SUPER_ADMIN" } });
+  const login = await request(app).post("/api/v1/auth/login")
+    .send({ email: staff.email, password: staff.password })
+    .expect(200);
+  expect(login.body.data.state).toBe("STAFF_CONSOLE");
+  const platformToken = login.body.data.platformToken as string;
+  expect(platformToken).toBeTruthy();
+  return platformToken;
+}
+
 describe("Platform support console", () => {
   it("is gated: unauthenticated -> 401, non-support roles -> 403", async () => {
     const owner = await registerUser(app, { email: "pc-owner@zoiko.test", tenantName: "Gate Tenant" });
@@ -37,17 +56,18 @@ describe("Platform support console", () => {
     await request(app).get("/api/v1/support/platform/overview").set(authHeader(owner.accessToken)).expect(403);
   });
 
-  it("allows a SUPPORT membership via a tenant-scoped access token", async () => {
+  it("denies a tenant-scoped SUPPORT membership from the platform console", async () => {
     const owner = await registerUser(app, { email: "pc-owner2@zoiko.test", tenantName: "Overview Tenant" });
     const { token } = await setupSupport(owner, "pc-agent@zoiko.test");
 
-    const res = await request(app).get("/api/v1/support/platform/overview").set(authHeader(token)).expect(200);
-    expect(res.body.data.stats).toMatchObject({ activeTenants: expect.any(Number), activeMailboxes: expect.any(Number) });
-    expect(res.body.data.providerHealth).toBeDefined();
-    expect(Array.isArray(res.body.data.issues)).toBe(true);
+    // A SUPPORT membership is a workspace-scoped, read-only role granted by an
+    // Owner. It must never reach the GLOBAL platform console, which can search
+    // and investigate ANY tenant. Only genuine staff (platform token or
+    // platformRole SUPPORT/SUPER_ADMIN) belong here.
+    await request(app).get("/api/v1/support/platform/overview").set(authHeader(token)).expect(403);
   });
 
-  it("allows staff via a platform token (no tenant membership required)", async () => {
+  it("still allows staff via a platform token (no tenant membership required)", async () => {
     const staff = await registerUser(app, { email: "pc-staff@zoiko.test" });
     await prisma.appUser.update({ where: { id: staff.userId }, data: { platformRole: "SUPER_ADMIN" } });
 
@@ -64,7 +84,7 @@ describe("Platform support console", () => {
 
   it("searches and drills into tenants; 404 for unknown tenants", async () => {
     const owner = await registerUser(app, { email: "pc-owner3@zoiko.test", tenantName: "Drilldown Corp" });
-    const { token } = await setupSupport(owner, "pc-agent2@zoiko.test");
+    const token = await staffPlatformToken("pc-platform3@zoiko.test");
 
     const search = await request(app).get("/api/v1/support/platform/tenants?q=Drilldown").set(authHeader(token)).expect(200);
     expect(search.body.data.tenants.some((t: { id: string }) => t.id === owner.tenantId)).toBe(true);
@@ -81,9 +101,8 @@ describe("Platform support console", () => {
       .set(authHeader(token)).expect(404);
   });
 
-  it("exposes operational logs to a SUPPORT member", async () => {
-    const owner = await registerUser(app, { email: "pc-owner4@zoiko.test", tenantName: "Logs Tenant" });
-    const { token } = await setupSupport(owner, "pc-agent3@zoiko.test");
+  it("exposes operational logs to platform staff", async () => {
+    const token = await staffPlatformToken("pc-platform4@zoiko.test");
 
     const expectations: Array<[string, string]> = [
       ["/provider-events", "events"],
@@ -99,7 +118,7 @@ describe("Platform support console", () => {
     }
   });
 
-  it("lets a SUPER_ADMIN revoke any grant, a SUPPORT member only their own", async () => {
+  it("lets a SUPER_ADMIN revoke any grant; a tenant SUPPORT member is denied from the console entirely", async () => {
     const owner = await registerUser(app, { email: "pc-owner5@zoiko.test", tenantName: "Grants Tenant" });
     const agentA = await setupSupport(owner, "pc-agentA@zoiko.test");
     const agentB = await setupSupport(owner, "pc-agentB@zoiko.test");
@@ -109,34 +128,37 @@ describe("Platform support console", () => {
     const grantB = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
       .send({ supportMembershipId: agentB.membership.id, reason: "Investigate delivery failure B", expiresInMinutes: 30, scopes: ["DELIVERY_DIAGNOSTICS"] }).expect(201);
 
-    // agentA cannot revoke agentB's grant...
-    await request(app).delete(`/api/v1/support/platform/grants/${grantB.body.data.id}`)
-      .set(authHeader(agentA.token)).expect(403);
-    // ...but can revoke their own.
+    // A tenant-scoped SUPPORT seat cannot reach the platform console at all
+    // (403 from requireSupportAccess), no matter whose grant it targets.
     await request(app).delete(`/api/v1/support/platform/grants/${grantA.body.data.id}`)
-      .set(authHeader(agentA.token)).expect(200);
-
-    // A SUPER_ADMIN platform session can revoke agentB's grant.
-    const staff = await registerUser(app, { email: "pc-superadmin@zoiko.test" });
-    await prisma.appUser.update({ where: { id: staff.userId }, data: { platformRole: "SUPER_ADMIN" } });
-    const login = await request(app).post("/api/v1/auth/login")
-      .send({ email: staff.email, password: staff.password }).expect(200);
+      .set(authHeader(agentA.token)).expect(403);
     await request(app).delete(`/api/v1/support/platform/grants/${grantB.body.data.id}`)
-      .set(authHeader(login.body.data.platformToken)).expect(200);
+      .set(authHeader(agentB.token)).expect(403);
+
+    // A SUPER_ADMIN platform session can revoke either grant.
+    const superToken = await staffPlatformToken("pc-superadmin@zoiko.test");
+    await request(app).delete(`/api/v1/support/platform/grants/${grantA.body.data.id}`)
+      .set(authHeader(superToken)).expect(200);
+    await request(app).delete(`/api/v1/support/platform/grants/${grantB.body.data.id}`)
+      .set(authHeader(superToken)).expect(200);
   });
 
-  it("serves grant-scoped diagnostics to the assigned support member", async () => {
+  it("serves grant-scoped diagnostics only to staff; a tenant SUPPORT seat is denied", async () => {
     const owner = await registerUser(app, { email: "pc-owner6@zoiko.test", tenantName: "Diag Tenant" });
     const agent = await setupSupport(owner, "pc-agent4@zoiko.test");
+    const staffToken = await staffPlatformToken("pc-platform-diag@zoiko.test");
 
-    // No grant ID -> 403.
+    // A tenant-scoped SUPPORT seat cannot even reach the console.
     await request(app).get("/api/v1/support/platform/diagnostics").set(authHeader(agent.token)).expect(403);
+
+    // Staff without a grant ID -> 403.
+    await request(app).get("/api/v1/support/platform/diagnostics").set(authHeader(staffToken)).expect(403);
 
     const grant = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
       .send({ supportMembershipId: agent.membership.id, reason: "Investigate tenant configuration failure", expiresInMinutes: 30, scopes: ["TENANT_DIAGNOSTICS", "AUDIT_READ"] }).expect(201);
 
     const ok = await request(app).get(`/api/v1/support/platform/diagnostics?grantId=${grant.body.data.id}`)
-      .set(authHeader(agent.token)).expect(200);
+      .set(authHeader(staffToken)).expect(200);
     expect(ok.body.data.grant.id).toBe(grant.body.data.id);
     expect(ok.body.data.tenant).toMatchObject({ id: owner.tenantId });
     expect(ok.body.data.audit).toBeDefined();
@@ -145,12 +167,13 @@ describe("Platform support console", () => {
     // Expired grants are rejected.
     await prisma.supportAccessGrant.update({ where: { id: grant.body.data.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
     await request(app).get(`/api/v1/support/platform/diagnostics?grantId=${grant.body.data.id}`)
-      .set(authHeader(agent.token)).expect(403);
+      .set(authHeader(staffToken)).expect(403);
   });
 
   it("searches and details mailboxes; 404 for unknown", async () => {
     const owner = await registerUser(app, { email: "pc-mb-owner@zoiko.test", tenantName: "Mailbox Tenant" });
-    const { token, membership } = await setupSupport(owner, "pc-mb-agent@zoiko.test");
+    const { membership } = await setupSupport(owner, "pc-mb-agent@zoiko.test");
+    const token = await staffPlatformToken("pc-mb-platform@zoiko.test");
 
     const domain = await prisma.mailDomain.create({
       data: { tenantId: owner.tenantId, domainName: "mb-test.zoiko.test", verificationStatus: "VERIFIED", verificationToken: "test-token-mb", sendingEnabled: true },
@@ -182,7 +205,7 @@ describe("Platform support console", () => {
 
   it("searches and details domains; 404 for unknown", async () => {
     const owner = await registerUser(app, { email: "pc-dom-owner@zoiko.test", tenantName: "Domain Tenant" });
-    const { token } = await setupSupport(owner, "pc-dom-agent@zoiko.test");
+    const token = await staffPlatformToken("pc-dom-platform@zoiko.test");
 
     const domain = await prisma.mailDomain.create({
       data: { tenantId: owner.tenantId, domainName: "dom-test.zoiko.test", verificationStatus: "PENDING", verificationToken: "test-token-dom", sendingEnabled: false },
