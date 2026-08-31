@@ -5,7 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { LogOut, Menu, X } from "lucide-react";
-import { isLoggedIn } from "@/lib/auth-storage";
+import { useWorkspaceAccess } from "@/lib/workspace-access";
 import { useMe, useLogout } from "@/lib/auth-hooks";
 import type { MeResponse } from "@/lib/auth-api";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
@@ -13,7 +13,6 @@ import { useCan, useCapabilities } from "@/lib/admin-capabilities";
 import { visibleNav, type AdminNavItem } from "@/lib/admin-nav";
 import { useActiveSupportGrant } from "@/lib/admin-hooks";
 import { Pill } from "@/components/admin/ui";
-import { AccessDenied } from "@/components/ui/AccessDenied";
 
 /** Roles allowed into the admin workspace; anyone else gets a warning. */
 const ADMIN_SHELL_ROLES = ["OWNER", "ADMIN", "SUPPORT"];
@@ -32,17 +31,14 @@ export function AdminShell({ children }: { children: ReactNode }) {
   const logout = useLogout();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Same auth guard the member shell uses.
-  useEffect(() => {
-    if (!isLoggedIn()) router.replace("/login");
-  }, [router]);
-
-  // Role guard: members without an admin-level role see a clear warning
-  // instead of the admin workspace (backend still enforces this per route).
-  if (me && !ADMIN_SHELL_ROLES.includes(me.membership.role)) {
+  // Fail closed: nothing renders until the role is known and permitted.
+  // The previous guard was `me && !ALLOWED.includes(...)`, which skipped
+  // itself while useMe() was in flight and let the console render.
+  const access = useWorkspaceAccess(ADMIN_SHELL_ROLES);
+  if (access !== "allowed") {
     return (
-      <div className="flex h-screen items-center justify-center bg-[var(--ground)] text-[var(--ink)]">
-        <AccessDenied role={me.membership.role} dashboard="admin" />
+      <div className="flex h-screen items-center justify-center bg-[var(--ground)]">
+        <span className="text-sm text-[var(--ink3)]">Checking access…</span>
       </div>
     );
   }

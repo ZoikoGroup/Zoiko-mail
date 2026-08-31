@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Menu, X, LogOut } from "lucide-react";
-import { isLoggedIn } from "@/lib/auth-storage";
+import { useWorkspaceAccess } from "@/lib/workspace-access";
 import { useMe, useLogout } from "@/lib/auth-hooks";
 import type { MeResponse } from "@/lib/auth-api";
 import { OwnerSidebar } from "./OwnerSidebar";
@@ -28,26 +28,15 @@ export function OwnerShell({ children }: { children: ReactNode }) {
   const logout = useLogout();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  useEffect(() => {
-    if (!isLoggedIn()) {
-      router.replace("/login");
-      return;
-    }
-  }, [router]);
-
-  // Redirect to login if /auth/me fails (expired/invalid token)
-  useEffect(() => {
-    if (!isLoading && error && isLoggedIn()) {
-      router.replace("/login");
-    }
-  }, [isLoading, error, router]);
-
-  // Role guard: non-owner/admin roles get a warning instead of the
-  // owner workspace chrome (individual pages guard themselves too).
-  if (me && !OWNER_SHELL_ROLES.includes(me.membership.role)) {
+  // Fail closed: nothing renders until the role is known and permitted.
+  // This replaces three separate checks -- an isLoggedIn effect, a /auth/me
+  // error effect, and `me && !ALLOWED.includes(...)` -- the last of which
+  // skipped itself while useMe() was in flight and let the console render.
+  const access = useWorkspaceAccess(OWNER_SHELL_ROLES);
+  if (access !== "allowed") {
     return (
-      <div className="flex h-screen items-center justify-center bg-[var(--ground)] text-[var(--ink)]">
-        <AccessDenied role={me.membership.role} dashboard="owner" />
+      <div className="flex h-screen items-center justify-center bg-[var(--ground)]">
+        <span className="text-sm text-[var(--ink3)]">Checking access…</span>
       </div>
     );
   }
