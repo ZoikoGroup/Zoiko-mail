@@ -91,6 +91,8 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, result, req.requestId);
 });
 
+// export const loginWithGoogle = asyncHandler(async (req: Request, res: Response) => {
+//   const result = await authService.loginWithGoogle(req.body, getRequestContext(req));
 /**
  * Serialises a Google sign-in outcome onto the response.
  *
@@ -132,11 +134,7 @@ function respondWithGoogleAuthState(
     sendSuccess(
       res,
       200,
-      {
-        ...result,
-        requiresTenantSelection: true,
-        tenants: result.workspaces,
-      },
+      { ...result, requiresTenantSelection: true, tenants: result.workspaces },
       req.requestId
     );
     return;
@@ -144,6 +142,11 @@ function respondWithGoogleAuthState(
 
   sendSuccess(res, 200, result, req.requestId);
 }
+
+export const loginWithGoogle = asyncHandler(async (req: Request, res: Response) => {
+  const result = await authService.loginWithGoogle(req.body, getRequestContext(req));
+  respondWithGoogleAuthState(req, res, result);
+});
 
 export const googleLogin = asyncHandler(async (req: Request, res: Response) => {
   const result = await authService.googleLogin(req.body, getRequestContext(req));

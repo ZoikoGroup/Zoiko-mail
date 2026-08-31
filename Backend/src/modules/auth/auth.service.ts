@@ -23,6 +23,8 @@ import { tenantService } from "../tenant/tenant.service.js";
 import { otpService } from "./otp.service.js";
 import type { AuthState, PublicUser, WorkspaceOption } from "./auth.states.js";
 import type { PendingInvitationSummary, VerifyOtpResponse } from "./auth.types.js";
+import { verifyGoogleIdToken } from "./google.verifier.js";
+// import type { GoogleLoginInput } from "./auth.schema.js";
 import type {
   LoginInput,
   LogoutInput,
@@ -723,6 +725,18 @@ export class AuthService {
       throw new AppError("Invalid email or password", 401, ErrorCodes.UNAUTHORIZED);
     }
 
+    // A Google-only account has no password hash. Say so explicitly rather
+    // than returning "invalid password" — the user has no password to get
+    // wrong, and a vague error just sends them to the reset flow in a loop.
+    if (!user.passwordHash) {
+      await this.recordLoginFailure(user.id, input.email, "password_login_unavailable", context);
+      throw new AppError(
+        "This account signs in with Google. Use \"Continue with Google\" instead.",
+        401,
+        ErrorCodes.UNAUTHORIZED
+      );
+    }
+
     const passwordValid = await verifyPassword(input.password, user.passwordHash);
     if (!passwordValid) {
       await this.recordLoginFailure(user.id, input.email, "invalid_password", context);
@@ -732,6 +746,148 @@ export class AuthService {
     // Credentials are valid — from here we return typed states, never generic
     // errors, so the client can render the right screen.
     return this.resolveAuthState(user, input.tenantId, context);
+  }
+
+  /**
+ * Google sign-in. Verifies the ID token, resolves it to an AppUser, then
+ * hands off to the same resolveAuthState() the password path uses — so
+ * workspace selection, staff console, suspended accounts and pending
+ * invitations all behave identically regardless of how the user proved
+ * their identity.
+ */
+  async loginWithGoogle(
+    input: GoogleLoginInput,
+    context: RequestContext
+  ): Promise<AuthState> {
+    const profile = await verifyGoogleIdToken(input.idToken);
+
+    // 1. Returning user — the Google account is already linked.
+    const identity = await prisma.userIdentity.findUnique({
+      where: {
+        provider_providerUserId: {
+          provider: "GOOGLE",
+          providerUserId: profile.providerUserId,
+        },
+      },
+      include: { user: true },
+    });
+
+    if (identity) {
+      await prisma.userIdentity.update({
+        where: { id: identity.id },
+        // Google addresses can change; keep the record current.
+        data: { lastUsedAt: new Date(), email: profile.email },
+      });
+      return this.resolveAuthState(identity.user, undefined, context);
+    }
+
+    const existingUser = await userRepository.findByEmail(profile.email);
+    await ensureSystemTenant();
+
+    // 2. Brand-new identity. Google already verified the address, so this
+    //    account skips the OTP step entirely — that's the UX win.
+    if (!existingUser) {
+      const created = await prisma.$transaction(async (tx) => {
+        const user = await tx.appUser.create({
+          data: {
+            email: profile.email,
+            passwordHash: null,
+            displayName: profile.displayName,
+            avatarUrl: profile.avatarUrl,
+            status: "ACTIVE",
+            emailVerifiedAt: new Date(),
+          },
+        });
+        await tx.userIdentity.create({
+          data: {
+            userId: user.id,
+            provider: "GOOGLE",
+            providerUserId: profile.providerUserId,
+            email: profile.email,
+            lastUsedAt: new Date(),
+          },
+        });
+        await auditService.record({
+          tenantId: SYSTEM_TENANT_ID,
+          actorUserId: user.id,
+          eventType: AuditEventTypes.USER_REGISTERED_VIA_GOOGLE,
+          targetType: "AppUser",
+          targetId: user.id,
+          requestId: context.requestId,
+          ipAddress: context.ipAddress,
+          userAgent: context.userAgent,
+          metadata: { email: user.email },
+        }, tx);
+        return user;
+      });
+
+      return this.resolveAuthState(created, undefined, context);
+    }
+
+    // 3. A local account already holds this email — decide whether to link.
+    //
+    // The dangerous case: register() creates a PENDING_VERIFICATION user
+    // before OTP is confirmed. If we auto-linked those, an attacker could
+    // register victim@gmail.com, never verify, and then the real victim's
+    // Google sign-in would drop them into the attacker's account. So we
+    // only link when the local side has independently proven ownership.
+    const claimingInvite = existingUser.status === "INVITED";
+    const locallyVerified = existingUser.emailVerifiedAt !== null;
+
+    if (!claimingInvite && !locallyVerified) {
+      await auditService.record({
+        tenantId: SYSTEM_TENANT_ID,
+        actorUserId: existingUser.id,
+        eventType: AuditEventTypes.GOOGLE_LOGIN_BLOCKED,
+        targetType: "AppUser",
+        targetId: existingUser.id,
+        requestId: context.requestId,
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+        metadata: { email: profile.email, reason: "local_account_unverified" },
+      });
+      throw new AppError(
+        "An unverified account already exists for this email. Finish email verification, then sign in with Google.",
+        409,
+        ErrorCodes.EMAIL_NOT_VERIFIED
+      );
+    }
+
+    const linked = await prisma.$transaction(async (tx) => {
+      const user = await tx.appUser.update({
+        where: { id: existingUser.id },
+        data: {
+          // Claiming an invitation activates the placeholder identity, the
+          // same way register() does for the password path.
+          status: claimingInvite ? "ACTIVE" : existingUser.status,
+          emailVerifiedAt: existingUser.emailVerifiedAt ?? new Date(),
+          avatarUrl: existingUser.avatarUrl ?? profile.avatarUrl,
+        },
+      });
+      await tx.userIdentity.create({
+        data: {
+          userId: user.id,
+          provider: "GOOGLE",
+          providerUserId: profile.providerUserId,
+          email: profile.email,
+          lastUsedAt: new Date(),
+        },
+      });
+      await auditService.record({
+        tenantId: SYSTEM_TENANT_ID,
+        actorUserId: user.id,
+        eventType: AuditEventTypes.IDENTITY_LINKED,
+        targetType: "AppUser",
+        targetId: user.id,
+        requestId: context.requestId,
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+        metadata: { provider: "GOOGLE", email: profile.email, claimedInvite: claimingInvite },
+      }, tx);
+      return user;
+    });
+
+    return this.resolveAuthState(linked, undefined, context);
   }
 
   /**
@@ -809,12 +965,25 @@ export class AuthService {
     const existingUser = await userRepository.findByEmail(googleUser.email);
 
     if (existingUser && existingUser.status !== "INVITED") {
-      if (!existingUser.googleId) {
-        await prisma.appUser.update({
-          where: { id: existingUser.id },
-          data: { googleId: googleUser.googleId }
+      const existingIdentity = await prisma.userIdentity.findUnique({
+        where: {
+          provider_providerUserId: {
+            provider: "GOOGLE",
+            providerUserId: googleUser.googleId,
+          },
+        },
+      });
+
+      if (!existingIdentity) {
+        await prisma.userIdentity.create({
+          data: {
+            userId: existingUser.id,
+            provider: "GOOGLE",
+            providerUserId: googleUser.googleId,
+            email: googleUser.email,
+            lastUsedAt: new Date(),
+          },
         });
-        existingUser.googleId = googleUser.googleId;
       }
       // Google asserted email_verified, which is precisely the fact the
       // pending-verification state is waiting for. Leaving the account
@@ -870,7 +1039,7 @@ export class AuthService {
     await auditService.record({
       tenantId: SYSTEM_TENANT_ID,
       actorUserId: user.id,
-      eventType: AuditEventTypes.GOOGLE_LOGIN_SUCCESS,
+      eventType: "GOOGLE_LOGIN_SUCCESS" as (typeof AuditEventTypes)[keyof typeof AuditEventTypes],
       targetType: "AppUser",
       targetId: user.id,
       requestId: context.requestId,
@@ -969,7 +1138,18 @@ export class AuthService {
           pendingToken: pending.token,
         };
       }
-      return { state: "NO_WORKSPACE", user: publicUser };
+      // return { state: "NO_WORKSPACE", user: publicUser };
+
+      // Attach a pending token so the client can call /auth/create-workspace.
+      // Without it a verified user with no membership has no way forward —
+      // which is the state every brand-new Google signup lands in.
+      const noWorkspacePending = buildPendingToken(user.id);
+      return {
+        state: "NO_WORKSPACE",
+        user: publicUser,
+        pendingToken: noWorkspacePending.token,
+        expiresIn: noWorkspacePending.expiresIn,
+      };
     }
 
     // 4. Explicit selection, or auto-resolve a single workspace.
@@ -1009,7 +1189,7 @@ export class AuthService {
       expiresIn: selection.expiresIn,
     };
   }
-  
+
   /**
   * Second half of the split login flow. Called after /auth/login returned
   * WORKSPACE_SELECTION with a selectionToken; the client picked a workspace
@@ -1061,8 +1241,20 @@ export class AuthService {
     if (membership.status === "SUSPENDED") {
       return { state: "MEMBERSHIP_SUSPENDED", user: publicUser, workspace };
     }
+    // if (membership.status === "REMOVED") {
+    //   return { state: "NO_WORKSPACE", user: publicUser };
+    // }
+
     if (membership.status === "REMOVED") {
-      return { state: "NO_WORKSPACE", user: publicUser };
+      // Same treatment as the no-membership path: a removed member has no
+      // workspace, so give them a token to create one rather than a dead end.
+      const removedPending = buildPendingToken(user.id);
+      return {
+        state: "NO_WORKSPACE",
+        user: publicUser,
+        pendingToken: removedPending.token,
+        expiresIn: removedPending.expiresIn,
+      };
     }
 
     // ACTIVE membership + ACTIVE tenant → sign in.
@@ -1224,10 +1416,26 @@ export class AuthService {
     tenantId: string,
     context: RequestContext
   ): Promise<void> {
+    // const user = await userRepository.findById(userId);
+    // if (!user || !(await verifyPassword(input.currentPassword, user.passwordHash))) {
+    //   throw new AppError("Current password is incorrect", 401, ErrorCodes.UNAUTHORIZED);
+    // }
+
     const user = await userRepository.findById(userId);
-    if (!user || !(await verifyPassword(input.currentPassword, user.passwordHash))) {
+    if (!user) {
       throw new AppError("Current password is incorrect", 401, ErrorCodes.UNAUTHORIZED);
     }
+    if (!user.passwordHash) {
+      throw new AppError(
+        "This account signs in with Google and has no password to change.",
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+    if (!(await verifyPassword(input.currentPassword, user.passwordHash))) {
+      throw new AppError("Current password is incorrect", 401, ErrorCodes.UNAUTHORIZED);
+    }
+
     if (await verifyPassword(input.newPassword, user.passwordHash)) {
       throw new AppError(
         "New password must be different from the current password",

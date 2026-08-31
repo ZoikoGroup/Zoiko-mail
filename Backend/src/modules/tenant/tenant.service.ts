@@ -5,6 +5,7 @@ import { membershipRepository } from "../membership/membership.repository.js";
 import { tenantRepository } from "./tenant.repository.js";
 import { AuditEventTypes } from "../auth/auth.types.js";
 import type { UpdateTenantInput, UpdateGeneralSettingsInput } from "./tenant.schema.js";
+import type { PolicyRules } from "../policy/policy.schema.js";
 
 interface TenantContext {
   tenantId: string;
@@ -30,6 +31,36 @@ interface WorkspaceCreationResult {
   tenantId: string;
   membershipId: string;
 }
+
+/**
+ * Policy evaluation fails closed: policyService.evaluate() returns DENY with
+ * reason NO_ACTIVE_POLICY when a tenant has no active policy of that type.
+ * A workspace created without these cannot send mail at all.
+ *
+ * These are permissive at the policy layer on purpose. Abuse, rate limiting
+ * and deliverability are handled by deliveryProtectionService and mailbox
+ * warm-up; having two systems act as the anti-spam gate causes bugs that are
+ * hard to trace.
+ */
+const DEFAULT_POLICIES: Array<{
+  type: "SENDING" | "AI";
+  name: string;
+  description: string;
+  rules: PolicyRules;
+}> = [
+    {
+      type: "SENDING",
+      name: "Default sending policy",
+      description: "Allows outbound sending. Add conditions to restrict.",
+      rules: { defaultEffect: "ALLOW", conditions: [] },
+    },
+    {
+      type: "AI",
+      name: "Default AI policy",
+      description: "Allows AI extraction and drafting.",
+      rules: { defaultEffect: "ALLOW", conditions: [] },
+    },
+  ];
 
 const tenantSelect = {
   id: true,
@@ -453,6 +484,24 @@ export class TenantService {
         },
         tx
       );
+
+      // Bootstrap default policies inside the same transaction, so a
+      // workspace can never exist in a state where it cannot send.
+      for (const policy of DEFAULT_POLICIES) {
+        await tx.tenantPolicy.create({
+          data: {
+            tenantId: tenant.id,
+            type: policy.type,
+            name: policy.name,
+            description: policy.description,
+            version: 1,
+            status: "ACTIVE",
+            rules: policy.rules as Prisma.InputJsonValue,
+            createdByUserId: ownerUserId,
+            activatedAt: new Date(),
+          },
+        });
+      }
 
       await auditService.record(
         {
