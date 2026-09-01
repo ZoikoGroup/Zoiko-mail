@@ -20,8 +20,6 @@ import {
   resetPasswordSchema,
   selectWorkspaceSchema,
   googleLoginSchema,
-  googleResendOtpSchema,
-  googleVerifyOtpSchema
 } from "./auth.schema.js";
 import * as authController from "./auth.controller.js";
 import { verifyOtpSchema } from "./otp.schema.js";
@@ -78,43 +76,25 @@ authRouter.post(
 
 authRouter.post("/login", loginRateLimit, validate(loginSchema), authController.login);
 
-// First leg of Google sign-in. Two implementations landed independently —
-// main's authService.loginWithGoogle (which signs the user straight in) and
-// this one (which sends an OTP first). Only one may own the path: Express
-// matches the first registration, so registering both silently disabled the
-// OTP legs below. The OTP flow wins because confirming the address is a
-// product requirement, not a preference.
+// Google sign-in, in one step: selecting an account lands the user in their
+// own workspace. Google has already verified the address and asserts it in a
+// signed token, so a second emailed code proves nothing the ID token has not
+// already established — it only adds a screen between the account chooser and
+// the mailbox.
 //
-// main's loginWithGoogle() and its UserIdentity model are deliberately left
-// in place: the multi-provider identity table is the better long-term model
-// and the two paths still need reconciling. See the note in auth.service.ts.
+// A two-step variant of this used to own the path, with /google/verify-otp
+// and /google/resend-otp behind it. It is deleted rather than left unrouted,
+// because its verify step accepted any pending token and minted a session
+// from an EMAIL_VERIFICATION code — the same purpose register() issues — so a
+// registration pending token plus its own emailed code could have been
+// exchanged for a session. Recoverable from history if the code step is ever
+// wanted back; it should not be revived as it was.
 authRouter.post(
   "/google",
   loginRateLimit,
   requireFlag("google_login_enabled"),
   validate(googleLoginSchema),
-  authController.googleLogin
-);
-
-// Second leg: the emailed code in exchange for a session. Rate limited like
-// login, because a guessable code is a credential. Behind the same flag as
-// the first leg — a kill switch that left two thirds of the flow reachable
-// would not be a kill switch.
-authRouter.post(
-  "/google/verify-otp",
-  loginRateLimit,
-  requireFlag("google_login_enabled"),
-  validate(googleVerifyOtpSchema),
-  authController.googleVerifyOtp
-);
-
-// Re-send, bounded by otpService's own cooldown and hourly cap on top of this.
-authRouter.post(
-  "/google/resend-otp",
-  loginRateLimit,
-  requireFlag("google_login_enabled"),
-  validate(googleResendOtpSchema),
-  authController.googleResendOtp
+  authController.loginWithGoogle
 );
 
 authRouter.post("/forgot-password", passwordResetRateLimit, validate(forgotPasswordSchema), authController.forgotPassword);

@@ -6,8 +6,6 @@ import { useRouter } from "next/navigation";
 import {
   login,
   googleLogin,
-  googleVerifyOtp,
-  googleResendOtp,
   register,
   logout,
   logoutAll,
@@ -129,60 +127,6 @@ export function useLogin() {
 //     },
 //   });
 // }
-
-/**
- * Second leg of Google sign-in.
- *
- * Shares useGoogleLogin's redirect handling, because a verified code produces
- * exactly the same AuthState a password login does, so the destination logic
- * must be the same rather than a parallel copy that can drift.
- */
-export function useGoogleVerifyOtp() {
-  const qc = useQueryClient();
-  const router = useRouter();
-
-  return useMutation({
-    mutationFn: ({ pendingToken, code }: { pendingToken: string; code: string }) =>
-      googleVerifyOtp(pendingToken, code),
-
-    onSuccess: async (data) => {
-      await qc.invalidateQueries({ queryKey: ["me"] });
-
-      let href: string;
-      if (data.state === "STAFF_CONSOLE") {
-        href = "/support";
-      } else if (data.state === "SIGNED_IN") {
-        // Google sign-in lands in the user's own workspace, whatever their role.
-        href = USER_WORKSPACE_HREF;
-      } else if (data.state === "WORKSPACE_SELECTION") {
-        if (typeof window !== "undefined") {
-          sessionStorage.setItem("zoiko.selection_token", data.selectionToken ?? "");
-          sessionStorage.setItem(
-            "zoiko.selection_workspaces",
-            JSON.stringify(data.workspaces ?? [])
-          );
-        }
-        href = "/select-workspace";
-      } else if (
-        data.state === "ACCOUNT_SUSPENDED" ||
-        data.state === "ACCOUNT_DISABLED"
-      ) {
-        href = `/auth-status?state=${data.state}`;
-      } else {
-        href = "/login";
-      }
-
-      router.replace(href);
-    },
-  });
-}
-
-/** Re-request the sign-in code. Bounded server-side by a cooldown and hourly cap. */
-export function useGoogleResendOtp() {
-  return useMutation({
-    mutationFn: (pendingToken: string) => googleResendOtp(pendingToken),
-  });
-}
 
 // export function useRegister() {
 //   const qc = useQueryClient();
