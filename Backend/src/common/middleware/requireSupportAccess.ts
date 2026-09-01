@@ -3,11 +3,19 @@ import { AppError } from "../errors/AppError.js";
 import { ErrorCodes } from "../errors/errorCodes.js";
 
 /**
- * Authorization guard for the platform support console.
+ * Authorization guard for the PLATFORM support console.
+ *
+ * The console is platform-wide staff tooling, so it must only accept genuine
+ * Zoiko staff — never a tenant-scoped SUPPORT member. A tenant SUPPORT role is
+ * an invitation granted by a workspace Owner; it permits read-only diagnostics
+ * inside that ONE tenant on /support (tenantRouter), and it must never reach the
+ * global console that can search & investigate ANY tenant.
  *
  * Accepts either authentication shape set by `authenticateStaff`:
- *  - access token: membership role SUPPORT, or platformRole SUPPORT / SUPER_ADMIN
- *  - platform token: platformRole SUPPORT / SUPER_ADMIN (Zoiko staff, no tenant)
+ *  - access token: ONLY if platformRole is SUPPORT / SUPER_ADMIN (staff who
+ *    also happen to hold a tenant membership). A membership role of SUPPORT
+ *    alone is NOT staff and is rejected.
+ *  - platform token: platformRole SUPPORT / SUPER_ADMIN (Zoiko staff, no tenant).
  *
  * On success it normalizes the caller into req.staffAuth so route handlers and
  * services never branch on the token type.
@@ -22,9 +30,11 @@ export function requireSupportAccess(
   next: NextFunction
 ): void {
   if (req.auth) {
-    const { sub, membershipId, role, platformRole } = req.auth;
+    const { sub, membershipId, platformRole } = req.auth;
+    // Tenant support access must be exercised through the /support tenant
+    // router (which runs tenantContext + requireRole). Here on the platform
+    // router only genuine staff rows are let through.
     if (
-      role === "SUPPORT" ||
       platformRole === "SUPPORT" ||
       platformRole === "SUPER_ADMIN"
     ) {

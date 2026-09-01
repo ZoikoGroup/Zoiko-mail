@@ -11,12 +11,14 @@ import type { MeResponse } from "@/lib/auth-api";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { useCan, useCapabilities } from "@/lib/admin-capabilities";
 import { visibleNav, type AdminNavItem } from "@/lib/admin-nav";
-import { useActiveSupportGrant } from "@/lib/admin-hooks";
+import { useActiveSupportGrant, useAdminNavCounts } from "@/lib/admin-hooks";
 import { Pill } from "@/components/admin/ui";
 import { AccessDenied } from "@/components/ui/AccessDenied";
 
-/** Roles allowed into the admin workspace; anyone else gets a warning. */
-const ADMIN_SHELL_ROLES = ["OWNER", "ADMIN", "SUPPORT"];
+/** Roles allowed into the admin workspace; anyone else gets a warning.
+ *  A tenant SUPPORT member lands on /tenant-support and must not manage
+ *  users/domains/billing here. */
+const ADMIN_SHELL_ROLES = ["OWNER", "ADMIN"];
 
 function initials(name?: string, email?: string) {
   const base = (name?.trim() || email || "?").trim();
@@ -166,7 +168,8 @@ function Rail({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const can = useCan();
   const { isLoading, error } = useCapabilities();
-  const groups = visibleNav(can);
+  const liveCounts = useAdminNavCounts();
+  const groups = visibleNav(can, liveCounts);
 
   return (
     <div className="flex h-full flex-col">

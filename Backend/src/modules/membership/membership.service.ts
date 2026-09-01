@@ -50,6 +50,38 @@ function assertAdminBoundary(actorRole: MembershipRole, role: MembershipRole): v
   }
 }
 
+/**
+ * A SUPPORT membership is workspace-scoped and read-only, so it must be the
+ * user's single Support seat. Allowing a user to hold SUPPORT in more than one
+ * tenant would silently widen the set of workspaces their Support seating can
+ * reach without any additional vetting. Reject such grants up front.
+ *
+ * `excludeTenantId` lets the caller skip a membership already being re-issued
+ * for the SAME workspace (re-invite, role update) without tripping on it.
+ */
+async function assertSupportNotElsewhere(
+  tenantId: string,
+  userId: string,
+  excludeTenantId?: string
+): Promise<void> {
+  const elsewhere = await prisma.tenantMembership.findFirst({
+    where: {
+      userId,
+      role: "SUPPORT",
+      status: "ACTIVE",
+      ...(excludeTenantId ? { tenantId: { not: excludeTenantId } } : {}),
+    },
+    select: { tenantId: true },
+  });
+  if (elsewhere) {
+    throw new AppError(
+      "This user already holds a Support membership in another workspace",
+      409,
+      ErrorCodes.CONFLICT
+    );
+  }
+}
+
 async function protectLastOwner(
   tx: Prisma.TransactionClient,
   tenantId: string,
@@ -101,6 +133,9 @@ export class MembershipService {
       if (existing) {
         throw new AppError("User already belongs to this tenant", 409, ErrorCodes.CONFLICT);
       }
+      if (input.role === "SUPPORT") {
+        await assertSupportNotElsewhere(context.tenantId, user.id);
+      }
 
       const membership = await tx.tenantMembership.create({
         data: {
@@ -144,6 +179,10 @@ export class MembershipService {
       }
       if (user.status !== "ACTIVE" && user.status !== "INVITED") {
         throw new AppError("User account is disabled", 409, ErrorCodes.CONFLICT);
+      }
+
+      if (input.role === "SUPPORT") {
+        await assertSupportNotElsewhere(context.tenantId, user.id);
       }
 
       const existing = await tx.tenantMembership.findFirst({
@@ -307,6 +346,13 @@ export class MembershipService {
       if (input.role) assertAdminBoundary(context.role, input.role);
       const nextRole = input.role ?? target.role;
       const nextStatus = input.status ?? target.status;
+      // Promoting a user to SUPPORT in this workspace is only allowed if they
+      // don't already seat SUPPORT in a DIFFERENT tenant. The current
+      // membership (excludeTenantId) is skipped so an in-place re-issue or a
+      // support→support no-op update is not treated as a violation.
+      if (nextRole === "SUPPORT") {
+        await assertSupportNotElsewhere(context.tenantId, target.userId, context.tenantId);
+      }
       await protectLastOwner(tx, context.tenantId, target, nextRole, nextStatus);
 
       const membership = await tx.tenantMembership.update({

@@ -24,6 +24,7 @@ export const ErrorCodes = {
   USER_DISABLED: "USER_DISABLED",
   MEMBERSHIP_SUSPENDED: "MEMBERSHIP_SUSPENDED",
   TENANT_SUSPENDED: "TENANT_SUSPENDED",
+  WORKSPACE_ACCESS_DENIED: "WORKSPACE_ACCESS_DENIED",
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];

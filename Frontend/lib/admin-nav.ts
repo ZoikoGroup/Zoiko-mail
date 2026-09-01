@@ -88,10 +88,22 @@ export const ADMIN_NAV: AdminNavGroup[] = [
   },
 ];
 
-/** Drops groups that end up empty once capabilities are applied. */
-export function visibleNav(can: (capability: Capability) => boolean): AdminNavGroup[] {
+/** Drops groups that end up empty once capabilities are applied.
+ *  `liveCounts` overlays real badge numbers (keyed by `href`) over the
+ *  template defaults — a key that is absent keeps its static badge, so the
+ *  rail never flashes a placeholder 0 while a count is still loading. */
+export function visibleNav(
+  can: (capability: Capability) => boolean,
+  liveCounts: Partial<Record<string, number>> = {}
+): AdminNavGroup[] {
   return ADMIN_NAV.map((group) => ({
     group: group.group,
-    items: group.items.filter((item) => !item.capability || can(item.capability)),
+    items: group.items
+      .filter((item) => !item.capability || can(item.capability))
+      .map((item) =>
+        liveCounts[item.href] !== undefined
+          ? { ...item, count: liveCounts[item.href] }
+          : item
+      ),
   })).filter((group) => group.items.length > 0);
 }
