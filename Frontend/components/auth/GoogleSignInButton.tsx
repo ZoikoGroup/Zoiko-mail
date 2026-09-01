@@ -152,7 +152,7 @@ export default function GoogleSignInButton({
   }
 
   return (
-    <div className={`relative h-12 w-full ${disabled ? "pointer-events-none opacity-60" : ""}`}>
+    <div className={`relative h-10 w-full ${disabled ? "pointer-events-none opacity-60" : ""}`} style={{ clipPath: "inset(0)" }}>
       {/* What the user sees: the same height, radius, border and type scale as
           the form's own buttons. Non-interactive, so every click falls through
           to Google's control above it. */}

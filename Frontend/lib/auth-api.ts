@@ -205,6 +205,27 @@ export async function login(input: LoginInput): Promise<AuthResponse> {
   return data;
 }
 
+export interface GoogleLoginInput {
+  credential: string;
+  tenantId?: string;
+}
+
+export async function loginWithGoogle(input: GoogleLoginInput): Promise<AuthResponse> {
+  const data = await apiRequest<AuthResponse>("/auth/google", {
+    method: "POST",
+    body: input,
+    auth: false,
+  });
+  const { accessToken, refreshToken, platformToken } = extractTokens(data);
+
+  clearTokens();
+  clearPlatformToken();
+
+  if (accessToken) setTokens(accessToken, refreshToken);
+  if (platformToken) setPlatformToken(platformToken);
+  return data;
+}
+
 export async function googleLogin(idToken: string): Promise<AuthResponse> {
   const data = await apiRequest<AuthResponse>("/auth/google", {
     method: "POST",

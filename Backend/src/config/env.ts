@@ -78,11 +78,15 @@ const envSchema = z.object({
   // "gcp" routes through Secret Manager and fails loudly until it is wired.
   SECRET_STORE: z.enum(["env", "gcp"]).default("env"),
   SECRET_CACHE_TTL_MS: z.coerce.number().int().min(0).max(3_600_000).default(300_000),
+  // Google OAuth 2.0 client ID and allowed hosted domain for login.
+  GOOGLE_CLIENT_ID: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  GOOGLE_ALLOWED_HD: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  FLAG_GOOGLE_LOGIN_ENABLED: boolFlag("false"),
   // Feature flags and kill switches — Infrastructure spec §15. A global "false"
   // is a kill switch: no tenant/domain/mailbox override can re-enable it.
   // Track B capabilities default off so hosted mail ships built-but-disabled.
   // Google OAuth — used for connecting Gmail accounts via OAuth 2.0
-  GOOGLE_CLIENT_ID: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  // GOOGLE_CLIENT_ID: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
   GOOGLE_CLIENT_SECRET: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
   GOOGLE_REDIRECT_URI: z.preprocess(blankAsUndefined, z.string().url().optional()),
   // Encryption key for token-at-rest (64 hex chars = 32 bytes for AES-256-GCM)
@@ -128,6 +132,14 @@ const envSchema = z.object({
       context.addIssue({ code: "custom", path: ["MAIL_PROVIDER_ENABLED"], message: "IMAP and SMTP TLS must remain enabled" });
     }
   }
+  if (value.FLAG_GOOGLE_LOGIN_ENABLED && !value.GOOGLE_CLIENT_ID) {
+    context.addIssue({
+      code: "custom",
+      path: ["GOOGLE_CLIENT_ID"],
+      message: "is required when FLAG_GOOGLE_LOGIN_ENABLED=true",
+    });
+  }
+
   // One client id serves two different Google features, and they need
   // different things:
   //
@@ -148,6 +160,11 @@ const envSchema = z.object({
       message: "GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI configure the Gmail connector and require GOOGLE_CLIENT_ID too; sign-in alone needs only GOOGLE_CLIENT_ID",
     });
   }
+  // Google OAuth vars must all be present or all absent
+  // const googleVars = [value.GOOGLE_CLIENT_ID, value.GOOGLE_CLIENT_SECRET, value.GOOGLE_REDIRECT_URI] as const;
+  // if (googleVars.some(Boolean) && !googleVars.every(Boolean)) {
+  //   context.addIssue({ code: "custom", path: ["GOOGLE_CLIENT_ID"], message: "GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI must all be set together" });
+  // }
 });
 
 export type Env = z.infer<typeof envSchema>;

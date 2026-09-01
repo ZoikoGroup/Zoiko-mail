@@ -25,6 +25,7 @@ import {
 } from "./auth.schema.js";
 import * as authController from "./auth.controller.js";
 import { verifyOtpSchema } from "./otp.schema.js";
+import { requireFlag } from "../../common/flags/index.js";
 
 const authRouter = Router();
 
@@ -77,6 +78,13 @@ authRouter.post(
 
 authRouter.post("/login", loginRateLimit, validate(loginSchema), authController.login);
 
+authRouter.post(
+  "/google",
+  loginRateLimit,
+  requireFlag("google_login_enabled"),
+  validate(googleLoginSchema),
+  authController.loginWithGoogle
+);
 authRouter.post("/google", loginRateLimit, validate(googleLoginSchema), authController.googleLogin);
 
 // Second leg: the emailed code in exchange for a session. Rate limited like

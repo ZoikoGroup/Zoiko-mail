@@ -20,6 +20,7 @@ export const loginSchema = z.object({
   tenantId: z.string().uuid().optional(),
 });
 
+/** Google login schema. */
 export const googleLoginSchema = z.object({
   idToken: z.string().min(1),
 });
@@ -70,6 +71,11 @@ export const selectWorkspaceSchema = z.object({
 export const joinWorkspaceSchema = z.object({
   membershipId: z.string().uuid(),
 });
+
+// export const googleLoginSchema = z.object({
+//   credential: z.string().trim().min(1).max(4096),
+//   tenantId: z.string().uuid().optional(),
+// });
 
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type CreateWorkspaceInput = z.infer<typeof createWorkspaceSchema>;
