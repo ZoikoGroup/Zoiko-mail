@@ -29,6 +29,18 @@ export default function CreateFirstWorkspacePage() {
   const [email, setEmail] = useState("");
   const [ready, setReady] = useState(false);
 
+  // Reads the stash without consuming it, so running twice is harmless.
+  //
+  // This effect used to delete the token as soon as it had read it, which
+  // broke the screen in exactly the way it was added to fix: React
+  // StrictMode double-invokes effects in development, so the second run
+  // found nothing and redirected to /login. The page appeared for about
+  // 400ms and then threw the user back at the login form — see the same
+  // trap, and the same cause, noted in app/accept-invitation/page.tsx.
+  //
+  // Keeping the token also means a refresh on this page still works, which
+  // a one-shot read could never do however the double-invoke was guarded.
+  // It is cleared once the workspace actually exists.
   useEffect(() => {
     document.title = "Create your workspace | Zoiko Mail";
 
@@ -41,12 +53,12 @@ export default function CreateFirstWorkspacePage() {
     setToken(stashed);
     setEmail(sessionStorage.getItem("zoiko.workspace_email") ?? "");
     setReady(true);
+  }, [router]);
 
-    // Cleared on read: the token is single-use, and leaving it behind would
-    // re-enter this page on a later visit with a token that no longer works.
+  const clearStash = () => {
     sessionStorage.removeItem("zoiko.workspace_token");
     sessionStorage.removeItem("zoiko.workspace_email");
-  }, [router]);
+  };
 
   if (!ready || !token) {
     return (
@@ -63,9 +75,10 @@ export default function CreateFirstWorkspacePage() {
   return (
     <AuthLayout>
       <AuthContainer>
-        {/* The form runs the mutation itself, and useCreateWorkspace stores the
-            session and moves the user on, so there is nothing left to do. */}
-        <CreateWorkspaceForm token={token} email={email} onSuccess={() => {}} />
+        {/* The form runs the mutation itself and useCreateWorkspace stores the
+            session and moves the user on, so the only thing left is to drop
+            the stash now that the token has been spent. */}
+        <CreateWorkspaceForm token={token} email={email} onSuccess={clearStash} />
       </AuthContainer>
     </AuthLayout>
   );
