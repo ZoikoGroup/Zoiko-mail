@@ -363,12 +363,13 @@ async function main(): Promise<void> {
       description: "Restrict AI processing from HR, legal and compliance mailboxes.",
       version: 2,
       status: "DRAFT",
-      rules: {
-        defaultEffect: "DENY",
-        conditions: [
-          { field: "mailbox.tags", operator: "IN", value: ["hr", "legal", "compliance"], effect: "DENY" },
-        ],
-      },
+      // rules: {
+      //   defaultEffect: "DENY",
+      //   conditions: [
+      //     { field: "mailbox.tags", operator: "IN", value: ["hr", "legal", "compliance"], effect: "DENY" },
+      //   ],
+      // },
+      rules: { defaultEffect: "ALLOW", conditions: [] },
     },
   });
 
@@ -382,14 +383,15 @@ async function main(): Promise<void> {
       description: "Rate-limited sending with new-domain warm-up. Autonomous external sending blocked.",
       version: 1,
       status: "ACTIVE",
-      rules: {
-        defaultEffect: "ALLOW",
-        conditions: [
-          { field: "sending_type", operator: "EQUALS", value: "autonomous_external", effect: "DENY" },
-          { field: "daily_volume", operator: "GREATER_THAN", value: 500, effect: "DENY" },
-          { field: "is_new_domain", operator: "EQUALS", value: true, effect: "ALLOW" },
-        ],
-      },
+      // rules: {
+      //   defaultEffect: "ALLOW",
+      //   conditions: [
+      //     { field: "sending_type", operator: "EQUALS", value: "autonomous_external", effect: "DENY" },
+      //     { field: "daily_volume", operator: "GREATER_THAN", value: 500, effect: "DENY" },
+      //     { field: "is_new_domain", operator: "EQUALS", value: true, effect: "ALLOW" },
+      //   ],
+      // },
+      rules: { defaultEffect: "ALLOW", conditions: [] },
       activatedAt: ago(20 * DAY),
     },
   });

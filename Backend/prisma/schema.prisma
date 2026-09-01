@@ -82,8 +82,23 @@ model AppUser {
   lifecycleRequests       DataLifecycleRequest[] @relation("LifecycleRequester")
   approvedSupportGrants   SupportAccessGrant[]   @relation("SupportApprover")
   connectedAccounts       ConnectedAccount[]
-
+  identities              UserIdentity[]
   @@map("app_users")
+}
+
+model UserIdentity {
+  id             String           @id @default(uuid()) @db.Uuid
+  userId         String           @map("user_id") @db.Uuid
+  provider       IdentityProvider
+  providerUserId String           @map("provider_user_id")
+  email          String
+  lastUsedAt     DateTime?        @map("last_used_at")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  user           AppUser          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUserId])
+  @@index([userId])
+  @@map("user_identities")
 }
 
 model EmailOtp {
@@ -653,6 +668,11 @@ enum PlatformRole {
   NONE
   SUPPORT
   SUPER_ADMIN
+}
+
+enum IdentityProvider {
+  GOOGLE
+  MICROSOFT
 }
 
 enum OtpPurpose {

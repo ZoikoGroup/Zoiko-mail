@@ -32,7 +32,10 @@ import {
   type ResetPasswordInput,
 } from "./auth-api";
 import { getPlatformToken, isLoggedIn } from "./auth-storage";
-import { resolveWorkspaceHref } from "./workspace";
+// import { resolveWorkspaceHref } from "./workspace";
+import { AuthResponse, GoogleLoginInput, loginWithGoogle } from "./auth-api";
+import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
+import { resolveWorkspaceHref, USER_WORKSPACE_HREF } from "./workspace";
 
 // Server state (the logged-in user) lives in TanStack Query, keyed by ['me'].
 export function useMe() {
@@ -46,84 +49,86 @@ export function useMe() {
   });
 }
 
+/**
+ * Maps a backend AuthState onto a destination. Shared by password login and
+ * Google login — both return the identical state union, so duplicating this
+ * would guarantee the two paths drift apart.
+ */
+export function routeAuthState(data: AuthResponse, router: AppRouterInstance): void {
+  let href: string;
+
+  if (data.state === "STAFF_CONSOLE") {
+    href = "/support";
+  } else if (data.state === "SIGNED_IN") {
+    href = resolveWorkspaceHref(data.membership?.role);
+  } else if (data.state === "WORKSPACE_SELECTION") {
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("zoiko.selection_token", data.selectionToken ?? "");
+      sessionStorage.setItem("zoiko.selection_workspaces", JSON.stringify(data.workspaces ?? []));
+    }
+    href = "/select-workspace";
+  } else if (data.state === "ACCOUNT_SUSPENDED" || data.state === "ACCOUNT_DISABLED") {
+    href = `/auth-status?state=${data.state}`;
+  } else if (
+    data.state === "MEMBERSHIP_SUSPENDED" ||
+    data.state === "WORKSPACE_SUSPENDED" ||
+    data.state === "WORKSPACE_DELETING"
+  ) {
+    href = `/auth-status?state=${data.state}&workspace=${encodeURIComponent(data.workspace?.name ?? "")}`;
+  } else if (data.state === "EMAIL_VERIFICATION_REQUIRED") {
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("zoiko.pending_token", data.pendingToken ?? "");
+      sessionStorage.setItem("zoiko.pending_email", data.user?.email ?? "");
+    }
+    href = "/verify-email";
+  } else if (data.state === "INVITATION_PENDING") {
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("zoiko.invite_pending_token", data.pendingToken ?? "");
+      sessionStorage.setItem("zoiko.invite_pending_list", JSON.stringify(data.invitations ?? []));
+      sessionStorage.removeItem("pendingInvitationToken");
+    }
+    const names = (data.invitations ?? []).map((w: { name: string }) => w.name).join(",");
+    href = `/auth-status?state=INVITATION_PENDING${names ? `&invitations=${encodeURIComponent(names)}` : ""}`;
+  } else if (data.state === "NO_WORKSPACE") {
+    // Every new Google signup lands here. The backend now issues a pending
+    // token with this state so the user can create their first workspace.
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("zoiko.pending_token", data.pendingToken ?? "");
+      sessionStorage.setItem("zoiko.pending_email", data.user?.email ?? "");
+    }
+    href = "/owner/onboarding";
+  } else {
+    href = "/login";
+  }
+
+  router.replace(href);
+}
+
 export function useLogin() {
   const qc = useQueryClient();
   const router = useRouter();
 
   return useMutation({
     mutationFn: (input: LoginInput) => login(input),
-
     onSuccess: async (data) => {
-      await qc.invalidateQueries({
-        queryKey: ["me"],
-      });
-
-      // Determine redirect based on backend auth state — the backend is the
-      // source of truth for role, never localStorage or email.
-      let href: string;
-
-      if (data.state === "STAFF_CONSOLE") {
-        href = "/support";
-      } else if (data.state === "SIGNED_IN") {
-        const role = data.membership?.role;
-        href = resolveWorkspaceHref(role);
-      } else if (data.state === "WORKSPACE_SELECTION") {
-        if (typeof window !== "undefined") {
-          sessionStorage.setItem(
-            "zoiko.selection_token",
-            data.selectionToken ?? ""
-          );
-          sessionStorage.setItem(
-            "zoiko.selection_workspaces",
-            JSON.stringify(data.workspaces ?? [])
-          );
-        }
-        href = "/select-workspace";
-      } else if (
-        data.state === "ACCOUNT_SUSPENDED" ||
-        data.state === "ACCOUNT_DISABLED"
-      ) {
-        href = `/auth-status?state=${data.state}`;
-      } else if (
-        data.state === "MEMBERSHIP_SUSPENDED" ||
-        data.state === "WORKSPACE_SUSPENDED" ||
-        data.state === "WORKSPACE_DELETING"
-      ) {
-        const workspaceName = encodeURIComponent(data.workspace?.name ?? "");
-        href = `/auth-status?state=${data.state}&workspace=${workspaceName}`;
-      } else if (data.state === "EMAIL_VERIFICATION_REQUIRED") {
-        if (typeof window !== "undefined") {
-          sessionStorage.setItem("zoiko.pending_token", data.pendingToken ?? "");
-          sessionStorage.setItem("zoiko.pending_email", data.user?.email ?? "");
-        }
-        href = "/verify-email";
-      } else if (data.state === "INVITATION_PENDING") {
-        // No tenant session exists yet, so acceptance happens on the
-        // status screen using the backend-issued pending token (same
-        // mechanism as the post-registration join flow).
-        if (typeof window !== "undefined") {
-          sessionStorage.setItem("zoiko.invite_pending_token", data.pendingToken ?? "");
-          sessionStorage.setItem(
-            "zoiko.invite_pending_list",
-            JSON.stringify(data.invitations ?? [])
-          );
-          sessionStorage.removeItem("pendingInvitationToken");
-        }
-        const names = (data.invitations ?? []).map((w: { name: string }) => w.name).join(",");
-        href = `/auth-status?state=INVITATION_PENDING${names ? `&invitations=${encodeURIComponent(names)}` : ""}`;
-      } else {
-        href = "/login";
-      }
-
-      if (data.state === "NO_WORKSPACE") {
-        router.replace("/login");
-        return;
-      }
-
-      router.replace(href);
+      await qc.invalidateQueries({ queryKey: ["me"] });
+      routeAuthState(data, router);
     },
   });
 }
+
+// export function useGoogleLogin() {
+//   const qc = useQueryClient();
+//   const router = useRouter();
+
+//   return useMutation({
+//     mutationFn: (input: GoogleLoginInput) => loginWithGoogle(input),
+//     onSuccess: async (data) => {
+//       await qc.invalidateQueries({ queryKey: ["me"] });
+//       routeAuthState(data, router);
+//     },
+//   });
+// }
 
 /**
  * Second leg of Google sign-in.

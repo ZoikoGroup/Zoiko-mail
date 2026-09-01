@@ -147,17 +147,17 @@ export default function RegisterForm({
 
   return (
     <>
-      <div className="mb-4 text-center">
+      <div className="mb-2 text-center">
         <h2 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-white">
           Create your account
         </h2>
-        <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
+        <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
           Get started with your secure Zoiko Mail workspace.
         </p>
       </div>
 
       {errorMessage && (
-        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+        <div className="mb-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
           {errorMessage}
         </div>
       )}
@@ -168,12 +168,12 @@ export default function RegisterForm({
         disabled={registerMutation.isPending || googleLoginMutation.isPending}
       />
 
-      <div className="relative my-4">
+      <div className="relative my-2">
         <div className="absolute inset-0 flex items-center">
           <div className="w-full border-t border-slate-200 dark:border-slate-700" />
         </div>
         <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-white px-2 text-slate-500 dark:bg-slate-950 dark:text-slate-400">or</span>
+          <span className="bg-white px-2 text-slate-500 dark:bg-slate-900 dark:text-slate-400">or</span>
         </div>
       </div>
 
@@ -229,7 +229,7 @@ export default function RegisterForm({
         >
           {registerMutation.isPending ? "Creating Account..." : "Continue"}
         </button>
-        <div className="border-t border-slate-200 pt-3 dark:border-slate-700">
+        <div className="">
           <p className="text-center text-sm text-slate-600 dark:text-slate-400">
             Already have an account?{" "}
             <button

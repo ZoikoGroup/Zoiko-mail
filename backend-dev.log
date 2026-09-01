@@ -1,0 +1,5 @@
+
+> zoiko_mail_backend@1.0.0 dev
+> tsx watch src/server.ts
+
+{"level":30,"time":"2026-09-01T06:03:00.230Z","service":"zoiko-mail-api","environment":"development","port":5000,"msg":"Zoiko Mail API listening"}
