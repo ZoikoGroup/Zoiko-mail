@@ -110,6 +110,31 @@ describe("Google sign-in opens a session in one step", () => {
     expect(created.passwordHash).toBeNull();
   });
 
+  it("hands a brand-new Google user a token that actually creates their first workspace", async () => {
+    // This is the path a new signup is stranded on if the pending token goes
+    // unused: the account exists, belongs to nothing, and has no session, so
+    // /auth/create-workspace is its only way forward. Asserting the token is
+    // present is not enough — it has to be accepted.
+    const start = await signInWithGoogle().expect(200);
+    expect(start.body.data.state).toBe("NO_WORKSPACE");
+
+    const created = await request(app)
+      .post("/api/v1/auth/create-workspace")
+      .set("Authorization", `Bearer ${start.body.data.pendingToken}`)
+      .send({ tenantName: "Devon's Workspace", planCode: "starter" })
+      .expect(201);
+
+    expect(created.body.data.accessToken).toBeTruthy();
+    expect(created.body.data.refreshToken).toBeTruthy();
+    expect(created.body.data.membership.role).toBe("OWNER");
+
+    // And signing in again now resolves to a real session rather than
+    // NO_WORKSPACE, which is what the user sees as "it finally lets me in".
+    const again = await signInWithGoogle().expect(200);
+    expect(again.body.data.state).toBe("SIGNED_IN");
+    expect(again.body.data.accessToken).toBeTruthy();
+  });
+
   it("refuses to link an unverified local account, so registering an address cannot capture its owner", async () => {
     // The attack this blocks: register victim@example.com, never verify it,
     // and wait for the real owner's Google sign-in to land in your account.

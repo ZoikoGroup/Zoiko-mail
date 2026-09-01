@@ -51,14 +51,24 @@ export function useMe() {
  * Maps a backend AuthState onto a destination. Shared by password login and
  * Google login — both return the identical state union, so duplicating this
  * would guarantee the two paths drift apart.
+ *
+ * `signedInHref` is the only thing the two callers disagree about: a password
+ * login opens the console the role implies, while a Google sign-in always
+ * lands in the user's own workspace. Everything else — and NO_WORKSPACE in
+ * particular — must behave identically, which is why it is a parameter here
+ * rather than a second copy of this function.
  */
-export function routeAuthState(data: AuthResponse, router: AppRouterInstance): void {
+export function routeAuthState(
+  data: AuthResponse,
+  router: AppRouterInstance,
+  opts?: { signedInHref?: string }
+): void {
   let href: string;
 
   if (data.state === "STAFF_CONSOLE") {
     href = "/support";
   } else if (data.state === "SIGNED_IN") {
-    href = resolveWorkspaceHref(data.membership?.role);
+    href = opts?.signedInHref ?? resolveWorkspaceHref(data.membership?.role);
   } else if (data.state === "WORKSPACE_SELECTION") {
     if (typeof window !== "undefined") {
       sessionStorage.setItem("zoiko.selection_token", data.selectionToken ?? "");
@@ -88,13 +98,22 @@ export function routeAuthState(data: AuthResponse, router: AppRouterInstance): v
     const names = (data.invitations ?? []).map((w: { name: string }) => w.name).join(",");
     href = `/auth-status?state=INVITATION_PENDING${names ? `&invitations=${encodeURIComponent(names)}` : ""}`;
   } else if (data.state === "NO_WORKSPACE") {
-    // Every new Google signup lands here. The backend now issues a pending
-    // token with this state so the user can create their first workspace.
+    // Every brand-new Google signup lands here: the account exists and is
+    // verified, but it belongs to no workspace yet, so there is nothing to
+    // sign in to until one is created. The backend attaches a pending token
+    // for exactly that, and /auth/create-workspace is the only thing that
+    // accepts it.
+    //
+    // Not /owner/onboarding: that sits behind ProtectedRoute, which requires a
+    // session this state does not have yet, so it bounces straight back to
+    // /login. Not /login either — the sign-in happens there, so replacing the
+    // same URL re-renders without remounting and a step on that page would
+    // never appear. /create-workspace is its own route for both reasons.
     if (typeof window !== "undefined") {
-      sessionStorage.setItem("zoiko.pending_token", data.pendingToken ?? "");
-      sessionStorage.setItem("zoiko.pending_email", data.user?.email ?? "");
+      sessionStorage.setItem("zoiko.workspace_token", data.pendingToken ?? "");
+      sessionStorage.setItem("zoiko.workspace_email", data.user?.email ?? "");
     }
-    href = "/owner/onboarding";
+    href = "/create-workspace";
   } else {
     href = "/login";
   }
@@ -145,6 +164,14 @@ export function useLogin() {
 //   });
 // }
 
+/**
+ * Google sign-in.
+ *
+ * Routing goes through routeAuthState so this path cannot drift from the
+ * password path again: it previously carried its own copy of the dispatch,
+ * which sent NO_WORKSPACE to /login and stranded every brand-new Google
+ * account back on the form it had just come from.
+ */
 export function useGoogleLogin() {
   const qc = useQueryClient();
   const router = useRouter();
@@ -153,68 +180,10 @@ export function useGoogleLogin() {
     mutationFn: ({ idToken }: { idToken: string }) => googleLogin(idToken),
 
     onSuccess: async (data) => {
-      await qc.invalidateQueries({
-        queryKey: ["me"],
-      });
-
-      let href: string;
-
-      if (data.state === "STAFF_CONSOLE") {
-        href = "/support";
-      } else if (data.state === "SIGNED_IN") {
-        // Google sign-in lands in the user's own workspace, whatever their role.
-        href = USER_WORKSPACE_HREF;
-      } else if (data.state === "WORKSPACE_SELECTION") {
-        if (typeof window !== "undefined") {
-          sessionStorage.setItem(
-            "zoiko.selection_token",
-            data.selectionToken ?? ""
-          );
-          sessionStorage.setItem(
-            "zoiko.selection_workspaces",
-            JSON.stringify(data.workspaces ?? [])
-          );
-        }
-        href = "/select-workspace";
-      } else if (
-        data.state === "ACCOUNT_SUSPENDED" ||
-        data.state === "ACCOUNT_DISABLED"
-      ) {
-        href = `/auth-status?state=${data.state}`;
-      } else if (
-        data.state === "MEMBERSHIP_SUSPENDED" ||
-        data.state === "WORKSPACE_SUSPENDED" ||
-        data.state === "WORKSPACE_DELETING"
-      ) {
-        const workspaceName = encodeURIComponent(data.workspace?.name ?? "");
-        href = `/auth-status?state=${data.state}&workspace=${workspaceName}`;
-      } else if (data.state === "EMAIL_VERIFICATION_REQUIRED") {
-        if (typeof window !== "undefined") {
-          sessionStorage.setItem("zoiko.pending_token", data.pendingToken ?? "");
-          sessionStorage.setItem("zoiko.pending_email", data.user?.email ?? "");
-        }
-        href = "/verify-email";
-      } else if (data.state === "INVITATION_PENDING") {
-        if (typeof window !== "undefined") {
-          sessionStorage.setItem("zoiko.invite_pending_token", data.pendingToken ?? "");
-          sessionStorage.setItem(
-            "zoiko.invite_pending_list",
-            JSON.stringify(data.invitations ?? [])
-          );
-          sessionStorage.removeItem("pendingInvitationToken");
-        }
-        const names = (data.invitations ?? []).map((w: { name: string }) => w.name).join(",");
-        href = `/auth-status?state=INVITATION_PENDING${names ? `&invitations=${encodeURIComponent(names)}` : ""}`;
-      } else {
-        href = "/login";
-      }
-
-      if (data.state === "NO_WORKSPACE") {
-        router.replace("/login");
-        return;
-      }
-
-      router.replace(href);
+      await qc.invalidateQueries({ queryKey: ["me"] });
+      // A social sign-in is a front-door entry point, so it lands in the
+      // user's own mailbox rather than whichever console their role implies.
+      routeAuthState(data, router, { signedInHref: USER_WORKSPACE_HREF });
     },
   });
 }
