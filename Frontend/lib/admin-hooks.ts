@@ -184,6 +184,39 @@ export function useGuardrails(): QueryLike<GuardrailDto[]> {
   return { data: GUARDRAILS, isLoading: false, error: null };
 }
 
+/* ── rail counts ───────────────────────────────────────────────────────── */
+
+/**
+ * Live badge counts for the admin rail nav items.
+ *
+ * Each key is the nav href; a key is present only once its underlying query has
+ * resolved, so a still-loading item keeps its previous badge rather than
+ * flickering to 0. A resolved-but-empty list carries its real 0.
+ *
+ * Groups and Inbox are intentionally absent: groups have no backend read yet
+ * (`useGroups` throws), and mail needs a member-level hook that does not live
+ * in this module.
+ */
+export function useAdminNavCounts(): Partial<Record<string, number>> {
+  const people = useWorkspacePeople();
+  const invitations = useInvitations();
+  const mailboxes = useMailboxes();
+  const domains = useDomains();
+  const notifications = useNotifications();
+  const commitments = useCommitments();
+
+  const counts: Partial<Record<string, number>> = {};
+  if (people.data) counts["/admin/users"] = people.data.length;
+  if (invitations.data) counts["/admin/invitations"] = invitations.data.length;
+  if (mailboxes.data) counts["/admin/mailboxes"] = mailboxes.data.length;
+  if (domains.data) counts["/admin/domains"] = domains.data.length;
+  if (notifications.data) {
+    counts["/admin/notifications"] = notifications.data.filter((n) => !n.readAt).length;
+  }
+  if (commitments.data) counts["/admin/commitments"] = commitments.data.length;
+  return counts;
+}
+
 /* ── dashboard ─────────────────────────────────────────────────────────── */
 
 /**
