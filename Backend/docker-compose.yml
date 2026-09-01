@@ -34,6 +34,9 @@ services:
       # Google as an identity provider. Optional: unset means the sign-in
       # route reports itself unconfigured instead of failing at startup.
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      # Without this the container falls back to env.ts's default of false and
+      # POST /auth/google answers 403, which reads like a broken button.
+      FLAG_GOOGLE_LOGIN_ENABLED: ${FLAG_GOOGLE_LOGIN_ENABLED:-false}
       ATTACHMENT_STORAGE_PATH: /app/storage/attachments
       EXPORT_STORAGE_PATH: /app/storage/exports
       TRUST_PROXY: ${TRUST_PROXY:-1}

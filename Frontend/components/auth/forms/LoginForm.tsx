@@ -32,7 +32,6 @@ export default function LoginForm({
   onForgotPassword,
 }: LoginFormProps) {
   const loginMutation = useLogin();
-  const googleLogin = useGoogleLogin();
   const googleLoginMutation = useGoogleLogin();
 
   // Set when Google sign-in comes back asking for a code. Holding it here
@@ -166,14 +165,9 @@ export default function LoginForm({
           }
           disabled={loginMutation.isPending || googleLoginMutation.isPending}
         />
-
-        {googleLogin.isError && (
-          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
-            {googleLogin.error instanceof ApiError
-              ? googleLogin.error.message
-              : "Google sign-in failed. Please try again."}
-          </div>
-        )}
+        {/* Google failures surface through `errorMessage` below, alongside
+            password failures, so the form has one error region rather than
+            two that can disagree. */}
       </div>
 
       <div className="relative m-2">

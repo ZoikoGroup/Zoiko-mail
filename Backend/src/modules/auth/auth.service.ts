@@ -754,6 +754,17 @@ export class AuthService {
  * workspace selection, staff console, suspended accounts and pending
  * invitations all behave identically regardless of how the user proved
  * their identity.
+ *
+ * NOT currently routed. Two Google implementations landed independently and
+ * both registered POST /auth/google; googleLogin() below owns the path now,
+ * because sending an OTP after account selection is a product requirement
+ * and this method signs the user straight in instead.
+ *
+ * Kept rather than deleted because its UserIdentity model is the better one:
+ * it supports multiple providers per user and survives a Google address
+ * change, where googleLogin()'s AppUser.googleId column does neither. The
+ * reconciliation worth doing is porting googleLogin()'s OTP step onto this
+ * identity lookup, then retiring the googleId column.
  */
   async loginWithGoogle(
     input: GoogleLoginInput,

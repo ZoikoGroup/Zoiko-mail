@@ -53,7 +53,7 @@ model AppUser {
   id                      String                 @id @default(uuid()) @db.Uuid
   email                   String                 @unique
   googleId                String?                @unique @map("google_id")
-  passwordHash            String                 @map("password_hash")
+  passwordHash            String?                @map("password_hash")
   displayName             String                 @map("display_name")
   avatarUrl               String?                @map("avatar_url")
   phoneNumber             String?                @map("phone_number")
