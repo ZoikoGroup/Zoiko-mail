@@ -53,21 +53,34 @@ export async function tenantContext(
     return;
   }
 
-  // One live workspace per account. Signing into a workspace claims it on the
-  // user row and revokes the other workspace's refresh tokens, but an access
-  // token already in a tab stays cryptographically valid until it expires —
-  // so without this check the workspace the user just left would keep working
-  // for up to JWT_ACCESS_EXPIRES_IN.
+  // One live workspace per account, enforced on every request.
   //
-  // Read from the row that was already loaded above, so this costs no extra
-  // query. A null activeTenantId means no sign-in has claimed a workspace yet
-  // (sessions predating this rule), and is deliberately allowed through.
+  // Access tokens are stateless: signing out or signing into another workspace
+  // revokes refresh tokens, but the token already in a tab stays
+  // cryptographically valid until it expires. Nothing but a server-side check
+  // can stop it, so this is that check, and it is deliberately strict —
+  // the claim must name *this* tenant, and anything else is refused:
+  //
+  //   - a different tenant: a newer sign-in moved the claim, so this token
+  //     belongs to a workspace the user has left.
+  //   - null: the claim was released by signing out. Treating null as
+  //     "unclaimed, allow" would have let a signed-out access token keep
+  //     working until it expired, which is the hole this closes.
+  //
+  // Read from the user row the membership query already loaded, so it costs
+  // no extra query. Sessions issued before claiming existed have no claim and
+  // are refused too; those users sign in once more and are then unaffected.
   const { activeTenantId } = membership.user;
-  if (activeTenantId && activeTenantId !== tenantId) {
+  if (activeTenantId !== tenantId) {
     next(
       new AppError(
-        "This session ended because you signed into another workspace. Sign in again to come back.",
+        activeTenantId
+          ? "This session ended because you signed into another workspace. Sign in again to come back."
+          : "This session has ended. Please sign in again.",
         401,
+        // The same code for both: in each case this token is no longer the
+        // account's current session, and the client must stop trying to
+        // refresh it and send the user to sign in.
         ErrorCodes.SESSION_SUPERSEDED
       )
     );

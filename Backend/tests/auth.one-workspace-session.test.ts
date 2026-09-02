@@ -201,4 +201,89 @@ describe("A user with two workspaces holds one session at a time", () => {
     // the newest session keeps working.
     await probe(again.body.data.accessToken).expect(200);
   });
+  it("kills the access token the moment the user signs out", async () => {
+    const session = sessionOf(
+      await pick(await beginSignIn(user), user.ownTenantId).expect(200)
+    );
+    await probe(session.accessToken).expect(200);
+
+    await request(app)
+      .post("/api/v1/auth/logout")
+      .send({ refreshToken: session.refreshToken })
+      .expect(200);
+
+    // Revoking the refresh token alone would have left this access token
+    // working until it expired, so a captured token stayed usable long after
+    // its owner signed out. Signing out releases the workspace claim, and
+    // that is what makes it dead immediately.
+    const after = await probe(session.accessToken).expect(401);
+    expect(after.body.error.code).toBe("SESSION_SUPERSEDED");
+  });
+
+  it("kills the access token when the user signs out everywhere", async () => {
+    const session = sessionOf(
+      await pick(await beginSignIn(user), user.guestTenantId).expect(200)
+    );
+    await probe(session.accessToken).expect(200);
+
+    await request(app)
+      .post("/api/v1/auth/logout-all")
+      .set(authHeader(session.accessToken))
+      .expect(200);
+
+    await probe(session.accessToken).expect(401);
+  });
+
+  it("lets the user back in after signing out", async () => {
+    const first = sessionOf(
+      await pick(await beginSignIn(user), user.ownTenantId).expect(200)
+    );
+    await request(app)
+      .post("/api/v1/auth/logout")
+      .send({ refreshToken: first.refreshToken })
+      .expect(200);
+
+    // Strict enforcement must not become a lockout: a fresh sign-in claims
+    // the workspace again and works.
+    const again = sessionOf(
+      await pick(await beginSignIn(user), user.ownTenantId).expect(200)
+    );
+    await probe(again.accessToken).expect(200);
+  });
+
+  it("will not open a workspace the account does not belong to", async () => {
+    const stranger = await registerUser(app, {
+      email: `stranger-${Date.now()}@zoiko.test`,
+      tenantName: "Stranger Workspace",
+    });
+
+    const selectionToken = await beginSignIn(user);
+    const refused = await pick(selectionToken, stranger.tenantId).expect(200);
+
+    // Naming someone else's tenant must not open it. The picker is a
+    // convenience; membership is what authorises, and it is checked here
+    // rather than trusted from the request.
+    expect(refused.body.data.state).not.toBe("SIGNED_IN");
+    expect(refused.body.data.session).toBeUndefined();
+  });
+
+  it("reports the role held in each workspace, which is what routing follows", async () => {
+    // The client sends a user to /owner, /admin or their mailbox based on the
+    // role in this response. The same person is OWNER of one workspace and
+    // MEMBER of the other, so a pick that reported the wrong one would route
+    // them into a console they hold no authority in.
+    const asOwner = await pick(
+      await beginSignIn(user),
+      user.ownTenantId
+    ).expect(200);
+    expect(asOwner.body.data.session.membership.role).toBe("OWNER");
+    expect(asOwner.body.data.session.tenant.id).toBe(user.ownTenantId);
+
+    const asMember = await pick(
+      await beginSignIn(user),
+      user.guestTenantId
+    ).expect(200);
+    expect(asMember.body.data.session.membership.role).toBe("MEMBER");
+    expect(asMember.body.data.session.tenant.id).toBe(user.guestTenantId);
+  });
 });

@@ -16,7 +16,7 @@ vi.mock("../src/modules/auth/google.verifier.js", () => ({
 
 const { createApp } = await import("../src/app.js");
 const { prisma } = await import("../src/config/prisma.js");
-const { registerUser } = await import("./helpers.js");
+const { registerUser, authHeader } = await import("./helpers.js");
 
 const app = createApp();
 
@@ -172,5 +172,88 @@ describe("Google sign-in opens a session in one step", () => {
       .post("/api/v1/auth/google/resend-otp")
       .send({ pendingToken: "a".repeat(40) })
       .expect(404);
+  });
+
+  it("makes a two-workspace Google sign-in pick one, rather than handing out a session", async () => {
+    // Google proves who someone is, never which workspace they meant. A user
+    // in two workspaces must reach the same picker a password sign-in reaches,
+    // or signing in with Google would be a way to skip the choice.
+    const own = await registerUser(app, {
+      email: profile.email,
+      tenantName: "Google Own Workspace",
+    });
+    const host = await registerUser(app, {
+      email: "google-host@zoiko.test",
+      tenantName: "Google Host Workspace",
+    });
+    await request(app)
+      .post("/api/v1/membership/members")
+      .set(authHeader(host.accessToken))
+      .send({ email: profile.email, role: "MEMBER" })
+      .expect(201);
+
+    const res = await signInWithGoogle().expect(200);
+
+    expect(res.body.data.state).toBe("WORKSPACE_SELECTION");
+    expect(res.body.data.selectionToken).toBeTruthy();
+    // No credentials at this step: nothing is authorised until a workspace is
+    // chosen and its membership checked.
+    expect(res.body.data.session).toBeUndefined();
+    expect(res.body.data.accessToken).toBeUndefined();
+
+    const offered = (res.body.data.workspaces as Array<{ id: string }>).map(
+      (w) => w.id
+    );
+    expect(offered.sort()).toEqual([own.tenantId, host.tenantId].sort());
+  });
+
+  it("gives a Google sign-in the role it holds in the workspace it entered", async () => {
+    // Where the client sends someone is decided by this role, so a Google
+    // sign-in reporting anything but the membership's real role would route
+    // a member into a console they are not authorised for.
+    await registerUser(app, {
+      email: profile.email,
+      tenantName: "Role Own Workspace",
+    });
+    const host = await registerUser(app, {
+      email: "role-host@zoiko.test",
+      tenantName: "Role Host Workspace",
+    });
+    await request(app)
+      .post("/api/v1/membership/members")
+      .set(authHeader(host.accessToken))
+      .send({ email: profile.email, role: "MEMBER" })
+      .expect(201);
+
+    const started = await signInWithGoogle().expect(200);
+    const entered = await request(app)
+      .post("/api/v1/auth/select-workspace")
+      .send({
+        selectionToken: started.body.data.selectionToken,
+        tenantId: host.tenantId,
+      })
+      .expect(200);
+
+    expect(entered.body.data.state).toBe("SIGNED_IN");
+    expect(entered.body.data.session.membership.role).toBe("MEMBER");
+    expect(entered.body.data.session.tenant.id).toBe(host.tenantId);
+  });
+
+  it("refuses a Google sign-in for a workspace the account does not belong to", async () => {
+    await registerUser(app, {
+      email: profile.email,
+      tenantName: "Outsider Own Workspace",
+    });
+    const stranger = await registerUser(app, {
+      email: "stranger@zoiko.test",
+      tenantName: "Stranger Workspace",
+    });
+
+    // One workspace, so this resolves straight to a session rather than a
+    // pick — which is itself the assertion that Google cannot see a workspace
+    // it holds no membership in.
+    const res = await signInWithGoogle().expect(200);
+    expect(res.body.data.state).toBe("SIGNED_IN");
+    expect(res.body.data.session.tenant.id).not.toBe(stranger.tenantId);
   });
 });

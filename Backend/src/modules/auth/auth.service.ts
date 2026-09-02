@@ -287,6 +287,28 @@ async function claimActiveWorkspace(
   });
 }
 
+/**
+ * Gives up the workspace claim, which is what makes signing out immediate.
+ *
+ * Revoking refresh tokens alone does not end a session: the access token in
+ * the tab stays cryptographically valid until it expires, so without this a
+ * signed-out token would keep working for up to JWT_ACCESS_EXPIRES_IN.
+ * Clearing the claim makes tenantContext reject it on the very next request.
+ *
+ * Scoped to the tenant being left, so this cannot clear a claim that a newer
+ * sign-in has already moved to another workspace.
+ */
+async function releaseActiveWorkspace(
+  userId: string,
+  tenantId: string,
+  tx: Prisma.TransactionClient | typeof prisma = prisma
+): Promise<void> {
+  await tx.appUser.updateMany({
+    where: { id: userId, activeTenantId: tenantId },
+    data: { activeTenantId: null },
+  });
+}
+
 async function issueSession(
   membership: MembershipWithRelations,
   tx: Prisma.TransactionClient | typeof prisma = prisma
@@ -1332,6 +1354,8 @@ export class AuthService {
         data: { revokedAt: new Date() },
       });
 
+      await releaseActiveWorkspace(storedToken.userId, storedToken.tenantId);
+
       await auditService.record({
         tenantId: storedToken.tenantId,
         actorUserId: storedToken.userId,
@@ -1412,6 +1436,9 @@ export class AuthService {
         where: { userId, tenantId, revokedAt: null },
         data: { revokedAt: new Date() },
       });
+
+      await releaseActiveWorkspace(userId, tenantId, tx);
+
       await auditService.record(
         {
           tenantId,

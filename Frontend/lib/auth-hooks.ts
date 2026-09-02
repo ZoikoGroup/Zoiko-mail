@@ -33,7 +33,7 @@ import { getPlatformToken, isLoggedIn } from "./auth-storage";
 // import { resolveWorkspaceHref } from "./workspace";
 import { AuthResponse, GoogleLoginInput, loginWithGoogle } from "./auth-api";
 import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
-import { resolveWorkspaceHref, USER_WORKSPACE_HREF } from "./workspace";
+import { resolveWorkspaceHref } from "./workspace";
 
 // Server state (the logged-in user) lives in TanStack Query, keyed by ['me'].
 export function useMe() {
@@ -52,11 +52,12 @@ export function useMe() {
  * Google login — both return the identical state union, so duplicating this
  * would guarantee the two paths drift apart.
  *
- * `signedInHref` is the only thing the two callers disagree about: a password
- * login opens the console the role implies, while a Google sign-in always
- * lands in the user's own workspace. Everything else — and NO_WORKSPACE in
- * particular — must behave identically, which is why it is a parameter here
- * rather than a second copy of this function.
+ * `signedInHref` overrides where a signed-in user lands. No caller sets it
+ * today: every sign-in, password or Google, routes on the role the backend
+ * assigned, so authenticating one way cannot reach a workspace the other
+ * would not. Kept as a parameter because the alternative — a second copy of
+ * this dispatch for one differing line — is what let the two paths drift
+ * before, sending Google sign-ins to a dead end on NO_WORKSPACE.
  */
 export function routeAuthState(
   data: AuthResponse,
@@ -167,10 +168,19 @@ export function useLogin() {
 /**
  * Google sign-in.
  *
- * Routing goes through routeAuthState so this path cannot drift from the
- * password path again: it previously carried its own copy of the dispatch,
- * which sent NO_WORKSPACE to /login and stranded every brand-new Google
- * account back on the form it had just come from.
+ * Routes exactly as a password sign-in does, on the role the backend assigned
+ * to the workspace being entered: Owner to the owner console, Admin to the
+ * admin console, everyone else to their mailbox. Proving identity with Google
+ * grants no different destination and no different authority than proving it
+ * with a password.
+ *
+ * A user in more than one workspace resolves to WORKSPACE_SELECTION here just
+ * as they would with a password, so Google cannot skip the pick or carry a
+ * session into a second workspace.
+ *
+ * Routing goes through routeAuthState rather than a local copy: this hook
+ * previously carried its own dispatch, which sent NO_WORKSPACE to /login and
+ * stranded every brand-new Google account back on the form it came from.
  */
 export function useGoogleLogin() {
   const qc = useQueryClient();
@@ -181,9 +191,7 @@ export function useGoogleLogin() {
 
     onSuccess: async (data) => {
       await qc.invalidateQueries({ queryKey: ["me"] });
-      // A social sign-in is a front-door entry point, so it lands in the
-      // user's own mailbox rather than whichever console their role implies.
-      routeAuthState(data, router, { signedInHref: USER_WORKSPACE_HREF });
+      routeAuthState(data, router);
     },
   });
 }
