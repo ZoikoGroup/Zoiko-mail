@@ -85,13 +85,15 @@ function isPendingTokenPayload(value: unknown): value is PendingTokenPayload {
 }
 
 function isSelectionTokenPayload(value: unknown): value is SelectionTokenPayload {
+  if (!value || typeof value !== "object") return false;
+  const payload = value as Record<string, unknown>;
   return (
-    typeof value === "object" &&
-    value !== null &&
-    "sub" in value &&
-    typeof (value as { sub: unknown }).sub === "string" &&
-    "type" in value &&
-    (value as { type: unknown }).type === "selection"
+    typeof payload.sub === "string" &&
+    payload.type === "selection" &&
+    // Required, not optional: a token minted before single-use enforcement
+    // has no jti and so could not be spent. Rejecting it sends that user
+    // back through sign-in, which is the behaviour being enforced anyway.
+    typeof payload.jti === "string"
   );
 }
 
@@ -191,6 +193,7 @@ function buildSelectionToken(userId: string): {
   const payload: SelectionTokenPayload = {
     sub: userId,
     type: "selection",
+    jti: uuidv4(),
   };
 
   const token = jwt.sign(payload, env.JWT_ACCESS_SECRET, {
@@ -251,6 +254,39 @@ async function persistRefreshToken(
   });
 }
 
+/**
+ * Claims one workspace for this account and ends every session for any other.
+ *
+ * A user with two memberships gets one live session, not two: switching
+ * workspace means signing in again. Two things are needed for that, because
+ * the two token kinds fail differently.
+ *
+ * Refresh tokens are rows, so the other workspace's are revoked here and its
+ * sessions cannot be renewed. Access tokens are stateless and stay
+ * cryptographically valid until they expire, so revocation alone would leave
+ * the old workspace usable for up to JWT_ACCESS_EXPIRES_IN. activeTenantId is
+ * what closes that: tenantContext reads it on every request and refuses a
+ * token minted for anything else.
+ */
+async function claimActiveWorkspace(
+  membership: MembershipWithRelations,
+  tx: Prisma.TransactionClient | typeof prisma
+): Promise<void> {
+  await tx.appUser.update({
+    where: { id: membership.userId },
+    data: { activeTenantId: membership.tenantId },
+  });
+
+  await tx.refreshToken.updateMany({
+    where: {
+      userId: membership.userId,
+      tenantId: { not: membership.tenantId },
+      revokedAt: null,
+    },
+    data: { revokedAt: new Date() },
+  });
+}
+
 async function issueSession(
   membership: MembershipWithRelations,
   tx: Prisma.TransactionClient | typeof prisma = prisma
@@ -259,6 +295,9 @@ async function issueSession(
   const refresh = buildRefreshToken(membership);
 
   await persistRefreshToken(membership, refresh.token, refresh.expiresAt, tx);
+  // After the new token is stored, so a failure here cannot leave the account
+  // pointing at a workspace it holds no session for.
+  await claimActiveWorkspace(membership, tx);
 
   return {
     accessToken,
@@ -1031,7 +1070,9 @@ export class AuthService {
     context: RequestContext
   ): Promise<AuthState> {
     // 1. Verify the selection token and extract userId.
-    const userId = this.verifySelectionToken(input.selectionToken);
+    const { userId, jti, expiresAt } = this.verifySelectionToken(
+      input.selectionToken
+    );
 
     // 2. Fetch the user record.
     const user = await userRepository.findById(userId);
@@ -1039,10 +1080,73 @@ export class AuthService {
       throw new AppError("User not found", 404, ErrorCodes.NOT_FOUND);
     }
 
-    // 3. Delegate to the shared resolver with the chosen tenantId. All the
-    //    membership-lookup, account-status, tenant-status, and membership-
-    //    status logic lives there — we just point it at the picked workspace.
-    return this.resolveAuthState(user, input.tenantId, context);
+    // 3. Spend the token before the pick is resolved, not after.
+    //
+    //    Claiming it first is what makes this safe under concurrency: the
+    //    primary key rejects the second of two simultaneous replays before
+    //    either can open a session. Doing it afterwards would let both
+    //    resolve, and two sessions would exist however the loser was then
+    //    reported.
+    await this.consumeSelectionToken(jti, userId, expiresAt);
+
+    let result: AuthState;
+    try {
+      // All the membership-lookup, account-status, tenant-status and
+      // membership-status logic lives in the shared resolver — we just point
+      // it at the picked workspace.
+      result = await this.resolveAuthState(user, input.tenantId, context);
+    } catch (error) {
+      // The pick blew up rather than resolving, so nothing was issued. Hand
+      // the token back or a transient fault would cost the user their login.
+      await this.releaseSelectionToken(jti);
+      throw error;
+    }
+
+    // 4. Only a real session spends the login. A pick that resolved to
+    //    anything else — a suspended workspace, a membership still pending —
+    //    issued no session, so the token is returned and the user can choose
+    //    a different workspace instead of being sent back to sign in.
+    if (result.state !== "SIGNED_IN") {
+      await this.releaseSelectionToken(jti);
+    }
+
+    return result;
+  }
+
+  /**
+   * Marks a selection token as spent, or refuses if it already was.
+   *
+   * The token is a stateless JWT: verifying it proves only that we minted it
+   * and that it has not expired, never that it is unused. This row is the
+   * only thing that makes one sign-in worth one workspace.
+   */
+  private async consumeSelectionToken(
+    jti: string,
+    userId: string,
+    expiresAt: Date
+  ): Promise<void> {
+    try {
+      await prisma.usedSelectionToken.create({
+        data: { jti, userId, expiresAt },
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        throw new AppError(
+          "This sign-in has already opened a workspace. Sign in again to switch workspace.",
+          401,
+          ErrorCodes.TOKEN_REUSED
+        );
+      }
+      throw error;
+    }
+  }
+
+  /** Returns an unspent token to circulation after a pick that issued nothing. */
+  private async releaseSelectionToken(jti: string): Promise<void> {
+    await prisma.usedSelectionToken.deleteMany({ where: { jti } });
   }
 
   /** Evaluate one chosen workspace: tenant status first, then membership status. */
@@ -1375,7 +1479,11 @@ export class AuthService {
     return payload.sub;
   }
 
-  private verifySelectionToken(token: string): string {
+  private verifySelectionToken(token: string): {
+    userId: string;
+    jti: string;
+    expiresAt: Date;
+  } {
     let payload: unknown;
 
     try {
@@ -1395,7 +1503,15 @@ export class AuthService {
       throw new AppError("Invalid selection token", 401, ErrorCodes.TOKEN_INVALID);
     }
 
-    return payload.sub;
+    // `exp` is set by jwt.sign from SELECTION_TOKEN_EXPIRES_IN and is in
+    // seconds. Carried through so the spent-token row can be pruned once the
+    // token could no longer be verified anyway.
+    const exp = (payload as unknown as { exp?: number }).exp;
+    return {
+      userId: payload.sub,
+      jti: payload.jti,
+      expiresAt: new Date((exp ?? Math.floor(Date.now() / 1000)) * 1000),
+    };
   }
 
   private async recordLoginFailure(

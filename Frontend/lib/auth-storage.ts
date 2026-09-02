@@ -50,3 +50,34 @@ export function clearTokens(): void {
 export function isLoggedIn(): boolean {
   return !!(getAccessToken() || getPlatformToken());
 }
+
+/**
+ * Why the last session ended, when it ended for a reason worth explaining.
+ *
+ * Signing into a second workspace ends every session for the first one, so a
+ * tab left open there stops working. Without a note the user just finds
+ * themselves back at the login form, which reads as a fault rather than as
+ * the rule it is. Written on the way out and shown once on the login screen.
+ */
+export const SIGN_OUT_NOTICE_KEY = "zoiko.sign_out_notice";
+
+export function setSignOutNotice(message: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(SIGN_OUT_NOTICE_KEY, message);
+  } catch {
+    // Private-mode storage failures must never break signing out.
+  }
+}
+
+/** Reads the notice and clears it, so it is shown once and not on every visit. */
+export function takeSignOutNotice(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const message = sessionStorage.getItem(SIGN_OUT_NOTICE_KEY);
+    if (message) sessionStorage.removeItem(SIGN_OUT_NOTICE_KEY);
+    return message;
+  } catch {
+    return null;
+  }
+}

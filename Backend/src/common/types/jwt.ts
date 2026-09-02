@@ -50,6 +50,13 @@ export interface PendingTokenPayload {
 export interface SelectionTokenPayload {
   sub: string;
   type: "selection";
+  /**
+   * Identifies this token so it can be spent exactly once. Without it the
+   * token is pure bearer data and stays valid for its whole window, which
+   * would let one sign-in open a session in every workspace the user
+   * belongs to.
+   */
+  jti: string;
 }
 
 /**

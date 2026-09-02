@@ -1,9 +1,10 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { FaEnvelope } from "react-icons/fa";
 
 import { ApiError } from "@/lib/api-client";
+import { takeSignOutNotice } from "@/lib/auth-storage";
 import { useLogin, useGoogleLogin } from "@/lib/auth-hooks";
 
 import {
@@ -95,6 +96,13 @@ export default function LoginForm({
         formData.tenantId || undefined,
     });
   };
+
+  // Why the previous session ended, if it ended for a reason the user should
+  // hear — signing into another workspace ends this one, and an unexplained
+  // return to this form reads as a fault. Read once and cleared, so it does
+  // not reappear on later visits.
+  const [signOutNotice, setSignOutNotice] = useState<string | null>(null);
+  useEffect(() => setSignOutNotice(takeSignOutNotice()), []);
 
   const errorMessage =
     loginMutation.error instanceof ApiError
@@ -219,6 +227,15 @@ export default function LoginForm({
         {errorMessage && (
           <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
             {errorMessage}
+          </div>
+        )}
+
+        {/* Not an error: nothing went wrong, the rule is one workspace at a
+            time. Styled as information so it does not read as a failure, and
+            hidden as soon as the user has a real error to look at. */}
+        {!errorMessage && signOutNotice && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
+            {signOutNotice}
           </div>
         )}
 

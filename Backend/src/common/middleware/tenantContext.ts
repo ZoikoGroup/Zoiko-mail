@@ -53,6 +53,27 @@ export async function tenantContext(
     return;
   }
 
+  // One live workspace per account. Signing into a workspace claims it on the
+  // user row and revokes the other workspace's refresh tokens, but an access
+  // token already in a tab stays cryptographically valid until it expires —
+  // so without this check the workspace the user just left would keep working
+  // for up to JWT_ACCESS_EXPIRES_IN.
+  //
+  // Read from the row that was already loaded above, so this costs no extra
+  // query. A null activeTenantId means no sign-in has claimed a workspace yet
+  // (sessions predating this rule), and is deliberately allowed through.
+  const { activeTenantId } = membership.user;
+  if (activeTenantId && activeTenantId !== tenantId) {
+    next(
+      new AppError(
+        "This session ended because you signed into another workspace. Sign in again to come back.",
+        401,
+        ErrorCodes.SESSION_SUPERSEDED
+      )
+    );
+    return;
+  }
+
   req.tenantContext = {
     tenantId: membership.tenantId,
     userId: membership.userId,

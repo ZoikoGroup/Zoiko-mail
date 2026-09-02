@@ -4,6 +4,7 @@ import {
     getRefreshToken,
     setTokens,
     clearTokens,
+    setSignOutNotice,
 } from "./auth-storage";
 
 // Your backend wraps every response as:
@@ -122,17 +123,34 @@ export async function apiRequest<T = unknown>(
         );
     }
 
-    // Token expired -> refresh once, then retry the original request.
+    // Read the body before deciding what to do with a 401: the error code is
+    // what separates an expired token from a session that was deliberately
+    // ended, and the two must not be handled the same way. A 204 has no body,
+    // which is what the catch covers.
+    const json = await res.json().catch(() => null);
+    const errorCode: string | undefined = json?.error?.code;
+
     if (res.status === 401 && auth && !_retried) {
-        const refreshed = await tryRefresh();
-        if (refreshed) return apiRequest<T>(path, { ...opts, _retried: true });
-        clearTokens(); // refresh failed -> force re-login
+        if (errorCode === "SESSION_SUPERSEDED") {
+            // The user signed into another workspace, which ends this one.
+            // Refreshing is not just futile — this session's refresh token was
+            // revoked on purpose, and presenting a revoked token puts the
+            // server on its reuse path, logging a security event for every
+            // stale tab. So stop here and explain it instead.
+            setSignOutNotice(
+                json?.error?.message ??
+                    "This session ended because you signed into another workspace."
+            );
+            clearTokens();
+        } else {
+            const refreshed = await tryRefresh();
+            if (refreshed) return apiRequest<T>(path, { ...opts, _retried: true });
+            clearTokens(); // refresh failed -> force re-login
+        }
     }
 
     // No content
     if (res.status === 204) return undefined as T;
-
-    const json = await res.json().catch(() => null);
 
     if (!res.ok) {
         const message = json?.error?.message ?? `Request failed (${res.status})`;
