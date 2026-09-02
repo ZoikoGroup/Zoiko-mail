@@ -101,8 +101,17 @@ export default function LoginForm({
   // hear — signing into another workspace ends this one, and an unexplained
   // return to this form reads as a fault. Read once and cleared, so it does
   // not reappear on later visits.
+  //
+  // The `if` is load-bearing, not a tidy-up. takeSignOutNotice consumes the
+  // message, and React StrictMode runs this effect twice in development: the
+  // first run took the notice and set it, and an unguarded second run read
+  // nothing and put the state straight back to null, so the explanation never
+  // appeared. Only ever overwrite state with a notice we actually found.
   const [signOutNotice, setSignOutNotice] = useState<string | null>(null);
-  useEffect(() => setSignOutNotice(takeSignOutNotice()), []);
+  useEffect(() => {
+    const message = takeSignOutNotice();
+    if (message) setSignOutNotice(message);
+  }, []);
 
   const errorMessage =
     loginMutation.error instanceof ApiError
