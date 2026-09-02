@@ -8,12 +8,14 @@ import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { hashPassword, verifyPassword } from "../../common/utils/password.js";
 import { hashToken } from "../../common/utils/tokenHash.js";
+import { actingRole } from "../../common/utils/workspaceScope.js";
 import type {
   AccessTokenPayload,
   PendingTokenPayload,
   PlatformTokenPayload,
   RefreshTokenPayload,
   SelectionTokenPayload,
+  WorkspaceScope,
 } from "../../common/types/jwt.js";
 import { auditService } from "../audit/audit.service.js";
 import { membershipRepository } from "../membership/membership.repository.js";
@@ -115,13 +117,37 @@ function parseDurationToMs(duration: string): number {
   return value * multipliers[unit]!;
 }
 
-function buildAccessToken(membership: MembershipWithRelations): string {
+/**
+ * The console a password sign-in opens: the one the role implies.
+ *
+ * Google sign-in does not use this — it is always issued MEMBER scope, so
+ * social sign-in can never land in a console. See googleWorkspaceScope.
+ */
+export function workspaceScopeForRole(role: MembershipRole): WorkspaceScope {
+  return role;
+}
+
+/**
+ * A Google sign-in always acts as a member, however senior the account is.
+ *
+ * Reaching the admin, owner or support console is a deliberate act that must
+ * go through a sign-in aimed at it. Without this an Owner who used the Google
+ * button would land in the owner console, which is precisely what the rule
+ * forbids.
+ */
+export const GOOGLE_WORKSPACE_SCOPE: WorkspaceScope = "MEMBER";
+
+function buildAccessToken(
+  membership: MembershipWithRelations,
+  workspace: WorkspaceScope
+): string {
   const payload: AccessTokenPayload = {
     sub: membership.userId,
     tenantId: membership.tenantId,
     membershipId: membership.id,
     role: membership.role,
     platformRole: membership.user.platformRole,
+    workspace,
     type: "access",
   };
 
@@ -130,7 +156,10 @@ function buildAccessToken(membership: MembershipWithRelations): string {
   });
 }
 
-function buildRefreshToken(membership: MembershipWithRelations): {
+function buildRefreshToken(
+  membership: MembershipWithRelations,
+  workspace: WorkspaceScope
+): {
   token: string;
   jti: string;
   expiresAt: Date;
@@ -141,6 +170,9 @@ function buildRefreshToken(membership: MembershipWithRelations): {
     tenantId: membership.tenantId,
     membershipId: membership.id,
     role: membership.role,
+    // Carried so a refresh renews the same console rather than re-deriving
+    // it from the role, which would promote a MEMBER-scoped Google session.
+    workspace,
     type: "refresh",
     jti,
   };
@@ -311,10 +343,11 @@ async function releaseActiveWorkspace(
 
 async function issueSession(
   membership: MembershipWithRelations,
+  workspace: WorkspaceScope,
   tx: Prisma.TransactionClient | typeof prisma = prisma
 ): Promise<AuthSessionResponse> {
-  const accessToken = buildAccessToken(membership);
-  const refresh = buildRefreshToken(membership);
+  const accessToken = buildAccessToken(membership, workspace);
+  const refresh = buildRefreshToken(membership, workspace);
 
   await persistRefreshToken(membership, refresh.token, refresh.expiresAt, tx);
   // After the new token is stored, so a failure here cannot leave the account
@@ -337,8 +370,12 @@ async function issueSession(
     },
     membership: {
       id: membership.id,
-      role: membership.role,
+      // The acting role, not the membership's maximum. The client routes on
+      // this, so reporting OWNER for a MEMBER-scoped Google session would
+      // send it straight to the owner console the scope exists to withhold.
+      role: actingRole(membership.role, workspace) ?? membership.role,
     },
+    workspace,
   };
 }
 
@@ -542,7 +579,10 @@ export class AuthService {
       );
     }
 
-    return issueSession(membershipWithRelations);
+    return issueSession(
+      membershipWithRelations,
+      workspaceScopeForRole(membershipWithRelations.role)
+    );
   }
 
   /**
@@ -633,7 +673,11 @@ export class AuthService {
         );
       }
 
-      return issueSession(membershipWithRelations, tx);
+      return issueSession(
+        membershipWithRelations,
+        workspaceScopeForRole(membershipWithRelations.role),
+        tx
+      );
     });
 
     return session;
@@ -847,7 +891,12 @@ export class AuthService {
         // Google addresses can change; keep the record current.
         data: { lastUsedAt: new Date(), email: profile.email },
       });
-      return this.resolveAuthState(identity.user, undefined, context);
+      return this.resolveAuthState(
+        identity.user,
+        undefined,
+        context,
+        GOOGLE_WORKSPACE_SCOPE
+      );
     }
 
     const existingUser = await userRepository.findByEmail(profile.email);
@@ -890,7 +939,12 @@ export class AuthService {
         return user;
       });
 
-      return this.resolveAuthState(created, undefined, context);
+      return this.resolveAuthState(
+        created,
+        undefined,
+        context,
+        GOOGLE_WORKSPACE_SCOPE
+      );
     }
 
     // 3. A local account already holds this email — decide whether to link.
@@ -956,14 +1010,26 @@ export class AuthService {
       return user;
     });
 
-    return this.resolveAuthState(linked, undefined, context);
+    return this.resolveAuthState(
+      linked,
+      undefined,
+      context,
+      GOOGLE_WORKSPACE_SCOPE
+    );
   }
 
   /** Ordered guard chain. First matching guard decides the state. */
+  /**
+   * `intendedWorkspace` fixes the console the session is bound to. Left
+   * undefined it follows the membership role, which is what a password
+   * sign-in wants. Google passes MEMBER explicitly so a social sign-in can
+   * never open a console.
+   */
   private async resolveAuthState(
     user: Awaited<ReturnType<typeof userRepository.findByEmail>> & {},
     selectedTenantId: string | undefined,
-    context: RequestContext
+    context: RequestContext,
+    intendedWorkspace?: WorkspaceScope
   ): Promise<AuthState> {
     const publicUser: PublicUser = {
       id: user.id,
@@ -1060,11 +1126,23 @@ export class AuthService {
           expiresIn: selection.expiresIn,
         };
       }
-      return this.resolveSelectedWorkspace(user, chosen, publicUser, context);
+      return this.resolveSelectedWorkspace(
+        user,
+        chosen,
+        publicUser,
+        context,
+        intendedWorkspace
+      );
     }
 
     if (nonRemoved.length === 1) {
-      return this.resolveSelectedWorkspace(user, nonRemoved[0]!, publicUser, context);
+      return this.resolveSelectedWorkspace(
+        user,
+        nonRemoved[0]!,
+        publicUser,
+        context,
+        intendedWorkspace
+      );
     }
 
     // 5. Multiple workspaces — let the client pick (statuses drive greying-out).
@@ -1171,12 +1249,19 @@ export class AuthService {
     await prisma.usedSelectionToken.deleteMany({ where: { jti } });
   }
 
-  /** Evaluate one chosen workspace: tenant status first, then membership status. */
+  /**
+   * Evaluate one chosen workspace: tenant status first, then membership status.
+   *
+   * `intendedWorkspace` is the console the sign-in is aiming at, passed
+   * through from resolveAuthState so the session it issues is bound to it.
+   * Left undefined it follows the membership role.
+   */
   private async resolveSelectedWorkspace(
     user: { id: string; email: string; displayName: string },
     membership: MembershipWithRelations,
     publicUser: PublicUser,
-    context: RequestContext
+    context: RequestContext,
+    intendedWorkspace?: WorkspaceScope
   ): Promise<AuthState> {
     const workspace = toWorkspaceOption(membership);
 
@@ -1215,7 +1300,10 @@ export class AuthService {
     }
 
     // ACTIVE membership + ACTIVE tenant → sign in.
-    const session = await issueSession(membership);
+    const session = await issueSession(
+      membership,
+      intendedWorkspace ?? workspaceScopeForRole(membership.role)
+    );
     await auditService.record({
       tenantId: membership.tenantId,
       actorUserId: user.id,
@@ -1306,7 +1394,14 @@ export class AuthService {
 
       if (claimed.count !== 1) return null;
 
-      const nextSession = await issueSession(membership, tx);
+      // The scope comes from the presented token, not from the role: a
+      // MEMBER-scoped Google session must stay a member session across a
+      // refresh rather than being promoted to whatever its role allows.
+      const nextSession = await issueSession(
+        membership,
+        payload.workspace ?? workspaceScopeForRole(membership.role),
+        tx
+      );
       await auditService.record(
         {
           tenantId: membership.tenantId,
@@ -1460,12 +1555,13 @@ export class AuthService {
   getCurrentUser(req: Request): AuthSessionResponse["user"] & {
     tenant: AuthSessionResponse["tenant"];
     membership: AuthSessionResponse["membership"];
+    workspace: WorkspaceScope;
   } {
     if (!req.tenantContext) {
       throw new AppError("Tenant context required", 403, ErrorCodes.FORBIDDEN);
     }
 
-    const { user, tenant, membershipId, role } = req.tenantContext;
+    const { user, tenant, membershipId, role, workspace } = req.tenantContext;
 
     return {
       id: user.id,
@@ -1477,9 +1573,14 @@ export class AuthService {
         planCode: tenant.planCode,
       },
       membership: {
+        // The acting role, already narrowed by the session scope, so the
+        // client is never told more authority than this session has.
         id: membershipId,
         role,
       },
+      // Which console this session belongs to. The shells gate on this, so it
+      // has to come from the server rather than be inferred from the role.
+      workspace,
     };
   }
 

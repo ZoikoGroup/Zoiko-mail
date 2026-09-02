@@ -3,9 +3,10 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
-import { isLoggedIn } from "./auth-storage";
+import { clearTokens, isLoggedIn, setSignOutNotice } from "./auth-storage";
 import { useMe } from "./auth-hooks";
 import type { MeResponse } from "./auth-api";
+import type { WorkspaceScope } from "./workspace";
 
 /**
  * Gate for a workspace shell, and deliberately fail-closed.
@@ -35,14 +36,29 @@ import type { MeResponse } from "./auth-api";
  */
 export type WorkspaceAccess = "checking" | "allowed";
 
-export function useWorkspaceAccess(allowedRoles: readonly string[]): WorkspaceAccess {
+/**
+ * Gate for a workspace shell: the session must have been opened for *this*
+ * workspace.
+ *
+ * Gating on the role was not enough, and that is the hole this closes. An
+ * Admin who signed into the admin console could type /owner and the owner
+ * console rendered, because its guard asked "is this role allowed here?" and
+ * an Admin is allowed on much of the owner surface. The question that matters
+ * is "was this session opened for this console?", and only the workspace scope
+ * answers it.
+ *
+ * A mismatch destroys the session rather than merely redirecting. The rule is
+ * that moving between workspaces needs a fresh sign-in, so leaving the old
+ * session intact would let the browser go straight back to where it came from.
+ */
+export function useWorkspaceAccess(workspace: WorkspaceScope): WorkspaceAccess {
   const router = useRouter();
   const { data, isLoading, error } = useMe();
 
   const me = data as MeResponse | undefined;
   const authenticated = isLoggedIn();
-  const role = me?.membership?.role;
-  const allowed = authenticated && Boolean(role && allowedRoles.includes(role));
+  const sessionWorkspace = me?.workspace;
+  const allowed = authenticated && sessionWorkspace === workspace;
 
   useEffect(() => {
     if (!authenticated) {
@@ -52,12 +68,33 @@ export function useWorkspaceAccess(allowedRoles: readonly string[]): WorkspaceAc
     // Still deciding: say nothing and render nothing.
     if (isLoading) return;
 
-    // Resolved, and not permitted — including the cases where the identity
-    // could not be established at all.
-    if (error || !role || !allowedRoles.includes(role)) {
+    // Resolved and not permitted, which includes an identity that could not
+    // be established at all. A session with no scope is refused too: it
+    // predates scoping, and guessing a console for it is the promotion this
+    // exists to prevent.
+    if (error || !sessionWorkspace) {
+      router.replace("/login");
+      return;
+    }
+
+    if (sessionWorkspace !== workspace) {
+      // Signing in again is the only way across, so the session that belongs
+      // elsewhere is ended here instead of being left usable.
+      setSignOutNotice(
+        `That workspace needs its own sign-in. You were signed in to the ${WORKSPACE_LABEL[sessionWorkspace] ?? "previous"} workspace.`
+      );
+      clearTokens();
       router.replace("/login");
     }
-  }, [authenticated, isLoading, error, role, allowedRoles, router]);
+  }, [authenticated, isLoading, error, sessionWorkspace, workspace, router]);
 
   return allowed ? "allowed" : "checking";
 }
+
+/** Human names for the notice shown when a session belongs elsewhere. */
+const WORKSPACE_LABEL: Record<string, string> = {
+  OWNER: "Owner",
+  ADMIN: "Admin",
+  MEMBER: "Member",
+  SUPPORT: "Support",
+};

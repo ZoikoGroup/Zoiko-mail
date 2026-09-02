@@ -59,6 +59,21 @@ export function useMe() {
  * this dispatch for one differing line — is what let the two paths drift
  * before, sending Google sign-ins to a dead end on NO_WORKSPACE.
  */
+/**
+ * The workspace a session was opened for, as the server reported it.
+ *
+ * Two response shapes have to be read: /auth/login flattens the session onto
+ * the top level, while /auth/select-workspace returns the state verbatim with
+ * the session one level down. The string check disambiguates a genuine name
+ * collision — on suspended states `workspace` is an object describing the
+ * tenant, not a scope.
+ */
+export function sessionWorkspace(data: AuthResponse): string | undefined {
+  const nested = (data as { session?: { workspace?: unknown } }).session?.workspace;
+  if (typeof nested === "string") return nested;
+  return typeof data.workspace === "string" ? data.workspace : undefined;
+}
+
 export function routeAuthState(
   data: AuthResponse,
   router: AppRouterInstance,
@@ -69,7 +84,11 @@ export function routeAuthState(
   if (data.state === "STAFF_CONSOLE") {
     href = "/support";
   } else if (data.state === "SIGNED_IN") {
-    href = opts?.signedInHref ?? resolveWorkspaceHref(data.membership?.role);
+    // Routed on the workspace the server bound this session to, not on the
+    // role. They usually agree, but a Google sign-in is always MEMBER-scoped
+    // however senior the account is — routing on the role there would open
+    // the owner console, which is exactly what the scope withholds.
+    href = opts?.signedInHref ?? resolveWorkspaceHref(sessionWorkspace(data));
   } else if (data.state === "WORKSPACE_SELECTION") {
     if (typeof window !== "undefined") {
       sessionStorage.setItem("zoiko.selection_token", data.selectionToken ?? "");

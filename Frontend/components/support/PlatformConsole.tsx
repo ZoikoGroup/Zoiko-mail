@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ApiError, apiRequest } from "@/lib/api-client";
-import { getPlatformToken, isLoggedIn, setPlatformToken } from "@/lib/auth-storage";
+import {
+  clearTokens,
+  getPlatformToken,
+  isLoggedIn,
+  setPlatformToken,
+  setSignOutNotice,
+} from "@/lib/auth-storage";
 // import { useLogout } from "@/lib/auth-hooks";
 import { useLogout, useMe } from "@/lib/auth-hooks";
 import { resolveWorkspaceHref } from "@/lib/workspace";
@@ -1614,15 +1620,26 @@ export default function PlatformConsole() {
     };
   }, [router, loadOverview]);
 
-  // Backend's requireSupportAccess only allows a staff platform token OR a
-  // tenant member with role SUPPORT — OWNER/ADMIN/MEMBER get a 403 from every
-  // call on this page. Match that here so they never see the shell either.
-  // useEffect(() => {
-  //   if (isPlatform) return;
-  //   if (!meLoading && me && me.membership.role !== "SUPPORT") {
-  //     router.replace(resolveWorkspaceHref(me.membership.role));
-  //   }
-  // }, [isPlatform, me, meLoading, router]);
+  // Workspace guard: this is the support workspace, so a tenant session may
+  // only be here if it was opened for support.
+  //
+  // The commented-out version below gated on the role and redirected to
+  // whichever console the role implied. That let a session opened elsewhere
+  // render this shell — every API call 403s, but the console still drew, the
+  // same way /owner drew for an admin session. Reaching another workspace
+  // requires signing in for it, so the session that belongs elsewhere is
+  // ended here rather than merely redirected.
+  //
+  // Staff are exempt: a platform token has no tenant membership and no
+  // workspace scope, and it is the legitimate way into this console.
+  useEffect(() => {
+    if (isPlatform || meLoading || !me) return;
+    if (me.workspace === "SUPPORT") return;
+
+    setSignOutNotice("The support workspace needs its own sign-in.");
+    clearTokens();
+    router.replace("/login");
+  }, [isPlatform, me, meLoading, router]);
 
   const openTenant = useCallback((tenantId: string) => {
     setPendingTenant(tenantId);

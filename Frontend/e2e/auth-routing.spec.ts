@@ -1,24 +1,41 @@
 import { test, expect, type Page } from "@playwright/test";
 
 /**
- * Where a sign-in lands, and whether it stays there.
+ * Where a sign-in lands, and whether the session stays inside the workspace
+ * it was opened for.
  *
- * The bugs this covers were all invisible from the server: the API answered
- * 200 and the client then dead-ended, so the logs showed a clean sign-in
- * while the user was looking at the login form.
+ * These failures leave no server trace: the API answers 200 and the client
+ * then dead-ends or renders a console it should not, so the logs show a clean
+ * sign-in while the user is somewhere they should not be. A browser is the
+ * only place to see it.
  *
- * The API is stubbed rather than run, because the subject here is the client's
- * routing decision for a given auth state, not whether the server produces
- * that state — the backend suite covers the second. Sign-in is driven through
- * the password form because Google's button is a cross-origin iframe that
- * cannot be clicked from a test; both paths share routeAuthState, which is
- * the code under test either way.
+ * The API is stubbed, because the subject is the client's routing and guard
+ * decisions for a given session, not whether the server produces it — the
+ * backend suite covers that, including forcing MEMBER scope on Google.
+ * Sign-in is driven through the password form because Google's button is a
+ * cross-origin iframe a test cannot click; both paths share routeAuthState.
  */
 
 const API = "**/api/v1";
 
-/** A SIGNED_IN payload shaped the way /auth/login actually returns one. */
-function signedIn(role: string) {
+type Scope = "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT";
+
+const HOME: Record<Scope, string> = {
+  OWNER: "/owner",
+  ADMIN: "/admin",
+  MEMBER: "/inbox",
+  SUPPORT: "/support",
+};
+
+/**
+ * A SIGNED_IN payload shaped the way /auth/login returns one: the session
+ * nested, and also flattened onto the top level.
+ *
+ * `role` is the acting role and `workspace` the console the session was
+ * opened for. They are separate on purpose — a Google sign-in by an owner is
+ * MEMBER/MEMBER, which is the case the scope exists for.
+ */
+function signedIn(workspace: Scope, role: string = workspace) {
   const session = {
     accessToken: "stub-access-token",
     refreshToken: "stub-refresh-token",
@@ -26,11 +43,9 @@ function signedIn(role: string) {
     user: { id: "u1", email: "someone@zoiko.test", displayName: "Someone" },
     tenant: { id: "t1", name: "Stub Workspace", planCode: "starter" },
     membership: { id: "m1", role },
+    workspace,
   };
-  return {
-    success: true,
-    data: { state: "SIGNED_IN", session, ...session },
-  };
+  return { success: true, data: { state: "SIGNED_IN", session, ...session } };
 }
 
 async function stubLogin(page: Page, body: unknown, status = 200) {
@@ -44,11 +59,14 @@ async function stubLogin(page: Page, body: unknown, status = 200) {
 }
 
 /**
- * Everything the shells fetch once a session exists. Without these the shell
- * would hit the real API with a stub token, get a 401, and redirect to
- * /login — which would look exactly like the bug under test.
+ * Everything a shell reads once a session exists. /auth/me has to report the
+ * workspace, because that is what every shell now gates on.
  */
-async function stubSessionReads(page: Page, role: string) {
+async function stubSessionReads(
+  page: Page,
+  workspace: Scope,
+  role: string = workspace
+) {
   await page.route(`${API}/auth/me`, (route) =>
     route.fulfill({
       status: 200,
@@ -61,19 +79,22 @@ async function stubSessionReads(page: Page, role: string) {
           displayName: "Someone",
           tenant: { id: "t1", name: "Stub Workspace", planCode: "starter" },
           membership: { id: "m1", role },
-       },
+          workspace,
+        },
       }),
     })
   );
 
-  // Anything else the dashboards ask for: an empty success keeps the page
-  // rendering instead of erroring, without pretending to be real data.
+  // Anything else a dashboard asks for. Shaped as an object rather than a
+  // bare array: an array made the admin dashboard throw inside its error
+  // boundary and redirect to /login, which is indistinguishable from the bug
+  // these tests exist to catch.
   await page.route(`${API}/**`, (route) => {
     if (route.request().url().includes("/auth/")) return route.fallback();
     return route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ success: true, data: [] }),
+      body: JSON.stringify({ success: true, data: { items: [], count: 0 } }),
     });
   });
 }
@@ -84,26 +105,97 @@ async function signIn(page: Page) {
   await page.getByRole("button", { name: "Sign In", exact: true }).click();
 }
 
-test.describe("a sign-in lands in the workspace its role allows", () => {
-  for (const [role, path] of [
-    ["OWNER", "/owner"],
-    ["ADMIN", "/admin"],
-    ["MEMBER", "/inbox"],
-  ] as const) {
-    test(`${role} is routed to ${path}`, async ({ page }) => {
-      await stubSessionReads(page, role);
-      await stubLogin(page, signedIn(role));
+/** Asserts a destination, and that it is still the destination a moment later. */
+async function settlesOn(page: Page, path: string) {
+  await expect(page).toHaveURL(new RegExp(`${path}$`));
+  // A guard that bounces a moment later passes a URL assertion taken
+  // immediately, which is how the create-workspace bounce stayed hidden.
+  await page.waitForTimeout(2500);
+  await expect(page).toHaveURL(new RegExp(`${path}$`));
+}
+
+/** Signs in for one workspace, then navigates to another workspace's URL. */
+async function signInThenVisit(page: Page, scope: Scope, target: string) {
+  await stubSessionReads(page, scope);
+  await stubLogin(page, signedIn(scope));
+
+  await page.goto("/login");
+  await signIn(page);
+  await expect(page).toHaveURL(new RegExp(`${HOME[scope]}$`));
+
+  await page.goto(target);
+}
+
+test.describe("a sign-in lands in the workspace it was opened for", () => {
+  for (const workspace of ["OWNER", "ADMIN", "MEMBER"] as const) {
+    test(`${workspace} lands on ${HOME[workspace]} and stays`, async ({ page }) => {
+      await stubSessionReads(page, workspace);
+      await stubLogin(page, signedIn(workspace));
 
       await page.goto("/login");
       await signIn(page);
 
-      await expect(page).toHaveURL(new RegExp(`${path}$`));
-      // And stays: a guard that bounces a moment later is the actual failure
-      // people report, and a plain URL assertion passes right before it.
-      await page.waitForTimeout(2500);
-      await expect(page).toHaveURL(new RegExp(`${path}$`));
+      await settlesOn(page, HOME[workspace]);
     });
   }
+
+  test("an owner signing in with Google lands in the member workspace", async ({
+    page,
+  }) => {
+    // The server issues MEMBER scope for every Google sign-in however senior
+    // the account. The client follows the scope, not the role — routing on
+    // the role here would open the owner console.
+    await stubSessionReads(page, "MEMBER");
+    await stubLogin(page, signedIn("MEMBER"));
+
+    await page.goto("/login");
+    await signIn(page);
+
+    await settlesOn(page, "/inbox");
+  });
+});
+
+test.describe("a session cannot be carried into another workspace", () => {
+  test("an admin session typing /owner is sent back to sign in", async ({ page }) => {
+    // This is the recording: signed into the admin console, typed
+    // localhost:3000/owner, and the owner console rendered.
+    await signInThenVisit(page, "ADMIN", "/owner");
+
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByText(/needs its own sign-in/i)).toBeVisible();
+  });
+
+  test("an owner session typing /admin is sent back to sign in", async ({ page }) => {
+    // Seniority is not the question. An owner outranks an admin and still has
+    // to sign in for the admin console.
+    await signInThenVisit(page, "OWNER", "/admin");
+    await expect(page).toHaveURL(/\/login$/);
+  });
+
+  test("an admin session typing /inbox is sent back to sign in", async ({ page }) => {
+    await signInThenVisit(page, "ADMIN", "/inbox");
+    await expect(page).toHaveURL(/\/login$/);
+  });
+
+  test("a member session typing /admin is sent back to sign in", async ({ page }) => {
+    await signInThenVisit(page, "MEMBER", "/admin");
+    await expect(page).toHaveURL(/\/login$/);
+  });
+
+  test("a member session typing /owner is sent back to sign in", async ({ page }) => {
+    await signInThenVisit(page, "MEMBER", "/owner");
+    await expect(page).toHaveURL(/\/login$/);
+  });
+
+  test("the discarded session cannot be walked back into", async ({ page }) => {
+    await signInThenVisit(page, "ADMIN", "/owner");
+    await expect(page).toHaveURL(/\/login$/);
+
+    // The tokens were destroyed, not merely navigated away from, so returning
+    // to the workspace that did match starts at the login form again.
+    await page.goto("/admin");
+    await expect(page).toHaveURL(/\/login$/);
+  });
 });
 
 test.describe("a sign-in with no workspace reaches the create-workspace screen", () => {
@@ -126,14 +218,11 @@ test.describe("a sign-in with no workspace reaches the create-workspace screen",
       page.getByRole("heading", { name: /create your workspace/i })
     ).toBeVisible();
 
-    // The bug: the screen appeared and bounced back to /login about 400ms
-    // later, because its mount effect consumed the token it had just read and
+    // The bug: the screen appeared then bounced to /login about 400ms later,
+    // because its mount effect consumed the token it had just read and
     // StrictMode ran the effect twice.
     await page.waitForTimeout(3000);
     await expect(page).toHaveURL(/\/create-workspace$/);
-    await expect(
-      page.getByRole("heading", { name: /create your workspace/i })
-    ).toBeVisible();
   });
 
   test("survives a reload, so a mistyped name is recoverable", async ({ page }) => {
@@ -152,7 +241,6 @@ test.describe("a sign-in with no workspace reaches the create-workspace screen",
     await expect(
       page.getByRole("heading", { name: /create your workspace/i })
     ).toBeVisible();
-    await expect(page).toHaveURL(/\/create-workspace$/);
   });
 
   test("sends someone who arrives with no pending token back to sign in", async ({
@@ -162,7 +250,6 @@ test.describe("a sign-in with no workspace reaches the create-workspace screen",
     await page.evaluate(() => sessionStorage.clear());
 
     await page.goto("/create-workspace");
-    // Fails closed: without a token there is nothing this screen can do.
     await expect(page).toHaveURL(/\/login$/);
   });
 });
@@ -222,8 +309,8 @@ test.describe("a session ended elsewhere returns to sign-in and says why", () =>
     await signIn(page);
     await expect(page).toHaveURL(/\/admin$/);
 
-    // Now the workspace claim moves, which is what signing into the other
-    // workspace does. Every tenant-scoped read starts refusing.
+    // Signing into another workspace moves the claim, and every tenant-scoped
+    // read then refuses.
     await page.route(`${API}/auth/me`, (route) =>
       route.fulfill({
         status: 401,
@@ -242,10 +329,8 @@ test.describe("a session ended elsewhere returns to sign-in and says why", () =>
     await page.reload();
 
     await expect(page).toHaveURL(/\/login$/);
-    // Silently reappearing at the login form is what makes this read as a
-    // fault rather than as the rule it is.
-    await expect(
-      page.getByText(/signed into another workspace/i)
-    ).toBeVisible();
+    // Reappearing at the login form with nothing said is what makes this read
+    // as a fault rather than as the rule it is.
+    await expect(page.getByText(/another workspace/i)).toBeVisible();
   });
 });

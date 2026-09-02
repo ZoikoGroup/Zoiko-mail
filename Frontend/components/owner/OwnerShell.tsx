@@ -11,8 +11,15 @@ import { GlobalSearch } from "./GlobalSearch";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { AccessDenied } from "@/components/ui/AccessDenied";
 
-/** Roles allowed into the owner workspace shell. */
-const OWNER_SHELL_ROLES = ["OWNER", "ADMIN"];
+/**
+ * The owner workspace admits sessions opened for the owner workspace only.
+ *
+ * This was ["OWNER", "ADMIN"], and that was the bypass: an Admin who signed
+ * into the admin console could type /owner and this shell rendered, because
+ * an Admin is on the list. A session now has to have been opened for this
+ * console, which an admin sign-in never is.
+ */
+const OWNER_WORKSPACE = "OWNER" as const;
 
 function initials(name?: string, email?: string) {
   const base = (name?.trim() || email || "?").trim();
@@ -32,7 +39,7 @@ export function OwnerShell({ children }: { children: ReactNode }) {
   // This replaces three separate checks -- an isLoggedIn effect, a /auth/me
   // error effect, and `me && !ALLOWED.includes(...)` -- the last of which
   // skipped itself while useMe() was in flight and let the console render.
-  const access = useWorkspaceAccess(OWNER_SHELL_ROLES);
+  const access = useWorkspaceAccess(OWNER_WORKSPACE);
   if (access !== "allowed") {
     return (
       <div className="flex h-screen items-center justify-center bg-[var(--ground)]">

@@ -14,8 +14,16 @@ import { visibleNav, type AdminNavItem } from "@/lib/admin-nav";
 import { useActiveSupportGrant } from "@/lib/admin-hooks";
 import { Pill } from "@/components/admin/ui";
 
-/** Roles allowed into the admin workspace; anyone else gets a warning. */
-const ADMIN_SHELL_ROLES = ["OWNER", "ADMIN", "SUPPORT"];
+/**
+ * The admin workspace admits sessions opened for the admin workspace, and
+ * nothing else.
+ *
+ * Previously a role list — ["OWNER", "ADMIN", "SUPPORT"] — which let anyone
+ * senior enough in, whichever console they had actually signed into. Moving
+ * between workspaces requires signing in again, so the question here is which
+ * console this session belongs to, not how senior its holder is.
+ */
+const ADMIN_WORKSPACE = "ADMIN" as const;
 
 function initials(name?: string, email?: string) {
   const base = (name?.trim() || email || "?").trim();
@@ -34,7 +42,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
   // Fail closed: nothing renders until the role is known and permitted.
   // The previous guard was `me && !ALLOWED.includes(...)`, which skipped
   // itself while useMe() was in flight and let the console render.
-  const access = useWorkspaceAccess(ADMIN_SHELL_ROLES);
+  const access = useWorkspaceAccess(ADMIN_WORKSPACE);
   if (access !== "allowed") {
     return (
       <div className="flex h-screen items-center justify-center bg-[var(--ground)]">
