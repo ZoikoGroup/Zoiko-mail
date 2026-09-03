@@ -1,6 +1,9 @@
 "use client";
 
+import { useState } from "react";
+
 import { useInvitations } from "@/lib/admin-hooks";
+import { InviteMemberDialog } from "@/components/admin/InviteMemberDialog";
 import { useCan } from "@/lib/admin-capabilities";
 import {
   Card,
@@ -15,6 +18,7 @@ import {
 export default function AdminInvitationsPage() {
   const can = useCan();
   const { data: invitations, isLoading, error } = useInvitations();
+  const [inviting, setInviting] = useState(false);
 
   // The role ceiling is the whole point of this screen: an Admin may grant
   // Member and nothing above it. Rendered from capabilities so widening the
@@ -25,14 +29,34 @@ export default function AdminInvitationsPage() {
     can("people.invite.owner") && "Owner",
   ].filter(Boolean) as string[];
 
+  // The same ceiling, in the shape the API speaks. The dialog offers only
+  // these; the server checks the boundary again, so this list decides what is
+  // offered, never what is permitted.
+  const grantableRoles = [
+    can("people.invite.member") && ("MEMBER" as const),
+    can("people.invite.admin") && ("ADMIN" as const),
+    can("people.invite.owner") && ("OWNER" as const),
+  ].filter(Boolean) as Array<"OWNER" | "ADMIN" | "MEMBER">;
+
   return (
     <>
+      {inviting && (
+        <InviteMemberDialog
+          grantableRoles={grantableRoles}
+          onClose={() => setInviting(false)}
+        />
+      )}
+
       <PageHeader
         title="Invitations"
         subtitle="Membership is granted, never claimed. Registering creates an account with no access."
         action={
           can("people.invite.member") ? (
-            <button type="button" className="zoiko-btn pri">
+            <button
+              type="button"
+              className="zoiko-btn pri"
+              onClick={() => setInviting(true)}
+            >
               New invitation
             </button>
           ) : undefined

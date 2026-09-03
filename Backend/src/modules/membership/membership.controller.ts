@@ -30,6 +30,13 @@ export const createInvitation = asyncHandler(async (req: Request, res: Response)
   sendSuccess(res, 201, invitation, req.requestId);
 });
 
+// 200, not 201: nothing is created. Drafting a letter for review is a read of
+// what would be sent, and re-running it must stay free of side effects.
+export const previewInvitation = asyncHandler(async (req: Request, res: Response) => {
+  const letter = await membershipService.previewInvitation(req.body, requestContext(req));
+  sendSuccess(res, 200, { letter }, req.requestId);
+});
+
 export const acceptInvitation = asyncHandler(async (req: Request, res: Response) => {
   const membership = await membershipService.acceptInvitation(req.body, {
     userId: req.auth?.sub ?? "",

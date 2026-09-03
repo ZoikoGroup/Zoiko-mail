@@ -114,6 +114,19 @@ async function settlesOn(page: Page, path: string) {
   await expect(page).toHaveURL(new RegExp(`${path}$`));
 }
 
+/**
+ * Waits for a guard to turn the browser away.
+ *
+ * A longer budget than the default on purpose. The guard cannot run until the
+ * target route has compiled, and in dev a cold route can take twenty seconds
+ * on its own — nothing to do with the guard being tested. A tight timeout
+ * made this assertion fail intermittently, and an intermittent security test
+ * is worse than none: people learn to re-run it rather than read it.
+ */
+async function expectSentToLogin(page: Page) {
+  await expect(page).toHaveURL(/\/login$/, { timeout: 60_000 });
+}
+
 /** Signs in for one workspace, then navigates to another workspace's URL. */
 async function signInThenVisit(page: Page, scope: Scope, target: string) {
   await stubSessionReads(page, scope);
@@ -161,7 +174,7 @@ test.describe("a session cannot be carried into another workspace", () => {
     // localhost:3000/owner, and the owner console rendered.
     await signInThenVisit(page, "ADMIN", "/owner");
 
-    await expect(page).toHaveURL(/\/login$/);
+    await expectSentToLogin(page);
     await expect(page.getByText(/needs its own sign-in/i)).toBeVisible();
   });
 
@@ -169,32 +182,32 @@ test.describe("a session cannot be carried into another workspace", () => {
     // Seniority is not the question. An owner outranks an admin and still has
     // to sign in for the admin console.
     await signInThenVisit(page, "OWNER", "/admin");
-    await expect(page).toHaveURL(/\/login$/);
+    await expectSentToLogin(page);
   });
 
   test("an admin session typing /inbox is sent back to sign in", async ({ page }) => {
     await signInThenVisit(page, "ADMIN", "/inbox");
-    await expect(page).toHaveURL(/\/login$/);
+    await expectSentToLogin(page);
   });
 
   test("a member session typing /admin is sent back to sign in", async ({ page }) => {
     await signInThenVisit(page, "MEMBER", "/admin");
-    await expect(page).toHaveURL(/\/login$/);
+    await expectSentToLogin(page);
   });
 
   test("a member session typing /owner is sent back to sign in", async ({ page }) => {
     await signInThenVisit(page, "MEMBER", "/owner");
-    await expect(page).toHaveURL(/\/login$/);
+    await expectSentToLogin(page);
   });
 
   test("the discarded session cannot be walked back into", async ({ page }) => {
     await signInThenVisit(page, "ADMIN", "/owner");
-    await expect(page).toHaveURL(/\/login$/);
+    await expectSentToLogin(page);
 
     // The tokens were destroyed, not merely navigated away from, so returning
     // to the workspace that did match starts at the login form again.
     await page.goto("/admin");
-    await expect(page).toHaveURL(/\/login$/);
+    await expectSentToLogin(page);
   });
 });
 
@@ -250,7 +263,7 @@ test.describe("a sign-in with no workspace reaches the create-workspace screen",
     await page.evaluate(() => sessionStorage.clear());
 
     await page.goto("/create-workspace");
-    await expect(page).toHaveURL(/\/login$/);
+    await expectSentToLogin(page);
   });
 });
 
@@ -328,7 +341,7 @@ test.describe("a session ended elsewhere returns to sign-in and says why", () =>
 
     await page.reload();
 
-    await expect(page).toHaveURL(/\/login$/);
+    await expectSentToLogin(page);
     // Reappearing at the login form with nothing said is what makes this read
     // as a fault rather than as the rule it is.
     await expect(page.getByText(/another workspace/i)).toBeVisible();
@@ -371,7 +384,7 @@ test.describe("a server that does not report the workspace says so", () => {
     await page.goto("/login");
     await signIn(page);
 
-    await expect(page).toHaveURL(/\/login$/);
+    await expectSentToLogin(page);
     // Named as a server problem, so the next person does not spend the round
     // re-testing their own sign-in.
     await expect(page.getByText(/did not say which workspace/i)).toBeVisible();

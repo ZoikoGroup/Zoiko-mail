@@ -484,3 +484,49 @@ export async function fetchActiveSupportGrant(): Promise<SupportGrantDto | null>
 export async function fetchGroups(): Promise<GroupDto[]> {
   throw new Error("Groups are not implemented in the API yet");
 }
+
+/** The drafted invitation letter, as the API returns it. */
+export interface InvitationLetterDto {
+  subject: string;
+  greeting: string;
+  paragraphs: string[];
+  closing: string;
+}
+
+export interface InvitationDraftInput {
+  firstName?: string;
+  lastName?: string;
+  email: string;
+  role: "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT";
+}
+
+/**
+ * Drafts the letter without inviting anyone.
+ *
+ * A POST that creates nothing, so it is safe to call again whenever the admin
+ * changes a name or the role — the server asserts that side-effect-freedom,
+ * and re-drafting on edit is the whole point of a review step.
+ */
+export async function previewInvitation(
+  input: InvitationDraftInput
+): Promise<InvitationLetterDto> {
+  const data = await apiRequest<{ letter: InvitationLetterDto }>(
+    "/membership/invitations/preview",
+    { method: "POST", body: input }
+  );
+  if (!data?.letter) throw new Error("The server did not return a letter to review.");
+  return data.letter;
+}
+
+/**
+ * Sends the invitation, with the body the admin approved.
+ *
+ * `letterBody` is sent only when it differs from the draft, so an unedited
+ * invitation uses the server's own wording rather than a copy of it that
+ * would silently go stale if the template changed.
+ */
+export async function sendInvitation(
+  input: InvitationDraftInput & { letterBody?: string[] }
+): Promise<void> {
+  await apiRequest("/membership/invitations", { method: "POST", body: input });
+}
