@@ -6,13 +6,21 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { Menu, X, LogOut } from "lucide-react";
 // import { isLoggedIn } from "@/lib/auth-storage";
-import { isLoggedIn, getPlatformToken } from "@/lib/auth-storage";
+import {
+  clearTokens,
+  getPlatformToken,
+  isLoggedIn,
+  setSignOutNotice,
+} from "@/lib/auth-storage";
 import { useMe, useLogout } from "@/lib/auth-hooks";
 import type { MeResponse } from "@/lib/auth-api";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 // import { DASHBOARD_ITEM, NAV, SECTIONS } from "@/lib/nav";
 import { DASHBOARD_ITEM, MEMBER_NAV, sectionsFor } from "@/lib/nav";
-import { resolveWorkspaceHref } from "@/lib/workspace";
+import { resolveWorkspaceHref, workspaceDenialNotice } from "@/lib/workspace";
+
+/** This shell is the member workspace; only sessions opened for it belong. */
+const MEMBER_WORKSPACE = "MEMBER" as const;
 import { AccessDenied } from "@/components/ui/AccessDenied";
 
 // Roles that belong on the member dashboard. SUPPORT has its own dashboard
@@ -48,19 +56,40 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
   }, [router]);
 
-  // Role guard: a SUPPORT member should never see this dashboard's nav or
-  // pages — redirect them to the tenant-scoped support workspace. Any other
-  // non-member role falls through to the AccessDenied warning below.
+  // Workspace guard: this is the member workspace, so only a session opened
+  // for it belongs here. An admin or owner session reaching these pages is a
+  // workspace switch, and switching requires signing in again — so the
+  // session that belongs elsewhere is ended rather than left usable.
+  //
+  // A tenant support member is covered by this too: their session is
+  // SUPPORT-scoped, so it is turned away here rather than quietly redirected
+  // to /tenant-support, because reaching another workspace takes a sign-in.
+  //
+  // Skipped for staff, whose platform token has no tenant membership and no
+  // workspace scope; the effect above has already sent them to /support.
   useEffect(() => {
-    if (me && me.membership.role === "SUPPORT") {
-      router.replace(resolveWorkspaceHref(me.membership.role));
-    }
-  }, [me, router]);
+    if (getPlatformToken() || meLoading || !me) return;
+    const scope = me.workspace;
+    if (scope === MEMBER_WORKSPACE) return;
+
+    setSignOutNotice(workspaceDenialNotice(MEMBER_WORKSPACE, scope));
+    clearTokens();
+    router.replace("/login");
+  }, [me, meLoading, router]);
+
+  // Role guard: a SUPPORT member (or any future role that isn't OWNER/ADMIN/
+  // MEMBER) should never see this dashboard's nav or pages — send them to
+  // the one their role actually resolves to.
+  // useEffect(() => {
+  //   if (me && !MEMBER_DASHBOARD_ROLES.includes(me.membership.role)) {
+  //     router.replace(resolveWorkspaceHref(me.membership.role));
+  //   }
+  // }, [me, router]);
 
   // Loading gate: don't render the shell until we know the user's role.
   // Without this, a SUPPORT user would briefly see the member dashboard nav
   // and header before the role guard useEffect kicks in and redirects them.
-  if (meLoading || !me) {
+  if (meLoading || !me || me.workspace !== MEMBER_WORKSPACE) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--ground)]">
         <div className="h-7 w-7 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />

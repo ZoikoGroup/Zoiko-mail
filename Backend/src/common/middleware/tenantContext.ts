@@ -3,6 +3,7 @@ import type { MembershipRole } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 import { AppError } from "../errors/AppError.js";
 import { ErrorCodes } from "../errors/errorCodes.js";
+import { actingRole } from "../utils/workspaceScope.js";
 
 export async function tenantContext(
   req: Request,
@@ -17,7 +18,10 @@ export async function tenantContext(
   // `role` is deliberately NOT taken from the token. Security §7.2 requires the
   // role to be read per request so a demotion takes effect on the caller's next
   // call rather than at their next sign-in; it comes from the membership row below.
-  const { sub: userId, tenantId, membershipId } = req.auth;
+  //
+  // `workspace` does come from the token, because it records which console
+  // this sign-in was for — a fact about the session, not about the user.
+  const { sub: userId, tenantId, membershipId, workspace } = req.auth;
 
   const membership = await prisma.tenantMembership.findFirst({
     where: {
@@ -53,11 +57,62 @@ export async function tenantContext(
     return;
   }
 
+  // One live workspace per account, enforced on every request.
+  //
+  // Access tokens are stateless: signing out or signing into another workspace
+  // revokes refresh tokens, but the token already in a tab stays
+  // cryptographically valid until it expires. Nothing but a server-side check
+  // can stop it, so this is that check, and it is deliberately strict —
+  // the claim must name *this* tenant, and anything else is refused:
+  //
+  //   - a different tenant: a newer sign-in moved the claim, so this token
+  //     belongs to a workspace the user has left.
+  //   - null: the claim was released by signing out. Treating null as
+  //     "unclaimed, allow" would have let a signed-out access token keep
+  //     working until it expired, which is the hole this closes.
+  //
+  // Read from the user row the membership query already loaded, so it costs
+  // no extra query. Sessions issued before claiming existed have no claim and
+  // are refused too; those users sign in once more and are then unaffected.
+  const { activeTenantId } = membership.user;
+  if (activeTenantId !== tenantId) {
+    next(
+      new AppError(
+        activeTenantId
+          ? "This session ended because you signed into another workspace. Sign in again to come back."
+          : "This session has ended. Please sign in again.",
+        401,
+        // The same code for both: in each case this token is no longer the
+        // account's current session, and the client must stop trying to
+        // refresh it and send the user to sign in.
+        ErrorCodes.SESSION_SUPERSEDED
+      )
+    );
+    return;
+  }
+
+  // Narrow the authority to this session's console before anything downstream
+  // reads it, so requireRole and every capability check see the acting role
+  // rather than the most the membership could ever do.
+  const acting = actingRole(membership.role, workspace);
+  if (!acting) {
+    next(
+      new AppError(
+        "This session was not opened for this workspace. Sign in again to continue.",
+        403,
+        ErrorCodes.WORKSPACE_MISMATCH
+      )
+    );
+    return;
+  }
+
   req.tenantContext = {
     tenantId: membership.tenantId,
     userId: membership.userId,
     membershipId: membership.id,
-    role: membership.role,
+    role: acting,
+    membershipRole: membership.role,
+    workspace,
     tenant: membership.tenant,
     user: membership.user,
   };

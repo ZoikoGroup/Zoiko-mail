@@ -3,10 +3,20 @@ import jwt from "jsonwebtoken";
 import { env } from "../../config/env.js";
 import { AppError } from "../errors/AppError.js";
 import { ErrorCodes } from "../errors/errorCodes.js";
-import type { AccessTokenPayload, PlatformTokenPayload } from "../types/jwt.js";
+import type {
+  AccessTokenPayload,
+  PlatformTokenPayload,
+  WorkspaceScope,
+} from "../types/jwt.js";
 import type { PlatformRole } from "@prisma/client";
 
 const roles = new Set(["OWNER", "ADMIN", "MEMBER", "SUPPORT"]);
+const workspaces = new Set<WorkspaceScope>([
+  "OWNER",
+  "ADMIN",
+  "MEMBER",
+  "SUPPORT",
+]);
 const platformRoles = new Set<PlatformRole>(["SUPPORT", "SUPER_ADMIN"]);
 
 function isAccessTokenPayload(value: unknown): value is AccessTokenPayload {
@@ -18,6 +28,12 @@ function isAccessTokenPayload(value: unknown): value is AccessTokenPayload {
     typeof payload.membershipId === "string" &&
     typeof payload.role === "string" &&
     roles.has(payload.role) &&
+    // A session must say which console it belongs to. Tokens minted before
+    // scoping existed carry none; they are refused rather than defaulted,
+    // because defaulting one would decide a console on the holder's behalf —
+    // the very thing this is here to prevent.
+    typeof payload.workspace === "string" &&
+    workspaces.has(payload.workspace as WorkspaceScope) &&
     payload.type === "access"
   );
 }
@@ -73,6 +89,8 @@ export function authenticate(
       role: decoded.role,
       // Older tokens minted before Phase 4 may lack platformRole; default NONE.
       platformRole: decoded.platformRole ?? "NONE",
+      // Guaranteed present by isAccessTokenPayload above.
+      workspace: decoded.workspace as WorkspaceScope,
       type: decoded.type,
     };
 

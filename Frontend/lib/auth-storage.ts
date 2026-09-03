@@ -50,3 +50,53 @@ export function clearTokens(): void {
 export function isLoggedIn(): boolean {
   return !!(getAccessToken() || getPlatformToken());
 }
+
+/**
+ * Why the last session ended, when it ended for a reason worth explaining.
+ *
+ * Signing into a second workspace ends every session for the first one, so a
+ * tab left open there stops working. Without a note the user just finds
+ * themselves back at the login form, which reads as a fault rather than as
+ * the rule it is. Written on the way out and shown once on the login screen.
+ */
+export const SIGN_OUT_NOTICE_KEY = "zoiko.sign_out_notice";
+
+export function setSignOutNotice(message: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(SIGN_OUT_NOTICE_KEY, message);
+  } catch {
+    // Private-mode storage failures must never break signing out.
+  }
+}
+
+/**
+ * Reads the notice without consuming it.
+ *
+ * Deliberately not a read-and-clear. A consuming read is only safe if the
+ * component reads it exactly once, and the login form cannot promise that:
+ * two guards can each redirect to /login, so it mounts twice, the first mount
+ * consumes the message and the second renders nothing. That showed up as the
+ * explanation appearing only sometimes — the same trap as the
+ * create-workspace screen, reached by a remount rather than by StrictMode.
+ *
+ * Cleared by clearSignOutNotice once the reader is done with it.
+ */
+export function peekSignOutNotice(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return sessionStorage.getItem(SIGN_OUT_NOTICE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Drops the notice, once the person has seen it and moved on. */
+export function clearSignOutNotice(): void {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.removeItem(SIGN_OUT_NOTICE_KEY);
+  } catch {
+    // Private-mode storage failures must not break the form.
+  }
+}

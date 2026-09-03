@@ -20,8 +20,6 @@ import {
   resetPasswordSchema,
   selectWorkspaceSchema,
   googleLoginSchema,
-  googleResendOtpSchema,
-  googleVerifyOtpSchema
 } from "./auth.schema.js";
 import * as authController from "./auth.controller.js";
 import { verifyOtpSchema } from "./otp.schema.js";
@@ -78,6 +76,19 @@ authRouter.post(
 
 authRouter.post("/login", loginRateLimit, validate(loginSchema), authController.login);
 
+// Google sign-in, in one step: selecting an account lands the user in their
+// own workspace. Google has already verified the address and asserts it in a
+// signed token, so a second emailed code proves nothing the ID token has not
+// already established — it only adds a screen between the account chooser and
+// the mailbox.
+//
+// A two-step variant of this used to own the path, with /google/verify-otp
+// and /google/resend-otp behind it. It is deleted rather than left unrouted,
+// because its verify step accepted any pending token and minted a session
+// from an EMAIL_VERIFICATION code — the same purpose register() issues — so a
+// registration pending token plus its own emailed code could have been
+// exchanged for a session. Recoverable from history if the code step is ever
+// wanted back; it should not be revived as it was.
 authRouter.post(
   "/google",
   loginRateLimit,
@@ -85,14 +96,6 @@ authRouter.post(
   validate(googleLoginSchema),
   authController.loginWithGoogle
 );
-authRouter.post("/google", loginRateLimit, validate(googleLoginSchema), authController.googleLogin);
-
-// Second leg: the emailed code in exchange for a session. Rate limited like
-// login, because a guessable code is a credential.
-authRouter.post("/google/verify-otp", loginRateLimit, validate(googleVerifyOtpSchema), authController.googleVerifyOtp);
-
-// Re-send, bounded by otpService's own cooldown and hourly cap on top of this.
-authRouter.post("/google/resend-otp", loginRateLimit, validate(googleResendOtpSchema), authController.googleResendOtp);
 
 authRouter.post("/forgot-password", passwordResetRateLimit, validate(forgotPasswordSchema), authController.forgotPassword);
 authRouter.post("/reset-password", passwordResetRateLimit, validate(resetPasswordSchema), authController.resetPassword);

@@ -6,3 +6,9 @@ out
 .env*
 .env.local
 next-env.d.ts
+
+# Playwright run artifacts (traces, screenshots, reports)
+test-results
+playwright-report
+blob-report
+.playwright

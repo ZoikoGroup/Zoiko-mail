@@ -2,6 +2,24 @@ import nodemailer, { type Transporter } from "nodemailer";
 import { env } from "../../config/env.js";
 import { logger } from "../../config/logger.js";
 
+import type { InvitationLetter } from "../../modules/membership/invitation-letter.js";
+
+/**
+ * Escapes text destined for an HTML email body.
+ *
+ * Needed because the invitation body can be edited by an admin before it is
+ * sent. Without this, an ampersand in a company name breaks the markup and a
+ * pasted tag would be rendered by the recipient's client.
+ */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 /**
  * Transactional "system" mailer for platform emails (OTP, security notices).
  * Separate from the per-tenant provider-mail pipeline, which is warmup-limited
@@ -90,14 +108,56 @@ export class SystemMailer {
   });
 }
 
-  async sendInvitationEmail(to: string, inviterName: string, workspaceName: string, acceptUrl: string): Promise<void> {
+  /**
+   * The invitation, laid out as a letter: wordmark, greeting, body, then the
+   * accept button.
+   *
+   * The body is escaped because an admin may have edited it before sending.
+   * It is theirs to word, but it is not theirs to put markup into a message
+   * that goes out under the workspace's name and the platform's address.
+   */
+  async sendInvitationEmail(
+    to: string,
+    letter: InvitationLetter,
+    acceptUrl: string
+  ): Promise<void> {
+    const paragraphs = letter.paragraphs
+      .map(
+        (text) =>
+          `<p style="margin:0 0 16px;line-height:1.6">${escapeHtml(text)}</p>`
+      )
+      .join("");
+
+    // Absolute, because an email client has no notion of the app's origin.
+    // Alt text carries the brand when images are blocked, which is the
+    // default in most clients.
+    const logo =
+      `<img src="${env.APP_URL}/zoiko-wordmark.png" alt="Zoiko Mail" `
+      + `height="24" style="height:24px;border:0;display:block" />`;
+
     await this.send({
       to,
-      subject: `You've been invited to join ${workspaceName} on Zoiko Mail`,
-      text: `${inviterName} has invited you to join ${workspaceName}. Click the link to accept: ${acceptUrl}`,
-      html: `<p><b>${inviterName}</b> has invited you to join <b>${workspaceName}</b> on Zoiko Mail.</p>`
-        + `<p style="margin:24px 0"><a href="${acceptUrl}" style="display:inline-block;padding:12px 24px;background:#0A7EA4;color:white;text-decoration:none;border-radius:8px;font-weight:600">Accept Invitation</a></p>`
-        + `<p style="color:#6C8092;font-size:12px">This invitation expires in ${env.INVITATION_EXPIRES_IN_HOURS} hours. If you didn't expect this, you can ignore this email.</p>`,
+      subject: letter.subject,
+      // The plain-text part is a real letter too, not a link dump: some
+      // clients show only this, and it is what a screen reader reaches first.
+      text: [
+        letter.greeting,
+        "",
+        ...letter.paragraphs,
+        "",
+        `Accept your invitation: ${acceptUrl}`,
+        "",
+        letter.closing,
+      ].join("\n"),
+      html:
+        `<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#12232E;max-width:560px">`
+        + `<div style="margin:0 0 28px">${logo}</div>`
+        + `<p style="margin:0 0 20px;font-size:16px">${escapeHtml(letter.greeting)}</p>`
+        + paragraphs
+        + `<p style="margin:28px 0"><a href="${acceptUrl}" style="display:inline-block;padding:12px 24px;background:#0A7EA4;color:white;text-decoration:none;border-radius:8px;font-weight:600">Accept invitation</a></p>`
+        + `<p style="color:#6C8092;font-size:12px;margin:0 0 4px">${escapeHtml(letter.closing)}</p>`
+        + `<p style="color:#6C8092;font-size:12px;margin:0">This invitation expires in ${env.INVITATION_EXPIRES_IN_HOURS} hours.</p>`
+        + `</div>`,
     });
   }
 }

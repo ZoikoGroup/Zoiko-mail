@@ -3,6 +3,23 @@ import type { MembershipRole, PlatformRole } from "@prisma/client";
 // export type TokenType = "access" | "refresh" | "pending" | "platform";
 export type TokenType = "access" | "refresh" | "pending" | "platform" | "selection";
 
+/**
+ * The one workspace a session may act in.
+ *
+ * A workspace here is a console — the member mailbox, the admin console, the
+ * owner console, the support console — not a tenant. A session is bound to
+ * exactly one, decided when it is issued, and moving to another requires
+ * signing in again. Without this a session was bound only to a tenant, so an
+ * Admin who signed into the admin console could open /owner by typing the
+ * URL and the owner console would render.
+ *
+ * It is not the same thing as the membership role. The role is the most a
+ * user could do; the scope is what this particular session is doing. A
+ * Google sign-in is always issued MEMBER scope however senior the account
+ * is, so reaching a console takes a deliberate sign-in.
+ */
+export type WorkspaceScope = "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT";
+
 export interface AccessTokenPayload {
   sub: string;
   tenantId: string;
@@ -16,6 +33,12 @@ export interface AccessTokenPayload {
    * membership — that's the separate "platform" token type below.
    */
   platformRole: PlatformRole;
+  /**
+   * The console this session may act in. Absent on tokens minted before
+   * scoping existed, which are refused rather than trusted — those users
+   * sign in once more and are then unaffected.
+   */
+  workspace?: WorkspaceScope;
   type: "access";
 }
 
@@ -24,6 +47,12 @@ export interface RefreshTokenPayload {
   tenantId: string;
   membershipId: string;
   role: MembershipRole;
+  /**
+   * Carried so a refresh renews the same scope. Without it, refreshing would
+   * re-derive the scope from the role and quietly promote a MEMBER-scoped
+   * Google session into the owner console.
+   */
+  workspace?: WorkspaceScope;
   type: "refresh";
   jti: string;
 }
@@ -50,6 +79,13 @@ export interface PendingTokenPayload {
 export interface SelectionTokenPayload {
   sub: string;
   type: "selection";
+  /**
+   * Identifies this token so it can be spent exactly once. Without it the
+   * token is pure bearer data and stays valid for its whole window, which
+   * would let one sign-in open a session in every workspace the user
+   * belongs to.
+   */
+  jti: string;
 }
 
 /**
@@ -85,6 +121,8 @@ export interface AuthContext {
   membershipId: string;
   role: MembershipRole;
   platformRole: PlatformRole;
+  /** The console this session is bound to; see WorkspaceScope. */
+  workspace: WorkspaceScope;
   type: "access";
 }
 
@@ -111,7 +149,18 @@ export interface TenantContextData {
   tenantId: string;
   userId: string;
   membershipId: string;
+  /**
+   * The authority this request actually acts with: the lesser of the
+   * membership role and the session's workspace scope. A senior account on a
+   * MEMBER-scoped session (every Google sign-in) acts as a member, and a
+   * demoted user acts as their new role rather than the one their token was
+   * minted with.
+   */
   role: MembershipRole;
+  /** What the membership permits at most, before the session scope narrows it. */
+  membershipRole: MembershipRole;
+  /** The console this session is bound to. */
+  workspace: WorkspaceScope;
   tenant: {
     id: string;
     name: string;

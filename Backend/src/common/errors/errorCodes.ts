@@ -8,6 +8,14 @@ export const ErrorCodes = {
   TOKEN_INVALID: "TOKEN_INVALID",
   TOKEN_EXPIRED: "TOKEN_EXPIRED",
   TOKEN_REUSED: "TOKEN_REUSED",
+  // The caller signed into a different workspace, which ends every session
+  // for the previous one. Distinct from UNAUTHORIZED so the client can say
+  // what happened instead of showing an unexplained sign-out.
+  SESSION_SUPERSEDED: "SESSION_SUPERSEDED",
+  // The session belongs to a different console than the one being used. A
+  // fresh sign-in aimed at that console is the only way in; the client shows
+  // this as "sign in again" rather than as a permissions failure.
+  WORKSPACE_MISMATCH: "WORKSPACE_MISMATCH",
   INTERNAL_ERROR: "INTERNAL_ERROR",
   INVITATION_INVALID: "INVITATION_INVALID",
   INVITATION_EXPIRED: "INVITATION_EXPIRED",

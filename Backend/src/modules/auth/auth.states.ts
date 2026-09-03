@@ -40,7 +40,6 @@ export type AuthState =
    * whereas this one continues into a session. Reusing it would have landed
    * a returning user in the sign-up flow instead of their dashboard.
    */
-  | { state: "OTP_REQUIRED"; user: PublicUser; pendingToken: string; expiresIn: string; sentTo: string }
   | { state: "ACCOUNT_SUSPENDED"; user: PublicUser }
   | { state: "ACCOUNT_DISABLED"; user: PublicUser }
   | {
