@@ -48,3 +48,46 @@ export interface WorkspaceOption {
 export const DEFAULT_WORKSPACE_OPTIONS: WorkspaceOption[] = [
   { id: "user", name: "User Workspace", planCode: "starter" },
 ];
+/** Human names for the workspaces, for messages shown to people. */
+export const WORKSPACE_LABEL: Record<WorkspaceScope, string> = {
+  OWNER: "Owner",
+  ADMIN: "Admin",
+  MEMBER: "Member",
+  SUPPORT: "Support",
+};
+
+/**
+ * Why a shell is turning someone away, in words they can act on.
+ *
+ * Every guard funnels through here so the three cases stay distinguishable.
+ * They used to collapse into one silent redirect, and that is what made this
+ * class of bug so expensive: a sign-in would succeed, a guard would bounce the
+ * browser back to the login form, and nothing on screen or in the server log
+ * said why. It has cost several rounds of "it stays on the login page".
+ *
+ * The third case is the one worth naming. A session that reports no workspace
+ * at all is not an ended session — it is a server that predates workspace
+ * scoping, so the client is asking for a field it does not send. Reporting
+ * that as "your session ended" sends the user round the loop forever, because
+ * signing in again produces exactly the same unscoped session.
+ */
+export function workspaceDenialNotice(
+  required: WorkspaceScope,
+  sessionScope?: string
+): string {
+  if (!sessionScope) {
+    // Loud in the console, because this one is a deployment mismatch rather
+    // than anything the person at the keyboard did.
+    if (typeof console !== "undefined") {
+      console.error(
+        `[zoiko] /auth/me reported no workspace, so the ${required} workspace cannot verify this session. ` +
+          "The API is older than this client — it needs the build that scopes sessions to a workspace."
+      );
+    }
+    return "Sign-in is temporarily unavailable: the server did not say which workspace this session belongs to. This needs an updated API, not another sign-in attempt.";
+  }
+
+  const from = WORKSPACE_LABEL[sessionScope as WorkspaceScope] ?? "previous";
+  const to = WORKSPACE_LABEL[required];
+  return `You were signed in to the ${from} workspace. The ${to} workspace needs its own sign-in.`;
+}

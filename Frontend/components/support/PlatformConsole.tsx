@@ -12,7 +12,7 @@ import {
 } from "@/lib/auth-storage";
 // import { useLogout } from "@/lib/auth-hooks";
 import { useLogout, useMe } from "@/lib/auth-hooks";
-import { resolveWorkspaceHref } from "@/lib/workspace";
+import { resolveWorkspaceHref, workspaceDenialNotice } from "@/lib/workspace";
 import Image from "next/image";
 import {
   fetchPlatformDiagnostics,
@@ -1636,7 +1636,7 @@ export default function PlatformConsole() {
     if (isPlatform || meLoading || !me) return;
     if (me.workspace === "SUPPORT") return;
 
-    setSignOutNotice("The support workspace needs its own sign-in.");
+    setSignOutNotice(workspaceDenialNotice("SUPPORT", me.workspace));
     clearTokens();
     router.replace("/login");
   }, [isPlatform, me, meLoading, router]);

@@ -334,3 +334,46 @@ test.describe("a session ended elsewhere returns to sign-in and says why", () =>
     await expect(page.getByText(/another workspace/i)).toBeVisible();
   });
 });
+
+test.describe("a server that does not report the workspace says so", () => {
+  test("an unscoped session explains itself instead of looping", async ({ page }) => {
+    // The failure this covers: the API was an older build that did not put a
+    // workspace on the session, the guards refused it, and the browser went
+    // back to the login form with nothing said. Signing in again produced the
+    // same unscoped session, so it looked like Google sign-in was broken.
+    await page.route(`${API}/auth/me`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            id: "u1",
+            email: "someone@zoiko.test",
+            displayName: "Someone",
+            tenant: { id: "t1", name: "Stub Workspace", planCode: "starter" },
+            membership: { id: "m1", role: "MEMBER" },
+            // No `workspace`: the whole point of this case.
+          },
+        }),
+      })
+    );
+    await page.route(`${API}/**`, (route) => {
+      if (route.request().url().includes("/auth/")) return route.fallback();
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: { items: [], count: 0 } }),
+      });
+    });
+    await stubLogin(page, signedIn("MEMBER"));
+
+    await page.goto("/login");
+    await signIn(page);
+
+    await expect(page).toHaveURL(/\/login$/);
+    // Named as a server problem, so the next person does not spend the round
+    // re-testing their own sign-in.
+    await expect(page.getByText(/did not say which workspace/i)).toBeVisible();
+  });
+});

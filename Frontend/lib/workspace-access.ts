@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { clearTokens, isLoggedIn, setSignOutNotice } from "./auth-storage";
 import { useMe } from "./auth-hooks";
 import type { MeResponse } from "./auth-api";
-import type { WorkspaceScope } from "./workspace";
+import { workspaceDenialNotice, type WorkspaceScope } from "./workspace";
 
 /**
  * Gate for a workspace shell, and deliberately fail-closed.
@@ -68,33 +68,22 @@ export function useWorkspaceAccess(workspace: WorkspaceScope): WorkspaceAccess {
     // Still deciding: say nothing and render nothing.
     if (isLoading) return;
 
-    // Resolved and not permitted, which includes an identity that could not
-    // be established at all. A session with no scope is refused too: it
-    // predates scoping, and guessing a console for it is the promotion this
-    // exists to prevent.
-    if (error || !sessionWorkspace) {
+    // The identity could not be established at all — the api client has
+    // already explained anything it knew about, so say nothing over the top.
+    if (error) {
       router.replace("/login");
       return;
     }
 
-    if (sessionWorkspace !== workspace) {
-      // Signing in again is the only way across, so the session that belongs
-      // elsewhere is ended here instead of being left usable.
-      setSignOutNotice(
-        `That workspace needs its own sign-in. You were signed in to the ${WORKSPACE_LABEL[sessionWorkspace] ?? "previous"} workspace.`
-      );
-      clearTokens();
-      router.replace("/login");
-    }
+    if (sessionWorkspace === workspace) return;
+
+    // Either the session belongs to another workspace, or it reports none at
+    // all. Both are refused, and both say which — a bare redirect here is
+    // what made this class of bug invisible.
+    setSignOutNotice(workspaceDenialNotice(workspace, sessionWorkspace));
+    clearTokens();
+    router.replace("/login");
   }, [authenticated, isLoading, error, sessionWorkspace, workspace, router]);
 
   return allowed ? "allowed" : "checking";
 }
-
-/** Human names for the notice shown when a session belongs elsewhere. */
-const WORKSPACE_LABEL: Record<string, string> = {
-  OWNER: "Owner",
-  ADMIN: "Admin",
-  MEMBER: "Member",
-  SUPPORT: "Support",
-};

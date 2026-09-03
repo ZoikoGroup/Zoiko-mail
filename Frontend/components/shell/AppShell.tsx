@@ -17,7 +17,7 @@ import type { MeResponse } from "@/lib/auth-api";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 // import { DASHBOARD_ITEM, NAV, SECTIONS } from "@/lib/nav";
 import { DASHBOARD_ITEM, MEMBER_NAV, sectionsFor } from "@/lib/nav";
-import { resolveWorkspaceHref } from "@/lib/workspace";
+import { resolveWorkspaceHref, workspaceDenialNotice } from "@/lib/workspace";
 
 /** This shell is the member workspace; only sessions opened for it belong. */
 const MEMBER_WORKSPACE = "MEMBER" as const;
@@ -68,11 +68,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     const scope = me.workspace;
     if (scope === MEMBER_WORKSPACE) return;
 
-    setSignOutNotice(
-      scope
-        ? "The member workspace needs its own sign-in."
-        : "This session has ended. Please sign in again."
-    );
+    setSignOutNotice(workspaceDenialNotice(MEMBER_WORKSPACE, scope));
     clearTokens();
     router.replace("/login");
   }, [me, meLoading, router]);
