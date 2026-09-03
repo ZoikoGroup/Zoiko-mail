@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { resolveMx, resolveTxt } from "node:dns/promises";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
@@ -46,11 +47,18 @@ export class DomainService {
   async add(domainName: string, tenantId: string, userId: string) {
     const existing = await prisma.mailDomain.findFirst({ where: { tenantId, domainName } });
     if (existing) throw new AppError("Domain already exists", 409, ErrorCodes.CONFLICT);
-    const domain = await prisma.mailDomain.create({
-      data: { tenantId, domainName, verificationToken: `zoiko-mail-verification=${randomBytes(24).toString("hex")}` },
-    });
-    await auditService.record({ tenantId, actorUserId: userId, eventType: "DOMAIN_ADDED", targetType: "MailDomain", targetId: domain.id });
-    return domain;
+    try {
+      const domain = await prisma.mailDomain.create({
+        data: { tenantId, domainName, verificationToken: `zoiko-mail-verification=${randomBytes(24).toString("hex")}` },
+      });
+      await auditService.record({ tenantId, actorUserId: userId, eventType: "DOMAIN_ADDED", targetType: "MailDomain", targetId: domain.id });
+      return domain;
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new AppError("Domain already exists", 409, ErrorCodes.CONFLICT);
+      }
+      throw error;
+    }
   }
   async diagnostics(domainId: string, tenantId: string, userId: string) {
     const domain = await prisma.mailDomain.findFirst({ where: { id: domainId, tenantId } });

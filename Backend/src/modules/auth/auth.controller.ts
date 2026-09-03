@@ -91,8 +91,6 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, result, req.requestId);
 });
 
-// export const loginWithGoogle = asyncHandler(async (req: Request, res: Response) => {
-//   const result = await authService.loginWithGoogle(req.body, getRequestContext(req));
 /**
  * Serialises a Google sign-in outcome onto the response.
  *

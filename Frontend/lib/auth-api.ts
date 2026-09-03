@@ -62,27 +62,6 @@ export interface JoinWorkspaceInput {
   membershipId: string;
 }
 
-// export interface CreateWorkspaceResponse {
-//   success: boolean;
-//   data: {
-//     tenant: {
-//       id: string;
-//       name: string;
-//       slug: string;
-//       planCode: string;
-//     };
-
-//     membership: {
-//       id: string;
-//       role: string;
-//     };
-
-//     accessToken: string;
-//     refreshToken: string;
-//     expiresIn: string;
-//   };
-// }
-
 export interface CreateWorkspaceResponse {
   accessToken: string;
   refreshToken: string;
@@ -170,18 +149,6 @@ function extractTokens(data: any): { accessToken?: string; refreshToken?: string
     platformToken: src?.platformToken ?? data?.platformToken,
   };
 }
-
-// export async function login(input: LoginInput): Promise<AuthResponse> {
-//   const data = await apiRequest<AuthResponse>("/auth/login", {
-//     method: "POST",
-//     body: input,
-//     auth: false,
-//   });
-//   const { accessToken, refreshToken, platformToken } = extractTokens(data);
-//   if (accessToken) setTokens(accessToken, refreshToken);
-//   if (platformToken) setPlatformToken(platformToken);
-//   return data;
-// }
 
 export async function login(input: LoginInput): Promise<AuthResponse> {
   const data = await apiRequest<AuthResponse>("/auth/login", {

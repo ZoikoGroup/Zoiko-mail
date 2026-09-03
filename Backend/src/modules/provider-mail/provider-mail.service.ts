@@ -197,10 +197,13 @@ export class ProviderMailService {
       include: { recipients: { where: { recipientMembershipId: null } } },
     });
     if (!message) throw new Error("SMTP message is not available for the configured tenant");
+    if (message.recipients.length === 0) throw new Error("Message has no external recipients to send to");
     const byType = (type: "TO" | "CC" | "BCC") =>
       message.recipients.filter((recipient) => recipient.type === type).map((recipient) => recipient.email);
+    const to = byType("TO");
+    if (to.length === 0) throw new Error("Message has no TO recipients");
     const result = await this.adapter.send({
-      to: byType("TO"),
+      to,
       cc: byType("CC"),
       bcc: byType("BCC"),
       subject: message.subject,
@@ -208,6 +211,7 @@ export class ProviderMailService {
       html: message.htmlBody,
     });
     const accepted = new Set(result.accepted.map((address: string) => address.toLowerCase()));
+    const sentAt = new Date();
     await prisma.$transaction(async (tx) => {
       for (const recipient of message.recipients) {
         const wasAccepted = accepted.has(recipient.email.toLowerCase());
@@ -224,6 +228,20 @@ export class ProviderMailService {
             providerEventId: result.messageId,
             metadata: { transport: "IMAP_SMTP" },
           },
+        });
+      }
+      await tx.emailMessage.update({
+        where: { id: messageId, tenantId },
+        data: { status: "SENT", sentAt, providerMessageId: result.messageId },
+      });
+      await tx.mailboxMessage.updateMany({
+        where: { tenantId, messageId, folder: "DRAFTS" },
+        data: { folder: "SENT", isRead: true },
+      });
+      if (message.threadId) {
+        await tx.messageThread.update({
+          where: { id: message.threadId, tenantId },
+          data: { lastMessageAt: sentAt },
         });
       }
     });

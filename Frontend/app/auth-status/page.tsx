@@ -155,8 +155,7 @@ function AuthStatusInner() {
     );
   }
 
-  // MEMBERSHIP_SUSPENDED is the only state that shows a workspace name.
-  // const showWorkspace = state === "MEMBERSHIP_SUSPENDED" && workspace;
+  // Suspended/deleting workspace states show the workspace name.
   const showWorkspace =
     (state === "MEMBERSHIP_SUSPENDED" ||
       state === "WORKSPACE_SUSPENDED" ||

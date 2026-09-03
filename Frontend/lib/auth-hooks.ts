@@ -32,7 +32,6 @@ import {
   type ResetPasswordInput,
 } from "./auth-api";
 import { getPlatformToken, isLoggedIn } from "./auth-storage";
-// import { resolveWorkspaceHref } from "./workspace";
 import { AuthResponse, GoogleLoginInput, loginWithGoogle } from "./auth-api";
 import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { resolveWorkspaceHref, USER_WORKSPACE_HREF } from "./workspace";
@@ -130,6 +129,19 @@ export function useLogin() {
 //   });
 // }
 
+// export function useGoogleLogin() {
+//   const qc = useQueryClient();
+//   const router = useRouter();
+
+//   return useMutation({
+//     mutationFn: (input: GoogleLoginInput) => loginWithGoogle(input),
+//     onSuccess: async (data) => {
+//       await qc.invalidateQueries({ queryKey: ["me"] });
+//       routeAuthState(data, router);
+//     },
+//   });
+// }
+
 /**
  * Second leg of Google sign-in.
  *
@@ -185,23 +197,6 @@ export function useGoogleResendOtp() {
     mutationFn: (pendingToken: string) => googleResendOtp(pendingToken),
   });
 }
-
-// export function useRegister() {
-//   const qc = useQueryClient();
-//   const router = useRouter();
-
-//   return useMutation({
-//     mutationFn: (input: RegisterInput) => register(input),
-
-//     onSuccess: async () => {
-//       await qc.invalidateQueries({
-//         queryKey: ["me"],
-//       });
-
-//       router.replace("/");
-//     },
-//   });
-// }
 
 export function useGoogleLogin() {
   const qc = useQueryClient();

@@ -89,7 +89,7 @@ connectorRouter.get(
       return;
     }
 
-    const account = await connectorService.handleGoogleCallback(code, {
+    await connectorService.handleGoogleCallback(code, {
       tenantId: payload.tenantId,
       membershipId: payload.membershipId,
       userId: payload.userId,

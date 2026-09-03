@@ -1,6 +1,5 @@
 import type { MembershipRole, PlatformRole } from "@prisma/client";
 
-// export type TokenType = "access" | "refresh" | "pending" | "platform";
 export type TokenType = "access" | "refresh" | "pending" | "platform" | "selection";
 
 export interface AccessTokenPayload {

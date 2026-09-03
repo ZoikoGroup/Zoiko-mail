@@ -24,7 +24,6 @@ import { otpService } from "./otp.service.js";
 import type { AuthState, PublicUser, WorkspaceOption } from "./auth.states.js";
 import type { PendingInvitationSummary, VerifyOtpResponse } from "./auth.types.js";
 import { verifyGoogleIdToken } from "./google.verifier.js";
-// import type { GoogleLoginInput } from "./auth.schema.js";
 import type {
   LoginInput,
   LogoutInput,
@@ -416,14 +415,6 @@ export class AuthService {
       throw new AppError("Account not found", 401, ErrorCodes.UNAUTHORIZED);
     }
 
-    // if (user.status !== "PENDING_VERIFICATION" && user.status !== "ACTIVE") {
-    //   throw new AppError(
-    //     "Account is not eligible to create a workspace",
-    //     403,
-    //     ErrorCodes.FORBIDDEN
-    //   );
-    // }
-
     // In non-production environments we allow workspace creation without email verification to simplify testing.
     if (!user.emailVerifiedAt && process.env.NODE_ENV === "production") {
       throw new AppError(
@@ -791,7 +782,7 @@ export class AuthService {
         const user = await tx.appUser.create({
           data: {
             email: profile.email,
-            passwordHash: null,
+            passwordHash: "",
             displayName: profile.displayName,
             avatarUrl: profile.avatarUrl,
             status: "ACTIVE",
@@ -1138,7 +1129,6 @@ export class AuthService {
           pendingToken: pending.token,
         };
       }
-      // return { state: "NO_WORKSPACE", user: publicUser };
 
       // Attach a pending token so the client can call /auth/create-workspace.
       // Without it a verified user with no membership has no way forward —
@@ -1155,9 +1145,6 @@ export class AuthService {
     // 4. Explicit selection, or auto-resolve a single workspace.
     if (selectedTenantId) {
       const chosen = nonRemoved.find((m) => m.tenantId === selectedTenantId);
-      // if (!chosen) {
-      //   return { state: "WORKSPACE_SELECTION", user: publicUser, workspaces: nonRemoved.map(toWorkspaceOption) };
-      // }
       if (!chosen) {
         const selection = buildSelectionToken(user.id);
         return {
@@ -1176,7 +1163,6 @@ export class AuthService {
     }
 
     // 5. Multiple workspaces — let the client pick (statuses drive greying-out).
-    // return { state: "WORKSPACE_SELECTION", user: publicUser, workspaces: nonRemoved.map(toWorkspaceOption) };
 
     // Issue a short-lived selection token so the client can call /auth/select-
     // workspace without asking the user for their password again.
@@ -1241,9 +1227,6 @@ export class AuthService {
     if (membership.status === "SUSPENDED") {
       return { state: "MEMBERSHIP_SUSPENDED", user: publicUser, workspace };
     }
-    // if (membership.status === "REMOVED") {
-    //   return { state: "NO_WORKSPACE", user: publicUser };
-    // }
 
     if (membership.status === "REMOVED") {
       // Same treatment as the no-membership path: a removed member has no
@@ -1416,11 +1399,6 @@ export class AuthService {
     tenantId: string,
     context: RequestContext
   ): Promise<void> {
-    // const user = await userRepository.findById(userId);
-    // if (!user || !(await verifyPassword(input.currentPassword, user.passwordHash))) {
-    //   throw new AppError("Current password is incorrect", 401, ErrorCodes.UNAUTHORIZED);
-    // }
-
     const user = await userRepository.findById(userId);
     if (!user) {
       throw new AppError("Current password is incorrect", 401, ErrorCodes.UNAUTHORIZED);

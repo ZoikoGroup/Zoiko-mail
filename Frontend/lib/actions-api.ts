@@ -53,11 +53,6 @@ export interface ListActionsParams {
   dueAfter?: string;   // ISO datetime, filters dueAt >= dueAfter
 }
 
-// export async function listActions(): Promise<ActionItem[]> {
-//   const data = await apiRequest<ListActionsResponse>("/actions");
-//   return data.actions ?? [];
-// }
-
 export async function listActions(params?: ListActionsParams): Promise<ActionItem[]> {
   const query = new URLSearchParams();
   if (params?.status) query.set("status", params.status);
