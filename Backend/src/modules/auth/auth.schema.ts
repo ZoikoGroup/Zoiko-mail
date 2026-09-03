@@ -25,17 +25,6 @@ export const googleLoginSchema = z.object({
   idToken: z.string().min(1),
 });
 
-/** Second leg of Google sign-in: the code, plus the token that identifies who. */
-export const googleVerifyOtpSchema = z.object({
-  pendingToken: z.string().min(10),
-  code: z.string().trim().min(4).max(10),
-  tenantId: z.string().uuid().optional(),
-});
-
-export const googleResendOtpSchema = z.object({
-  pendingToken: z.string().min(10),
-});
-
 export const refreshSchema = z.object({
   refreshToken: z.string().min(1),
 });
@@ -83,5 +72,3 @@ export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 export type SelectWorkspaceInput = z.infer<typeof selectWorkspaceSchema>;
 export type JoinWorkspaceInput = z.infer<typeof joinWorkspaceSchema>;
 export type GoogleLoginInput = z.infer<typeof googleLoginSchema>;
-export type GoogleVerifyOtpInput = z.infer<typeof googleVerifyOtpSchema>;
-export type GoogleResendOtpInput = z.infer<typeof googleResendOtpSchema>;

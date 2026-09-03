@@ -6,8 +6,6 @@ import { useRouter } from "next/navigation";
 import {
   login,
   googleLogin,
-  googleVerifyOtp,
-  googleResendOtp,
   register,
   logout,
   logoutAll,
@@ -32,7 +30,7 @@ import {
   type ResetPasswordInput,
 } from "./auth-api";
 import { getPlatformToken, isLoggedIn } from "./auth-storage";
-import { AuthResponse, GoogleLoginInput, loginWithGoogle } from "./auth-api";
+import { AuthResponse } from "./auth-api";
 import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { resolveWorkspaceHref, USER_WORKSPACE_HREF } from "./workspace";
 
@@ -113,88 +111,6 @@ export function useLogin() {
       await qc.invalidateQueries({ queryKey: ["me"] });
       routeAuthState(data, router);
     },
-  });
-}
-
-// export function useGoogleLogin() {
-//   const qc = useQueryClient();
-//   const router = useRouter();
-
-//   return useMutation({
-//     mutationFn: (input: GoogleLoginInput) => loginWithGoogle(input),
-//     onSuccess: async (data) => {
-//       await qc.invalidateQueries({ queryKey: ["me"] });
-//       routeAuthState(data, router);
-//     },
-//   });
-// }
-
-// export function useGoogleLogin() {
-//   const qc = useQueryClient();
-//   const router = useRouter();
-
-//   return useMutation({
-//     mutationFn: (input: GoogleLoginInput) => loginWithGoogle(input),
-//     onSuccess: async (data) => {
-//       await qc.invalidateQueries({ queryKey: ["me"] });
-//       routeAuthState(data, router);
-//     },
-//   });
-// }
-
-/**
- * Second leg of Google sign-in.
- *
- * Shares useGoogleLogin's redirect handling, because a verified code produces
- * exactly the same AuthState a password login does, so the destination logic
- * must be the same rather than a parallel copy that can drift.
- */
-export function useGoogleVerifyOtp() {
-  const qc = useQueryClient();
-  const router = useRouter();
-
-  return useMutation({
-    mutationFn: ({ pendingToken, code }: { pendingToken: string; code: string }) =>
-      googleVerifyOtp(pendingToken, code),
-
-    onSuccess: async (data) => {
-      await qc.invalidateQueries({ queryKey: ["me"] });
-
-      let href: string;
-      if (data.state === "STAFF_CONSOLE") {
-        href = "/support";
-      } else if (data.state === "SIGNED_IN") {
-        // Google sign-in still lands in the user's own role-resolved
-        // workspace (SUPPORT → /tenant-support, ADMIN → /admin, etc.).
-        const role = data.membership?.role;
-        href = resolveWorkspaceHref(role);
-      } else if (data.state === "WORKSPACE_SELECTION") {
-        if (typeof window !== "undefined") {
-          sessionStorage.setItem("zoiko.selection_token", data.selectionToken ?? "");
-          sessionStorage.setItem(
-            "zoiko.selection_workspaces",
-            JSON.stringify(data.workspaces ?? [])
-          );
-        }
-        href = "/select-workspace";
-      } else if (
-        data.state === "ACCOUNT_SUSPENDED" ||
-        data.state === "ACCOUNT_DISABLED"
-      ) {
-        href = `/auth-status?state=${data.state}`;
-      } else {
-        href = "/login";
-      }
-
-      router.replace(href);
-    },
-  });
-}
-
-/** Re-request the sign-in code. Bounded server-side by a cooldown and hourly cap. */
-export function useGoogleResendOtp() {
-  return useMutation({
-    mutationFn: (pendingToken: string) => googleResendOtp(pendingToken),
   });
 }
 
