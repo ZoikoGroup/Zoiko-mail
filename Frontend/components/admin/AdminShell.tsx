@@ -11,7 +11,7 @@ import type { MeResponse } from "@/lib/auth-api";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { useCan, useCapabilities } from "@/lib/admin-capabilities";
 import { visibleNav, type AdminNavItem } from "@/lib/admin-nav";
-import { useActiveSupportGrant } from "@/lib/admin-hooks";
+import { useActiveSupportGrant, useAdminNavCounts } from "@/lib/admin-hooks";
 import { Pill } from "@/components/admin/ui";
 
 /**
@@ -170,7 +170,8 @@ function Rail({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const can = useCan();
   const { isLoading, error } = useCapabilities();
-  const groups = visibleNav(can);
+  const liveCounts = useAdminNavCounts();
+  const groups = visibleNav(can, liveCounts);
 
   return (
     <div className="flex h-full flex-col">

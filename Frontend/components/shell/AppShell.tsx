@@ -61,6 +61,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   // workspace switch, and switching requires signing in again — so the
   // session that belongs elsewhere is ended rather than left usable.
   //
+  // A tenant support member is covered by this too: their session is
+  // SUPPORT-scoped, so it is turned away here rather than quietly redirected
+  // to /tenant-support, because reaching another workspace takes a sign-in.
+  //
   // Skipped for staff, whose platform token has no tenant membership and no
   // workspace scope; the effect above has already sent them to /support.
   useEffect(() => {
@@ -95,6 +99,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   // if (!MEMBER_DASHBOARD_ROLES.includes(me.membership.role)) {
   //   return null;
   // }
+  // A SUPPORT user is already being redirected by the effect above; the
+  // in-render guard below catches any other non-member role.
+  if (me.membership.role === "SUPPORT") {
+    return null;
+  }
   if (!MEMBER_DASHBOARD_ROLES.includes(me.membership.role)) {
     return <AccessDenied role={me.membership.role} dashboard="member" />;
   }

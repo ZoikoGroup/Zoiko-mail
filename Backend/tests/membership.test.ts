@@ -93,4 +93,71 @@ describe("Tenant membership management", () => {
 
     expect(added.body.data.role).toBe("ADMIN");
   });
+
+  it("rejects granting SUPPORT to a user who already holds SUPPORT in another tenant", async () => {
+    const ownerA = await registerUser(app, { email: "support-single-a@zoiko.test", tenantName: "Tenant A" });
+    const ownerB = await registerUser(app, { email: "support-single-b@zoiko.test", tenantName: "Tenant B" });
+    const candidate = await registerUser(app, { email: "support-candidate@zoiko.test" });
+
+    // candidate becomes SUPPORT in tenant A — allowed.
+    const supportInA = await request(app)
+      .post("/api/v1/membership/members")
+      .set(authHeader(ownerA.accessToken))
+      .send({ email: candidate.email, role: "SUPPORT" })
+      .expect(201);
+    expect(supportInA.body.data.role).toBe("SUPPORT");
+
+    // tenant B cannot add candidate as SUPPORT — single-workspace Support rule.
+    await request(app)
+      .post("/api/v1/membership/members")
+      .set(authHeader(ownerB.accessToken))
+      .send({ email: candidate.email, role: "SUPPORT" })
+      .expect(409);
+
+    // tenant B cannot invite candidate as SUPPORT either.
+    await request(app)
+      .post("/api/v1/membership/invitations")
+      .set(authHeader(ownerB.accessToken))
+      .send({ email: candidate.email, role: "SUPPORT" })
+      .expect(409);
+
+    // Adding candidate to tenant B as MEMBER is fine...
+    const memberInB = await request(app)
+      .post("/api/v1/membership/members")
+      .set(authHeader(ownerB.accessToken))
+      .send({ email: candidate.email, role: "MEMBER" })
+      .expect(201);
+
+    // ...but promoting that member to SUPPORT there is not.
+    await request(app)
+      .patch(`/api/v1/membership/members/${memberInB.body.data.id}`)
+      .set(authHeader(ownerB.accessToken))
+      .send({ role: "SUPPORT" })
+      .expect(409);
+  });
+
+  it("allows a user to hold SUPPORT in a tenant and later hold it again in a DIFFERENT tenant after it is removed", async () => {
+    const ownerA = await registerUser(app, { email: "support-reissue-a@zoiko.test", tenantName: "Tenant A" });
+    const ownerB = await registerUser(app, { email: "support-reissue-b@zoiko.test", tenantName: "Tenant B" });
+    const candidate = await registerUser(app, { email: "support-reissue-c@zoiko.test" });
+
+    const inA = await request(app)
+      .post("/api/v1/membership/members")
+      .set(authHeader(ownerA.accessToken))
+      .send({ email: candidate.email, role: "SUPPORT" })
+      .expect(201);
+
+    // Removing the SUPPORT seat from tenant A frees the seat.
+    await request(app)
+      .delete(`/api/v1/membership/members/${inA.body.data.id}`)
+      .set(authHeader(ownerA.accessToken))
+      .expect(200);
+
+    // Now tenant B can grant SUPPORT.
+    await request(app)
+      .post("/api/v1/membership/members")
+      .set(authHeader(ownerB.accessToken))
+      .send({ email: candidate.email, role: "SUPPORT" })
+      .expect(201);
+  });
 });

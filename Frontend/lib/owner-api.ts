@@ -7,7 +7,7 @@ export interface Member {
   userId: string;
   displayName: string;
   email: string;
-  role: "OWNER" | "ADMIN" | "MEMBER";
+  role: "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT";
   status: "ACTIVE" | "INVITED" | "SUSPENDED";
   joinedAt: string;
   lastActiveAt: string | null;
@@ -16,7 +16,7 @@ export interface Member {
 export interface Invitation {
   id: string;
   email: string;
-  role: "ADMIN" | "MEMBER";
+  role: "ADMIN" | "MEMBER" | "SUPPORT";
   status: "PENDING" | "ACCEPTED" | "EXPIRED";
   createdAt: string;
   expiresAt: string;
@@ -43,7 +43,7 @@ export async function getMembers(): Promise<Member[]> {
 
 export interface InviteMemberInput {
   email: string;
-  role: "ADMIN" | "MEMBER";
+  role: "ADMIN" | "MEMBER" | "SUPPORT";
 }
 
 export async function inviteMember(input: InviteMemberInput): Promise<Invitation> {
@@ -72,7 +72,7 @@ export async function acceptInvitationById(membershipId: string): Promise<{ id: 
 }
 
 export interface UpdateMemberInput {
-  role?: "ADMIN" | "MEMBER";
+  role?: "ADMIN" | "MEMBER" | "SUPPORT";
   status?: "ACTIVE" | "SUSPENDED";
 }
 

@@ -32,7 +32,7 @@ export default function UsersPage() {
           onClose={() => setInviteOpen(false)}
           onInvite={(email, role) => {
             inviteMember.mutate(
-              { email, role: role as "ADMIN" | "MEMBER" },
+              { email, role: role as "ADMIN" | "MEMBER" | "SUPPORT" },
               { onSuccess: () => setInviteOpen(false) }
             );
           }}
@@ -47,7 +47,7 @@ export default function UsersPage() {
             currentRole={roleModalUser.role}
             onConfirm={(newRole) => {
               updateMember.mutate(
-                { id: roleModalUser.id, input: { role: newRole as "ADMIN" | "MEMBER" } },
+                { id: roleModalUser.id, input: { role: newRole as "ADMIN" | "MEMBER" | "SUPPORT" } },
                 { onSuccess: () => setRoleModalUser(null) }
               );
             }}

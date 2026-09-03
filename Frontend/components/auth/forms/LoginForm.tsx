@@ -4,7 +4,7 @@ import Link from "next/link";
 import { FaEnvelope } from "react-icons/fa";
 
 import { ApiError } from "@/lib/api-client";
-import { takeSignOutNotice } from "@/lib/auth-storage";
+import { clearSignOutNotice, peekSignOutNotice } from "@/lib/auth-storage";
 import { useLogin, useGoogleLogin } from "@/lib/auth-hooks";
 
 import {
@@ -89,6 +89,7 @@ export default function LoginForm({
 
     if (!validate()) return;
 
+    dismissSignOutNotice();
     loginMutation.mutate({
       email: formData.email,
       password: formData.password,
@@ -97,21 +98,26 @@ export default function LoginForm({
     });
   };
 
-  // Why the previous session ended, if it ended for a reason the user should
-  // hear — signing into another workspace ends this one, and an unexplained
-  // return to this form reads as a fault. Read once and cleared, so it does
-  // not reappear on later visits.
+  // Why the previous session ended, when it ended for a reason worth hearing:
+  // signing into another workspace ends this one, and an unexplained return to
+  // this form reads as a fault.
   //
-  // The `if` is load-bearing, not a tidy-up. takeSignOutNotice consumes the
-  // message, and React StrictMode runs this effect twice in development: the
-  // first run took the notice and set it, and an unguarded second run read
-  // nothing and put the state straight back to null, so the explanation never
-  // appeared. Only ever overwrite state with a notice we actually found.
+  // Read without consuming, so a remount still finds it.
+  //
+  // This form can mount more than once for a single sign-out: two guards can
+  // each redirect to /login. A consuming read meant the first mount ate the
+  // message and the second rendered nothing, so the explanation appeared only
+  // sometimes. It is dropped instead when the person acts on it, below.
   const [signOutNotice, setSignOutNotice] = useState<string | null>(null);
   useEffect(() => {
-    const message = takeSignOutNotice();
-    if (message) setSignOutNotice(message);
+    setSignOutNotice(peekSignOutNotice());
   }, []);
+
+  /** Once they try to sign in, the explanation has done its job. */
+  const dismissSignOutNotice = () => {
+    clearSignOutNotice();
+    setSignOutNotice(null);
+  };
 
   const errorMessage =
     loginMutation.error instanceof ApiError
@@ -148,7 +154,10 @@ export default function LoginForm({
             user's own workspace, not in whichever console their role would
             otherwise open. */}
         <GoogleSignInButton
-          onSuccess={(idToken) => googleLoginMutation.mutate({ idToken })}
+          onSuccess={(idToken) => {
+            dismissSignOutNotice();
+            googleLoginMutation.mutate({ idToken });
+          }}
           disabled={loginMutation.isPending || googleLoginMutation.isPending}
         />
         {/* Google failures surface through `errorMessage` below, alongside

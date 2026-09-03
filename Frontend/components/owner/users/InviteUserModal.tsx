@@ -67,6 +67,7 @@ export function InviteUserModal({ open, onClose, onInvite, loading }: InviteUser
           >
             <option value="MEMBER">Member — Basic access</option>
             <option value="ADMIN">Admin — Full management access</option>
+            <option value="SUPPORT">Support — Read-only diagnostics access</option>
           </select>
         </div>
         <p className="text-[11px] text-[var(--ink3)]">

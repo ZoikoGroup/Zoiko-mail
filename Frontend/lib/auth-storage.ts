@@ -70,14 +70,33 @@ export function setSignOutNotice(message: string): void {
   }
 }
 
-/** Reads the notice and clears it, so it is shown once and not on every visit. */
-export function takeSignOutNotice(): string | null {
+/**
+ * Reads the notice without consuming it.
+ *
+ * Deliberately not a read-and-clear. A consuming read is only safe if the
+ * component reads it exactly once, and the login form cannot promise that:
+ * two guards can each redirect to /login, so it mounts twice, the first mount
+ * consumes the message and the second renders nothing. That showed up as the
+ * explanation appearing only sometimes — the same trap as the
+ * create-workspace screen, reached by a remount rather than by StrictMode.
+ *
+ * Cleared by clearSignOutNotice once the reader is done with it.
+ */
+export function peekSignOutNotice(): string | null {
   if (typeof window === "undefined") return null;
   try {
-    const message = sessionStorage.getItem(SIGN_OUT_NOTICE_KEY);
-    if (message) sessionStorage.removeItem(SIGN_OUT_NOTICE_KEY);
-    return message;
+    return sessionStorage.getItem(SIGN_OUT_NOTICE_KEY);
   } catch {
     return null;
+  }
+}
+
+/** Drops the notice, once the person has seen it and moved on. */
+export function clearSignOutNotice(): void {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.removeItem(SIGN_OUT_NOTICE_KEY);
+  } catch {
+    // Private-mode storage failures must not break the form.
   }
 }

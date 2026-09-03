@@ -115,6 +115,7 @@ export function UsersTable({ onInvite, onChangeRole }: UsersTableProps) {
               { label: "Owner", value: "OWNER" },
               { label: "Admin", value: "ADMIN" },
               { label: "Member", value: "MEMBER" },
+              { label: "Support", value: "SUPPORT" },
             ]}
           />
           <FilterSelect
