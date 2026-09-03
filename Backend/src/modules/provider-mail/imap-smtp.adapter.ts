@@ -5,8 +5,10 @@ import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 
 export interface ProviderMailConfig {
-  imap: { host: string; port: number; secure: true };
-  smtp: { host: string; port: number; secure: true };
+  // imap: { host: string; port: number; secure: true };
+  // smtp: { host: string; port: number; secure: true };
+  imap: { host: string; port: number; secure: boolean };
+  smtp: { host: string; port: number; secure: boolean };
   username: string;
   password: string;
   fromAddress: string;
@@ -42,8 +44,8 @@ export type SmtpFactory = (config: ProviderMailConfig) => Pick<Transporter, "ver
 function configuration(): ProviderMailConfig | null {
   if (!env.MAIL_PROVIDER_ENABLED) return null;
   return {
-    imap: { host: env.IMAP_HOST, port: env.IMAP_PORT, secure: true },
-    smtp: { host: env.SMTP_HOST, port: env.SMTP_PORT, secure: true },
+    imap: { host: env.IMAP_HOST, port: env.IMAP_PORT, secure: env.IMAP_SECURE },
+    smtp: { host: env.SMTP_HOST, port: env.SMTP_PORT, secure: env.SMTP_SECURE },
     username: env.MAIL_PROVIDER_USERNAME!,
     password: env.MAIL_PROVIDER_PASSWORD!,
     fromAddress: env.MAIL_PROVIDER_FROM_ADDRESS!,
@@ -62,15 +64,27 @@ const defaultImapFactory: ImapFactory = (config) => new ImapFlow({
   disableAutoIdle: true,
 }) as unknown as ImapClient;
 
+// const defaultSmtpFactory: SmtpFactory = (config) => nodemailer.createTransport({
+//   host: config.smtp.host,
+//   port: config.smtp.port,
+//   secure: config.smtp.secure,
+//   auth: { user: config.username, pass: config.password },
+//   connectionTimeout: config.connectionTimeoutMs,
+//   greetingTimeout: config.connectionTimeoutMs,
+//   socketTimeout: config.connectionTimeoutMs * 2,
+//   tls: { rejectUnauthorized: true, minVersion: "TLSv1.2" },
+// });
 const defaultSmtpFactory: SmtpFactory = (config) => nodemailer.createTransport({
   host: config.smtp.host,
   port: config.smtp.port,
   secure: config.smtp.secure,
-  auth: { user: config.username, pass: config.password },
+  auth: config.username && config.password
+    ? { user: config.username, pass: config.password }
+    : undefined,
   connectionTimeout: config.connectionTimeoutMs,
   greetingTimeout: config.connectionTimeoutMs,
   socketTimeout: config.connectionTimeoutMs * 2,
-  tls: { rejectUnauthorized: true, minVersion: "TLSv1.2" },
+  ...(config.smtp.secure ? { tls: { rejectUnauthorized: true, minVersion: "TLSv1.2" as const } } : {}),
 });
 
 function addresses(values?: Array<{ address?: string; name?: string }>) {
@@ -84,7 +98,7 @@ export class ImapSmtpAdapter {
     private readonly config: ProviderMailConfig | null = configuration(),
     private readonly imapFactory: ImapFactory = defaultImapFactory,
     private readonly smtpFactory: SmtpFactory = defaultSmtpFactory
-  ) {}
+  ) { }
 
   status() {
     return {
