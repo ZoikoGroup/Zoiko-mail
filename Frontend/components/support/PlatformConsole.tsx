@@ -1550,8 +1550,13 @@ export default function PlatformConsole() {
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [overviewError, setOverviewError] = useState<string | null>(null);
 
-  const isPlatform = !!getPlatformToken();
-  // const { data: me, isLoading: meLoading } = useMe();
+  // The platform token lives in localStorage, which does not exist during
+  // SSR. Reading it at render time makes the server tree differ from the
+  // client tree (a staff refresh of /support with a stored token) and throws
+  // a React hydration error. Resolve it into state on mount so the first
+  // render always matches the server.
+  const [mounted, setMounted] = useState(false);
+  const [isPlatform, setIsPlatform] = useState(false);
 
   // Only fetch /auth/me when we're a tenant user. Staff platform tokens are
   // not valid for /auth/me, and calling it triggers a 401 -> refresh-fail ->
@@ -1565,6 +1570,16 @@ export default function PlatformConsole() {
   // and store ONLY the platform token (tenant sessions stay untouched).
   // TODO: remove this bypass once the staff login flow is sorted.
   const [devBypass, setDevBypass] = useState(false);
+  // True once the dev-bypass / staff-token resolution above has finished. We
+  // keep the loading gate up until then so non-staff tenant roles don't see a
+  // "You have no access" flash while the bypass is about to promote them to
+  // the staff console.
+  const [bypassSettled, setBypassSettled] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    setIsPlatform(!!getPlatformToken());
+  }, []);
 
   const loadOverview = useCallback(async () => {
     setOverviewLoading(true);
@@ -1596,7 +1611,10 @@ export default function PlatformConsole() {
             });
             const src = data?.session ?? data?.tokens ?? data ?? {};
             const platformToken = src?.platformToken ?? data?.platformToken;
-            if (platformToken) setPlatformToken(platformToken);
+            if (platformToken) {
+              setPlatformToken(platformToken);
+              setIsPlatform(true);
+            }
           } catch {
             // fall through — the isLoggedIn() check below redirects to /login
           }
@@ -1607,6 +1625,7 @@ export default function PlatformConsole() {
         router.replace("/login");
         return;
       }
+      setBypassSettled(true);
       loadOverview();
     })();
     return () => {
@@ -1629,11 +1648,22 @@ export default function PlatformConsole() {
     setPage("tenants");
   }, []);
 
+  // Hydration guard: until mount, render the exact same static tree the
+  // server sent (localStorage-aware state is only resolved in the effect
+  // above). Everything below can then safely depend on the browser.
+  if (!mounted) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-sm">Loading…</div>
+      </div>
+    );
+  }
+
   // Loading gate: don't render the staff console until we know whether the
   // user has staff platform access OR the tenant SUPPORT role. Without this,
   // a member briefly sees the console UI before the guard redirects them.
   // Staff platform users skip this because their access doesn't depend on /auth/me.
-  if (!isPlatform && (meLoading || !me)) {
+  if (!isPlatform && (meLoading || !me || !bypassSettled)) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-sm">Loading…</div>
@@ -1645,7 +1675,7 @@ export default function PlatformConsole() {
   // }
 
   // Loading gate change:
-  if (!isPlatform && me && me.membership.role !== "SUPPORT") {
+  if (!isPlatform && me && me.membership.role !== "SUPPORT" && bypassSettled) {
     return <AccessDenied role={me.membership.role} dashboard="support" />;
   }
 

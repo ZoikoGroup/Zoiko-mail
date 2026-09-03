@@ -24,7 +24,6 @@ import { otpService } from "./otp.service.js";
 import type { AuthState, PublicUser, WorkspaceOption } from "./auth.states.js";
 import type { PendingInvitationSummary, VerifyOtpResponse } from "./auth.types.js";
 import { verifyGoogleIdToken } from "./google.verifier.js";
-// import type { GoogleLoginInput } from "./auth.schema.js";
 import type {
   LoginInput,
   LogoutInput,
@@ -37,7 +36,6 @@ import type {
   SelectWorkspaceInput,
   GoogleLoginInput,
 } from "./auth.schema.js";
-import { verifyGoogleToken } from "./google-auth.js";
 import {
   AuditEventTypes,
   SYSTEM_TENANT_ID,
@@ -416,14 +414,6 @@ export class AuthService {
       throw new AppError("Account not found", 401, ErrorCodes.UNAUTHORIZED);
     }
 
-    // if (user.status !== "PENDING_VERIFICATION" && user.status !== "ACTIVE") {
-    //   throw new AppError(
-    //     "Account is not eligible to create a workspace",
-    //     403,
-    //     ErrorCodes.FORBIDDEN
-    //   );
-    // }
-
     // In non-production environments we allow workspace creation without email verification to simplify testing.
     if (!user.emailVerifiedAt && process.env.NODE_ENV === "production") {
       throw new AppError(
@@ -791,7 +781,7 @@ export class AuthService {
         const user = await tx.appUser.create({
           data: {
             email: profile.email,
-            passwordHash: null,
+            passwordHash: "",
             displayName: profile.displayName,
             avatarUrl: profile.avatarUrl,
             status: "ACTIVE",
@@ -890,183 +880,6 @@ export class AuthService {
     return this.resolveAuthState(linked, undefined, context);
   }
 
-  /**
-   * Issues and sends the sign-in code, and returns the state that asks for it.
-   *
-   * Delivery is fire-and-forget inside otpService, so a slow or unreachable
-   * SMTP server cannot hold up the response. That also means a send failure is
-   * invisible here by design — the code is always written to the API log,
-   * which is how this stays testable before SMTP credentials exist.
-   */
-  private async issueGoogleOtp(
-    user: { id: string; email: string; displayName: string }
-  ): Promise<AuthState> {
-    const { code } = await otpService.issue(user.id);
-    await otpService.sendOtpEmail(user.email, code);
-
-    const pending = buildPendingToken(user.id);
-    return {
-      state: "OTP_REQUIRED",
-      user: { id: user.id, email: user.email, displayName: user.displayName },
-      pendingToken: pending.token,
-      expiresIn: pending.expiresIn,
-      sentTo: user.email,
-    };
-  }
-
-  /**
-   * Second leg of Google sign-in: exchange a correct code for a session.
-   *
-   * Separate from verifyEmailOtp because that one continues *registration* --
-   * it returns pending invitations and another pending token so the caller can
-   * create or join a workspace. This continues *sign-in*, so it ends in
-   * resolveAuthState and a real session.
-   */
-  async verifyGoogleOtp(
-    pendingToken: string,
-    code: string,
-    context: RequestContext,
-    tenantId?: string
-  ): Promise<AuthState> {
-    const userId = this.verifyPendingToken(pendingToken);
-    await otpService.verify(userId, code);
-
-    const user = await userRepository.findById(userId);
-    if (!user) {
-      throw new AppError("Account not found", 401, ErrorCodes.UNAUTHORIZED);
-    }
-
-    await ensureSystemTenant();
-    await auditService.record({
-      tenantId: SYSTEM_TENANT_ID,
-      actorUserId: userId,
-      eventType: AuditEventTypes.EMAIL_VERIFIED,
-      targetType: "AppUser",
-      targetId: userId,
-      requestId: context.requestId,
-      ipAddress: context.ipAddress,
-      userAgent: context.userAgent,
-      metadata: { provider: "google", step: "otp" },
-    });
-
-    // The same guard chain as every other sign-in route, so a suspension
-    // between the code being sent and entered is still honoured.
-    return this.resolveAuthState(user, tenantId, context);
-  }
-
-  /** Re-sends the code, subject to otpService's cooldown and hourly cap. */
-  async resendGoogleOtp(pendingToken: string): Promise<{ cooldownMs: number }> {
-    const userId = this.verifyPendingToken(pendingToken);
-    return otpService.resendForSignIn(userId);
-  }
-
-  async googleLogin(input: GoogleLoginInput, context: RequestContext): Promise<AuthState | RegisterResponse> {
-    const googleUser = await verifyGoogleToken(input.idToken);
-    const existingUser = await userRepository.findByEmail(googleUser.email);
-
-    if (existingUser && existingUser.status !== "INVITED") {
-      const existingIdentity = await prisma.userIdentity.findUnique({
-        where: {
-          provider_providerUserId: {
-            provider: "GOOGLE",
-            providerUserId: googleUser.googleId,
-          },
-        },
-      });
-
-      if (!existingIdentity) {
-        await prisma.userIdentity.create({
-          data: {
-            userId: existingUser.id,
-            provider: "GOOGLE",
-            providerUserId: googleUser.googleId,
-            email: googleUser.email,
-            lastUsedAt: new Date(),
-          },
-        });
-      }
-      // Google asserted email_verified, which is precisely the fact the
-      // pending-verification state is waiting for. Leaving the account
-      // pending would send someone Google just verified off to a "verify
-      // your email" screen, and the sign-in could never proceed.
-      if (existingUser.status === "PENDING_VERIFICATION" || !existingUser.emailVerifiedAt) {
-        const promoted = await prisma.appUser.update({
-          where: { id: existingUser.id },
-          data: {
-            emailVerifiedAt: existingUser.emailVerifiedAt ?? new Date(),
-            status: existingUser.status === "PENDING_VERIFICATION" ? "ACTIVE" : existingUser.status,
-          },
-        });
-        existingUser.status = promoted.status;
-        existingUser.emailVerifiedAt = promoted.emailVerifiedAt;
-      }
-
-      // Google has proved the address; the product still asks for a code
-      // before opening a session. Guard states are evaluated first — a
-      // suspended account must be told so, not sent a code it can never use.
-      const guard = await this.resolveAuthState(existingUser, undefined, context);
-      if (guard.state !== "SIGNED_IN") return guard;
-      return this.issueGoogleOtp(existingUser);
-    }
-
-    let user;
-    const passwordHash = await hashPassword("");
-    if (existingUser && existingUser.status === "INVITED") {
-      user = await prisma.appUser.update({
-        where: { id: existingUser.id },
-        data: {
-          googleId: googleUser.googleId,
-          displayName: googleUser.name,
-          emailVerifiedAt: new Date(),
-          status: "ACTIVE",
-          passwordHash
-        }
-      });
-    } else {
-      user = await prisma.appUser.create({
-        data: {
-          email: googleUser.email,
-          googleId: googleUser.googleId,
-          displayName: googleUser.name,
-          passwordHash,
-          status: "ACTIVE",
-          emailVerifiedAt: new Date()
-        }
-      });
-    }
-
-    await ensureSystemTenant();
-    await auditService.record({
-      tenantId: SYSTEM_TENANT_ID,
-      actorUserId: user.id,
-      eventType: "GOOGLE_LOGIN_SUCCESS" as (typeof AuditEventTypes)[keyof typeof AuditEventTypes],
-      targetType: "AppUser",
-      targetId: user.id,
-      requestId: context.requestId,
-      ipAddress: context.ipAddress,
-      userAgent: context.userAgent,
-      metadata: { email: user.email, provider: "google" },
-    });
-
-    const memberships = await membershipRepository.findByUserId(user.id);
-    const nonRemoved = memberships.filter((m) => m.status !== "REMOVED");
-
-    if (nonRemoved.length > 0) {
-      return this.resolveAuthState(user, undefined, context);
-    }
-
-    const pending = buildPendingToken(user.id);
-    return {
-      user: {
-        id: user.id,
-        email: user.email,
-        displayName: user.displayName,
-      },
-      pendingToken: pending.token,
-      expiresIn: pending.expiresIn,
-    };
-  }
-
   /** Ordered guard chain. First matching guard decides the state. */
   private async resolveAuthState(
     user: Awaited<ReturnType<typeof userRepository.findByEmail>> & {},
@@ -1138,7 +951,6 @@ export class AuthService {
           pendingToken: pending.token,
         };
       }
-      // return { state: "NO_WORKSPACE", user: publicUser };
 
       // Attach a pending token so the client can call /auth/create-workspace.
       // Without it a verified user with no membership has no way forward —
@@ -1155,9 +967,6 @@ export class AuthService {
     // 4. Explicit selection, or auto-resolve a single workspace.
     if (selectedTenantId) {
       const chosen = nonRemoved.find((m) => m.tenantId === selectedTenantId);
-      // if (!chosen) {
-      //   return { state: "WORKSPACE_SELECTION", user: publicUser, workspaces: nonRemoved.map(toWorkspaceOption) };
-      // }
       if (!chosen) {
         const selection = buildSelectionToken(user.id);
         return {
@@ -1176,7 +985,6 @@ export class AuthService {
     }
 
     // 5. Multiple workspaces — let the client pick (statuses drive greying-out).
-    // return { state: "WORKSPACE_SELECTION", user: publicUser, workspaces: nonRemoved.map(toWorkspaceOption) };
 
     // Issue a short-lived selection token so the client can call /auth/select-
     // workspace without asking the user for their password again.
@@ -1241,9 +1049,6 @@ export class AuthService {
     if (membership.status === "SUSPENDED") {
       return { state: "MEMBERSHIP_SUSPENDED", user: publicUser, workspace };
     }
-    // if (membership.status === "REMOVED") {
-    //   return { state: "NO_WORKSPACE", user: publicUser };
-    // }
 
     if (membership.status === "REMOVED") {
       // Same treatment as the no-membership path: a removed member has no
@@ -1416,11 +1221,6 @@ export class AuthService {
     tenantId: string,
     context: RequestContext
   ): Promise<void> {
-    // const user = await userRepository.findById(userId);
-    // if (!user || !(await verifyPassword(input.currentPassword, user.passwordHash))) {
-    //   throw new AppError("Current password is incorrect", 401, ErrorCodes.UNAUTHORIZED);
-    // }
-
     const user = await userRepository.findById(userId);
     if (!user) {
       throw new AppError("Current password is incorrect", 401, ErrorCodes.UNAUTHORIZED);

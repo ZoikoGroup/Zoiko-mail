@@ -83,7 +83,6 @@ export async function apiRequest<T = unknown>(
     path: string,
     opts: RequestOptions = {}
 ): Promise<T> {
-    // const { method = "GET", body, auth = true, _retried = false } = opts;
     const {
         method = "GET",
         body,
@@ -95,7 +94,6 @@ export async function apiRequest<T = unknown>(
         accessToken,
     } = opts;
 
-    // const headers: Record<string, string> = { "Content-Type": "application/json" };
     const headers: Record<string, string> = {
         "Content-Type": "application/json",
         ...customHeaders,

@@ -23,10 +23,6 @@ export class ActionService {
     });
   }
 
-  // list(tenantId: string, userId: string) {
-  //   return prisma.commitment.findMany({ where: { tenantId, ownerUserId: userId }, orderBy: [{ dueAt: "asc" }, { createdAt: "desc" }] });
-  // }
-
   list(tenantId: string, userId: string, filters?: ListFilters) {
     const where: Record<string, unknown> = { tenantId, ownerUserId: userId };
     if (filters?.status) where.status = filters.status;

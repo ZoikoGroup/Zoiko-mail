@@ -170,6 +170,61 @@ describe("Platform support console", () => {
       .set(authHeader(staffToken)).expect(403);
   });
 
+  it("filters suppressions by active status for platform staff", async () => {
+    const owner = await registerUser(app, { email: "pc-sup-owner@zoiko.test", tenantName: "Suppression Tenant" });
+    const token = await staffPlatformToken("pc-sup-platform@zoiko.test");
+
+    const activeEntry = await prisma.suppressionEntry.create({
+      data: { tenantId: owner.tenantId, emailHash: "a".repeat(64), reason: "ADMIN", active: true },
+    });
+    const inactiveEntry = await prisma.suppressionEntry.create({
+      data: { tenantId: owner.tenantId, emailHash: "b".repeat(64), reason: "COMPLAINT", active: false },
+    });
+
+    try {
+      const active = await request(app).get("/api/v1/support/platform/suppressions?status=true")
+        .set(authHeader(token)).expect(200);
+      const activeIds = active.body.data.suppressions.map((s: { id: string }) => s.id);
+      expect(activeIds).toContain(activeEntry.id);
+      expect(activeIds).not.toContain(inactiveEntry.id);
+
+      const inactive = await request(app).get("/api/v1/support/platform/suppressions?status=false")
+        .set(authHeader(token)).expect(200);
+      const inactiveIds = inactive.body.data.suppressions.map((s: { id: string }) => s.id);
+      expect(inactiveIds).toContain(inactiveEntry.id);
+      expect(inactiveIds).not.toContain(activeEntry.id);
+
+      // No filter -> both returned.
+      const all = await request(app).get("/api/v1/support/platform/suppressions")
+        .set(authHeader(token)).expect(200);
+      expect(all.body.data.suppressions.map((s: { id: string }) => s.id))
+        .toEqual(expect.arrayContaining([activeEntry.id, inactiveEntry.id]));
+    } finally {
+      await prisma.suppressionEntry.deleteMany({ where: { tenantId: owner.tenantId } });
+    }
+  });
+
+  it("denies a non-SUPER_ADMIN staff platform session from revoking grants", async () => {
+    const owner = await registerUser(app, { email: "pc-staff-owner@zoiko.test", tenantName: "Staff Grants Tenant" });
+    const agent = await setupSupport(owner, "pc-staff-agent@zoiko.test");
+    const grant = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
+      .send({ supportMembershipId: agent.membership.id, reason: "Investigate staff revoke denial", expiresInMinutes: 30, scopes: ["DELIVERY_DIAGNOSTICS"] }).expect(201);
+
+    const staff = await registerUser(app, { email: "pc-staff-support@zoiko.test" });
+    await prisma.appUser.update({ where: { id: staff.userId }, data: { platformRole: "SUPPORT" } });
+    const login = await request(app).post("/api/v1/auth/login")
+      .send({ email: staff.email, password: staff.password }).expect(200);
+    expect(login.body.data.state).toBe("STAFF_CONSOLE");
+    const platformToken = login.body.data.platformToken as string;
+    expect(platformToken).toBeTruthy();
+
+    // A staff SUPPORT session has no tenant membershipId, so it can never match
+    // a grant's supportMembershipId — only SUPER_ADMIN may revoke here.
+    await request(app).delete(`/api/v1/support/platform/grants/${grant.body.data.id}`)
+      .set(authHeader(platformToken)).expect(403);
+    expect((await prisma.supportAccessGrant.findUnique({ where: { id: grant.body.data.id } }))?.revokedAt).toBeNull();
+  });
+
   it("searches and details mailboxes; 404 for unknown", async () => {
     const owner = await registerUser(app, { email: "pc-mb-owner@zoiko.test", tenantName: "Mailbox Tenant" });
     const { membership } = await setupSupport(owner, "pc-mb-agent@zoiko.test");

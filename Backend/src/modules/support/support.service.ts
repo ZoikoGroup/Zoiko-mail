@@ -929,9 +929,15 @@ export class SupportService {
     return updated;
   }
 
-  async listSuppressions(input: { tenantId?: string; limit?: number }) {
+  async listSuppressions(input: { tenantId?: string; status?: string; limit?: number }) {
+    // The platform console's "Active" filter sends status=true|false. Honor it
+    // so staff can isolate active vs unsuppressed entries across tenants.
+    const where: Prisma.SuppressionEntryWhereInput = {
+      ...(input.tenantId ? { tenantId: input.tenantId } : {}),
+      ...(input.status === "true" || input.status === "false" ? { active: input.status === "true" } : {}),
+    };
     const entries = await prisma.suppressionEntry.findMany({
-      where: input.tenantId ? { tenantId: input.tenantId } : {},
+      where,
       include: { tenant: { select: { id: true, name: true } } },
       orderBy: { updatedAt: "desc" },
       take: Math.min(input.limit ?? 50, 200),
