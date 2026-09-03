@@ -404,10 +404,10 @@ export class MailService {
     const warmupReserved = senderMailbox.sendSuspendedAt
       ? true
       : await deliveryProtectionService.reserveWarmup(
-          senderMailbox.id,
-          context.tenantId,
-          externalEmails.length
-        );
+        senderMailbox.id,
+        context.tenantId,
+        externalEmails.length
+      );
     if (!warmupReserved) {
       await auditService.record({
         tenantId: context.tenantId,
@@ -470,104 +470,163 @@ export class MailService {
 
     try {
       return await prisma.$transaction(async (tx) => {
-      const sentAt = new Date();
-      const recipients = await tx.messageRecipient.findMany({
-        where: { tenantId: context.tenantId, messageId },
-      });
-
-      for (const recipient of recipients) {
-        const membership = await tx.tenantMembership.findFirst({
-          where: {
-            tenantId: context.tenantId,
-            status: "ACTIVE",
-            user: { email: { equals: recipient.email, mode: "insensitive" }, status: "ACTIVE" },
-          },
-          include: { user: { select: { email: true } } },
+        const sentAt = new Date();
+        const recipients = await tx.messageRecipient.findMany({
+          where: { tenantId: context.tenantId, messageId },
         });
-        if (membership) {
-          const recipientMailbox = await this.mailbox({
-            ...context,
-            userId: membership.userId,
-            membershipId: membership.id,
-            email: membership.user.email,
-          }, tx);
-          if (recipientMailbox.id !== senderMailbox.id) {
-          await tx.mailboxMessage.upsert({
-              where: {
-                mailboxId_messageId: { mailboxId: recipientMailbox.id, messageId },
+
+        for (const recipient of recipients) {
+          const membership = await tx.tenantMembership.findFirst({
+            where: {
+              tenantId: context.tenantId,
+              status: "ACTIVE",
+              user: { email: { equals: recipient.email, mode: "insensitive" }, status: "ACTIVE" },
+            },
+            include: { user: { select: { email: true } } },
+          });
+          if (membership) {
+            const recipientMailbox = await this.mailbox({
+              ...context,
+              userId: membership.userId,
+              membershipId: membership.id,
+              email: membership.user.email,
+            }, tx);
+            if (recipientMailbox.id !== senderMailbox.id) {
+              await tx.mailboxMessage.upsert({
+                where: {
+                  mailboxId_messageId: { mailboxId: recipientMailbox.id, messageId },
+                  tenantId: context.tenantId,
+                },
+                create: { tenantId: context.tenantId, mailboxId: recipientMailbox.id, messageId, folder: "INBOX" },
+                update: { folder: "INBOX" },
+              });
+            }
+            await tx.messageRecipient.update({
+              where: { id: recipient.id, tenantId: context.tenantId },
+              data: { recipientMembershipId: membership.id, deliveryStatus: "DELIVERED" },
+            });
+            await tx.deliveryEvent.create({
+              data: {
                 tenantId: context.tenantId,
+                messageId,
+                recipientId: recipient.id,
+                type: "DELIVERED",
+                metadata: { transport: "INTERNAL" },
               },
-              create: { tenantId: context.tenantId, mailboxId: recipientMailbox.id, messageId, folder: "INBOX" },
-              update: { folder: "INBOX" },
+            });
+          } else {
+            await tx.messageRecipient.update({
+              where: { id: recipient.id, tenantId: context.tenantId },
+              data: { deliveryStatus: "QUEUED" },
+            });
+            await tx.deliveryEvent.create({
+              data: {
+                tenantId: context.tenantId,
+                messageId,
+                recipientId: recipient.id,
+                type: "QUEUED",
+                metadata: { transport: "EXTERNAL_PROVIDER_PENDING" },
+              },
             });
           }
-          await tx.messageRecipient.update({
-            where: { id: recipient.id, tenantId: context.tenantId },
-            data: { recipientMembershipId: membership.id, deliveryStatus: "DELIVERED" },
-          });
-          await tx.deliveryEvent.create({
-            data: {
-              tenantId: context.tenantId,
-              messageId,
-              recipientId: recipient.id,
-              type: "DELIVERED",
-              metadata: { transport: "INTERNAL" },
-            },
-          });
+        }
+
+        // await tx.mailboxMessage.update({
+        //   where: {
+        //     mailboxId_messageId: { mailboxId: senderMailbox.id, messageId },
+        //     tenantId: context.tenantId,
+        //   },
+        //   data: { folder: "SENT", isRead: true },
+        // });
+        // const message = await tx.emailMessage.update({
+        //   where: { id: messageId, tenantId: context.tenantId },
+        //   data: { status: "SENT", sentAt, scheduledAt: null, scheduleLastError: null },
+        //   include: messageInclude,
+        // });
+        // if (message.threadId) {
+        //   await tx.messageThread.update({
+        //     where: { id: message.threadId, tenantId: context.tenantId },
+        //     data: { lastMessageAt: sentAt },
+        //   });
+        // }
+        // const hasExternalRecipients = await tx.messageRecipient.count({
+        //   where: { tenantId: context.tenantId, messageId, recipientMembershipId: null },
+        // }) > 0;
+        // if (
+        //   hasExternalRecipients
+        //   && env.MAIL_PROVIDER_ENABLED
+        //   && context.tenantId === env.MAIL_PROVIDER_TENANT_ID
+        //   && context.membershipId === env.MAIL_PROVIDER_MEMBERSHIP_ID
+        // ) {
+        //   await jobService.enqueue({
+        //     tenantId: context.tenantId,
+        //     userId: context.userId,
+        //     type: "SMTP_SEND",
+        //     payload: { messageId },
+        //     idempotencyKey: `smtp-send:${messageId}`,
+        //   }, tx);
+        // }
+        await tx.mailboxMessage.update({
+          where: {
+            mailboxId_messageId: { mailboxId: senderMailbox.id, messageId },
+            tenantId: context.tenantId,
+          },
+          data: { folder: "SENT", isRead: true },
+        });
+
+        // Decide the honest status by looking at what will actually happen.
+        // Three cases:
+        //   1. No external recipients          → SENT   (delivered in-DB above)
+        //   2. External + we enqueue SMTP      → SENDING (worker will flip to SENT)
+        //   3. External but nothing to send it → FAILED  (no silent black holes)
+        const hasExternalRecipients = await tx.messageRecipient.count({
+          where: { tenantId: context.tenantId, messageId, recipientMembershipId: null },
+        }) > 0;
+
+        const canEnqueueSmtp = env.MAIL_PROVIDER_ENABLED
+          && context.tenantId === env.MAIL_PROVIDER_TENANT_ID
+          && context.membershipId === env.MAIL_PROVIDER_MEMBERSHIP_ID;
+
+        let status: MessageStatus;
+        let scheduleLastError: string | null = null;
+        let messageSentAt: Date | null = null;
+
+        if (!hasExternalRecipients) {
+          status = "SENT";
+          messageSentAt = sentAt;
+        } else if (canEnqueueSmtp) {
+          status = "SENDING";
+          // sentAt stays null — the worker sets it on real SMTP success.
         } else {
-          await tx.messageRecipient.update({
-            where: { id: recipient.id, tenantId: context.tenantId },
-            data: { deliveryStatus: "QUEUED" },
-          });
-          await tx.deliveryEvent.create({
-            data: {
-              tenantId: context.tenantId,
-              messageId,
-              recipientId: recipient.id,
-              type: "QUEUED",
-              metadata: { transport: "EXTERNAL_PROVIDER_PENDING" },
-            },
+          status = "FAILED";
+          scheduleLastError = "External delivery is not configured for this tenant";
+        }
+
+        const message = await tx.emailMessage.update({
+          where: { id: messageId, tenantId: context.tenantId },
+          data: { status, sentAt: messageSentAt, scheduledAt: null, scheduleLastError },
+          include: messageInclude,
+        });
+
+        if (message.threadId && messageSentAt) {
+          await tx.messageThread.update({
+            where: { id: message.threadId, tenantId: context.tenantId },
+            data: { lastMessageAt: messageSentAt },
           });
         }
-      }
 
-      await tx.mailboxMessage.update({
-        where: {
-          mailboxId_messageId: { mailboxId: senderMailbox.id, messageId },
-          tenantId: context.tenantId,
-        },
-        data: { folder: "SENT", isRead: true },
-      });
-      const message = await tx.emailMessage.update({
-        where: { id: messageId, tenantId: context.tenantId },
-        data: { status: "SENT", sentAt, scheduledAt: null, scheduleLastError: null },
-        include: messageInclude,
-      });
-      if (message.threadId) {
-        await tx.messageThread.update({
-          where: { id: message.threadId, tenantId: context.tenantId },
-          data: { lastMessageAt: sentAt },
-        });
-      }
-      const hasExternalRecipients = await tx.messageRecipient.count({
-        where: { tenantId: context.tenantId, messageId, recipientMembershipId: null },
-      }) > 0;
-      if (
-        hasExternalRecipients
-        && env.MAIL_PROVIDER_ENABLED
-        && context.tenantId === env.MAIL_PROVIDER_TENANT_ID
-        && context.membershipId === env.MAIL_PROVIDER_MEMBERSHIP_ID
-      ) {
-        await jobService.enqueue({
-          tenantId: context.tenantId,
-          userId: context.userId,
-          type: "SMTP_SEND",
-          payload: { messageId },
-          idempotencyKey: `smtp-send:${messageId}`,
-        }, tx);
-      }
-      await this.audit(tx, context, "MAIL_SENT", message.id, { recipientCount: recipients.length });
-      return message;
+        if (status === "SENDING") {
+          await jobService.enqueue({
+            tenantId: context.tenantId,
+            userId: context.userId,
+            type: "SMTP_SEND",
+            payload: { messageId },
+            idempotencyKey: `smtp-send:${messageId}`,
+          }, tx);
+        }
+
+        await this.audit(tx, context, "MAIL_SENT", message.id, { recipientCount: recipients.length });
+        return message;
       });
     } catch (error) {
       await prisma.deliveryEvent.createMany({
@@ -920,12 +979,12 @@ export class MailService {
 
     const data: Prisma.MailboxMessageUpdateManyMutationInput =
       input.action === "MARK_READ" ? { isRead: true }
-      : input.action === "MARK_UNREAD" ? { isRead: false }
-      : input.action === "STAR" ? { isStarred: true }
-      : input.action === "UNSTAR" ? { isStarred: false }
-      : input.action === "ARCHIVE" ? { folder: "ARCHIVE" }
-      : input.action === "TRASH" ? { folder: "TRASH" }
-      : { folder: "INBOX" };
+        : input.action === "MARK_UNREAD" ? { isRead: false }
+          : input.action === "STAR" ? { isStarred: true }
+            : input.action === "UNSTAR" ? { isStarred: false }
+              : input.action === "ARCHIVE" ? { folder: "ARCHIVE" }
+                : input.action === "TRASH" ? { folder: "TRASH" }
+                  : { folder: "INBOX" };
 
     return prisma.$transaction(async (tx) => {
       const result = await tx.mailboxMessage.updateMany({
@@ -1163,7 +1222,7 @@ export class MailService {
     });
     if (!attachment) throw new AppError("Attachment not found", 404, ErrorCodes.NOT_FOUND);
     if (attachment.scanStatus === "BLOCKED" ||
-        (attachment.message.quarantinedAt && attachment.message.authorUserId !== context.userId)) {
+      (attachment.message.quarantinedAt && attachment.message.authorUserId !== context.userId)) {
       throw new AppError("Attachment is blocked by security controls", 403, ErrorCodes.FORBIDDEN);
     }
     return {

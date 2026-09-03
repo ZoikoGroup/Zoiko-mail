@@ -134,7 +134,14 @@ const envSchema = z.object({
         context.addIssue({ code: "custom", path: [key], message: "is required when MAIL_PROVIDER_ENABLED=true" });
       }
     }
-    if (!value.IMAP_SECURE || !value.SMTP_SECURE) {
+    // if (!value.IMAP_SECURE || !value.SMTP_SECURE) {
+    //   context.addIssue({ code: "custom", path: ["MAIL_PROVIDER_ENABLED"], message: "IMAP and SMTP TLS must remain enabled" });
+    // }
+    if (
+      value.SMTP_HOST !== "localhost" &&
+      value.IMAP_HOST !== "localhost" &&
+      (!value.IMAP_SECURE || !value.SMTP_SECURE)
+    ) {
       context.addIssue({ code: "custom", path: ["MAIL_PROVIDER_ENABLED"], message: "IMAP and SMTP TLS must remain enabled" });
     }
   }
