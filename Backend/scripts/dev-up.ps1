@@ -217,8 +217,51 @@ if (Test-Port ([int]$DbPort)) {
 if ($Docker) {
   Write-Step '3/4  api (container, rebuilt)'
 
-  # The source API, if it is running, owns port 5000 and the container cannot
-  # bind it. This is the error people hit when they reach for compose by hand.
+  # The image build is by far the heaviest thing here: two npm ci runs, a
+  # prisma generate and a tsc build. On a machine this tight it does not
+  # merely fail — it takes the Docker engine down with it, which then looks
+  # like an unrelated "cannot connect to the docker API" error. Refusing up
+  # front is kinder than a half-finished teardown.
+  $freeForBuild = [math]::Round((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1KB)
+  if ($freeForBuild -lt 1500) {
+    Write-Bad "Not enough memory to build the image: ${freeForBuild} MB free, and this needs about 1.5 GB."
+    Write-Bad 'Close some VS Code windows and re-run, or drop -Docker to run the API from source.'
+    Write-Warn 'Nothing was changed — whatever is running stays running.'
+    return
+  }
+
+  # Build before touching anything that works.
+  #
+  # The first version stopped the source API first, so a build that died left
+  # no API at all: the working setup was torn down for a container that never
+  # arrived. Build, and only swap once there is something to swap to.
+  Write-Step '  building the image (several minutes, and memory-hungry)...'
+  $built = $false
+  Push-Location $BackendDir
+  try {
+    $env:POSTGRES_HOST_PORT = $DbPort
+    & docker compose -f docker-compose.yml -f docker-compose.dev.yml build api 2>&1 |
+      Where-Object { $_ -match 'Building|Built|ERROR|error|failed|cannot connect' } |
+      ForEach-Object { Write-Step "    $_" }
+    $built = $LASTEXITCODE -eq 0
+  } finally { Pop-Location }
+
+  if (-not $built) {
+    # The engine dying mid-build is the common shape of this on a tight
+    # machine, and its own error message points at a pipe rather than at
+    # memory. Name the likely cause instead.
+    & docker info --format '{{.ServerVersion}}' 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+      Write-Bad 'The Docker engine went down during the build — almost always memory.'
+    } else {
+      Write-Bad 'The image build failed. A build killed for memory shows as exit 137.'
+    }
+    Write-Bad 'Free some RAM and re-run, or drop -Docker to run the API from source.'
+    Write-Warn 'Nothing was swapped — whatever was running is still running.'
+    return
+  }
+
+  # Only now is it safe to give up the working API.
   Get-NetTCPConnection -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue |
     Select-Object -ExpandProperty OwningProcess -Unique |
     ForEach-Object {
@@ -227,16 +270,16 @@ if ($Docker) {
         Write-Step "  stopped the source API (pid $_) so the container can bind 5000"
       } catch {}
     }
+  # Wait for the port to actually clear: a listener lingers briefly after the
+  # process goes, and starting the container into an occupied port fails.
+  $freeBy = (Get-Date).AddSeconds(20)
+  while ((Test-Port 5000) -and (Get-Date) -lt $freeBy) { Start-Sleep -Seconds 2 }
 
-  # Always --build. An image built earlier is the failure this whole script
-  # exists to avoid: it answers every request normally while omitting the
-  # workspace scope, so sign-in bounces and the API looks healthy.
-  Write-Step '  building the image (several minutes, and memory-hungry)...'
   Push-Location $BackendDir
   try {
     $env:POSTGRES_HOST_PORT = $DbPort
-    & docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build api 2>&1 |
-      Where-Object { $_ -match 'Building|Built|Started|Running|Recreated|Healthy|ERROR|error|failed' } |
+    & docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d api 2>&1 |
+      Where-Object { $_ -match 'Started|Running|Recreated|Healthy|ERROR|error|failed' } |
       ForEach-Object { Write-Step "    $_" }
   } finally { Pop-Location }
 
@@ -246,7 +289,6 @@ if ($Docker) {
     Write-Ok 'up on 5000 (container)'
   } else {
     Write-Bad 'the api container did not come up. Check: docker logs backend-api-1'
-    Write-Bad 'A build killed for memory shows as exit 137 — free some RAM and re-run.'
   }
 }
 else {
@@ -254,7 +296,17 @@ else {
 Write-Step '3/4  api (from source)'
 # The container image goes stale and answers with unscoped sessions, so it must
 # not own port 5000. Stopping it is cheap and prevents a confusing failure.
+#
+# Then wait for the port to clear before deciding anything. Without the wait,
+# the check below saw the stopping container still listening, reported
+# "already up on 5000", started nothing, and left no API at all — the status
+# table two lines later said down.
 & docker stop backend-api-1 2>&1 | Out-Null
+$clearBy = (Get-Date).AddSeconds(20)
+while ((Test-Port 5000) -and (Get-Date) -lt $clearBy) {
+  if (-not (docker ps -q --filter 'name=backend-api-1')) { break }
+  Start-Sleep -Seconds 2
+}
 if (Test-Port 5000) {
   Write-Ok 'already up on 5000'
 } else {
