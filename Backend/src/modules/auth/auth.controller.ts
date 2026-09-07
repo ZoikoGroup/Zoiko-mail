@@ -94,22 +94,16 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
 /**
  * Serialises a Google sign-in outcome onto the response.
  *
- * Shared by both legs — the token exchange and the code verification — so
- * the client sees one shape throughout. A second copy of this dispatch is a
- * second place for a state to go unhandled, which is how one leg ends up
- * silently dropping a guard the other honours.
+ * SIGNED_IN is flattened so the client reads tokens off the top level, the
+ * same way the password login response is shaped. Every other state falls
+ * through unchanged, so a new guard state surfaces to the client rather than
+ * being silently swallowed here.
  */
 function respondWithGoogleAuthState(
   req: Request,
   res: Response,
   result: Awaited<ReturnType<typeof authService.loginWithGoogle>>
 ): void {
-
-  if (!("state" in result)) {
-    sendSuccess(res, 201, result, req.requestId);
-    return;
-  }
-
   if (result.state === "SIGNED_IN") {
     sendSuccess(
       res,

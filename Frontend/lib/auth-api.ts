@@ -121,10 +121,6 @@ export interface AuthResponse {
   state?: string;
   platformRole?: string;
   platformToken?: string;
-  // OTP_REQUIRED: Google verified the identity, the code is still owed.
-  // The address is echoed back so the code screen can name it without
-  // the client having to remember which account was picked.
-  sentTo?: string;
 }
 
 export interface MeResponse {
@@ -132,7 +128,14 @@ export interface MeResponse {
   email: string;
   displayName: string;
   tenant: { id: string; name: string; planCode: string };
+  /** The acting role, already narrowed by the session's workspace scope. */
   membership: { id: string; role: "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT" | string };
+  /**
+   * The workspace this session was opened for. Every shell gates on this, so
+   * it must come from the server: a role alone cannot say which console a
+   * session belongs to, because one role can sign into more than one.
+   */
+  workspace?: "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT";
 }
 
 // Pull tokens out regardless of which shape the endpoint used.

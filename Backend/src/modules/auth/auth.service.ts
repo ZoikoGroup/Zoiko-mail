@@ -8,12 +8,14 @@ import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { hashPassword, verifyPassword } from "../../common/utils/password.js";
 import { hashToken } from "../../common/utils/tokenHash.js";
+import { actingRole } from "../../common/utils/workspaceScope.js";
 import type {
   AccessTokenPayload,
   PendingTokenPayload,
   PlatformTokenPayload,
   RefreshTokenPayload,
   SelectionTokenPayload,
+  WorkspaceScope,
 } from "../../common/types/jwt.js";
 import { auditService } from "../audit/audit.service.js";
 import { membershipRepository } from "../membership/membership.repository.js";
@@ -84,13 +86,15 @@ function isPendingTokenPayload(value: unknown): value is PendingTokenPayload {
 }
 
 function isSelectionTokenPayload(value: unknown): value is SelectionTokenPayload {
+  if (!value || typeof value !== "object") return false;
+  const payload = value as Record<string, unknown>;
   return (
-    typeof value === "object" &&
-    value !== null &&
-    "sub" in value &&
-    typeof (value as { sub: unknown }).sub === "string" &&
-    "type" in value &&
-    (value as { type: unknown }).type === "selection"
+    typeof payload.sub === "string" &&
+    payload.type === "selection" &&
+    // Required, not optional: a token minted before single-use enforcement
+    // has no jti and so could not be spent. Rejecting it sends that user
+    // back through sign-in, which is the behaviour being enforced anyway.
+    typeof payload.jti === "string"
   );
 }
 
@@ -112,13 +116,37 @@ function parseDurationToMs(duration: string): number {
   return value * multipliers[unit]!;
 }
 
-function buildAccessToken(membership: MembershipWithRelations): string {
+/**
+ * The console a password sign-in opens: the one the role implies.
+ *
+ * Google sign-in does not use this — it is always issued MEMBER scope, so
+ * social sign-in can never land in a console. See googleWorkspaceScope.
+ */
+export function workspaceScopeForRole(role: MembershipRole): WorkspaceScope {
+  return role;
+}
+
+/**
+ * A Google sign-in always acts as a member, however senior the account is.
+ *
+ * Reaching the admin, owner or support console is a deliberate act that must
+ * go through a sign-in aimed at it. Without this an Owner who used the Google
+ * button would land in the owner console, which is precisely what the rule
+ * forbids.
+ */
+export const GOOGLE_WORKSPACE_SCOPE: WorkspaceScope = "MEMBER";
+
+function buildAccessToken(
+  membership: MembershipWithRelations,
+  workspace: WorkspaceScope
+): string {
   const payload: AccessTokenPayload = {
     sub: membership.userId,
     tenantId: membership.tenantId,
     membershipId: membership.id,
     role: membership.role,
     platformRole: membership.user.platformRole,
+    workspace,
     type: "access",
   };
 
@@ -127,7 +155,10 @@ function buildAccessToken(membership: MembershipWithRelations): string {
   });
 }
 
-function buildRefreshToken(membership: MembershipWithRelations): {
+function buildRefreshToken(
+  membership: MembershipWithRelations,
+  workspace: WorkspaceScope
+): {
   token: string;
   jti: string;
   expiresAt: Date;
@@ -138,6 +169,9 @@ function buildRefreshToken(membership: MembershipWithRelations): {
     tenantId: membership.tenantId,
     membershipId: membership.id,
     role: membership.role,
+    // Carried so a refresh renews the same console rather than re-deriving
+    // it from the role, which would promote a MEMBER-scoped Google session.
+    workspace,
     type: "refresh",
     jti,
   };
@@ -190,6 +224,7 @@ function buildSelectionToken(userId: string): {
   const payload: SelectionTokenPayload = {
     sub: userId,
     type: "selection",
+    jti: uuidv4(),
   };
 
   const token = jwt.sign(payload, env.JWT_ACCESS_SECRET, {
@@ -250,14 +285,73 @@ async function persistRefreshToken(
   });
 }
 
+/**
+ * Claims one workspace for this account and ends every session for any other.
+ *
+ * A user with two memberships gets one live session, not two: switching
+ * workspace means signing in again. Two things are needed for that, because
+ * the two token kinds fail differently.
+ *
+ * Refresh tokens are rows, so the other workspace's are revoked here and its
+ * sessions cannot be renewed. Access tokens are stateless and stay
+ * cryptographically valid until they expire, so revocation alone would leave
+ * the old workspace usable for up to JWT_ACCESS_EXPIRES_IN. activeTenantId is
+ * what closes that: tenantContext reads it on every request and refuses a
+ * token minted for anything else.
+ */
+async function claimActiveWorkspace(
+  membership: MembershipWithRelations,
+  tx: Prisma.TransactionClient | typeof prisma
+): Promise<void> {
+  await tx.appUser.update({
+    where: { id: membership.userId },
+    data: { activeTenantId: membership.tenantId },
+  });
+
+  await tx.refreshToken.updateMany({
+    where: {
+      userId: membership.userId,
+      tenantId: { not: membership.tenantId },
+      revokedAt: null,
+    },
+    data: { revokedAt: new Date() },
+  });
+}
+
+/**
+ * Gives up the workspace claim, which is what makes signing out immediate.
+ *
+ * Revoking refresh tokens alone does not end a session: the access token in
+ * the tab stays cryptographically valid until it expires, so without this a
+ * signed-out token would keep working for up to JWT_ACCESS_EXPIRES_IN.
+ * Clearing the claim makes tenantContext reject it on the very next request.
+ *
+ * Scoped to the tenant being left, so this cannot clear a claim that a newer
+ * sign-in has already moved to another workspace.
+ */
+async function releaseActiveWorkspace(
+  userId: string,
+  tenantId: string,
+  tx: Prisma.TransactionClient | typeof prisma = prisma
+): Promise<void> {
+  await tx.appUser.updateMany({
+    where: { id: userId, activeTenantId: tenantId },
+    data: { activeTenantId: null },
+  });
+}
+
 async function issueSession(
   membership: MembershipWithRelations,
+  workspace: WorkspaceScope,
   tx: Prisma.TransactionClient | typeof prisma = prisma
 ): Promise<AuthSessionResponse> {
-  const accessToken = buildAccessToken(membership);
-  const refresh = buildRefreshToken(membership);
+  const accessToken = buildAccessToken(membership, workspace);
+  const refresh = buildRefreshToken(membership, workspace);
 
   await persistRefreshToken(membership, refresh.token, refresh.expiresAt, tx);
+  // After the new token is stored, so a failure here cannot leave the account
+  // pointing at a workspace it holds no session for.
+  await claimActiveWorkspace(membership, tx);
 
   return {
     accessToken,
@@ -275,8 +369,12 @@ async function issueSession(
     },
     membership: {
       id: membership.id,
-      role: membership.role,
+      // The acting role, not the membership's maximum. The client routes on
+      // this, so reporting OWNER for a MEMBER-scoped Google session would
+      // send it straight to the owner console the scope exists to withhold.
+      role: actingRole(membership.role, workspace) ?? membership.role,
     },
+    workspace,
   };
 }
 
@@ -472,7 +570,10 @@ export class AuthService {
       );
     }
 
-    return issueSession(membershipWithRelations);
+    return issueSession(
+      membershipWithRelations,
+      workspaceScopeForRole(membershipWithRelations.role)
+    );
   }
 
   /**
@@ -563,7 +664,11 @@ export class AuthService {
         );
       }
 
-      return issueSession(membershipWithRelations, tx);
+      return issueSession(
+        membershipWithRelations,
+        workspaceScopeForRole(membershipWithRelations.role),
+        tx
+      );
     });
 
     return session;
@@ -744,6 +849,15 @@ export class AuthService {
  * workspace selection, staff console, suspended accounts and pending
  * invitations all behave identically regardless of how the user proved
  * their identity.
+ *
+ * This owns POST /auth/google. Selecting a Google account signs the user in
+ * and lands them in their own workspace; there is no second code step,
+ * because the ID token is already Google's signed assertion that it verified
+ * the address.
+ *
+ * Preferred over googleLogin() below on the identity model too: UserIdentity
+ * supports multiple providers per user and survives a Google address change,
+ * where the AppUser.googleId column does neither.
  */
   async loginWithGoogle(
     input: GoogleLoginInput,
@@ -768,7 +882,12 @@ export class AuthService {
         // Google addresses can change; keep the record current.
         data: { lastUsedAt: new Date(), email: profile.email },
       });
-      return this.resolveAuthState(identity.user, undefined, context);
+      return this.resolveAuthState(
+        identity.user,
+        undefined,
+        context,
+        GOOGLE_WORKSPACE_SCOPE
+      );
     }
 
     const existingUser = await userRepository.findByEmail(profile.email);
@@ -781,7 +900,12 @@ export class AuthService {
         const user = await tx.appUser.create({
           data: {
             email: profile.email,
-            passwordHash: "",
+            // Null, not an empty string: a Google-only account has no
+            // password, and the column is nullable. main wrote "" because
+            // its schema still declared the field non-null while its own
+            // migration had already dropped the constraint; that drift is
+            // fixed here, so the honest value fits.
+            passwordHash: null,
             displayName: profile.displayName,
             avatarUrl: profile.avatarUrl,
             status: "ACTIVE",
@@ -811,7 +935,12 @@ export class AuthService {
         return user;
       });
 
-      return this.resolveAuthState(created, undefined, context);
+      return this.resolveAuthState(
+        created,
+        undefined,
+        context,
+        GOOGLE_WORKSPACE_SCOPE
+      );
     }
 
     // 3. A local account already holds this email — decide whether to link.
@@ -877,14 +1006,26 @@ export class AuthService {
       return user;
     });
 
-    return this.resolveAuthState(linked, undefined, context);
+    return this.resolveAuthState(
+      linked,
+      undefined,
+      context,
+      GOOGLE_WORKSPACE_SCOPE
+    );
   }
 
   /** Ordered guard chain. First matching guard decides the state. */
+  /**
+   * `intendedWorkspace` fixes the console the session is bound to. Left
+   * undefined it follows the membership role, which is what a password
+   * sign-in wants. Google passes MEMBER explicitly so a social sign-in can
+   * never open a console.
+   */
   private async resolveAuthState(
     user: Awaited<ReturnType<typeof userRepository.findByEmail>> & {},
     selectedTenantId: string | undefined,
-    context: RequestContext
+    context: RequestContext,
+    intendedWorkspace?: WorkspaceScope
   ): Promise<AuthState> {
     const publicUser: PublicUser = {
       id: user.id,
@@ -977,11 +1118,23 @@ export class AuthService {
           expiresIn: selection.expiresIn,
         };
       }
-      return this.resolveSelectedWorkspace(user, chosen, publicUser, context);
+      return this.resolveSelectedWorkspace(
+        user,
+        chosen,
+        publicUser,
+        context,
+        intendedWorkspace
+      );
     }
 
     if (nonRemoved.length === 1) {
-      return this.resolveSelectedWorkspace(user, nonRemoved[0]!, publicUser, context);
+      return this.resolveSelectedWorkspace(
+        user,
+        nonRemoved[0]!,
+        publicUser,
+        context,
+        intendedWorkspace
+      );
     }
 
     // 5. Multiple workspaces — let the client pick (statuses drive greying-out).
@@ -1008,7 +1161,9 @@ export class AuthService {
     context: RequestContext
   ): Promise<AuthState> {
     // 1. Verify the selection token and extract userId.
-    const userId = this.verifySelectionToken(input.selectionToken);
+    const { userId, jti, expiresAt } = this.verifySelectionToken(
+      input.selectionToken
+    );
 
     // 2. Fetch the user record.
     const user = await userRepository.findById(userId);
@@ -1016,18 +1171,88 @@ export class AuthService {
       throw new AppError("User not found", 404, ErrorCodes.NOT_FOUND);
     }
 
-    // 3. Delegate to the shared resolver with the chosen tenantId. All the
-    //    membership-lookup, account-status, tenant-status, and membership-
-    //    status logic lives there — we just point it at the picked workspace.
-    return this.resolveAuthState(user, input.tenantId, context);
+    // 3. Spend the token before the pick is resolved, not after.
+    //
+    //    Claiming it first is what makes this safe under concurrency: the
+    //    primary key rejects the second of two simultaneous replays before
+    //    either can open a session. Doing it afterwards would let both
+    //    resolve, and two sessions would exist however the loser was then
+    //    reported.
+    await this.consumeSelectionToken(jti, userId, expiresAt);
+
+    let result: AuthState;
+    try {
+      // All the membership-lookup, account-status, tenant-status and
+      // membership-status logic lives in the shared resolver — we just point
+      // it at the picked workspace.
+      result = await this.resolveAuthState(user, input.tenantId, context);
+    } catch (error) {
+      // The pick blew up rather than resolving, so nothing was issued. Hand
+      // the token back or a transient fault would cost the user their login.
+      await this.releaseSelectionToken(jti);
+      throw error;
+    }
+
+    // 4. Only a real session spends the login. A pick that resolved to
+    //    anything else — a suspended workspace, a membership still pending —
+    //    issued no session, so the token is returned and the user can choose
+    //    a different workspace instead of being sent back to sign in.
+    if (result.state !== "SIGNED_IN") {
+      await this.releaseSelectionToken(jti);
+    }
+
+    return result;
   }
 
-  /** Evaluate one chosen workspace: tenant status first, then membership status. */
+  /**
+   * Marks a selection token as spent, or refuses if it already was.
+   *
+   * The token is a stateless JWT: verifying it proves only that we minted it
+   * and that it has not expired, never that it is unused. This row is the
+   * only thing that makes one sign-in worth one workspace.
+   */
+  private async consumeSelectionToken(
+    jti: string,
+    userId: string,
+    expiresAt: Date
+  ): Promise<void> {
+    try {
+      await prisma.usedSelectionToken.create({
+        data: { jti, userId, expiresAt },
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        throw new AppError(
+          "This sign-in has already opened a workspace. Sign in again to switch workspace.",
+          401,
+          ErrorCodes.TOKEN_REUSED
+        );
+      }
+      throw error;
+    }
+  }
+
+  /** Returns an unspent token to circulation after a pick that issued nothing. */
+  private async releaseSelectionToken(jti: string): Promise<void> {
+    await prisma.usedSelectionToken.deleteMany({ where: { jti } });
+  }
+
+  /**
+   * Evaluate one chosen workspace: tenant status first, then membership status.
+   *
+   * `intendedWorkspace` is the console the sign-in is aiming at, passed
+   * through from resolveAuthState so the session it issues is bound to it.
+   * Left undefined it follows the membership role.
+   */
   private async resolveSelectedWorkspace(
     user: { id: string; email: string; displayName: string },
     membership: MembershipWithRelations,
     publicUser: PublicUser,
-    context: RequestContext
+    context: RequestContext,
+    intendedWorkspace?: WorkspaceScope
   ): Promise<AuthState> {
     const workspace = toWorkspaceOption(membership);
 
@@ -1063,7 +1288,10 @@ export class AuthService {
     }
 
     // ACTIVE membership + ACTIVE tenant → sign in.
-    const session = await issueSession(membership);
+    const session = await issueSession(
+      membership,
+      intendedWorkspace ?? workspaceScopeForRole(membership.role)
+    );
     await auditService.record({
       tenantId: membership.tenantId,
       actorUserId: user.id,
@@ -1154,7 +1382,14 @@ export class AuthService {
 
       if (claimed.count !== 1) return null;
 
-      const nextSession = await issueSession(membership, tx);
+      // The scope comes from the presented token, not from the role: a
+      // MEMBER-scoped Google session must stay a member session across a
+      // refresh rather than being promoted to whatever its role allows.
+      const nextSession = await issueSession(
+        membership,
+        payload.workspace ?? workspaceScopeForRole(membership.role),
+        tx
+      );
       await auditService.record(
         {
           tenantId: membership.tenantId,
@@ -1201,6 +1436,8 @@ export class AuthService {
         where: { id: storedToken.id },
         data: { revokedAt: new Date() },
       });
+
+      await releaseActiveWorkspace(storedToken.userId, storedToken.tenantId);
 
       await auditService.record({
         tenantId: storedToken.tenantId,
@@ -1277,6 +1514,9 @@ export class AuthService {
         where: { userId, tenantId, revokedAt: null },
         data: { revokedAt: new Date() },
       });
+
+      await releaseActiveWorkspace(userId, tenantId, tx);
+
       await auditService.record(
         {
           tenantId,
@@ -1298,12 +1538,13 @@ export class AuthService {
   getCurrentUser(req: Request): AuthSessionResponse["user"] & {
     tenant: AuthSessionResponse["tenant"];
     membership: AuthSessionResponse["membership"];
+    workspace: WorkspaceScope;
   } {
     if (!req.tenantContext) {
       throw new AppError("Tenant context required", 403, ErrorCodes.FORBIDDEN);
     }
 
-    const { user, tenant, membershipId, role } = req.tenantContext;
+    const { user, tenant, membershipId, role, workspace } = req.tenantContext;
 
     return {
       id: user.id,
@@ -1315,9 +1556,14 @@ export class AuthService {
         planCode: tenant.planCode,
       },
       membership: {
+        // The acting role, already narrowed by the session scope, so the
+        // client is never told more authority than this session has.
         id: membershipId,
         role,
       },
+      // Which console this session belongs to. The shells gate on this, so it
+      // has to come from the server rather than be inferred from the role.
+      workspace,
     };
   }
 
@@ -1344,7 +1590,11 @@ export class AuthService {
     return payload.sub;
   }
 
-  private verifySelectionToken(token: string): string {
+  private verifySelectionToken(token: string): {
+    userId: string;
+    jti: string;
+    expiresAt: Date;
+  } {
     let payload: unknown;
 
     try {
@@ -1364,7 +1614,15 @@ export class AuthService {
       throw new AppError("Invalid selection token", 401, ErrorCodes.TOKEN_INVALID);
     }
 
-    return payload.sub;
+    // `exp` is set by jwt.sign from SELECTION_TOKEN_EXPIRES_IN and is in
+    // seconds. Carried through so the spent-token row can be pruned once the
+    // token could no longer be verified anyway.
+    const exp = (payload as unknown as { exp?: number }).exp;
+    return {
+      userId: payload.sub,
+      jti: payload.jti,
+      expiresAt: new Date((exp ?? Math.floor(Date.now() / 1000)) * 1000),
+    };
   }
 
   private async recordLoginFailure(

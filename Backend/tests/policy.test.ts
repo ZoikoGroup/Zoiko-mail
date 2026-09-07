@@ -19,8 +19,11 @@ describe("Tenant policy module", () => {
       .send({ type: "SENDING", name: "Sending v1", rules }).expect(201);
     const second = await request(app).post("/api/v1/policies").set(authHeader(owner.accessToken))
       .send({ type: "SENDING", name: "Sending v2", rules: { ...rules, defaultEffect: "DENY" } }).expect(201);
-    expect(first.body.data.version).toBe(2);
-    expect(second.body.data.version).toBe(3);
+    // Versions are monotonic per type, but no longer start at 1: workspace
+    // creation seeds a default SENDING policy as v1. Asserting the increment
+    // rather than absolute numbers keeps this on the invariant that matters
+    // and off the seeding count, which is free to change.
+    expect(second.body.data.version).toBe(first.body.data.version + 1);
 
     await request(app).post(`/api/v1/policies/${first.body.data.id}/activate`)
       .set(authHeader(owner.accessToken)).expect(200);
@@ -30,7 +33,11 @@ describe("Tenant policy module", () => {
     expect((await prisma.tenantPolicy.findUnique({ where: { id: first.body.data.id } }))?.status).toBe("ARCHIVED");
     const denied = await request(app).post("/api/v1/policies/evaluate").set(authHeader(owner.accessToken))
       .send({ type: "SENDING", context: { recipient: { external: true } } }).expect(200);
-    expect(denied.body.data).toMatchObject({ effect: "DENY", reason: "CONDITION_MATCHED", version: 3 });
+    expect(denied.body.data).toMatchObject({
+      effect: "DENY",
+      reason: "CONDITION_MATCHED",
+      version: second.body.data.version,
+    });
   });
 
   it("fails closed without an active policy and prevents cross-tenant reads", async () => {
@@ -42,12 +49,14 @@ describe("Tenant policy module", () => {
     await request(app).get(`/api/v1/policies/${policy.body.data.id}`)
       .set(authHeader(second.accessToken)).expect(404);
 
-    // Every workspace is bootstrapped with an active default AI policy.
-    // Archive it so this tenant has none active, exercising fail-closed.
+    // The second workspace starts with a seeded default AI policy, so reaching
+    // the no-active-policy state takes an explicit archive. The fail-closed
+    // guarantee is the point of this assertion and is unchanged.
     await prisma.tenantPolicy.updateMany({
       where: { tenantId: second.tenantId, type: "AI", status: "ACTIVE" },
       data: { status: "ARCHIVED" },
     });
+
     const evaluation = await request(app).post("/api/v1/policies/evaluate")
       .set(authHeader(second.accessToken)).send({ type: "AI", context: {} }).expect(200);
     expect(evaluation.body.data).toMatchObject({ effect: "DENY", reason: "NO_ACTIVE_POLICY" });

@@ -1,9 +1,10 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { FaEnvelope } from "react-icons/fa";
 
 import { ApiError } from "@/lib/api-client";
+import { clearSignOutNotice, peekSignOutNotice } from "@/lib/auth-storage";
 import { useLogin, useGoogleLogin } from "@/lib/auth-hooks";
 
 import {
@@ -86,12 +87,34 @@ export default function LoginForm({
 
     if (!validate()) return;
 
+    dismissSignOutNotice();
     loginMutation.mutate({
       email: formData.email,
       password: formData.password,
       tenantId:
         formData.tenantId || undefined,
     });
+  };
+
+  // Why the previous session ended, when it ended for a reason worth hearing:
+  // signing into another workspace ends this one, and an unexplained return to
+  // this form reads as a fault.
+  //
+  // Read without consuming, so a remount still finds it.
+  //
+  // This form can mount more than once for a single sign-out: two guards can
+  // each redirect to /login. A consuming read meant the first mount ate the
+  // message and the second rendered nothing, so the explanation appeared only
+  // sometimes. It is dropped instead when the person acts on it, below.
+  const [signOutNotice, setSignOutNotice] = useState<string | null>(null);
+  useEffect(() => {
+    setSignOutNotice(peekSignOutNotice());
+  }, []);
+
+  /** Once they try to sign in, the explanation has done its job. */
+  const dismissSignOutNotice = () => {
+    clearSignOutNotice();
+    setSignOutNotice(null);
   };
 
   const errorMessage =
@@ -123,20 +146,19 @@ export default function LoginForm({
       </div>
 
       <div className="mt-3">
+        {/* The hook owns the destination: a Google sign-in lands in the
+            user's own workspace, not in whichever console their role would
+            otherwise open. */}
         <GoogleSignInButton
-          onSuccess={(idToken) =>
-            googleLoginMutation.mutate({ idToken })
-          }
+          onSuccess={(idToken) => {
+            dismissSignOutNotice();
+            googleLoginMutation.mutate({ idToken });
+          }}
           disabled={loginMutation.isPending || googleLoginMutation.isPending}
         />
-
-        {googleLoginMutation.isError && (
-          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
-            {googleLoginMutation.error instanceof ApiError
-              ? googleLoginMutation.error.message
-              : "Google sign-in failed. Please try again."}
-          </div>
-        )}
+        {/* Google failures surface through `errorMessage` below, alongside
+            password failures, so the form has one error region rather than
+            two that can disagree. */}
       </div>
 
       <div className="relative m-2">
@@ -211,6 +233,19 @@ export default function LoginForm({
             {errorMessage}
           </div>
         )}
+
+        {/* Not an error: nothing went wrong, the rule is one workspace at a
+            time. Styled as information so it does not read as a failure, and
+            hidden as soon as the user has a real error to look at. */}
+        {!errorMessage && signOutNotice && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
+            {signOutNotice}
+          </div>
+        )}
+
+        {/* =====================================================
+            Login Button
+        ====================================================== */}
 
         <button
           type="submit"

@@ -5,7 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { LogOut, Menu, X } from "lucide-react";
-import { isLoggedIn } from "@/lib/auth-storage";
+import { useWorkspaceAccess } from "@/lib/workspace-access";
 import { useMe, useLogout } from "@/lib/auth-hooks";
 import type { MeResponse } from "@/lib/auth-api";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
@@ -13,12 +13,17 @@ import { useCan, useCapabilities } from "@/lib/admin-capabilities";
 import { visibleNav, type AdminNavItem } from "@/lib/admin-nav";
 import { useActiveSupportGrant, useAdminNavCounts } from "@/lib/admin-hooks";
 import { Pill } from "@/components/admin/ui";
-import { AccessDenied } from "@/components/ui/AccessDenied";
 
-/** Roles allowed into the admin workspace; anyone else gets a warning.
- *  A tenant SUPPORT member lands on /tenant-support and must not manage
- *  users/domains/billing here. */
-const ADMIN_SHELL_ROLES = ["OWNER", "ADMIN"];
+/**
+ * The admin workspace admits sessions opened for the admin workspace, and
+ * nothing else.
+ *
+ * Previously a role list — ["OWNER", "ADMIN", "SUPPORT"] — which let anyone
+ * senior enough in, whichever console they had actually signed into. Moving
+ * between workspaces requires signing in again, so the question here is which
+ * console this session belongs to, not how senior its holder is.
+ */
+const ADMIN_WORKSPACE = "ADMIN" as const;
 
 function initials(name?: string, email?: string) {
   const base = (name?.trim() || email || "?").trim();
@@ -34,36 +39,14 @@ export function AdminShell({ children }: { children: ReactNode }) {
   const logout = useLogout();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Same auth guard the member shell uses.
-  useEffect(() => {
-    if (!isLoggedIn()) router.replace("/login");
-  }, [router]);
-
-  // Redirect to login if /auth/me fails (expired/invalid token), matching
-  // the owner shell's handling so an invalid session never spins forever.
-  useEffect(() => {
-    if (!isLoading && error && isLoggedIn()) {
-      router.replace("/login");
-    }
-  }, [isLoading, error, router]);
-
-  // Loading gate: don't render admin chrome until the user's role is known.
-  // Without this a MEMBER would briefly see the admin sidebar/header before
-  // the role guard below swaps in the AccessDenied page.
-  if (isLoading || !me) {
+  // Fail closed: nothing renders until the role is known and permitted.
+  // The previous guard was `me && !ALLOWED.includes(...)`, which skipped
+  // itself while useMe() was in flight and let the console render.
+  const access = useWorkspaceAccess(ADMIN_WORKSPACE);
+  if (access !== "allowed") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--ground)]">
-        <div className="h-7 w-7 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-      </div>
-    );
-  }
-
-  // Role guard: members without an admin-level role see a clear warning
-  // instead of the admin workspace (backend still enforces this per route).
-  if (me && !ADMIN_SHELL_ROLES.includes(me.membership.role)) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-[var(--ground)] text-[var(--ink)]">
-        <AccessDenied role={me.membership.role} dashboard="admin" />
+      <div className="flex h-screen items-center justify-center bg-[var(--ground)]">
+        <span className="text-sm text-[var(--ink3)]">Checking access…</span>
       </div>
     );
   }

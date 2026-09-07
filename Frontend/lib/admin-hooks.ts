@@ -13,7 +13,7 @@
  * plausible-looking number is worse than a blank, because it reads as real and
  * gets trusted.
  */
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchActiveSupportGrant,
   fetchAuditEvents,
@@ -22,6 +22,9 @@ import {
   fetchDomains,
   fetchGroups,
   fetchInvitations,
+  previewInvitation,
+  sendInvitation,
+  updateWorkspaceSettings,
   fetchMailboxes,
   fetchMembers,
   fetchNotifications,
@@ -30,6 +33,7 @@ import {
   fetchSyncErrors,
   fetchTenant,
 } from "./admin-queries";
+import type { InvitationDraftInput, WorkspaceSettingsPatch } from "./admin-queries";
 import { CAPABILITY_MATRIX, GUARDRAILS } from "./admin-api";
 import type {
   AuditEventDto,
@@ -288,4 +292,55 @@ export function useDashboard(): QueryLike<DashboardDto> {
     isLoading: false,
     error,
   };
+}
+
+/**
+ * Drafting and sending an invitation.
+ *
+ * Two mutations rather than one call, because the admin reviews the letter
+ * before a stranger receives it: draft, read, optionally edit, then send.
+ * Sending invalidates the invitation list so the new pending row appears
+ * without a reload.
+ */
+export function usePreviewInvitation() {
+  return useMutation({
+    mutationFn: (input: InvitationDraftInput) => previewInvitation(input),
+  });
+}
+
+export function useSendInvitation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: InvitationDraftInput & { letterBody?: string[] }) =>
+      sendInvitation(input),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["invitations"] }),
+        // The roster shows invited people too, so it is stale as well.
+        qc.invalidateQueries({ queryKey: ["people"] }),
+      ]);
+    },
+  });
+}
+
+/**
+ * Saves the workspace settings and refreshes what the screen shows.
+ *
+ * Invalidating rather than trusting the request: the server trims, lowercases
+ * domains and de-duplicates them, so the saved value is not always the typed
+ * one. Re-reading is what makes the page show what was actually stored.
+ */
+export function useUpdateWorkspaceSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: WorkspaceSettingsPatch) => updateWorkspaceSettings(patch),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["settings"] }),
+        // The tenant name shows in the shell header too, and settings is
+        // derived from the same read.
+        qc.invalidateQueries({ queryKey: ["tenant"] }),
+      ]);
+    },
+  });
 }

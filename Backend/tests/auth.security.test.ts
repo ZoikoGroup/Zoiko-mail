@@ -53,12 +53,15 @@ describe("Auth security", () => {
       },
     });
 
+    // Otherwise well-formed, including the workspace scope, so this still
+    // fails on the tenant it names rather than on a malformed token.
     const forgedToken = jwt.sign(
       {
         sub: user.userId,
         tenantId: otherTenant.id,
         membershipId: user.membershipId,
         role: "OWNER",
+        workspace: "OWNER",
         type: "access",
       },
       env.JWT_ACCESS_SECRET,
@@ -71,6 +74,33 @@ describe("Auth security", () => {
       .expect(403);
 
     expect(response.body.error.code).toBe("FORBIDDEN");
+  });
+
+  it("rejects an access token that names no workspace", async () => {
+    const user = await registerUser(app);
+
+    // A session has to say which console it belongs to. Accepting a token
+    // without one would mean choosing a console on the holder's behalf, and
+    // the obvious default — the role's own console — is exactly the promotion
+    // this scoping exists to prevent.
+    const unscoped = jwt.sign(
+      {
+        sub: user.userId,
+        tenantId: user.tenantId,
+        membershipId: user.membershipId,
+        role: "OWNER",
+        type: "access",
+      },
+      env.JWT_ACCESS_SECRET,
+      { expiresIn: "15m" }
+    );
+
+    const response = await request(app)
+      .get("/api/v1/auth/me")
+      .set(authHeader(unscoped))
+      .expect(401);
+
+    expect(response.body.error.code).toBe("TOKEN_INVALID");
   });
 
   it("rejects inactive membership", async () => {

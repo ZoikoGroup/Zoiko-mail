@@ -21,6 +21,11 @@ process.env.LOGIN_RATE_LIMIT_MAX = "10000";
 process.env.REFRESH_RATE_LIMIT_MAX = "10000";
 process.env.PROVIDER_CALLBACK_SECRET =
   "test-provider-callback-secret-minimum-32";
+// Google sign-in ships behind a kill switch that defaults to false, so its
+// routes 403 unless it is on. Set here rather than inherited from .env: the
+// suite must not pass or fail depending on whether a developer happens to
+// have enabled the flag locally.
+process.env.FLAG_GOOGLE_LOGIN_ENABLED = "true";
 
 if (process.env.TEST_DATABASE_URL) {
   process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;

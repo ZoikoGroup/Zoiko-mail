@@ -32,7 +32,7 @@ import {
 import { getPlatformToken, isLoggedIn } from "./auth-storage";
 import { AuthResponse } from "./auth-api";
 import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
-import { resolveWorkspaceHref, USER_WORKSPACE_HREF } from "./workspace";
+import { resolveWorkspaceHref } from "./workspace";
 
 // Server state (the logged-in user) lives in TanStack Query, keyed by ['me'].
 export function useMe() {
@@ -50,14 +50,44 @@ export function useMe() {
  * Maps a backend AuthState onto a destination. Shared by password login and
  * Google login — both return the identical state union, so duplicating this
  * would guarantee the two paths drift apart.
+ *
+ * `signedInHref` overrides where a signed-in user lands. No caller sets it
+ * today: every sign-in, password or Google, routes on the role the backend
+ * assigned, so authenticating one way cannot reach a workspace the other
+ * would not. Kept as a parameter because the alternative — a second copy of
+ * this dispatch for one differing line — is what let the two paths drift
+ * before, sending Google sign-ins to a dead end on NO_WORKSPACE.
  */
-export function routeAuthState(data: AuthResponse, router: AppRouterInstance): void {
+/**
+ * The workspace a session was opened for, as the server reported it.
+ *
+ * Two response shapes have to be read: /auth/login flattens the session onto
+ * the top level, while /auth/select-workspace returns the state verbatim with
+ * the session one level down. The string check disambiguates a genuine name
+ * collision — on suspended states `workspace` is an object describing the
+ * tenant, not a scope.
+ */
+export function sessionWorkspace(data: AuthResponse): string | undefined {
+  const nested = (data as { session?: { workspace?: unknown } }).session?.workspace;
+  if (typeof nested === "string") return nested;
+  return typeof data.workspace === "string" ? data.workspace : undefined;
+}
+
+export function routeAuthState(
+  data: AuthResponse,
+  router: AppRouterInstance,
+  opts?: { signedInHref?: string }
+): void {
   let href: string;
 
   if (data.state === "STAFF_CONSOLE") {
     href = "/support";
   } else if (data.state === "SIGNED_IN") {
-    href = resolveWorkspaceHref(data.membership?.role);
+    // Routed on the workspace the server bound this session to, not on the
+    // role. They usually agree, but a Google sign-in is always MEMBER-scoped
+    // however senior the account is — routing on the role there would open
+    // the owner console, which is exactly what the scope withholds.
+    href = opts?.signedInHref ?? resolveWorkspaceHref(sessionWorkspace(data));
   } else if (data.state === "WORKSPACE_SELECTION") {
     if (typeof window !== "undefined") {
       sessionStorage.setItem("zoiko.selection_token", data.selectionToken ?? "");
@@ -87,13 +117,22 @@ export function routeAuthState(data: AuthResponse, router: AppRouterInstance): v
     const names = (data.invitations ?? []).map((w: { name: string }) => w.name).join(",");
     href = `/auth-status?state=INVITATION_PENDING${names ? `&invitations=${encodeURIComponent(names)}` : ""}`;
   } else if (data.state === "NO_WORKSPACE") {
-    // Every new Google signup lands here. The backend now issues a pending
-    // token with this state so the user can create their first workspace.
+    // Every brand-new Google signup lands here: the account exists and is
+    // verified, but it belongs to no workspace yet, so there is nothing to
+    // sign in to until one is created. The backend attaches a pending token
+    // for exactly that, and /auth/create-workspace is the only thing that
+    // accepts it.
+    //
+    // Not /owner/onboarding: that sits behind ProtectedRoute, which requires a
+    // session this state does not have yet, so it bounces straight back to
+    // /login. Not /login either — the sign-in happens there, so replacing the
+    // same URL re-renders without remounting and a step on that page would
+    // never appear. /create-workspace is its own route for both reasons.
     if (typeof window !== "undefined") {
-      sessionStorage.setItem("zoiko.pending_token", data.pendingToken ?? "");
-      sessionStorage.setItem("zoiko.pending_email", data.user?.email ?? "");
+      sessionStorage.setItem("zoiko.workspace_token", data.pendingToken ?? "");
+      sessionStorage.setItem("zoiko.workspace_email", data.user?.email ?? "");
     }
-    href = "/owner/onboarding";
+    href = "/create-workspace";
   } else {
     href = "/login";
   }
@@ -114,6 +153,22 @@ export function useLogin() {
   });
 }
 
+/**
+ * Google sign-in.
+ *
+ * Routes on the workspace the backend bound the session to, exactly as a
+ * password sign-in does. Not on the role: a Google sign-in is always
+ * MEMBER-scoped however senior the account, so routing on the role would open
+ * the owner console for an owner — the thing the scope withholds.
+ *
+ * A user in more than one workspace resolves to WORKSPACE_SELECTION here just
+ * as they would with a password, so Google cannot skip the pick or carry a
+ * session into a second workspace.
+ *
+ * Routing goes through routeAuthState rather than a local copy: this hook
+ * previously carried its own dispatch, which sent NO_WORKSPACE to /login and
+ * stranded every brand-new Google account back on the form it came from.
+ */
 export function useGoogleLogin() {
   const qc = useQueryClient();
   const router = useRouter();
@@ -122,69 +177,8 @@ export function useGoogleLogin() {
     mutationFn: ({ idToken }: { idToken: string }) => googleLogin(idToken),
 
     onSuccess: async (data) => {
-      await qc.invalidateQueries({
-        queryKey: ["me"],
-      });
-
-      let href: string;
-
-      if (data.state === "STAFF_CONSOLE") {
-        href = "/support";
-      } else if (data.state === "SIGNED_IN") {
-        // Google sign-in lands in the user's role-resolved workspace.
-        const role = data.membership?.role;
-        href = resolveWorkspaceHref(role);
-      } else if (data.state === "WORKSPACE_SELECTION") {
-        if (typeof window !== "undefined") {
-          sessionStorage.setItem(
-            "zoiko.selection_token",
-            data.selectionToken ?? ""
-          );
-          sessionStorage.setItem(
-            "zoiko.selection_workspaces",
-            JSON.stringify(data.workspaces ?? [])
-          );
-        }
-        href = "/select-workspace";
-      } else if (
-        data.state === "ACCOUNT_SUSPENDED" ||
-        data.state === "ACCOUNT_DISABLED"
-      ) {
-        href = `/auth-status?state=${data.state}`;
-      } else if (
-        data.state === "MEMBERSHIP_SUSPENDED" ||
-        data.state === "WORKSPACE_SUSPENDED" ||
-        data.state === "WORKSPACE_DELETING"
-      ) {
-        const workspaceName = encodeURIComponent(data.workspace?.name ?? "");
-        href = `/auth-status?state=${data.state}&workspace=${workspaceName}`;
-      } else if (data.state === "EMAIL_VERIFICATION_REQUIRED") {
-        if (typeof window !== "undefined") {
-          sessionStorage.setItem("zoiko.pending_token", data.pendingToken ?? "");
-          sessionStorage.setItem("zoiko.pending_email", data.user?.email ?? "");
-        }
-        href = "/verify-email";
-      } else if (data.state === "INVITATION_PENDING") {
-        if (typeof window !== "undefined") {
-          sessionStorage.setItem("zoiko.invite_pending_token", data.pendingToken ?? "");
-          sessionStorage.setItem(
-            "zoiko.invite_pending_list",
-            JSON.stringify(data.invitations ?? [])
-          );
-          sessionStorage.removeItem("pendingInvitationToken");
-        }
-        const names = (data.invitations ?? []).map((w: { name: string }) => w.name).join(",");
-        href = `/auth-status?state=INVITATION_PENDING${names ? `&invitations=${encodeURIComponent(names)}` : ""}`;
-      } else {
-        href = "/login";
-      }
-
-      if (data.state === "NO_WORKSPACE") {
-        router.replace("/login");
-        return;
-      }
-
-      router.replace(href);
+      await qc.invalidateQueries({ queryKey: ["me"] });
+      routeAuthState(data, router);
     },
   });
 }

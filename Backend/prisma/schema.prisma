@@ -53,7 +53,7 @@ model AppUser {
   id                      String                 @id @default(uuid()) @db.Uuid
   email                   String                 @unique
   googleId                String?                @unique @map("google_id")
-  passwordHash            String                 @map("password_hash")
+  passwordHash            String?                @map("password_hash")
   displayName             String                 @map("display_name")
   avatarUrl               String?                @map("avatar_url")
   phoneNumber             String?                @map("phone_number")
@@ -62,6 +62,13 @@ model AppUser {
   status                  AppUserStatus          @default(ACTIVE)
   platformRole            PlatformRole           @default(NONE) @map("platform_role")
   emailVerifiedAt         DateTime?              @map("email_verified_at")
+  // The one workspace this account may currently act in. Signing into a
+  // workspace claims it here and ends every session for the previous one, so
+  // a user with two memberships holds one live session, not two. Deliberately
+  // not an FK: it is a pointer to whichever tenant won the last sign-in, and
+  // a deleted tenant should leave it dangling rather than cascade a delete
+  // onto the user row.
+  activeTenantId          String?                @map("active_tenant_id") @db.Uuid
   lastLoginAt             DateTime?              @map("last_login_at")
   failedLoginAttempts     Int                    @default(0) @map("failed_login_attempts")
   lockedUntil             DateTime?              @map("locked_until")
@@ -83,7 +90,31 @@ model AppUser {
   approvedSupportGrants   SupportAccessGrant[]   @relation("SupportApprover")
   connectedAccounts       ConnectedAccount[]
   identities              UserIdentity[]
+  usedSelectionTokens     UsedSelectionToken[]
   @@map("app_users")
+}
+
+/**
+ * Selection tokens that have already been exchanged for a session.
+ *
+ * The token itself is a stateless JWT, so nothing about it changes when it is
+ * used. Without this record a single sign-in could be replayed for the whole
+ * 15-minute window to open a session in each workspace the user belongs to,
+ * which is exactly what "switching workspace needs a fresh login" forbids.
+ *
+ * Keyed by the token's jti so a replay collides on the primary key. Rows are
+ * disposable once expiresAt has passed — the token cannot be verified after
+ * that regardless.
+ */
+model UsedSelectionToken {
+  jti       String   @id
+  userId    String   @map("user_id") @db.Uuid
+  usedAt    DateTime @default(now()) @map("used_at")
+  expiresAt DateTime @map("expires_at")
+  user      AppUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("used_selection_tokens")
 }
 
 model UserIdentity {

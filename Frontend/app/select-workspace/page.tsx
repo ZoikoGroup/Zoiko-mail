@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { API_BASE } from "@/lib/config";
 import { resolveWorkspaceHref } from "@/lib/workspace";
-import { setTokens, setPlatformToken } from "@/lib/auth-storage";
+import { setTokens, setPlatformToken, setSignOutNotice } from "@/lib/auth-storage";
 
 // Matches the WorkspaceOption shape the backend returns in the login
 // WORKSPACE_SELECTION response.
@@ -70,6 +70,18 @@ export default function SelectWorkspacePage() {
         });
         const json = await res.json();
         if (!res.ok || !json.success) {
+          // A spent sign-in cannot pick again, so there is nothing useful to
+          // do on this screen. One sign-in opens one workspace: send them
+          // back to do that rather than leaving them on a dead picker.
+          if (json?.error?.code === "TOKEN_REUSED") {
+            setSignOutNotice(
+              json?.error?.message ??
+                "That sign-in has already opened a workspace. Sign in again to switch workspace."
+            );
+            clearStash();
+            router.replace("/login");
+            return;
+          }
           setError(json?.error?.message ?? "Failed to select workspace");
           setSubmitting(false);
           return;

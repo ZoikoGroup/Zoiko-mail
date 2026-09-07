@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { authenticate, requireCapability, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./membership.controller.js";
-import { acceptInvitationSchema, addMemberSchema, createInvitationSchema, membershipIdParamsSchema, updateMemberSchema } from "./membership.schema.js";
+import { acceptInvitationSchema, addMemberSchema, createInvitationSchema, membershipIdParamsSchema, previewInvitationSchema, updateMemberSchema } from "./membership.schema.js";
 
 const membershipRouter = Router();
 
@@ -24,6 +24,16 @@ membershipRouter.post(
   requireCapability("people.member.manage"),
   validate(addMemberSchema),
   controller.add
+);
+// Drafts the letter without inviting anyone, so an admin can read and edit
+// what a stranger is about to receive. Gated identically to sending it:
+// drafting an invitation the caller could not send would be a way to probe
+// the role ceiling.
+membershipRouter.post(
+  "/invitations/preview",
+  requireCapability("people.invite.member"),
+  validate(previewInvitationSchema),
+  controller.previewInvitation
 );
 membershipRouter.post(
   "/invitations",
