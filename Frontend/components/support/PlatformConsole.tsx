@@ -44,6 +44,28 @@ import {
 import { supportStyles } from "@/components/support/support-styles";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { AccessDenied } from "@/components/ui/AccessDenied";
+import {
+  AlertCircle,
+  AlertTriangle,
+  Ban,
+  BellRing,
+  Boxes,
+  Building2,
+  Cog,
+  Globe,
+  KeyRound,
+  Link2,
+  Mail,
+  RotateCw,
+  ScrollText,
+  Send,
+  Server,
+  ShieldAlert,
+  ShieldCheck,
+  Users,
+  XCircle,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 type PageId = "overview" | "tenants" | "mailboxes" | "domains" | "suppressions" | "provider-events" | "delivery-events" | "jobs" | "audit" | "grants";
 
@@ -59,6 +81,19 @@ const PAGES: Array<{ id: PageId; label: string; icon: string }> = [
   { id: "audit", label: "Audit", icon: "🛡" },
   { id: "grants", label: "Support Grants", icon: "🗝" },
 ];
+
+const COUNT_ICONS: Record<string, LucideIcon> = {
+  members: Users,
+  mailboxes: Mail,
+  domains: Globe,
+  connectedAccounts: Link2,
+  providerEvents: BellRing,
+  deliveryEvents: Send,
+  jobs: Cog,
+  audit: ScrollText,
+  grants: KeyRound,
+  suppressions: Ban,
+};
 
 function apiErrorMessage(e: unknown): string {
   if (e instanceof ApiError) return e.message;
@@ -178,16 +213,18 @@ function Spinner() {
 
 function Table({ headers, children }: { headers: string[]; children: React.ReactNode }) {
   return (
-    <table>
-      <thead>
-        <tr>
-          {headers.map((h) => (
-            <th key={h}>{h}</th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>{children}</tbody>
-    </table>
+    <div className="tblwrap">
+      <table>
+        <thead>
+          <tr>
+            {headers.map((h) => (
+              <th key={h}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>{children}</tbody>
+      </table>
+    </div>
   );
 }
 
@@ -208,16 +245,16 @@ function OverviewPage({
 }) {
   if (!data) return null;
   const s = data.stats;
-  const stats: Array<{ label: string; val: string | number; tone: string; sub: string }> = [
-    { label: "Active Tenants", val: s.activeTenants, tone: "", sub: "across the platform" },
-    { label: "Members", val: s.tenantMembers, tone: "", sub: "tenant users" },
-    { label: "Active Mailboxes", val: s.activeMailboxes, tone: "", sub: "connected inboxes" },
-    { label: "Configured Domains", val: s.configuredDomains, tone: "", sub: "verified + pending" },
-    { label: "Provider Accounts", val: s.providerAccounts, tone: "", sub: "connected OAuth accounts" },
-    { label: "Failed Sends 24h", val: s.failedSends24h, tone: s.failedSends24h > 0 ? "crit" : "ok", sub: "rejected / bounced" },
-    { label: "Sync Failures 24h", val: s.syncFailures24h, tone: s.syncFailures24h > 0 ? "warn" : "ok", sub: "provider webhook errors" },
-    { label: "Failed Jobs", val: s.failedJobs, tone: s.failedJobs > 0 ? "crit" : "ok", sub: "exhausted retries" },
-    { label: "Retry Jobs", val: s.retryJobs, tone: s.retryJobs > 0 ? "warn" : "ok", sub: "scheduled to retry" },
+  const stats: Array<{ label: string; val: string | number; tone: string; sub: string; icon?: LucideIcon }> = [
+    { label: "Active Tenants", val: s.activeTenants, tone: "", sub: "across the platform", icon: Building2 },
+    { label: "Members", val: s.tenantMembers, tone: "", sub: "tenant users", icon: Users },
+    { label: "Active Mailboxes", val: s.activeMailboxes, tone: "", sub: "connected inboxes", icon: Mail },
+    { label: "Configured Domains", val: s.configuredDomains, tone: "", sub: "verified + pending", icon: Globe },
+    { label: "Provider Accounts", val: s.providerAccounts, tone: "", sub: "connected OAuth accounts", icon: Link2 },
+    { label: "Failed Sends 24h", val: s.failedSends24h, tone: s.failedSends24h > 0 ? "crit" : "ok", sub: "rejected / bounced", icon: AlertCircle },
+    { label: "Sync Failures 24h", val: s.syncFailures24h, tone: s.syncFailures24h > 0 ? "warn" : "ok", sub: "provider webhook errors", icon: AlertTriangle },
+    { label: "Failed Jobs", val: s.failedJobs, tone: s.failedJobs > 0 ? "crit" : "ok", sub: "exhausted retries", icon: XCircle },
+    { label: "Retry Jobs", val: s.retryJobs, tone: s.retryJobs > 0 ? "warn" : "ok", sub: "scheduled to retry", icon: RotateCw },
   ];
 
   return (
@@ -225,7 +262,14 @@ function OverviewPage({
       <div className="stats">
         {stats.map((st) => (
           <div key={st.label} className={`stat ${st.tone}`}>
-            <div className="lbl">{st.label}</div>
+            <div className="stt">
+              <div className="lbl">{st.label}</div>
+              {st.icon && (
+                <span className="ic">
+                  <st.icon size={14} />
+                </span>
+              )}
+            </div>
             <div className="val">{st.val}</div>
             <div className="sub">{st.sub}</div>
           </div>
@@ -368,12 +412,20 @@ function TenantDetail({
       </div>
 
       <div className="stats">
-        {Object.entries(counts).map(([k, v]) => (
-          <div key={k} className="stat">
-            <div className="lbl">{k}</div>
-            <div className="val">{String(v)}</div>
-          </div>
-        ))}
+        {Object.entries(counts).map(([k, v]) => {
+          const Icon = COUNT_ICONS[k] ?? Boxes;
+          return (
+            <div key={k} className="stat">
+              <div className="stt">
+                <div className="lbl">{k}</div>
+                <span className="ic">
+                  <Icon size={14} />
+                </span>
+              </div>
+              <div className="val">{String(v)}</div>
+            </div>
+          );
+        })}
       </div>
 
       {sections.map((sec) => (
@@ -482,10 +534,22 @@ function DomainDetail({ data, onBack }: { data: PlatformDomainDetail; onBack: ()
         </div>
       </div>
       <div className="stats">
-        <div className="stat"><div className="lbl">MX</div><div className="val"><Pill status={d.mxStatus} /></div></div>
-        <div className="stat"><div className="lbl">SPF</div><div className="val"><Pill status={d.spfStatus} /></div></div>
-        <div className="stat"><div className="lbl">DKIM</div><div className="val"><Pill status={d.dkimStatus} /></div></div>
-        <div className="stat"><div className="lbl">DMARC</div><div className="val"><Pill status={d.dmarcStatus} /></div></div>
+        <div className="stat">
+          <div className="stt"><div className="lbl">MX</div><span className="ic"><Server size={14} /></span></div>
+          <div className="val"><Pill status={d.mxStatus} /></div>
+        </div>
+        <div className="stat">
+          <div className="stt"><div className="lbl">SPF</div><span className="ic"><ShieldCheck size={14} /></span></div>
+          <div className="val"><Pill status={d.spfStatus} /></div>
+        </div>
+        <div className="stat">
+          <div className="stt"><div className="lbl">DKIM</div><span className="ic"><KeyRound size={14} /></span></div>
+          <div className="val"><Pill status={d.dkimStatus} /></div>
+        </div>
+        <div className="stat">
+          <div className="stt"><div className="lbl">DMARC</div><span className="ic"><ShieldAlert size={14} /></span></div>
+          <div className="val"><Pill status={d.dmarcStatus} /></div>
+        </div>
       </div>
       {d.errorDetails && (
         <div className="card">
@@ -722,7 +786,7 @@ function TenantsPage({
   return (
     <div>
       <div className="filterbar">
-        <div className="gsearch" style={{ width: 360, marginLeft: 0 }}>
+        <div className="gsearch" style={{ maxWidth: 360, marginLeft: 0 }}>
           <span>⌕</span>
           <input
             placeholder="Search tenants by name or id…"
@@ -1380,7 +1444,7 @@ function MailboxesPage() {
   return (
     <div>
       <div className="filterbar">
-        <div className="gsearch" style={{ width: 360, marginLeft: 0 }}>
+        <div className="gsearch" style={{ maxWidth: 360, marginLeft: 0 }}>
           <span>⌕</span>
           <input placeholder="Search mailboxes by address or tenant…" value={q} onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") { setApplied(q); search(q); } }} />
@@ -1461,7 +1525,7 @@ function DomainsPage() {
   return (
     <div>
       <div className="filterbar">
-        <div className="gsearch" style={{ width: 360, marginLeft: 0 }}>
+        <div className="gsearch" style={{ maxWidth: 360, marginLeft: 0 }}>
           <span>⌕</span>
           <input placeholder="Search domains by name or tenant…" value={q} onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") { setApplied(q); search(q); } }} />
@@ -1541,6 +1605,23 @@ function SuppressionsPage() {
 // Shell
 // ---------------------------------------------------------------------------
 
+function RailMenu({ current, onNavigate }: { current: PageId; onNavigate?: (id: PageId) => void }) {
+  return (
+    <>
+      {PAGES.map((p) => (
+        <button
+          key={p.id}
+          className={`railitem ${current === p.id ? "on" : ""}`}
+          onClick={() => onNavigate?.(p.id)}
+        >
+          <span className="ico">{p.icon}</span>
+          <span>{p.label}</span>
+        </button>
+      ))}
+    </>
+  );
+}
+
 export default function PlatformConsole() {
   const router = useRouter();
   const logout = useLogout();
@@ -1549,6 +1630,7 @@ export default function PlatformConsole() {
   const [overview, setOverview] = useState<PlatformOverview | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   // The platform token lives in localStorage, which does not exist during
   // SSR. Reading it at render time makes the server tree differ from the
@@ -1685,47 +1767,63 @@ export default function PlatformConsole() {
         {supportStyles}
       </style>
 
-      <div className="topbar">
-        <div className="brand">
-          {/* <img src="/ZoikoMail_Logo_DarkBG_PNG.png" alt="Zoiko Mail" style={{ height: 28, width: "auto" }} /> */}
-          <Image src="/ZoikoMail_Logo_DarkBG_PNG.png" width={400} height={100} alt="Zoiko Mail" style={{ height: 28, width: "auto" }} priority />
-        </div>
-        <div className="gsearch" style={{ flex: 1, maxWidth: 420, marginLeft: 16 }}>
-          <span>⌕</span>
-          <input placeholder="Cross-tenant search (API endpoint)…" readOnly />
-        </div>
-        <div className="sp" />
-        <ThemeToggle />
-        <span className={`pill ${isPlatform ? "violet" : "accent"}`}>
-          {isPlatform ? "Platform (staff)" : "Support member"}
-        </span>
-        <div className="who">
-          <div className="avatar">P</div>
-          <div>
-            <b>Support Staff</b>
-            <span>Staff Console</span>
+      {mobileOpen && (
+        <div className="drawer">
+          <div className="scrim" onClick={() => setMobileOpen(false)} />
+          <div className="panel">
+<div className="drawerhead">
+              <Image src="/ZoikoMail_Logo_DarkBG_PNG.png" width={400} height={100} className="h-10 w-auto" alt="Zoiko Mail" priority />
+              <button className="menubtn" onClick={() => setMobileOpen(false)} aria-label="Close menu">
+                ✕
+              </button>
+            </div>
+            <RailMenu
+              current={page}
+              onNavigate={(id) => {
+                setPage(id);
+                setMobileOpen(false);
+              }}
+            />
           </div>
-          <button className="btn sm" onClick={() => logout.mutate()}>
-            Log out
-          </button>
         </div>
-      </div>
+      )}
 
       <div className="shell">
         <nav className="rail">
-          {PAGES.map((p) => (
-            <button
-              key={p.id}
-              className={`railitem ${page === p.id ? "on" : ""}`}
-              onClick={() => setPage(p.id)}
-            >
-              <span className="ico">{p.icon}</span>
-              <span>{p.label}</span>
-            </button>
-          ))}
+          <div className="rail-brand">
+            <Image src="/ZoikoMail_Logo_DarkBG_PNG.png" width={400} height={100} className="h-10 w-auto" alt="Zoiko Mail" priority />
+          </div>
+          <RailMenu current={page} onNavigate={setPage} />
         </nav>
 
-        <main>
+        <div className="body">
+          <div className="topbar">
+            <button className="menubtn" onClick={() => setMobileOpen(true)} aria-label="Open menu">
+              ☰
+            </button>
+            <div className="gsearch" style={{ flex: 1, maxWidth: 420, marginLeft: 16 }}>
+              <span>⌕</span>
+              <input placeholder="Cross-tenant search (API endpoint)…" readOnly />
+            </div>
+            <div className="sp" />
+            <ThemeToggle />
+            <span className={`pill ${isPlatform ? "violet" : "accent"}`}>
+              {isPlatform ? "Platform (staff)" : "Support member"}
+            </span>
+            <div className="who">
+              <div className="avatar">P</div>
+              <div>
+                <b>Support Staff</b>
+                <span>Staff Console</span>
+              </div>
+              <button className="btn sm" onClick={() => logout.mutate()}>
+                Log out
+              </button>
+            </div>
+          </div>
+
+          <main>
+          <div className="page">
           <div className="crumbs">
             <span>Support Workspace</span>
             <span>/</span>
@@ -1761,7 +1859,9 @@ export default function PlatformConsole() {
           {page === "jobs" && <JobsPage />}
           {page === "audit" && <AuditPage />}
           {page === "grants" && <GrantsPage />}
-        </main>
+          </div>
+          </main>
+        </div>
       </div>
     </div>
   );
