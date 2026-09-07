@@ -1,9 +1,49 @@
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import nodemailer, { type Transporter } from "nodemailer";
 import { env } from "../../config/env.js";
 import { logger } from "../../config/logger.js";
 
-import type { InvitationLetter } from "../../modules/membership/invitation-letter.js";
-
+import type { InvitationLetter } from "../../modules/membership/invitation-letter.js";
+
+/** Content id the invitation HTML uses to reference the attached wordmark. */
+const WORDMARK_CID = "zoiko-wordmark";
+
+/**
+ * Where the wordmark lives, or null if it cannot be found.
+ *
+ * Two candidates because the same code runs from source and from the image,
+ * and the layout differs: `tsx src/...` puts this file under src/, while the
+ * build emits it under dist/src/. Both resolve to Backend/assets, but from
+ * different depths.
+ *
+ * The asset is duplicated from Frontend/public rather than shared, because
+ * the Docker build context is Backend/ and cannot reach outside it. Worth the
+ * copy: the alternative is an email whose logo only renders in production.
+ */
+let wordmarkCache: string | null | undefined;
+function wordmarkPath(): string | null {
+  if (wordmarkCache !== undefined) return wordmarkCache;
+
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    // src/common/mailer -> Backend/assets
+    resolve(here, "../../../assets/zoiko-wordmark.png"),
+    // dist/src/common/mailer -> /app/assets
+    resolve(here, "../../../../assets/zoiko-wordmark.png"),
+  ];
+
+  wordmarkCache = candidates.find((path) => existsSync(path)) ?? null;
+  if (!wordmarkCache) {
+    logger.warn(
+      { candidates },
+      "wordmark asset not found; invitation emails will use a text wordmark"
+    );
+  }
+  return wordmarkCache;
+}
+
 /**
  * Escapes text destined for an HTML email body.
  *
@@ -55,6 +95,20 @@ export interface SystemMail {
   subject: string;
   text: string;
   html?: string;
+  /**
+   * Inline images, referenced from the HTML as `cid:<cid>`.
+   *
+   * Needed because a remote <img> does not work in a real inbox. Gmail and
+   * Outlook fetch images through their own servers, so an absolute URL has to
+   * be publicly reachable — a development APP_URL of http://localhost:3000
+   * resolves to their proxy's own machine and the recipient sees the alt text.
+   * An attached image travels with the message and needs no fetch at all.
+   */
+  attachments?: Array<{
+    filename: string;
+    path: string;
+    cid: string;
+  }>;
 }
 
 export class SystemMailer {
@@ -78,6 +132,7 @@ export class SystemMailer {
       subject: mail.subject,
       text: mail.text,
       html: mail.html,
+      attachments: mail.attachments,
     });
     logger.info({ to: mail.to, subject: mail.subject }, "system email sent");
   }
@@ -128,12 +183,19 @@ export class SystemMailer {
       )
       .join("");
 
-    // Absolute, because an email client has no notion of the app's origin.
-    // Alt text carries the brand when images are blocked, which is the
-    // default in most clients.
-    const logo =
-      `<img src="${env.APP_URL}/zoiko-wordmark.png" alt="Zoiko Mail" `
-      + `height="24" style="height:24px;border:0;display:block" />`;
+    // Attached rather than linked. A remote <img> pointing at APP_URL only
+    // renders when that host is reachable from the recipient's mail provider,
+    // and Gmail fetches through its own servers — so a development APP_URL of
+    // localhost:3000 showed nothing but the alt text in a real inbox.
+    //
+    // Falls back to a text wordmark when the file is missing, because the
+    // failure being fixed here is a broken image and a `cid:` pointing at an
+    // absent attachment is exactly that again.
+    const logoFile = wordmarkPath();
+    const logo = logoFile
+      ? `<img src="cid:${WORDMARK_CID}" alt="Zoiko Mail" height="24" `
+        + `style="height:24px;border:0;display:block" />`
+      : `<span style="font-size:17px;font-weight:700;letter-spacing:-0.2px;color:#12232E">Zoiko Mail</span>`;
 
     await this.send({
       to,
@@ -158,6 +220,15 @@ export class SystemMailer {
         + `<p style="color:#6C8092;font-size:12px;margin:0 0 4px">${escapeHtml(letter.closing)}</p>`
         + `<p style="color:#6C8092;font-size:12px;margin:0">This invitation expires in ${env.INVITATION_EXPIRES_IN_HOURS} hours.</p>`
         + `</div>`,
+      attachments: logoFile
+        ? [
+            {
+              filename: "zoiko-wordmark.png",
+              path: logoFile,
+              cid: WORDMARK_CID,
+            },
+          ]
+        : undefined,
     });
   }
 }
