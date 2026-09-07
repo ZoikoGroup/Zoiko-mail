@@ -24,6 +24,7 @@ import {
   fetchInvitations,
   previewInvitation,
   sendInvitation,
+  updateWorkspaceSettings,
   fetchMailboxes,
   fetchMembers,
   fetchNotifications,
@@ -32,7 +33,7 @@ import {
   fetchSyncErrors,
   fetchTenant,
 } from "./admin-queries";
-import type { InvitationDraftInput } from "./admin-queries";
+import type { InvitationDraftInput, WorkspaceSettingsPatch } from "./admin-queries";
 import { CAPABILITY_MATRIX, GUARDRAILS } from "./admin-api";
 import type {
   AuditEventDto,
@@ -317,6 +318,28 @@ export function useSendInvitation() {
         qc.invalidateQueries({ queryKey: ["invitations"] }),
         // The roster shows invited people too, so it is stale as well.
         qc.invalidateQueries({ queryKey: ["people"] }),
+      ]);
+    },
+  });
+}
+
+/**
+ * Saves the workspace settings and refreshes what the screen shows.
+ *
+ * Invalidating rather than trusting the request: the server trims, lowercases
+ * domains and de-duplicates them, so the saved value is not always the typed
+ * one. Re-reading is what makes the page show what was actually stored.
+ */
+export function useUpdateWorkspaceSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: WorkspaceSettingsPatch) => updateWorkspaceSettings(patch),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["settings"] }),
+        // The tenant name shows in the shell header too, and settings is
+        // derived from the same read.
+        qc.invalidateQueries({ queryKey: ["tenant"] }),
       ]);
     },
   });

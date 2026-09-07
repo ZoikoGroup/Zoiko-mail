@@ -530,3 +530,35 @@ export async function sendInvitation(
 ): Promise<void> {
   await apiRequest("/membership/invitations", { method: "POST", body: input });
 }
+
+/**
+ * The editable workspace settings, keyed as the settings screen shows them.
+ *
+ * `defaultDomain` is not a tenant column: the tenant holds an allowedDomains
+ * list and the screen shows the first entry, so saving it replaces that entry
+ * rather than sending a field the API does not have.
+ */
+export interface WorkspaceSettingsPatch {
+  name?: string;
+  timezone?: string;
+  defaultDomain?: string;
+}
+
+export async function updateWorkspaceSettings(
+  patch: WorkspaceSettingsPatch
+): Promise<void> {
+  const body: Record<string, unknown> = {};
+  if (patch.name !== undefined) body.name = patch.name;
+  if (patch.timezone !== undefined) body.timezone = patch.timezone;
+  if (patch.defaultDomain !== undefined) {
+    // The API takes a list. An emptied field clears it rather than sending an
+    // empty string, which the domain validator would reject.
+    body.allowedDomains = patch.defaultDomain ? [patch.defaultDomain] : [];
+  }
+
+  // The endpoint refuses an empty patch, and a Save with nothing changed is a
+  // no-op rather than an error the person has to read.
+  if (Object.keys(body).length === 0) return;
+
+  await apiRequest("/tenants/current", { method: "PATCH", body });
+}
