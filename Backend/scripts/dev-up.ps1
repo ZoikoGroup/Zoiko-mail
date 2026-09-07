@@ -25,15 +25,24 @@
 .PARAMETER Down
   Stop what this script starts.
 
+.PARAMETER Docker
+  Run the API from its container image instead of from source, rebuilding the
+  image first. Use this when you want the containerised platform; the rebuild
+  is what keeps it from being the stale image described above. Slower and far
+  more memory-hungry than the default. The frontend still runs with npm —
+  there is no Frontend/Dockerfile.
+
 .EXAMPLE
   .\Backend\scripts\dev-up.ps1
+  .\Backend\scripts\dev-up.ps1 -Docker
   .\Backend\scripts\dev-up.ps1 -Check
   .\Backend\scripts\dev-up.ps1 -Down
 #>
 [CmdletBinding()]
 param(
   [switch]$Check,
-  [switch]$Down
+  [switch]$Down,
+  [switch]$Docker
 )
 
 $ErrorActionPreference = 'Stop'
@@ -205,6 +214,43 @@ if (Test-Port ([int]$DbPort)) {
   if (Test-Port ([int]$DbPort)) { Write-Ok "up on $DbPort" } else { Write-Bad 'postgres did not come up'; return }
 }
 
+if ($Docker) {
+  Write-Step '3/4  api (container, rebuilt)'
+
+  # The source API, if it is running, owns port 5000 and the container cannot
+  # bind it. This is the error people hit when they reach for compose by hand.
+  Get-NetTCPConnection -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue |
+    Select-Object -ExpandProperty OwningProcess -Unique |
+    ForEach-Object {
+      try {
+        Stop-Process -Id $_ -Force -ErrorAction Stop
+        Write-Step "  stopped the source API (pid $_) so the container can bind 5000"
+      } catch {}
+    }
+
+  # Always --build. An image built earlier is the failure this whole script
+  # exists to avoid: it answers every request normally while omitting the
+  # workspace scope, so sign-in bounces and the API looks healthy.
+  Write-Step '  building the image (several minutes, and memory-hungry)...'
+  Push-Location $BackendDir
+  try {
+    $env:POSTGRES_HOST_PORT = $DbPort
+    & docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build api 2>&1 |
+      Where-Object { $_ -match 'Building|Built|Started|Running|Recreated|Healthy|ERROR|error|failed' } |
+      ForEach-Object { Write-Step "    $_" }
+  } finally { Pop-Location }
+
+  $deadline = (Get-Date).AddMinutes(3)
+  while (-not (Test-Port 5000) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 5 }
+  if (Test-Port 5000) {
+    Write-Ok 'up on 5000 (container)'
+  } else {
+    Write-Bad 'the api container did not come up. Check: docker logs backend-api-1'
+    Write-Bad 'A build killed for memory shows as exit 137 — free some RAM and re-run.'
+  }
+}
+else {
+
 Write-Step '3/4  api (from source)'
 # The container image goes stale and answers with unscoped sessions, so it must
 # not own port 5000. Stopping it is cheap and prevents a confusing failure.
@@ -226,7 +272,12 @@ npm run dev
   if (Test-Port 5000) { Write-Ok 'up on 5000 (own window)' } else { Write-Bad 'api did not come up — check its window' }
 }
 
-Write-Step '4/4  frontend'
+}
+
+# The frontend is not containerised — there is no Frontend/Dockerfile and no
+# frontend service in compose — so it runs with npm in both modes. Said here
+# rather than left implicit, because "-Docker" reasonably implies otherwise.
+Write-Step '4/4  frontend (npm — not containerised)'
 if (Test-Port 3000) {
   Write-Ok 'already up on 3000'
 } else {
