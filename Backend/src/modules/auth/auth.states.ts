@@ -32,15 +32,6 @@ export type AuthState =
   // | { state: "NO_WORKSPACE"; user: PublicUser }
   | { state: "NO_WORKSPACE"; user: PublicUser; pendingToken: string; expiresIn: string }
   | { state: "EMAIL_VERIFICATION_REQUIRED"; user: PublicUser; pendingToken: string; expiresIn: string }
-  /**
-   * A verified Google identity that still owes a one-time code.
-   *
-   * Distinct from EMAIL_VERIFICATION_REQUIRED on purpose: that state belongs
-   * to registration and continues into create-workspace / join-workspace,
-   * whereas this one continues into a session. Reusing it would have landed
-   * a returning user in the sign-up flow instead of their dashboard.
-   */
-  | { state: "OTP_REQUIRED"; user: PublicUser; pendingToken: string; expiresIn: string; sentTo: string }
   | { state: "ACCOUNT_SUSPENDED"; user: PublicUser }
   | { state: "ACCOUNT_DISABLED"; user: PublicUser }
   | {

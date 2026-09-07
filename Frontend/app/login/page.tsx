@@ -13,7 +13,6 @@ import {
   ForgotPasswordForm,
   ResetPasswordForm,
 } from "@/components/auth";
-// import VerifyOtpForm from "@/components/auth/forms/VerifyOtpForm";
 
 import type { AuthStep } from "@/components/auth";
 import type { PendingInvitation } from "@/lib/auth-api";

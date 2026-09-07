@@ -12,13 +12,15 @@ const rules = {
 
 describe("Tenant policy module", () => {
   it("creates versions, activates one version, and evaluates deterministically", async () => {
+    // Each workspace is bootstrapped with default SENDING and AI policies at
+    // version 1, so the first custom policy starts at version 2.
     const owner = await registerUser(app, { email: "policy-owner@zoiko.test" });
     const first = await request(app).post("/api/v1/policies").set(authHeader(owner.accessToken))
       .send({ type: "SENDING", name: "Sending v1", rules }).expect(201);
     const second = await request(app).post("/api/v1/policies").set(authHeader(owner.accessToken))
       .send({ type: "SENDING", name: "Sending v2", rules: { ...rules, defaultEffect: "DENY" } }).expect(201);
-    expect(first.body.data.version).toBe(1);
-    expect(second.body.data.version).toBe(2);
+    expect(first.body.data.version).toBe(2);
+    expect(second.body.data.version).toBe(3);
 
     await request(app).post(`/api/v1/policies/${first.body.data.id}/activate`)
       .set(authHeader(owner.accessToken)).expect(200);
@@ -28,7 +30,7 @@ describe("Tenant policy module", () => {
     expect((await prisma.tenantPolicy.findUnique({ where: { id: first.body.data.id } }))?.status).toBe("ARCHIVED");
     const denied = await request(app).post("/api/v1/policies/evaluate").set(authHeader(owner.accessToken))
       .send({ type: "SENDING", context: { recipient: { external: true } } }).expect(200);
-    expect(denied.body.data).toMatchObject({ effect: "DENY", reason: "CONDITION_MATCHED", version: 2 });
+    expect(denied.body.data).toMatchObject({ effect: "DENY", reason: "CONDITION_MATCHED", version: 3 });
   });
 
   it("fails closed without an active policy and prevents cross-tenant reads", async () => {
@@ -39,6 +41,13 @@ describe("Tenant policy module", () => {
 
     await request(app).get(`/api/v1/policies/${policy.body.data.id}`)
       .set(authHeader(second.accessToken)).expect(404);
+
+    // Every workspace is bootstrapped with an active default AI policy.
+    // Archive it so this tenant has none active, exercising fail-closed.
+    await prisma.tenantPolicy.updateMany({
+      where: { tenantId: second.tenantId, type: "AI", status: "ACTIVE" },
+      data: { status: "ARCHIVED" },
+    });
     const evaluation = await request(app).post("/api/v1/policies/evaluate")
       .set(authHeader(second.accessToken)).send({ type: "AI", context: {} }).expect(200);
     expect(evaluation.body.data).toMatchObject({ effect: "DENY", reason: "NO_ACTIVE_POLICY" });

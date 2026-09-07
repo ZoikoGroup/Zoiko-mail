@@ -27,6 +27,12 @@ async function activateAllowSendingPolicy(accessToken: string) {
 describe("Mail module", () => {
   it("creates a draft and fails closed when no sending policy is active", async () => {
     const owner = await registerUser(app, { email: "mail-policy@zoiko.test" });
+    // Every workspace is bootstrapped with an active default SENDING policy.
+    // Archive it so no sending policy is active, exercising fail-closed.
+    await prisma.tenantPolicy.updateMany({
+      where: { tenantId: owner.tenantId, type: "SENDING", status: "ACTIVE" },
+      data: { status: "ARCHIVED" },
+    });
     const draft = await request(app)
       .post("/api/v1/mail/drafts")
       .set(authHeader(owner.accessToken))

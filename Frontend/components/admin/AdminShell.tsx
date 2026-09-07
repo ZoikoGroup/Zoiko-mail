@@ -29,7 +29,7 @@ function initials(name?: string, email?: string) {
 export function AdminShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { data } = useMe();
+  const { data, isLoading, error } = useMe();
   const me = data as MeResponse | undefined;
   const logout = useLogout();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -38,6 +38,25 @@ export function AdminShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!isLoggedIn()) router.replace("/login");
   }, [router]);
+
+  // Redirect to login if /auth/me fails (expired/invalid token), matching
+  // the owner shell's handling so an invalid session never spins forever.
+  useEffect(() => {
+    if (!isLoading && error && isLoggedIn()) {
+      router.replace("/login");
+    }
+  }, [isLoading, error, router]);
+
+  // Loading gate: don't render admin chrome until the user's role is known.
+  // Without this a MEMBER would briefly see the admin sidebar/header before
+  // the role guard below swaps in the AccessDenied page.
+  if (isLoading || !me) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[var(--ground)]">
+        <div className="h-7 w-7 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+      </div>
+    );
+  }
 
   // Role guard: members without an admin-level role see a clear warning
   // instead of the admin workspace (backend still enforces this per route).

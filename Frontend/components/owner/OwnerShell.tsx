@@ -42,6 +42,17 @@ export function OwnerShell({ children }: { children: ReactNode }) {
     }
   }, [isLoading, error, router]);
 
+  // Loading gate: don't render owner chrome until the user's role is known.
+  // Without this a MEMBER would briefly see the owner sidebar/header before
+  // the role guard below swaps in the AccessDenied page.
+  if (isLoading || !me) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[var(--ground)]">
+        <div className="h-7 w-7 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+      </div>
+    );
+  }
+
   // Role guard: non-owner/admin roles get a warning instead of the
   // owner workspace chrome (individual pages guard themselves too).
   if (me && !OWNER_SHELL_ROLES.includes(me.membership.role)) {

@@ -1,6 +1,4 @@
 "use client";
-import { GoogleLogin } from "@react-oauth/google";
-// import { useGoogleLogin } from "@/lib/auth-hooks";
 import { useState } from "react";
 import Link from "next/link";
 import { FaEnvelope } from "react-icons/fa";
@@ -13,7 +11,6 @@ import {
   PasswordInput,
   GoogleSignInButton,
 } from "@/components/auth";
-import GoogleOtpStep from "@/components/auth/GoogleOtpStep";
 
 interface LoginFormProps {
   onRegister: () => void;
@@ -25,20 +22,12 @@ type FormErrors = {
   password?: string;
 };
 
-
-
 export default function LoginForm({
   onRegister,
   onForgotPassword,
 }: LoginFormProps) {
   const loginMutation = useLogin();
-  const googleLogin = useGoogleLogin();
   const googleLoginMutation = useGoogleLogin();
-
-  // Set when Google sign-in comes back asking for a code. Holding it here
-  // keeps the whole two-leg flow on one screen, so a refresh mid-flow lands
-  // back on a clean login rather than a half-authenticated dead end.
-  const [googleOtp, setGoogleOtp] = useState<{ pendingToken: string; sentTo: string } | null>(null);
 
   const [rememberMe, setRememberMe] = useState(false);
 
@@ -110,23 +99,11 @@ export default function LoginForm({
       ? loginMutation.error.message
       : loginMutation.error
         ? "Something went wrong."
-        // : null;
-        // ? "Something went wrong."
         : googleLoginMutation.error instanceof ApiError
           ? googleLoginMutation.error.message
           : googleLoginMutation.error
             ? "Something went wrong."
             : null;
-
-  if (googleOtp) {
-    return (
-      <GoogleOtpStep
-        pendingToken={googleOtp.pendingToken}
-        sentTo={googleOtp.sentTo}
-        onCancel={() => setGoogleOtp(null)}
-      />
-    );
-  }
 
   return (
     <>
@@ -148,29 +125,15 @@ export default function LoginForm({
       <div className="mt-3">
         <GoogleSignInButton
           onSuccess={(idToken) =>
-            googleLoginMutation.mutate(
-              { idToken },
-              {
-                onSuccess: (data) => {
-                  if (data.state === "OTP_REQUIRED") {
-                    setGoogleOtp({
-                      pendingToken: data.pendingToken,
-                      // Falls back to the typed address so the screen always names
-                      // somewhere, even if an older API omits the echo.
-                      sentTo: data.sentTo ?? data.user?.email ?? formData.email,
-                    });
-                  }
-                },
-              }
-            )
+            googleLoginMutation.mutate({ idToken })
           }
           disabled={loginMutation.isPending || googleLoginMutation.isPending}
         />
 
-        {googleLogin.isError && (
+        {googleLoginMutation.isError && (
           <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
-            {googleLogin.error instanceof ApiError
-              ? googleLogin.error.message
+            {googleLoginMutation.error instanceof ApiError
+              ? googleLoginMutation.error.message
               : "Google sign-in failed. Please try again."}
           </div>
         )}
@@ -187,30 +150,6 @@ export default function LoginForm({
           </span>
         </div>
       </div>
-      {/* ================================================
-          FORM
-      ================================================= */}
-
-      {/* <GoogleSignInButton
-        onSuccess={(idToken) =>
-          googleLoginMutation.mutate(
-            { idToken },
-            {
-              onSuccess: (data) => {
-                if (data.state === "OTP_REQUIRED") {
-                  setGoogleOtp({
-            pendingToken: data.pendingToken,
-            // Falls back to the typed address so the screen always names
-            // somewhere, even if an older API omits the echo.
-            sentTo: data.sentTo ?? data.user?.email ?? formData.email,
-          });
-                }
-              },
-            }
-          )
-        }
-        disabled={loginMutation.isPending || googleLoginMutation.isPending}
-      /> */}
 
       <form
         onSubmit={onSubmit}
@@ -243,9 +182,6 @@ export default function LoginForm({
           }
           error={errors.password}
         />
-        {/* =====================================================
-            Remember Me / Forgot Password
-        ====================================================== */}
 
         <div className="flex items-center justify-between gap-4">
           <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
@@ -270,19 +206,11 @@ export default function LoginForm({
           </button>
         </div>
 
-        {/* =====================================================
-            Error Message
-        ====================================================== */}
-
         {errorMessage && (
           <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
             {errorMessage}
           </div>
         )}
-
-        {/* =====================================================
-            Login Button
-        ====================================================== */}
 
         <button
           type="submit"
@@ -293,76 +221,11 @@ export default function LoginForm({
             ? "Signing In..."
             : "Sign In"}
         </button>
-
-        {/* =====================================================
-            Divider
-        ====================================================== */}
-
-        {/* <div className="relative">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-slate-200 dark:border-slate-700" />
-          </div>
-
-          <div className="relative flex justify-center">
-            <span className="bg-white px-4 text-sm text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-              OR
-            </span>
-          </div>
-        </div> */}
-
-        {/* =====================================================
-            Google Login
-        ====================================================== */}
-
-        {/* <div className="flex w-full justify-center [&>div]:w-full">
-          <GoogleLogin
-            onSuccess={(cr) => {
-              if (cr.credential) googleLogin.mutate({ idToken: cr.credential });
-            }}
-            onError={() => console.error("Google sign-in failed")}
-            theme="outline"
-            size="large"
-            shape="rectangular"
-            text="continue_with"
-            logo_alignment="center"
-            width="100%"
-          />
-        </div> */}
-        {/* <div className="mt-3">
-          <GoogleSignInButton
-            onSuccess={(idToken) =>
-              googleLoginMutation.mutate(
-                { idToken },
-                {
-                  onSuccess: (data) => {
-                    if (data.state === "OTP_REQUIRED") {
-                      setGoogleOtp({
-                        pendingToken: data.pendingToken,
-                        // Falls back to the typed address so the screen always names
-                        // somewhere, even if an older API omits the echo.
-                        sentTo: data.sentTo ?? data.user?.email ?? formData.email,
-                      });
-                    }
-                  },
-                }
-              )
-            }
-            disabled={loginMutation.isPending || googleLoginMutation.isPending}
-          />
-
-          {googleLogin.isError && (
-            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
-              {googleLogin.error instanceof ApiError
-                ? googleLogin.error.message
-                : "Google sign-in failed. Please try again."}
-            </div>
-          )}
-        </div> */}
       </form>
 
       {/* =====================================================
-            Register Link
-        ====================================================== */}
+          Register Link
+      ====================================================== */}
       <div className="text-center mt-3">
         <p className="text-sm text-slate-600 dark:text-slate-400">
           Don&apos;t have an account?{" "}
@@ -377,8 +240,8 @@ export default function LoginForm({
       </div>
 
       {/* =====================================================
-            Terms
-        ====================================================== */}
+          Terms
+      ====================================================== */}
 
       <div className="text-center text-xs leading-6 text-slate-500 dark:text-slate-500 mt-2">
         By continuing you agree to our{" "}
