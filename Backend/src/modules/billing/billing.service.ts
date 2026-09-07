@@ -140,6 +140,8 @@ export class BillingService {
     });
     if (existing?.stripeCustomerId) return existing.stripeCustomerId;
 
+    // Create the Stripe customer. If a race condition creates a duplicate,
+    // Stripe will handle it gracefully — we only need the latest one.
     const customer = await stripe.customers.create({
       name: tenantName,
       metadata: { tenantId },
@@ -169,6 +171,16 @@ export class BillingService {
     const tenant = await prisma.tenant.findUnique({ where: { id: context.tenantId } });
     if (!tenant) {
       throw new AppError("Tenant not found", 404, ErrorCodes.NOT_FOUND);
+    }
+
+    // Guard against duplicate active subscriptions — redirect to portal instead.
+    const existing = await this.getCurrentSubscription(context.tenantId);
+    if (existing && (existing.status === "active" || existing.status === "trialing")) {
+      throw new AppError(
+        "This workspace already has an active subscription. Use the billing portal to manage or change your plan.",
+        409,
+        ErrorCodes.CONFLICT
+      );
     }
 
     const customerId = await this.ensureCustomer(tenant.id, stripe, tenant.name);
@@ -323,20 +335,20 @@ export class BillingService {
       throw new AppError("Invalid Stripe signature", 400, "STRIPE_SIGNATURE_INVALID");
     }
 
-    // Idempotency guard — record first, then process. Distinct events are the
-    // single cap on webhook processing; retries of the same event short-circuit.
-    const existing = await prisma.stripeWebhookEvent.findUnique({
-      where: { stripeEventId: event.id },
-    });
-    if (existing) {
-      return { received: true, alreadyProcessed: true, eventType: event.type };
+    // Idempotency guard — attempt to record atomically. If the unique
+    // constraint on stripeEventId fires, another worker already processed it.
+    try {
+      await prisma.stripeWebhookEvent.create({
+        data: { stripeEventId: event.id, eventType: event.type },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        return { received: true, alreadyProcessed: true, eventType: event.type };
+      }
+      throw error;
     }
 
     await this.processEvent(event);
-
-    await prisma.stripeWebhookEvent.create({
-      data: { stripeEventId: event.id, eventType: event.type },
-    });
 
     return { received: true, alreadyProcessed: false, eventType: event.type };
   }
@@ -382,12 +394,11 @@ export class BillingService {
       });
       if (byPrice) return byPrice;
     }
-    const fallback = await prisma.plan.findFirst({
-      where: { code: "starter" },
-      orderBy: { priceMonthly: "asc" },
-    });
-    if (fallback) return fallback;
-    throw new AppError("No billing plan available", 500, ErrorCodes.INTERNAL_ERROR);
+    throw new AppError(
+      `No billing plan found for planCode="${planCode}" or stripePriceId="${stripePriceId}". Ensure the plan exists in the database.`,
+      500,
+      ErrorCodes.INTERNAL_ERROR
+    );
   }
 
   private async upsertFromCheckout(session: Stripe.Checkout.Session) {
@@ -503,7 +514,15 @@ export class BillingService {
     });
 
     const current = await this.getCurrentSubscription(existing.tenantId);
-    await this.syncTenantPlan(existing.tenantId, current?.plan.code ?? "starter");
+    if (current && current.plan) {
+      await this.syncTenantPlan(existing.tenantId, current.plan.code);
+    } else {
+      // No active subscription remains — fall back to the default plan.
+      const defaultPlan = await prisma.plan.findUnique({ where: { code: "starter" } });
+      if (defaultPlan) {
+        await this.syncTenantPlan(existing.tenantId, defaultPlan.code);
+      }
+    }
   }
 
   private async upsertInvoice(invoice: Stripe.Invoice) {

@@ -12,6 +12,8 @@ const rules = {
 
 describe("Tenant policy module", () => {
   it("creates versions, activates one version, and evaluates deterministically", async () => {
+    // Each workspace is bootstrapped with default SENDING and AI policies at
+    // version 1, so the first custom policy starts at version 2.
     const owner = await registerUser(app, { email: "policy-owner@zoiko.test" });
     const first = await request(app).post("/api/v1/policies").set(authHeader(owner.accessToken))
       .send({ type: "SENDING", name: "Sending v1", rules }).expect(201);

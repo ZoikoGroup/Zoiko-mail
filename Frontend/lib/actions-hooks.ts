@@ -13,10 +13,6 @@ import {
 
 const KEY = ["actions"] as const;
 
-// export function useActions() {
-//   return useQuery({ queryKey: KEY, queryFn: listActions, staleTime: 15_000 });
-// }
-
 export function useActions(params?: ListActionsParams) {
   // Key structure: no params -> ["actions"] (matches existing Action Inbox
   // + optimistic updates in useUpdateAction). With params -> nested key so

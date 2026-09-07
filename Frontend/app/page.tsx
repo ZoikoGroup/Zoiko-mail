@@ -9,7 +9,6 @@ import { useMe } from "@/lib/auth-hooks";
 import { useActions } from "@/lib/actions-hooks";
 import { isLoggedIn } from "@/lib/auth-storage";
 import type { MeResponse } from "@/lib/auth-api";
-// import { NAV, SECTIONS } from "@/lib/nav";
 import { MEMBER_NAV, sectionsFor } from "@/lib/nav";
 
 export default function DashboardPage() {

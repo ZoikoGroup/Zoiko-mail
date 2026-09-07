@@ -75,14 +75,6 @@ export interface ListMailResponse {
   pagination: MailPagination;
 }
 
-// export interface ListMailParams {
-//   folder?: MailFolder;
-//   starredOnly?: boolean;
-//   labelId?: string;
-//   page?: number;
-//   limit?: number;
-// }
-
 export interface ListMailParams {
   folder?: MailFolder;
   starredOnly?: boolean;

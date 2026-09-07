@@ -30,8 +30,7 @@ import {
   type ResetPasswordInput,
 } from "./auth-api";
 import { getPlatformToken, isLoggedIn } from "./auth-storage";
-// import { resolveWorkspaceHref } from "./workspace";
-import { AuthResponse, GoogleLoginInput, loginWithGoogle } from "./auth-api";
+import { AuthResponse } from "./auth-api";
 import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { resolveWorkspaceHref } from "./workspace";
 
@@ -154,44 +153,13 @@ export function useLogin() {
   });
 }
 
-// export function useGoogleLogin() {
-//   const qc = useQueryClient();
-//   const router = useRouter();
-
-//   return useMutation({
-//     mutationFn: (input: GoogleLoginInput) => loginWithGoogle(input),
-//     onSuccess: async (data) => {
-//       await qc.invalidateQueries({ queryKey: ["me"] });
-//       routeAuthState(data, router);
-//     },
-//   });
-// }
-
-// export function useRegister() {
-//   const qc = useQueryClient();
-//   const router = useRouter();
-
-//   return useMutation({
-//     mutationFn: (input: RegisterInput) => register(input),
-
-//     onSuccess: async () => {
-//       await qc.invalidateQueries({
-//         queryKey: ["me"],
-//       });
-
-//       router.replace("/");
-//     },
-//   });
-// }
-
 /**
  * Google sign-in.
  *
- * Routes exactly as a password sign-in does, on the role the backend assigned
- * to the workspace being entered: Owner to the owner console, Admin to the
- * admin console, everyone else to their mailbox. Proving identity with Google
- * grants no different destination and no different authority than proving it
- * with a password.
+ * Routes on the workspace the backend bound the session to, exactly as a
+ * password sign-in does. Not on the role: a Google sign-in is always
+ * MEMBER-scoped however senior the account, so routing on the role would open
+ * the owner console for an owner — the thing the scope withholds.
  *
  * A user in more than one workspace resolves to WORKSPACE_SELECTION here just
  * as they would with a password, so Google cannot skip the pick or carry a

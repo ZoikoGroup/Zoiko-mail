@@ -107,7 +107,12 @@ async function signIn(page: Page) {
 
 /** Asserts a destination, and that it is still the destination a moment later. */
 async function settlesOn(page: Page, path: string) {
-  await expect(page).toHaveURL(new RegExp(`${path}$`));
+  // Generous on the first assertion for the same reason as expectSentToLogin:
+  // the destination route has to compile before the browser can arrive, and a
+  // cold route in dev takes tens of seconds on its own. The second assertion
+  // below keeps the default budget, because by then the page is warm and a
+  // late bounce is exactly what it is looking for.
+  await expect(page).toHaveURL(new RegExp(`${path}$`), { timeout: 60_000 });
   // A guard that bounces a moment later passes a URL assertion taken
   // immediately, which is how the create-workspace bounce stayed hidden.
   await page.waitForTimeout(2500);

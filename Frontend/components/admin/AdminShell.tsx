@@ -34,7 +34,7 @@ function initials(name?: string, email?: string) {
 export function AdminShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { data } = useMe();
+  const { data, isLoading, error } = useMe();
   const me = data as MeResponse | undefined;
   const logout = useLogout();
   const [mobileOpen, setMobileOpen] = useState(false);

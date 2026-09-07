@@ -82,4 +82,48 @@ describe("Temporary audited SUPPORT access", () => {
 
     await request(app).get("/api/v1/support/overview").expect(401);
   });
+
+  it("lets an ADMIN revoke a support grant through the capability gate", async () => {
+    const owner = await registerUser(app, { email: "adminrevoke-owner@zoiko.test" });
+    const admin = await registerUser(app, { email: "adminrevoke-admin@zoiko.test" });
+    const support = await registerUser(app, { email: "adminrevoke-agent@zoiko.test" });
+
+    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+      .send({ email: admin.email, role: "ADMIN" }).expect(201);
+    const added = await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+      .send({ email: support.email, role: "SUPPORT" }).expect(201);
+
+    const grant = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
+      .send({ supportMembershipId: added.body.data.id, reason: "Investigate admin revoke flow", expiresInMinutes: 30, scopes: ["TENANT_DIAGNOSTICS"] }).expect(201);
+
+    const adminLogin = await request(app).post("/api/v1/auth/login")
+      .send({ email: admin.email, password: admin.password, tenantId: owner.tenantId }).expect(200);
+    const adminToken = adminLogin.body.data.session?.accessToken ?? adminLogin.body.data.accessToken;
+
+    await request(app).delete(`/api/v1/support/access-grants/${grant.body.data.id}`)
+      .set(authHeader(adminToken)).expect(200);
+    expect((await prisma.supportAccessGrant.findUnique({ where: { id: grant.body.data.id } }))?.revokedAt).toBeTruthy();
+  });
+
+  it("denies a MEMBER from revoking a support grant", async () => {
+    const owner = await registerUser(app, { email: "memrevoke-owner@zoiko.test" });
+    const member = await registerUser(app, { email: "memrevoke-member@zoiko.test" });
+    const support = await registerUser(app, { email: "memrevoke-agent@zoiko.test" });
+
+    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+      .send({ email: member.email, role: "MEMBER" }).expect(201);
+    const added = await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+      .send({ email: support.email, role: "SUPPORT" }).expect(201);
+
+    const grant = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
+      .send({ supportMembershipId: added.body.data.id, reason: "Investigate member revoke denial", expiresInMinutes: 30, scopes: ["TENANT_DIAGNOSTICS"] }).expect(201);
+
+    const memberLogin = await request(app).post("/api/v1/auth/login")
+      .send({ email: member.email, password: member.password, tenantId: owner.tenantId }).expect(200);
+    const memberToken = memberLogin.body.data.session?.accessToken ?? memberLogin.body.data.accessToken;
+
+    await request(app).delete(`/api/v1/support/access-grants/${grant.body.data.id}`)
+      .set(authHeader(memberToken)).expect(403);
+    expect((await prisma.supportAccessGrant.findUnique({ where: { id: grant.body.data.id } }))?.revokedAt).toBeNull();
+  });
 });

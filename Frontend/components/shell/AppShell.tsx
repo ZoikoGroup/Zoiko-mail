@@ -15,7 +15,6 @@ import {
 import { useMe, useLogout } from "@/lib/auth-hooks";
 import type { MeResponse } from "@/lib/auth-api";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
-// import { DASHBOARD_ITEM, NAV, SECTIONS } from "@/lib/nav";
 import { DASHBOARD_ITEM, MEMBER_NAV, sectionsFor } from "@/lib/nav";
 import { resolveWorkspaceHref, workspaceDenialNotice } from "@/lib/workspace";
 

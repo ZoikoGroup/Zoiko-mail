@@ -23,8 +23,6 @@ type FormErrors = {
   password?: string;
 };
 
-
-
 export default function LoginForm({
   onRegister,
   onForgotPassword,
@@ -124,8 +122,6 @@ export default function LoginForm({
       ? loginMutation.error.message
       : loginMutation.error
         ? "Something went wrong."
-        // : null;
-        // ? "Something went wrong."
         : googleLoginMutation.error instanceof ApiError
           ? googleLoginMutation.error.message
           : googleLoginMutation.error
@@ -176,9 +172,6 @@ export default function LoginForm({
           </span>
         </div>
       </div>
-      {/* ================================================
-          FORM
-      ================================================= */}
 
       <form
         onSubmit={onSubmit}
@@ -211,9 +204,6 @@ export default function LoginForm({
           }
           error={errors.password}
         />
-        {/* =====================================================
-            Remember Me / Forgot Password
-        ====================================================== */}
 
         <div className="flex items-center justify-between gap-4">
           <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
@@ -237,10 +227,6 @@ export default function LoginForm({
             Forgot password?
           </button>
         </div>
-
-        {/* =====================================================
-            Error Message
-        ====================================================== */}
 
         {errorMessage && (
           <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
@@ -270,32 +256,11 @@ export default function LoginForm({
             ? "Signing In..."
             : "Sign In"}
         </button>
-
-        {/* =====================================================
-            Divider
-        ====================================================== */}
-
-        {/* <div className="relative">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-slate-200 dark:border-slate-700" />
-          </div>
-
-          <div className="relative flex justify-center">
-            <span className="bg-white px-4 text-sm text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-              OR
-            </span>
-          </div>
-        </div> */}
-
-        {/* =====================================================
-            Google Login
-        ====================================================== */}
-
       </form>
 
       {/* =====================================================
-            Register Link
-        ====================================================== */}
+          Register Link
+      ====================================================== */}
       <div className="text-center mt-3">
         <p className="text-sm text-slate-600 dark:text-slate-400">
           Don&apos;t have an account?{" "}
@@ -310,8 +275,8 @@ export default function LoginForm({
       </div>
 
       {/* =====================================================
-            Terms
-        ====================================================== */}
+          Terms
+      ====================================================== */}
 
       <div className="text-center text-xs leading-6 text-slate-500 dark:text-slate-500 mt-2">
         By continuing you agree to our{" "}
