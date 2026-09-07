@@ -72,6 +72,13 @@ export const supportStyles = `
 .support-workspace .dropdown .ditem b { font-size: 12px; display: block; }
 .support-workspace .dropdown .ditem span { font-size: 10.8px; color: var(--ink3); }
 .support-workspace .dropdown button.ditem { width: 100%; text-align: left; }
+.support-workspace .globdd { position: absolute; top: calc(100% + 6px); left: 0; right: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--sh3); z-index: 61; max-height: min(70vh, 420px); overflow-y: auto; padding-bottom: 4px; }
+.support-workspace .globdd .gh { padding: 9px 14px 4px; font-family: var(--mo); font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink3); }
+.support-workspace .globdd .gitem { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 8px 14px; border-top: 1px solid var(--border); text-align: left; font-size: 12.4px; color: var(--ink); }
+.support-workspace .globdd .gitem:hover { background: var(--s2); }
+.support-workspace .globdd .gitem .gname { font-weight: 620; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.support-workspace .globdd .gitem .gsub { font-size: 10.3px; color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.support-workspace .globdd .gitem.muted { flex-direction: row; color: var(--ink3); font-weight: 500; }
 .support-workspace .shell { display: flex; height: 100vh; overflow: hidden; }
 .support-workspace .body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .support-workspace .rail { background: var(--s2); border-right: 1px solid var(--border); padding: 14px 0; display: flex; flex-direction: column; width: 216px; flex: none; overflow-y: auto; }

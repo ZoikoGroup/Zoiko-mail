@@ -1398,7 +1398,13 @@ function GrantsPage() {
 // New standalone list pages
 // ---------------------------------------------------------------------------
 
-function MailboxesPage() {
+function MailboxesPage({
+  initialOpen,
+  onConsumed,
+}: {
+  initialOpen?: { tenantId: string; mailboxId: string } | null;
+  onConsumed?: () => void;
+}) {
   const [q, setQ] = useState("");
   const [applied, setApplied] = useState("");
   const [mailboxes, setMailboxes] = useState<PlatformMailbox[]>([]);
@@ -1436,6 +1442,14 @@ function MailboxesPage() {
       setDetailLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (initialOpen) {
+      void openDetail(initialOpen.tenantId, initialOpen.mailboxId);
+      onConsumed?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialOpen]);
 
   if (detailLoading) return <Spinner />;
   if (detailError) return <LoadErr error={detailError} onRetry={() => { setDetailError(null); }} />;
@@ -1479,7 +1493,13 @@ function MailboxesPage() {
   );
 }
 
-function DomainsPage() {
+function DomainsPage({
+  initialOpen,
+  onConsumed,
+}: {
+  initialOpen?: { tenantId: string; domainId: string } | null;
+  onConsumed?: () => void;
+}) {
   const [q, setQ] = useState("");
   const [applied, setApplied] = useState("");
   const [domains, setDomains] = useState<PlatformDomain[]>([]);
@@ -1517,6 +1537,14 @@ function DomainsPage() {
       setDetailLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (initialOpen) {
+      void openDetail(initialOpen.tenantId, initialOpen.domainId);
+      onConsumed?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialOpen]);
 
   if (detailLoading) return <Spinner />;
   if (detailError) return <LoadErr error={detailError} onRetry={() => { setDetailError(null); }} />;
@@ -1631,6 +1659,17 @@ export default function PlatformConsole() {
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [globQ, setGlobQ] = useState("");
+  const [globOpen, setGlobOpen] = useState(false);
+  const [globLoading, setGlobLoading] = useState(false);
+  const [globError, setGlobError] = useState<string | null>(null);
+  const [globResults, setGlobResults] = useState<{
+    tenants: PlatformTenant[];
+    mailboxes: PlatformMailbox[];
+    domains: PlatformDomain[];
+  } | null>(null);
+  const [pendingMailbox, setPendingMailbox] = useState<{ tenantId: string; mailboxId: string } | null>(null);
+  const [pendingDomain, setPendingDomain] = useState<{ tenantId: string; domainId: string } | null>(null);
 
   // The platform token lives in localStorage, which does not exist during
   // SSR. Reading it at render time makes the server tree differ from the
@@ -1730,6 +1769,51 @@ export default function PlatformConsole() {
     setPage("tenants");
   }, []);
 
+  const runGlobalSearch = useCallback(async (raw: string) => {
+    const query = raw.trim();
+    setGlobLoading(true);
+    setGlobError(null);
+    try {
+      const [t, m, d] = await Promise.all([
+        searchPlatformTenants(query, 8),
+        searchPlatformMailboxes(query, 8),
+        searchPlatformDomains(query, 8),
+      ]);
+      setGlobResults({ tenants: t.tenants, mailboxes: m.mailboxes, domains: d.domains });
+      setGlobOpen(true);
+    } catch (e) {
+      setGlobError(apiErrorMessage(e));
+      setGlobResults(null);
+      setGlobOpen(true);
+    } finally {
+      setGlobLoading(false);
+    }
+  }, []);
+
+  const closeGlobalSearch = useCallback(() => {
+    setGlobOpen(false);
+    setGlobQ("");
+    setGlobResults(null);
+    setGlobError(null);
+  }, []);
+
+  const openGlobTenant = useCallback((tenantId: string) => {
+    closeGlobalSearch();
+    openTenant(tenantId);
+  }, [closeGlobalSearch, openTenant]);
+
+  const openGlobMailbox = useCallback((tenantId: string, mailboxId: string) => {
+    closeGlobalSearch();
+    setPendingMailbox({ tenantId, mailboxId });
+    setPage("mailboxes");
+  }, [closeGlobalSearch]);
+
+  const openGlobDomain = useCallback((tenantId: string, domainId: string) => {
+    closeGlobalSearch();
+    setPendingDomain({ tenantId, domainId });
+    setPage("domains");
+  }, [closeGlobalSearch]);
+
   // Hydration guard: until mount, render the exact same static tree the
   // server sent (localStorage-aware state is only resolved in the effect
   // above). Everything below can then safely depend on the browser.
@@ -1801,9 +1885,88 @@ export default function PlatformConsole() {
             <button className="menubtn" onClick={() => setMobileOpen(true)} aria-label="Open menu">
               ☰
             </button>
-            <div className="gsearch" style={{ flex: 1, maxWidth: 420, marginLeft: 16 }}>
-              <span>⌕</span>
-              <input placeholder="Cross-tenant search (API endpoint)…" readOnly />
+            <div style={{ position: "relative", flex: 1, maxWidth: 420, marginLeft: 16, minWidth: 0 }}
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setGlobOpen(false);
+              }}
+            >
+              <div className="gsearch" style={{ flex: 1, maxWidth: "none", marginLeft: 0 }}>
+                <span>{globLoading ? "…" : "⌕"}</span>
+                <input
+                  placeholder="Search tenants, mailboxes, domains…"
+                  value={globQ}
+                  onChange={(e) => {
+                    setGlobQ(e.target.value);
+                    if (e.target.value.trim() === "") setGlobOpen(false);
+                  }}
+                  onFocus={() => {
+                    if (globResults || globError) setGlobOpen(true);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void runGlobalSearch(globQ);
+                    if (e.key === "Escape") setGlobOpen(false);
+                  }}
+                />
+              </div>
+              {globOpen && (
+                <div className="globdd">
+                  {globError && <div className="gitem muted">{globError}</div>}
+                  {globResults &&
+                    (globResults.tenants.length === 0 &&
+                    globResults.mailboxes.length === 0 &&
+                    globResults.domains.length === 0 ? (
+                      <div className="gitem muted">No matches for “{globQ}”.</div>
+                    ) : (
+                      <>
+                        {globResults.tenants.length > 0 && (
+                          <>
+                            <div className="gh">Tenants</div>
+                            {globResults.tenants.map((t) => (
+                              <button key={t.id} className="gitem" onMouseDown={() => openGlobTenant(t.id)}>
+                                <span className="gname">{t.name}</span>
+                                <span className="gsub">
+                                  {t.planCode} · {t.mailboxes} mailboxes · {t.status}
+                                </span>
+                              </button>
+                            ))}
+                          </>
+                        )}
+                        {globResults.mailboxes.length > 0 && (
+                          <>
+                            <div className="gh">Mailboxes</div>
+                            {globResults.mailboxes.map((m) => (
+                              <button
+                                key={m.id}
+                                className="gitem"
+                                onMouseDown={() => openGlobMailbox(m.tenantId, m.id)}
+                              >
+                                <span className="gname">{m.address}</span>
+                                <span className="gsub">{m.tenantName}</span>
+                              </button>
+                            ))}
+                          </>
+                        )}
+                        {globResults.domains.length > 0 && (
+                          <>
+                            <div className="gh">Domains</div>
+                            {globResults.domains.map((d) => (
+                              <button
+                                key={d.id}
+                                className="gitem"
+                                onMouseDown={() => openGlobDomain(d.tenant.id, d.id)}
+                              >
+                                <span className="gname">{d.domainName}</span>
+                                <span className="gsub">
+                                  {d.tenant.name} · {d.verificationStatus}
+                                </span>
+                              </button>
+                            ))}
+                          </>
+                        )}
+                      </>
+                    ))}
+                </div>
+              )}
             </div>
             <div className="sp" />
             <ThemeToggle />
@@ -1851,8 +2014,18 @@ export default function PlatformConsole() {
               onConsumed={() => setPendingTenant(null)}
             />
           )}
-          {page === "mailboxes" && <MailboxesPage />}
-          {page === "domains" && <DomainsPage />}
+          {page === "mailboxes" && (
+            <MailboxesPage
+              initialOpen={pendingMailbox}
+              onConsumed={() => setPendingMailbox(null)}
+            />
+          )}
+          {page === "domains" && (
+            <DomainsPage
+              initialOpen={pendingDomain}
+              onConsumed={() => setPendingDomain(null)}
+            />
+          )}
           {page === "suppressions" && <SuppressionsPage />}
           {page === "provider-events" && <ProviderEventsPage />}
           {page === "delivery-events" && <DeliveryEventsPage />}
