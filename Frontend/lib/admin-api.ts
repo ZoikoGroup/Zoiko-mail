@@ -87,13 +87,27 @@ export interface ConnectorDto {
   status: "ACTIVE" | "REAUTH_REQUIRED" | "IDLE";
 }
 
+/** Failure counts behind the dashboard's failed-sends tile. */
+export interface DeliveryFailureSummaryDto {
+  windowHours: number;
+  failed: number;
+  /** Per-type breakdown, so the tile can say what kind of failure it saw. */
+  byType: Record<string, number>;
+}
+
 export interface DashboardDto {
-  tenant: { name: string; planCode: string; region: string; status: string };
+  /**
+   * `timezone`, not `region`. The tenant has no region column — Data Model
+   * §6.1 specifies `primary_region` and the schema does not implement it — so
+   * the subtitle used to print the timezone under the word "region". Naming
+   * the field for what it holds is what stops that recurring.
+   */
+  tenant: { name: string; planCode: string; timezone: string; status: string };
   counts: {
     people: number;
     pendingInvitations: number;
     mailboxes: number;
-    mailboxSeats: number;
+    suspendedMailboxes: number;
     connectedAccounts: number;
     connectedGmail: number;
     connectedMicrosoft: number;
@@ -101,10 +115,11 @@ export interface DashboardDto {
     domainsTotal: number;
     mfaCovered: number;
     mfaTotal: number;
-    failedSends24h: number;
     storageUsedGb: number;
     storageLimitGb: number;
   };
+  /** Null while the read is in flight or refused; the tile then shows "—". */
+  deliveryFailures: DeliveryFailureSummaryDto | null;
   recentAudit: AuditEventDto[];
   providerSync: ConnectorDto[];
 }

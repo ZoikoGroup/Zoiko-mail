@@ -1,4 +1,4 @@
-import { Prisma, type MailFolder, type MembershipRole, type MessageStatus, type RecipientType } from "@prisma/client";
+import { Prisma, type DeliveryEventType, type MailFolder, type MembershipRole, type MessageStatus, type RecipientType } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 import { env } from "../../config/env.js";
 import { AppError } from "../../common/errors/AppError.js";
@@ -22,6 +22,26 @@ interface MailContext {
   ipAddress?: string | null;
   userAgent?: string | null;
 }
+
+/**
+ * What counts as a failed send.
+ *
+ * Deliberately narrower than "did not reach the inbox". A COMPLAINED event
+ * means the message *did* arrive and the recipient objected; SUPPRESSED and
+ * RATE_LIMITED mean Zoiko itself declined to send, which is a control working
+ * rather than a delivery failing; DEFERRED is still in flight. Folding any of
+ * them in would make the dashboard tile disagree with the delivery feed one
+ * click away, which is worse than a narrower number.
+ */
+const FAILED_DELIVERY_TYPES = [
+  "FAILED",
+  "BOUNCED",
+  "REJECTED",
+  "BLOCKED",
+  "PROVIDER_ERROR",
+] as const satisfies readonly DeliveryEventType[];
+
+type FailedDeliveryType = (typeof FAILED_DELIVERY_TYPES)[number];
 
 const messageInclude = {
   recipients: { orderBy: [{ type: "asc" as const }, { email: "asc" as const }] },
@@ -724,6 +744,55 @@ export class MailService {
       fromAddress: e.message?.fromAddress ?? null,
       recipients: e.message?.recipients ?? [],
     }));
+  }
+
+  /**
+   * Failed-send counts over a trailing window, for the admin dashboard tile.
+   *
+   * A count rather than a page of rows, for two reasons. The tile needs one
+   * number, and the feed above caps at 200 — so counting rows client-side
+   * would silently under-report the moment a workspace had more failures than
+   * the page size, which is exactly when the number matters most.
+   *
+   * `byType` is returned alongside the total so the tile can explain itself
+   * without a second call: "3 bounced, 1 rejected" is actionable where a bare
+   * 4 is not.
+   */
+  async adminDeliveryFailureSummary(
+    input: { windowHours: number },
+    context: MailContext
+  ) {
+    const since = new Date(Date.now() - input.windowHours * 3_600_000);
+
+    const grouped = await prisma.deliveryEvent.groupBy({
+      by: ["type"],
+      where: {
+        tenantId: context.tenantId,
+        type: { in: [...FAILED_DELIVERY_TYPES] },
+        createdAt: { gte: since },
+      },
+      _count: { _all: true },
+    });
+
+    // Every failure type is present with an explicit zero, so the client never
+    // has to distinguish "no failures of this kind" from "key absent".
+    const byType = Object.fromEntries(
+      FAILED_DELIVERY_TYPES.map((type) => [type, 0])
+    ) as Record<FailedDeliveryType, number>;
+
+    let failed = 0;
+    for (const row of grouped) {
+      const count = row._count._all;
+      byType[row.type as FailedDeliveryType] = count;
+      failed += count;
+    }
+
+    return {
+      windowHours: input.windowHours,
+      since: since.toISOString(),
+      failed,
+      byType,
+    };
   }
 
   async updateSendingStatus(

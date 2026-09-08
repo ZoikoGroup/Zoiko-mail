@@ -80,6 +80,16 @@ export const adminDeliveryEventsQuerySchema = z.object({
   ]).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
 });
+/**
+ * Trailing window for the delivery-failure count.
+ *
+ * Capped at a week: the dashboard tile asks about recent operational health,
+ * and an unbounded window would turn a cheap aggregate into a full-table
+ * count as a workspace ages.
+ */
+export const adminDeliverySummaryQuerySchema = z.object({
+  windowHours: z.coerce.number().int().min(1).max(168).default(24),
+});
 export const updateMailboxItemSchema = z.object({
   isRead: z.boolean().optional(),
   isStarred: z.boolean().optional(),

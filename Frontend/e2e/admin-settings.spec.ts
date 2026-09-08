@@ -15,6 +15,13 @@ const API = "**/api/v1";
 interface Tenant {
   id: string;
   name: string;
+  /**
+   * The real GET /tenants/current returns this, and the dashboard reads it on
+   * the way through to the settings screen. Omitting it here made the stub
+   * unfaithful in a way that only showed up once the dashboard rendered fast
+   * enough to reach it.
+   */
+  status: string;
   planCode: string;
   timezone: string;
   allowedDomains: string[];
@@ -149,6 +156,7 @@ test.describe("workspace settings save", () => {
   const initial: Tenant = {
     id: "t1",
     name: "Acme Corp",
+    status: "ACTIVE",
     planCode: "starter",
     timezone: "Europe/London",
     allowedDomains: ["acme.test"],

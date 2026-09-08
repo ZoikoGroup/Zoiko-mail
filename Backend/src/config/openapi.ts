@@ -715,6 +715,26 @@ export const openApiDocument = {
         responses: { "200": ok("Delivery events returned"), "404": { $ref: "#/components/responses/NotFound" } },
       },
     },
+    "/api/v1/mail/admin/delivery-events/summary": {
+      get: {
+        tags: ["Mail"],
+        summary: "Failed-send counts over a trailing window (OWNER/ADMIN)",
+        operationId: "adminDeliveryFailureSummary",
+        security: bearer,
+        parameters: [
+          {
+            name: "windowHours",
+            in: "query",
+            schema: { type: "integer", minimum: 1, maximum: 168, default: 24 },
+            description: "Trailing window in hours. Defaults to the last 24 hours.",
+          },
+        ],
+        responses: {
+          "200": ok("Failure counts returned"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+        },
+      },
+    },
     "/api/v1/mail/admin/delivery-events": {
       get: {
         tags: ["Mail"], summary: "Tenant-wide delivery event feed (OWNER/ADMIN)", security: bearer,

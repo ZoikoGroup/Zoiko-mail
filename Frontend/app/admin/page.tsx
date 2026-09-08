@@ -45,11 +45,30 @@ export default function AdminDashboardPage() {
   const mfaGap = c.mfaTotal - c.mfaCovered;
   const pct = (used: number, total: number) => (total > 0 ? (used / total) * 100 : 0);
 
+  const failures = data.deliveryFailures;
+  /**
+   * "3 bounced, 1 rejected" rather than a bare total — a failed send is
+   * actionable only once you know which kind it was. Zero-count types are
+   * dropped so the line names what happened, not what didn't.
+   */
+  const failureBreakdown = failures
+    ? Object.entries(failures.byType)
+        .filter(([, count]) => count > 0)
+        .sort(([, a], [, b]) => b - a)
+        .map(([type, count]) => `${count} ${type.toLowerCase().replace(/_/g, " ")}`)
+        .join(" · ")
+    : "";
+  const failureWindowLabel = failures
+    ? failures.windowHours === 24
+      ? "last 24 hours"
+      : `last ${failures.windowHours} hours`
+    : "unavailable";
+
   return (
     <>
       <PageHeader
         title="Dashboard"
-        subtitle={`${data.tenant.name} · ${data.tenant.planCode} plan · ${data.tenant.region} region · tenant ${data.tenant.status}`}
+        subtitle={`${data.tenant.name} · ${data.tenant.planCode} plan · ${data.tenant.timezone} · tenant ${data.tenant.status}`}
         action={
           can("people.invite.member") ? (
             <Link href="/admin/invitations" className="zoiko-btn pri">
@@ -59,7 +78,16 @@ export default function AdminDashboardPage() {
         }
       />
 
-      <StaticNote>Mirrors GET /admin/dashboard — one aggregate call, not seven</StaticNote>
+      {/*
+        There is no GET /admin/dashboard. This note used to claim one, which
+        made the page look like it had an endpoint nobody could find. The
+        composition is deliberate — see useDashboard — so the note says what
+        the page actually does.
+      */}
+      <StaticNote>
+        Composed from the individual reads, so one failing subsystem cannot blank
+        the page
+      </StaticNote>
 
       {mfaGap > 0 && (
         <Notice tone="warn">
@@ -73,12 +101,20 @@ export default function AdminDashboardPage() {
 
       <div className="mb-5 grid grid-cols-[repeat(auto-fit,minmax(152px,1fr))] gap-2.5">
         <StatTile label="Users" value={c.people} sub={`${c.pendingInvitations} pending invites`} />
+        {/*
+          No meter and no "/seats" suffix. Seat entitlement is billing data an
+          Admin cannot read, so the old denominator was the mailbox count
+          itself — a bar that was always full and always meaningless.
+        */}
         <StatTile
           label="Mailboxes"
           value={c.mailboxes}
-          suffix={`/${c.mailboxSeats}`}
-          tone="ok"
-          meter={pct(c.mailboxes, c.mailboxSeats)}
+          sub={
+            c.suspendedMailboxes > 0
+              ? `${c.suspendedMailboxes} suspended`
+              : "none suspended"
+          }
+          tone={c.suspendedMailboxes > 0 ? "warn" : undefined}
         />
         <StatTile
           label="Connected"
@@ -98,11 +134,16 @@ export default function AdminDashboardPage() {
           tone="warn"
           meter={pct(c.mfaCovered, c.mfaTotal)}
         />
+        {/*
+          Real delivery failures, counted server-side. This tile used to show
+          the number of suspended mailboxes under a "last 24 hours" label —
+          a different quantity over a different period.
+        */}
         <StatTile
           label="Failed sends"
-          value={c.failedSends24h}
-          sub="last 24 hours"
-          tone={c.failedSends24h > 0 ? "crit" : undefined}
+          value={failures ? failures.failed : "—"}
+          sub={failureBreakdown || failureWindowLabel}
+          tone={failures && failures.failed > 0 ? "crit" : undefined}
         />
         <StatTile
           label="Storage"
@@ -117,7 +158,11 @@ export default function AdminDashboardPage() {
           title="Recent audit events"
           action={
             can("audit.read") ? (
-              <span className="zoiko-btn sm cursor-default opacity-60">View log · soon</span>
+              // /admin/audit exists and reads GET /audit/events. This was a
+              // disabled "soon" label sitting next to a working screen.
+              <Link href="/admin/audit" className="zoiko-btn sm">
+                View log
+              </Link>
             ) : undefined
           }
         >

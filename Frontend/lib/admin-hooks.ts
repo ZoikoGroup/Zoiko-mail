@@ -19,6 +19,7 @@ import {
   fetchAuditEvents,
   fetchCommitments,
   fetchConnectors,
+  fetchDeliveryFailures,
   fetchDomains,
   fetchGroups,
   fetchInvitations,
@@ -41,6 +42,7 @@ import type {
   CommitmentDto,
   ConnectorDto,
   DashboardDto,
+  DeliveryFailureSummaryDto,
   DomainDto,
   GroupDto,
   GuardrailDto,
@@ -221,6 +223,36 @@ export function useAdminNavCounts(): Partial<Record<string, number>> {
   return counts;
 }
 
+/* ── delivery health ───────────────────────────────────────────────────── */
+
+/**
+ * Failed sends over a trailing window.
+ *
+ * `retry: false` because the only expected failure is a 403 from a caller
+ * without the operator role, and retrying a permission denial three times just
+ * delays the tile settling on "—".
+ */
+/** Whether a response really is a failure summary and can be read as one. */
+function isFailureSummary(value: unknown): value is DeliveryFailureSummaryDto {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<DeliveryFailureSummaryDto>;
+  return (
+    typeof candidate.failed === "number" &&
+    typeof candidate.windowHours === "number" &&
+    typeof candidate.byType === "object" &&
+    candidate.byType !== null
+  );
+}
+
+export function useDeliveryFailures(windowHours = 24) {
+  return useQuery({
+    queryKey: ["delivery-failures", windowHours],
+    queryFn: () => fetchDeliveryFailures(windowHours),
+    retry: false,
+    ...LIVE,
+  });
+}
+
 /* ── dashboard ─────────────────────────────────────────────────────────── */
 
 /**
@@ -238,10 +270,19 @@ export function useDashboard(): QueryLike<DashboardDto> {
   const domains = useDomains();
   const connectors = useConnectors();
   const audit = useAuditEvents();
+  const failures = useDeliveryFailures();
 
+  // `failures` is deliberately absent from `parts`: the endpoint is
+  // OWNER/ADMIN-only, so a caller who reaches this page without the role gets
+  // a 403 there and nowhere else. Letting that blank the whole dashboard would
+  // trade one missing tile for six working ones.
   const parts = [tenant, members, mailboxes, domains, connectors, audit];
   const isLoading = parts.some((p) => p.isLoading);
   const error = (parts.find((p) => p.error)?.error as Error) ?? null;
+
+  const failureSummary: DeliveryFailureSummaryDto | null = isFailureSummary(failures.data)
+    ? failures.data
+    : null;
 
   if (isLoading || !tenant.data || !members.data) {
     return { data: undefined, isLoading, error };
@@ -257,19 +298,27 @@ export function useDashboard(): QueryLike<DashboardDto> {
       tenant: {
         name: tenant.data.name,
         planCode: tenant.data.planCode,
-        // Region is not modelled on the tenant; show the timezone, which is.
-        region: tenant.data.timezone ?? "—",
-        status: tenant.data.status.toLowerCase(),
+        // Labelled as a timezone because that is what it is. `primary_region`
+        // (Data Model §6.1) is not in the schema, and printing the timezone
+        // under the word "region" was the bug this replaces.
+        timezone: tenant.data.timezone ?? "UTC",
+        // Optional-chained even though the type says it is always present. A
+        // response missing this field used to throw here and take the whole
+        // dashboard down to an unhandled error — a white screen is a far worse
+        // answer to a partial payload than the word "unknown".
+        status: tenant.data.status?.toLowerCase() ?? "unknown",
       },
       counts: {
         // Every membership except REMOVED, which is what the API returns.
         people: people.length,
         pendingInvitations: people.filter((m) => m.status === "INVITED").length,
         mailboxes: boxes.length,
-        // Seat entitlement lives with billing, which is the Owner's domain and
-        // has no endpoint. Falls back to the mailbox count so the meter reads
-        // full rather than implying headroom that may not exist.
-        mailboxSeats: boxes.length,
+        // No seat entitlement here, and so no meter on the tile. Seats live
+        // with billing, which the capability matrix withholds from an Admin
+        // (`billing.read` is Owner-only) — so the previous fallback of
+        // `mailboxSeats = boxes.length` could only ever draw a full bar, which
+        // read as "at capacity" rather than "unknown".
+        suspendedMailboxes: boxes.filter((m) => m.status === "SUSPENDED").length,
         connectedAccounts: conns.length,
         connectedGmail: conns.filter((c) => c.name === "Gmail").length,
         connectedMicrosoft: conns.filter((c) => c.name === "Microsoft 365").length,
@@ -280,12 +329,16 @@ export function useDashboard(): QueryLike<DashboardDto> {
         // dashboard's warning then states something true.
         mfaCovered: 0,
         mfaTotal: people.filter((m) => m.status === "ACTIVE").length,
-        // Suspended mailboxes are the closest real signal to failed sending
-        // until the delivery-events read is wired.
-        failedSends24h: boxes.filter((m) => m.status === "SUSPENDED").length,
         storageUsedGb: boxes.reduce((sum, m) => sum + m.storageUsedGb, 0),
         storageLimitGb: boxes.reduce((sum, m) => sum + m.storageLimitGb, 0),
       },
+      // Real delivery failures now, from GET /mail/admin/delivery-events/summary.
+      // Null rather than 0 while unavailable: "no failures" and "could not
+      // read" are different facts and the tile renders them differently.
+      // Shape-checked rather than trusted, so a proxy or an older build
+      // answering with a different body degrades to "—" instead of throwing
+      // inside the tile.
+      deliveryFailures: failureSummary,
       recentAudit: (audit.data ?? []).slice(0, 6),
       providerSync: conns.slice(0, 6),
     },

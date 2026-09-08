@@ -2,12 +2,21 @@ import { Router } from "express";
 import { authenticate, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./mail.controller.js";
 import { attachmentUpload } from "./attachment.middleware.js";
-import { adminDeliveryEventsQuerySchema, adminUpdateMailboxSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
+import { adminDeliveryEventsQuerySchema, adminDeliverySummaryQuerySchema, adminUpdateMailboxSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
 
 const mailRouter = Router();
 mailRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBER"));
 // Admin literal paths MUST be registered before any /:messageId routes,
 // otherwise "/admin/delivery-events" is captured as messageId="admin".
+// The count goes before the feed: both are exact literals so Express would
+// match either way, but keeping the more specific path first is the habit that
+// stops the next nested route being swallowed.
+mailRouter.get(
+  "/admin/delivery-events/summary",
+  requireRole("OWNER", "ADMIN"),
+  validate(adminDeliverySummaryQuerySchema, "query"),
+  controller.adminDeliveryFailureSummary
+);
 mailRouter.get(
   "/admin/delivery-events",
   requireRole("OWNER", "ADMIN"),

@@ -20,6 +20,7 @@ import type {
   AuditEventDto,
   CommitmentDto,
   ConnectorDto,
+  DeliveryFailureSummaryDto,
   DomainDto,
   GroupDto,
   InvitationDto,
@@ -283,6 +284,24 @@ export async function fetchSyncErrors(): Promise<SyncErrorDto[]> {
     ago: ago(e.receivedAt),
     action: "Replay",
   }));
+}
+
+/* ── delivery health ───────────────────────────────────────────────────── */
+
+/**
+ * Failed-send counts for the dashboard tile.
+ *
+ * A dedicated count endpoint rather than counting rows from the delivery feed:
+ * that feed is capped at 200 rows, so counting client-side would under-report
+ * exactly when the number matters. The server decides what counts as a
+ * failure, so the tile and the feed cannot drift apart.
+ */
+export async function fetchDeliveryFailures(
+  windowHours = 24
+): Promise<DeliveryFailureSummaryDto> {
+  return apiRequest<DeliveryFailureSummaryDto>(
+    `/mail/admin/delivery-events/summary?windowHours=${windowHours}`
+  );
 }
 
 /* ── policies ──────────────────────────────────────────────────────────── */

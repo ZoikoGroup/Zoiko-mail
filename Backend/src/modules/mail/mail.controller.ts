@@ -124,6 +124,17 @@ export const adminListDeliveryEvents = asyncHandler(async (req: Request, res: Re
     req.requestId
   );
 });
+export const adminDeliveryFailureSummary = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(
+    res,
+    200,
+    await mailService.adminDeliveryFailureSummary(
+      req.query as unknown as { windowHours: number },
+      context(req)
+    ),
+    req.requestId
+  );
+});
 export const updateSendingStatus = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(
     res,
