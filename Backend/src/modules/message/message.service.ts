@@ -3,6 +3,7 @@ import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import type { ListMessagesInput, ListThreadsInput } from "./message.schema.js";
+import { messageListSelect, toListMessage } from "./message.utils.js";
 
 interface MessageContext {
   tenantId: string;
@@ -63,7 +64,9 @@ export class MessageService {
     const [items, total] = await prisma.$transaction([
       prisma.mailboxMessage.findMany({
         where,
-        include: { message: { include: messageInclude } },
+        // §13: "Metadata and snippets only". The body is available from
+        // `get()` below, which is the authorized detail-by-id read.
+        include: { message: { select: messageListSelect } },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         skip: (filters.page - 1) * filters.limit,
         take: filters.limit,
@@ -73,7 +76,7 @@ export class MessageService {
     return {
       messages: items.map((item) => ({
         mailbox: { folder: item.folder, isRead: item.isRead, receivedAt: item.createdAt },
-        ...protectBcc(item.message, context.userId),
+        ...toListMessage(item.message, context.userId),
       })),
       pagination: {
         page: filters.page,
@@ -132,7 +135,11 @@ export class MessageService {
               tenantId: context.tenantId,
               mailboxItems: { some: { tenantId: context.tenantId, mailboxId: mailbox.id } },
             },
-            include: messageInclude,
+            // §13: threads list is "Metadata only ... No full message bodies".
+            // The screen wants a preview, which is what `snippet` is for — it
+            // used to take the whole body and slice 140 characters in the
+            // browser.
+            select: messageListSelect,
             orderBy: { createdAt: "desc" },
             take: 1,
           },
@@ -146,7 +153,7 @@ export class MessageService {
     return {
       threads: threads.map((thread) => ({
         ...thread,
-        messages: thread.messages.map((message) => protectBcc(message, context.userId)),
+        messages: thread.messages.map((message) => toListMessage(message, context.userId)),
       })),
       pagination: {
         page: filters.page,

@@ -47,8 +47,35 @@ export interface EmailMessage {
   author: { id: string; email: string; displayName: string };
 }
 
-// A row in a folder = mailbox item + its message + labels.
-export interface MailItem {
+/**
+ * A message as a list endpoint returns it: metadata, a snippet, and a count
+ * of attachments — no body.
+ *
+ * List responses carry this and detail responses carry `EmailMessage`, which
+ * is why they are separate types rather than one with optional fields. The
+ * API stopped shipping bodies in lists (API §9 / AC-011), and an optional
+ * `textBody` would let a screen read one and silently render nothing.
+ */
+export interface EmailMessageSummary {
+  id: string;
+  subject: string;
+  snippet: string | null;
+  status: MessageStatus;
+  sentAt: string | null;
+  scheduledAt: string | null;
+  threadId: string | null;
+  authorUserId: string;
+  fromAddress: string | null;
+  fromName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  recipients: MailRecipient[];
+  hasAttachments: boolean;
+  attachmentCount: number;
+  author: { id: string; email: string; displayName: string };
+}
+
+interface MailItemBase {
   id: string;
   messageId: string;
   folder: MailFolder;
@@ -57,6 +84,15 @@ export interface MailItem {
   createdAt: string;
   updatedAt: string;
   labels: MailLabel[];
+}
+
+/** A row in a folder listing. */
+export interface MailListItem extends MailItemBase {
+  message: EmailMessageSummary;
+}
+
+/** A single message read by id, and what the mutations return. */
+export interface MailItem extends MailItemBase {
   message: EmailMessage;
 }
 
@@ -71,7 +107,7 @@ export interface MailPagination {
 }
 
 export interface ListMailResponse {
-  items: MailItem[];
+  items: MailListItem[];
   pagination: MailPagination;
 }
 
@@ -235,15 +271,27 @@ export async function downloadAttachment(
 // The list view returns one thread per row with only the most recent message
 // preview inside; the detail view returns the full message list chronologically.
 
-export interface MessageThread {
+interface MessageThreadBase {
   id: string;
   subjectNormalized: string;
   messageCount: number;
   lastMessageAt: string;
   createdAt: string;
-  // In list responses this contains only the most recent message (backend
-  // does `take: 1`). In detail responses it contains all messages in
-  // chronological order.
+}
+
+/**
+ * A thread in a list response: the most recent message only (the backend does
+ * `take: 1`), and as a summary rather than a full message.
+ *
+ * The list screen shows a preview, which is what `snippet` is for. It used to
+ * receive the whole body and cut 140 characters out of it in the browser.
+ */
+export interface ThreadSummary extends MessageThreadBase {
+  messages: EmailMessageSummary[];
+}
+
+/** A thread read by id: every message it holds, in chronological order. */
+export interface MessageThread extends MessageThreadBase {
   messages: EmailMessage[];
 }
 
@@ -255,7 +303,7 @@ export interface ThreadPagination {
 }
 
 export interface ListThreadsResponse {
-  threads: MessageThread[];
+  threads: ThreadSummary[];
   pagination: ThreadPagination;
 }
 

@@ -7,7 +7,12 @@ import { auditService } from "../audit/audit.service.js";
 import { billingService } from "../billing/billing.service.js";
 import { policyService } from "../policy/policy.service.js";
 import { attachmentStorage } from "./attachment.storage.js";
-import { normalizeSubject, uniqueParticipants } from "../message/message.utils.js";
+import {
+  messageListSelect,
+  normalizeSubject,
+  toListMessage,
+  uniqueParticipants,
+} from "../message/message.utils.js";
 import { deliveryProtectionService } from "../delivery-protection/delivery-protection.service.js";
 import { jobService } from "../job/job.service.js";
 import type { BulkMailboxActionInput, CreateDraftInput, CreateLabelInput, ListMailInput, UpdateDraftInput, UpdateLabelInput, UpdateMailboxItemInput } from "./mail.schema.js";
@@ -866,8 +871,11 @@ export class MailService {
     const [items, total] = await prisma.$transaction([
       prisma.mailboxMessage.findMany({
         where,
+        // Metadata and a snippet, never the body — API §9 / AC-011. The
+        // reading pane gets its content from `get()` below, which is a
+        // detail-by-id read and permitted to return it.
         include: {
-          message: { include: messageInclude },
+          message: { select: messageListSelect },
           labels: { include: { label: true }, orderBy: { label: { name: "asc" } } },
         },
         orderBy: { createdAt: "desc" },
@@ -880,12 +888,7 @@ export class MailService {
       items: items.map((item) => ({
         ...item,
         labels: item.labels.map((entry) => entry.label),
-        message: {
-          ...item.message,
-          recipients: item.message.authorUserId === context.userId
-            ? item.message.recipients
-            : item.message.recipients.filter((recipient) => recipient.type !== "BCC"),
-        },
+        message: toListMessage(item.message, context.userId),
       })),
       pagination: { ...filters, total, totalPages: Math.ceil(total / filters.limit) },
     };

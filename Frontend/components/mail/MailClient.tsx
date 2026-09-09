@@ -28,7 +28,12 @@ import {
 import { ComposeModal } from "@/components/mail/ComposeModal";
 import { Modal } from "@/components/ui/Modal";
 import type { ComposerMode } from "@/lib/mail-hooks";
-import { downloadAttachment, type MailFolder, type MailItem } from "@/lib/mail-api";
+import {
+  downloadAttachment,
+  type MailFolder,
+  type MailItem,
+  type MailListItem,
+} from "@/lib/mail-api";
 import {
   DropdownMenu, DropdownItem,
 } from "@/components/ui/DropdownMenu";
@@ -70,7 +75,8 @@ function bytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function sender(item: MailItem): string {
+/** Works for a list row or a detail read — both carry the sender fields. */
+function sender(item: MailListItem | MailItem): string {
   const m = item.message;
   return m.fromName || m.fromAddress || m.author?.displayName || m.author?.email || "Unknown";
 }
@@ -367,7 +373,10 @@ export function MailClient() {
                       {it.message.subject || "(no subject)"}
                     </span>
                     <div className="flex items-center gap-1.5">
-                      {it.message.attachments.length > 0 && (
+                      {/* A flag, not the attachment list — the list endpoint
+                          returns `has_attachments` per API §9 and names the
+                          files only on the detail read. */}
+                      {it.message.hasAttachments && (
                         <Paperclip className="h-3 w-3 text-[var(--ink3)]" />
                       )}
                       {it.labels.slice(0, 2).map((l) => (
