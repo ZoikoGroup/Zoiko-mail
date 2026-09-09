@@ -9,3 +9,5 @@ dist/
 coverage/
 *.log
 storage/
+# Local writable secret store (connector OAuth tokens) — never commit.
+.secrets/

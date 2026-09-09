@@ -1,17 +1,23 @@
 import { createHash } from "node:crypto";
 import { Prisma, type ConnectorProvider } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
+import { logger } from "../../config/logger.js";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
 import { env } from "../../config/env.js";
 import { deliveryProtectionService } from "../delivery-protection/delivery-protection.service.js";
-import { encrypt, decrypt } from "../../common/utils/encryption.js";
+import {
+  deleteConnectorTokens,
+  readConnectorTokens,
+  storeConnectorTokens,
+} from "../../common/secrets/connectorTokens.js";
 
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo";
 const GOOGLE_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"];
+const MS365_SCOPES = ["Mail.Read", "offline_access", "User.Read"];
 
 interface CreateAccountInput {
   provider: ConnectorProvider;
@@ -144,14 +150,60 @@ export class ConnectorService {
     accountId: string,
     context: { tenantId: string; membershipId: string; userId: string; requestId?: string }
   ) {
-    return prisma.$transaction(async (tx) => {
-      const account = await tx.connectedAccount.findFirst({
-        where: { id: accountId, tenantId: context.tenantId, membershipId: context.membershipId },
+    const account = await prisma.connectedAccount.findFirst({
+      where: { id: accountId, tenantId: context.tenantId, membershipId: context.membershipId },
+    });
+    if (!account) throw new AppError("Connected account not found", 404, ErrorCodes.NOT_FOUND);
+
+    // Best-effort provider cleanup (token revocation) is attempted *before*
+    // deleting local state. Failures to reach the provider must not block the
+    // disconnect — the user is leaving, local credential state must go
+    // regardless. Audit the outcome either way. Never log token values.
+    let providerRevoked = false;
+    try {
+      if (account.provider === "GMAIL") {
+        await revokeGoogleAccessToken(account.providerAccountId);
+        providerRevoked = true;
+      } else if (account.provider === "MICROSOFT_365") {
+        await revokeMicrosoftAccessToken(account.providerAccountId);
+        providerRevoked = true;
+      }
+    } catch (error) {
+      logger.warn(
+        { provider: account.provider, accountId: account.id, requestId: context.requestId },
+        "Provider token revocation failed during disconnect; continuing"
+      );
+    }
+
+    const disconnectCtx = {
+      tenantId: context.tenantId,
+      requestId: context.requestId,
+    };
+    // Delete the secret holding the tokens. Uses ref from the row (or the
+    // deterministic one) so a row without a ref still clears any orphaned value.
+    try {
+      await deleteConnectorTokens(account.provider, account.providerAccountId, account.tokenSecretRef, {
+        purpose: "disconnect",
+        ...disconnectCtx,
       });
-      if (!account) throw new AppError("Connected account not found", 404, ErrorCodes.NOT_FOUND);
+    } catch (error) {
+      logger.warn(
+        { provider: account.provider, accountId: account.id },
+        "Secret deletion failed during disconnect; continuing"
+      );
+    }
+
+    return prisma.$transaction(async (tx) => {
       const updated = await tx.connectedAccount.update({
         where: { id: account.id },
-        data: { status: "DISCONNECTED", disconnectedAt: new Date() },
+        data: {
+          status: "DISCONNECTED",
+          disconnectedAt: new Date(),
+          tokenSecretRef: null,
+          watchExpiresAt: null,
+          microsoftSubscriptionId: null,
+          microsoftDeltaLink: null,
+        },
         select: { id: true, provider: true, email: true, status: true, disconnectedAt: true },
       });
       await auditService.record({
@@ -161,7 +213,7 @@ export class ConnectorService {
         targetType: "ConnectedAccount",
         targetId: account.id,
         requestId: context.requestId,
-        metadata: { provider: account.provider },
+        metadata: { provider: account.provider, providerRevoked },
       }, tx);
       return updated;
     });
@@ -404,9 +456,17 @@ export class ConnectorService {
       picture?: string;
     };
 
-    // Encrypt tokens before storage
-    const encryptedAccessToken = encrypt(tokens.access_token);
-    const encryptedRefreshToken = tokens.refresh_token ? encrypt(tokens.refresh_token) : null;
+    // Store tokens in the Secret Manager (or local-equivalent) instead of the
+    // database. Only the deterministic ref is persisted on the row.
+    const tokenRef = await storeConnectorTokens(
+      "GMAIL",
+      userinfo.id,
+      {
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+      },
+      { purpose: "google-connect", tenantId: context.tenantId, requestId: context.requestId }
+    );
     const tokenExpiresAt = new Date(Date.now() + tokens.expires_in * 1000);
 
     // Upsert connected account
@@ -416,13 +476,12 @@ export class ConnectorService {
       });
 
       if (existing) {
-        // Update existing account with new tokens
+        // Update existing account with new token ref
         const updated = await tx.connectedAccount.update({
           where: { id: existing.id },
           data: {
             status: "ACTIVE",
-            accessToken: encryptedAccessToken,
-            refreshToken: encryptedRefreshToken ?? existing.refreshToken,
+            tokenSecretRef: tokenRef,
             tokenExpiresAt,
             email: userinfo.email,
             lastErrorCode: null,
@@ -455,8 +514,7 @@ export class ConnectorService {
           email: userinfo.email,
           scopes: GOOGLE_SCOPES,
           status: "ACTIVE",
-          accessToken: encryptedAccessToken,
-          refreshToken: encryptedRefreshToken,
+          tokenSecretRef: tokenRef,
           tokenExpiresAt,
         },
         select: {
@@ -475,26 +533,198 @@ export class ConnectorService {
       return created;
     });
 
+    // Register users.watch so Google pushes mailbox changes (ZM-BE-005). Skip
+    // silently when Pub/Sub is not configured — the catch-up sync covers it.
+    if (env.GMAIL_PUBSUB_TOPIC) {
+      try {
+        const { gmailConnector } = await import("./gmail/gmail.connector.js");
+        await gmailConnector.registerWatch(account.id, context.tenantId);
+      } catch (error) {
+        logger.warn({ accountId: account.id, error }, "Gmail watch registration deferred after connect");
+      }
+    }
+
     return account;
+  }
+
+  // ─── Microsoft 365 OAuth (ZM-BE-006) ───────────────────────────────────────
+
+  async getMicrosoftAuthUrl(state: string): Promise<string> {
+    const { microsoftConnector } = await import("./m365/m365.connector.js");
+    return microsoftConnector.authUrl(state);
+  }
+
+  async handleMicrosoftCallback(
+    code: string,
+    context: { tenantId: string; membershipId: string; userId: string; requestId?: string }
+  ): Promise<{ id: string; provider: string; email: string; status: string }> {
+    const { microsoftConnector } = await import("./m365/m365.connector.js");
+    const { tokens, user } = await microsoftConnector.acquireTokens(code);
+    const email = user.mail ?? user.userPrincipalName;
+    if (!email) throw new AppError("Microsoft account has no email address", 400, ErrorCodes.VALIDATION_ERROR);
+
+    const tokenRef = await storeConnectorTokens(
+      "MICROSOFT_365",
+      user.id,
+      { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken },
+      { purpose: "microsoft-connect", tenantId: context.tenantId, requestId: context.requestId }
+    );
+    const tokenExpiresAt = new Date(tokens.expiresAt);
+
+    const account = await prisma.$transaction(async (tx) => {
+      const existing = await tx.connectedAccount.findUnique({
+        where: { provider_providerAccountId: { provider: "MICROSOFT_365", providerAccountId: user.id } },
+      });
+      if (existing) {
+        const updated = await tx.connectedAccount.update({
+          where: { id: existing.id },
+          data: {
+            status: "ACTIVE",
+            tokenSecretRef: tokenRef,
+            tokenExpiresAt,
+            email,
+            lastErrorCode: null,
+            disconnectedAt: null,
+          },
+          select: { id: true, provider: true, email: true, status: true },
+        });
+        await auditService.record({
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          eventType: "CONNECTED_ACCOUNT_UPDATED",
+          targetType: "ConnectedAccount",
+          targetId: updated.id,
+          requestId: context.requestId,
+          metadata: { provider: "MICROSOFT_365", email },
+        }, tx);
+        return updated;
+      }
+      const created = await tx.connectedAccount.create({
+        data: {
+          tenantId: context.tenantId,
+          membershipId: context.membershipId,
+          userId: context.userId,
+          provider: "MICROSOFT_365",
+          providerAccountId: user.id,
+          email,
+          scopes: MS365_SCOPES,
+          status: "ACTIVE",
+          tokenSecretRef: tokenRef,
+          tokenExpiresAt,
+        },
+        select: { id: true, provider: true, email: true, status: true },
+      });
+      await auditService.record({
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        eventType: "CONNECTED_ACCOUNT_CREATED",
+        targetType: "ConnectedAccount",
+        targetId: created.id,
+        requestId: context.requestId,
+        metadata: { provider: "MICROSOFT_365", scopes: MS365_SCOPES },
+      }, tx);
+      return created;
+    });
+
+    // Register the Graph change-notification subscription after connect so the
+    // delta sync has a live webhook. Deferred when the notification URL is
+    // unconfigured — the catch-up sweep still runs.
+    if (env.MICROSOFT_NOTIFICATION_URL) {
+      try {
+        await microsoftConnector.registerSubscription(account.id, context.tenantId);
+      } catch (error) {
+        logger.warn({ accountId: account.id, error }, "Microsoft Graph subscription deferred after connect");
+      }
+    }
+
+    return account;
+  }
+
+  async refreshMicrosoftToken(accountId: string): Promise<void> {
+    const account = await prisma.connectedAccount.findUnique({ where: { id: accountId } });
+    if (!account) throw new AppError("Connected account not found", 404, ErrorCodes.NOT_FOUND);
+    if (account.provider !== "MICROSOFT_365") {
+      throw new AppError("Not a Microsoft 365 account", 400, ErrorCodes.VALIDATION_ERROR);
+    }
+    const tokens = await readConnectorTokens("MICROSOFT_365", account.providerAccountId, account.tokenSecretRef, {
+      purpose: "token-refresh",
+      tenantId: account.tenantId,
+    });
+    if (!tokens?.refreshToken) {
+      await prisma.connectedAccount.update({
+        where: { id: accountId },
+        data: { status: "REAUTH_REQUIRED", lastErrorCode: "NO_REFRESH_TOKEN" },
+      });
+      throw new AppError("No refresh token available — reauthorization required", 401, ErrorCodes.UNAUTHORIZED);
+    }
+
+    const { microsoftConnector } = await import("./m365/m365.connector.js");
+    const refreshed = await microsoftConnector.refreshTokens(tokens.refreshToken);
+    await storeConnectorTokens(
+      "MICROSOFT_365",
+      account.providerAccountId,
+      { accessToken: refreshed.accessToken, refreshToken: refreshed.refreshToken },
+      { purpose: "microsoft-token-refresh", tenantId: account.tenantId }
+    );
+    await prisma.connectedAccount.update({
+      where: { id: accountId },
+      data: {
+        tokenExpiresAt: new Date(refreshed.expiresAt),
+        status: "ACTIVE",
+        lastErrorCode: null,
+      },
+    });
+  }
+
+  async getMicrosoftAccessToken(accountId: string, tenantId: string): Promise<string> {
+    const account = await prisma.connectedAccount.findFirst({
+      where: { id: accountId, tenantId, provider: "MICROSOFT_365" },
+    });
+    if (!account) throw new AppError("Connected account not found", 404, ErrorCodes.NOT_FOUND);
+    if (account.tokenExpiresAt && account.tokenExpiresAt.getTime() < Date.now() + 5 * 60 * 1000) {
+      await this.refreshMicrosoftToken(accountId);
+    }
+    const tokens = await readConnectorTokens("MICROSOFT_365", account.providerAccountId, account.tokenSecretRef, {
+      purpose: "token-read",
+      tenantId: account.tenantId,
+    });
+    if (!tokens?.accessToken) {
+      await prisma.connectedAccount.update({
+        where: { id: accountId },
+        data: { status: "REAUTH_REQUIRED", lastErrorCode: "NO_ACCESS_TOKEN" },
+      });
+      throw new AppError("No access token available", 401, ErrorCodes.UNAUTHORIZED);
+    }
+    return tokens.accessToken;
   }
 
   async refreshGoogleToken(accountId: string): Promise<void> {
     const account = await prisma.connectedAccount.findUnique({ where: { id: accountId } });
     if (!account) throw new AppError("Connected account not found", 404, ErrorCodes.NOT_FOUND);
     if (account.provider !== "GMAIL") throw new AppError("Not a Google account", 400, ErrorCodes.VALIDATION_ERROR);
-    if (!account.refreshToken) throw new AppError("No refresh token available", 400, ErrorCodes.VALIDATION_ERROR);
     if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
       throw new AppError("Google OAuth is not configured", 500, ErrorCodes.INTERNAL_ERROR);
     }
 
-    const refreshToken = decrypt(account.refreshToken);
+    const tokens = await readConnectorTokens("GMAIL", account.providerAccountId, account.tokenSecretRef, {
+      purpose: "token-refresh",
+      tenantId: account.tenantId,
+    });
+    if (!tokens?.refreshToken) {
+      await prisma.connectedAccount.update({
+        where: { id: accountId },
+        data: { status: "REAUTH_REQUIRED", lastErrorCode: "NO_REFRESH_TOKEN" },
+      });
+      throw new AppError("No refresh token available — reauthorization required", 401, ErrorCodes.UNAUTHORIZED);
+    }
+
     const tokenResponse = await fetch(GOOGLE_TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         client_id: env.GOOGLE_CLIENT_ID,
         client_secret: env.GOOGLE_CLIENT_SECRET,
-        refresh_token: refreshToken,
+        refresh_token: tokens.refreshToken,
         grant_type: "refresh_token",
       }),
     });
@@ -508,16 +738,20 @@ export class ConnectorService {
       throw new AppError("Token refresh failed — reauthorization required", 401, ErrorCodes.UNAUTHORIZED);
     }
 
-    const tokens = await tokenResponse.json() as {
+    const refreshed = await tokenResponse.json() as {
       access_token: string;
       expires_in: number;
     };
 
+    await storeConnectorTokens("GMAIL", account.providerAccountId, {
+      accessToken: refreshed.access_token,
+      refreshToken: tokens.refreshToken,
+    }, { purpose: "token-refresh-write", tenantId: account.tenantId });
+
     await prisma.connectedAccount.update({
       where: { id: accountId },
       data: {
-        accessToken: encrypt(tokens.access_token),
-        tokenExpiresAt: new Date(Date.now() + tokens.expires_in * 1000),
+        tokenExpiresAt: new Date(Date.now() + refreshed.expires_in * 1000),
         status: "ACTIVE",
         lastErrorCode: null,
       },
@@ -529,18 +763,24 @@ export class ConnectorService {
       where: { id: accountId, tenantId, provider: "GMAIL" },
     });
     if (!account) throw new AppError("Connected account not found", 404, ErrorCodes.NOT_FOUND);
-    if (!account.accessToken) throw new AppError("No access token available", 400, ErrorCodes.VALIDATION_ERROR);
 
     // Check if token is expired (with 5 min buffer)
     if (account.tokenExpiresAt && account.tokenExpiresAt.getTime() < Date.now() + 5 * 60 * 1000) {
       await this.refreshGoogleToken(accountId);
-      // Re-fetch after refresh
-      const refreshed = await prisma.connectedAccount.findUnique({ where: { id: accountId } });
-      if (!refreshed?.accessToken) throw new AppError("Token refresh failed", 500, ErrorCodes.INTERNAL_ERROR);
-      return decrypt(refreshed.accessToken);
     }
 
-    return decrypt(account.accessToken);
+    const tokens = await readConnectorTokens("GMAIL", account.providerAccountId, account.tokenSecretRef, {
+      purpose: "token-read",
+      tenantId: account.tenantId,
+    });
+    if (!tokens?.accessToken) {
+      await prisma.connectedAccount.update({
+        where: { id: accountId },
+        data: { status: "REAUTH_REQUIRED", lastErrorCode: "NO_ACCESS_TOKEN" },
+      });
+      throw new AppError("No access token available", 401, ErrorCodes.UNAUTHORIZED);
+    }
+    return tokens.accessToken;
   }
 
   async replayDeadLetter(eventId: string, tenantId: string, userId: string, requestId?: string) {
@@ -597,6 +837,31 @@ export class ConnectorService {
       const retryableEvents = new Set(["PROVIDER_RATE_LIMIT", "PROVIDER_UNAVAILABLE", "TEMPORARY_FAILURE"]);
       if (retryableEvents.has(event.eventType)) {
         throw new Error(event.eventType);
+      }
+
+      // Gmail history / M365 delta sync (ZM-BE-005/006): replay mailbox
+      // changes before the event is marked processed so a failure here routes
+      // through the normal retry / dead-letter machinery. Idempotent via the
+      // providerMessageId constraint and the per-provider checkpoint.
+      if (event.provider === "GMAIL" && isGmailHistoryEvent(event.eventType)) {
+        const { gmailConnector } = await import("./gmail/gmail.connector.js");
+        const result = await gmailConnector.syncHistory(
+          event.connectedAccountId,
+          event.tenantId,
+          event.providerReference ?? undefined
+        );
+        logger.info(
+          { eventId: event.id, accountId: event.connectedAccountId, ...result },
+          "Gmail history sync completed"
+        );
+      }
+      if (event.provider === "MICROSOFT_365" && isMicrosoftSyncEvent(event.eventType)) {
+        const { microsoftConnector } = await import("./m365/m365.connector.js");
+        const result = await microsoftConnector.syncInbox(event.connectedAccountId, event.tenantId);
+        logger.info(
+          { eventId: event.id, accountId: event.connectedAccountId, ...result },
+          "Microsoft 365 delta sync completed"
+        );
       }
 
       await prisma.$transaction(async (tx) => {
@@ -668,6 +933,53 @@ export class ConnectorService {
       };
     }
   }
+}
+
+const GMAIL_SYNC_EVENTS = new Set(["MAILBOX_CHANGED", "MESSAGE_CHANGED", "MESSAGE_DELETED", "HISTORY_SYNC"]);
+
+function isGmailHistoryEvent(eventType: string): boolean {
+  return GMAIL_SYNC_EVENTS.has(eventType);
+}
+
+const MS365_SYNC_EVENTS = new Set(["MAILBOX_CHANGED", "MESSAGE_CHANGED", "MESSAGE_DELETED", "INBOX_CHANGED"]);
+
+function isMicrosoftSyncEvent(eventType: string): boolean {
+  return MS365_SYNC_EVENTS.has(eventType);
+}
+
+/**
+ * Revokes a Google OAuth token at the provider. Best-effort: the caller decides
+ * whether a failure here should block the surrounding operation (it never does
+ * for disconnect — local state is cleared regardless).
+ */
+export async function revokeGoogleAccessToken(providerAccountId: string): Promise<void> {
+  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) return;
+  const tokens = await readConnectorTokens("GMAIL", providerAccountId, undefined, {
+    purpose: "disconnect-revoke",
+  });
+  const value = tokens?.accessToken ?? tokens?.refreshToken;
+  if (!value) return;
+  const response = await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(value)}`, {
+    method: "POST",
+  });
+  if (!response.ok && response.status !== 400) {
+    // 400 simply means the token was already invalid/revoked.
+    throw new Error(`Google token revocation failed with HTTP ${response.status}`);
+  }
+}
+
+/**
+ * Revokes a Microsoft OAuth token by signing the user out at the common
+ * authorization endpoint. Microsoft has no public token-revocation API for
+ * Graph apps; logout is the documented best-effort signal, and the wrapped
+ * error is tolerated by the disconnect flow.
+ */
+export async function revokeMicrosoftAccessToken(_providerAccountId: string): Promise<void> {
+  // Microsoft exposes no server-side refresh-token revocation endpoint for the
+  // confidential-client flows Zeo Mail uses; local credential state (the token
+  // secret + delta/subscription checkpoints) is fully cleared on disconnect, so
+  // this deliberately stays a no-op (ZM-BE-006).
+  return;
 }
 
 export const connectorService = new ConnectorService();

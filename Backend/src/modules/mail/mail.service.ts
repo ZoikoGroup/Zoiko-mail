@@ -156,35 +156,25 @@ export class MailService {
         status: "DRAFT",
         mailboxItems: { some: { tenantId: context.tenantId, mailboxId: mailbox.id, folder: "DRAFTS" } },
       },
-      include: { attachments: { select: { storageKey: true, sizeBytes: true } } },
+      select: { id: true, threadId: true },
     });
     if (!draft) throw new AppError("Draft not found", 404, ErrorCodes.NOT_FOUND);
 
-    const attachmentBytes = draft.attachments.reduce((total, attachment) => total + attachment.sizeBytes, 0);
+    // Drafts are soft-deleted into TRASH so they remain recoverable, exactly
+    // like trashed mail — and only a permanent delete from trash removes them.
     await prisma.$transaction(async (tx) => {
-      await this.audit(tx, context, "MAIL_DRAFT_DELETED", draft.id);
-      await tx.emailMessage.delete({ where: { id: draft.id, tenantId: context.tenantId } });
-      if (attachmentBytes > 0) {
-        await tx.mailbox.update({
-          where: { id: mailbox.id, tenantId: context.tenantId },
-          data: { storageUsed: { decrement: attachmentBytes } },
-        });
-      }
-      if (draft.threadId) {
-        const remaining = await tx.emailMessage.count({
-          where: { tenantId: context.tenantId, threadId: draft.threadId },
-        });
-        if (remaining === 0) {
-          await tx.messageThread.delete({ where: { id: draft.threadId, tenantId: context.tenantId } });
-        } else {
-          await tx.messageThread.update({
-            where: { id: draft.threadId, tenantId: context.tenantId },
-            data: { messageCount: remaining },
-          });
-        }
-      }
+      const trashed = await tx.mailboxMessage.updateMany({
+        where: {
+          tenantId: context.tenantId,
+          mailboxId: mailbox.id,
+          messageId: draft.id,
+          folder: "DRAFTS",
+        },
+        data: { folder: "TRASH" },
+      });
+      if (trashed.count === 0) throw new AppError("Draft not found", 404, ErrorCodes.NOT_FOUND);
+      await this.audit(tx, context, "MAIL_DRAFT_TRASHED", draft.id, { folder: "TRASH" });
     });
-    await Promise.all(draft.attachments.map((attachment) => attachmentStorage.delete(attachment.storageKey)));
     return { deleted: true };
   }
 
@@ -873,9 +863,6 @@ export class MailService {
     if (input.folder === "ARCHIVE" && !["INBOX", "ARCHIVE"].includes(item.folder)) {
       throw new AppError("Only inbox messages can be archived", 400, ErrorCodes.VALIDATION_ERROR);
     }
-    if (input.folder === "TRASH" && item.folder === "DRAFTS") {
-      throw new AppError("Drafts must be deleted using the draft endpoint", 400, ErrorCodes.VALIDATION_ERROR);
-    }
     return prisma.$transaction(async (tx) => {
       const updated = await tx.mailboxMessage.update({
         where: { id: item.id, tenantId: context.tenantId },
@@ -911,7 +898,6 @@ export class MailService {
     const invalid = items.some((item) => {
       if (input.action === "ARCHIVE") return item.folder !== "INBOX" && item.folder !== "ARCHIVE";
       if (input.action === "RESTORE") return item.folder !== "TRASH" && item.folder !== "ARCHIVE";
-      if (input.action === "TRASH") return item.folder === "DRAFTS";
       return false;
     });
     if (invalid) {
@@ -1070,11 +1056,13 @@ export class MailService {
     const mailbox = await this.mailbox(context);
     const item = await prisma.mailboxMessage.findFirst({
       where: { tenantId: context.tenantId, mailboxId: mailbox.id, messageId, folder: "TRASH" },
+      select: { id: true },
     });
     if (!item) throw new AppError("Trashed message not found", 404, ErrorCodes.NOT_FOUND);
 
     await prisma.$transaction(async (tx) => {
       await tx.mailboxMessage.delete({ where: { id: item.id, tenantId: context.tenantId } });
+      await this.purgeOrphanedDrafts(tx, context.tenantId, mailbox.id);
       await this.audit(tx, context, "MAIL_TRASH_MESSAGE_DELETED", messageId, { mailboxId: mailbox.id });
     });
     return { deleted: true };
@@ -1086,9 +1074,58 @@ export class MailService {
       const result = await tx.mailboxMessage.deleteMany({
         where: { tenantId: context.tenantId, mailboxId: mailbox.id, folder: "TRASH" },
       });
+      await this.purgeOrphanedDrafts(tx, context.tenantId, mailbox.id);
       await this.audit(tx, context, "MAIL_TRASH_EMPTIED", mailbox.id, { deletedCount: result.count });
       return { deletedCount: result.count };
     });
+  }
+
+  /**
+   * After mailbox items are permanently removed, delete any draft/scheduled
+   * email rows that no longer have a mailbox item anywhere, freeing their
+   * storage and fixing thread counts. Received/sent mail rows are left intact
+   * in case other mailboxes still reference them.
+   */
+  private async purgeOrphanedDrafts(tx: Prisma.TransactionClient, tenantId: string, mailboxId: string) {
+    const orphans = await tx.emailMessage.findMany({
+      where: {
+        tenantId,
+        status: { in: ["DRAFT", "SCHEDULED"] },
+        mailboxItems: { none: { mailboxId } },
+      },
+      select: {
+        id: true,
+        threadId: true,
+        attachments: { select: { sizeBytes: true } },
+      },
+    });
+    if (orphans.length === 0) return;
+
+    const attachmentBytes = orphans.reduce(
+      (total, orphan) => total + orphan.attachments.reduce((sum, attachment) => sum + attachment.sizeBytes, 0),
+      0
+    );
+    await tx.emailMessage.deleteMany({
+      where: { tenantId, id: { in: orphans.map((orphan) => orphan.id) } },
+    });
+    if (attachmentBytes > 0) {
+      await tx.mailbox.update({
+        where: { id: mailboxId, tenantId },
+        data: { storageUsed: { decrement: attachmentBytes } },
+      });
+    }
+    const threadIds = new Set(orphans.map((orphan) => orphan.threadId).filter((value): value is string => Boolean(value)));
+    for (const threadId of threadIds) {
+      const remaining = await tx.emailMessage.count({ where: { tenantId, threadId } });
+      if (remaining === 0) {
+        await tx.messageThread.delete({ where: { id: threadId, tenantId } });
+      } else {
+        await tx.messageThread.update({
+          where: { id: threadId, tenantId },
+          data: { messageCount: remaining },
+        });
+      }
+    }
   }
 
   async addAttachment(messageId: string, file: Express.Multer.File, context: MailContext) {
