@@ -18,10 +18,15 @@ import { supportPlatformRouter, supportRouter } from "../modules/support/support
 import { connectorRouter } from "../modules/connector/connector.routes.js";
 import { deliveryProtectionRouter } from "../modules/delivery-protection/delivery-protection.routes.js";
 import { billingRouter } from "../modules/billing/billing.routes.js";
+import { dashboardRouter } from "../modules/dashboard/dashboard.routes.js";
 
 const apiRouter = Router();
 
 apiRouter.use("/auth", authRouter);
+// Admin-console aggregates. Mounted at /admin so the console's own reads are
+// grouped, rather than hanging a dashboard off /tenants alongside the tenant
+// resource itself.
+apiRouter.use("/admin", dashboardRouter);
 apiRouter.use("/membership", membershipRouter);
 apiRouter.use("/users", userRouter);
 apiRouter.use("/tenants", tenantRouter);

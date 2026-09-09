@@ -15,11 +15,12 @@
  *     one — a fabricated MFA method or last-seen time is worse than an honest
  *     blank, because it reads as real.
  */
-import { apiRequest } from "./api-client";
+import { ApiError, apiRequest } from "./api-client";
 import type {
   AuditEventDto,
   CommitmentDto,
   ConnectorDto,
+  DashboardDto,
   DeliveryFailureSummaryDto,
   DomainDto,
   GroupDto,
@@ -199,11 +200,10 @@ interface ApiAuditEvent {
   actor: { id: string; email: string; displayName: string | null } | null;
 }
 
-export async function fetchAuditEvents(limit = 50): Promise<AuditEventDto[]> {
-  const res = await apiRequest<{ events: ApiAuditEvent[] }>(
-    `/audit/events?limit=${limit}`
-  );
-  return (res.events ?? []).map((e) => ({
+/** Shared by the audit screen and the dashboard aggregate, which return the
+ *  same row shape — so there is one mapping rather than two that can drift. */
+function toAuditEvent(e: ApiAuditEvent): AuditEventDto {
+  return {
     id: e.id,
     eventType: e.eventType,
     actorName: e.actor ? personName(e.actor) : "System",
@@ -214,7 +214,14 @@ export async function fetchAuditEvents(limit = 50): Promise<AuditEventDto[]> {
       ? `${e.targetType}${e.targetId ? ` · ${e.targetId.slice(0, 8)}` : ""}`
       : "—",
     createdAtLabel: ago(e.createdAt),
-  }));
+  };
+}
+
+export async function fetchAuditEvents(limit = 50): Promise<AuditEventDto[]> {
+  const res = await apiRequest<{ events: ApiAuditEvent[] }>(
+    `/audit/events?limit=${limit}`
+  );
+  return (res.events ?? []).map(toAuditEvent);
 }
 
 /* ── connectors ────────────────────────────────────────────────────────── */
@@ -302,6 +309,163 @@ export async function fetchDeliveryFailures(
   return apiRequest<DeliveryFailureSummaryDto>(
     `/mail/admin/delivery-events/summary?windowHours=${windowHours}`
   );
+}
+
+/**
+ * The summary, or null when the body is not one.
+ *
+ * Load-bearing, not defensive decoration: the tile reads `byType` with
+ * `Object.entries`, which throws on undefined. A proxy, a rewritten route or
+ * a catch-all answering 200 with some other object is enough to reach that,
+ * and the result is an unhandled error that takes the whole dashboard down
+ * rather than one tile showing "—".
+ */
+export function asFailureSummary(value: unknown): DeliveryFailureSummaryDto | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<DeliveryFailureSummaryDto>;
+  const usable =
+    typeof candidate.failed === "number" &&
+    typeof candidate.windowHours === "number" &&
+    typeof candidate.byType === "object" &&
+    candidate.byType !== null;
+  return usable ? (candidate as DeliveryFailureSummaryDto) : null;
+}
+
+/* ── dashboard ─────────────────────────────────────────────────────────── */
+
+interface ApiDashboard {
+  tenant: { name: string; planCode: string; timezone: string; status: string };
+  counts: DashboardDto["counts"];
+  mfa: DashboardDto["mfa"];
+  deliveryFailures: DeliveryFailureSummaryDto | null;
+  recentAudit: ApiAuditEvent[];
+  providerSync: ApiConnectedAccount[];
+  degraded: string[];
+  auditWithheld: boolean;
+}
+
+/**
+ * The dashboard in one read, falling back to composing it from the individual
+ * endpoints.
+ *
+ * The aggregate exists because the fan-out pulled five whole collections just
+ * to count them. The fallback exists because a client can be newer than the
+ * API it is talking to — the same reason `fetchConnectors` tries
+ * `/connectors/admin` before `/connectors`.
+ *
+ * Only a 404 falls back. A 403 must not: retrying as seven calls would either
+ * fail seven times or, worse, succeed at some of them and render data the
+ * caller was refused in aggregate.
+ */
+export async function fetchDashboard(windowHours = 24): Promise<DashboardDto> {
+  try {
+    const res = await apiRequest<ApiDashboard>(
+      `/admin/dashboard?windowHours=${windowHours}`
+    );
+    // Shape-checked rather than trusted. A proxy, a rewritten route or an
+    // older build can answer 200 with something else entirely, and reading
+    // `res.tenant.name` off that throws where falling back would have worked.
+    if (!res?.tenant?.name || !res.counts || !res.mfa) {
+      return composeDashboard(windowHours);
+    }
+    return {
+      tenant: {
+        name: res.tenant.name,
+        planCode: res.tenant.planCode,
+        timezone: res.tenant.timezone ?? "UTC",
+        status: res.tenant.status?.toLowerCase() ?? "unknown",
+      },
+      counts: res.counts,
+      mfa: res.mfa,
+      deliveryFailures: asFailureSummary(res.deliveryFailures),
+      recentAudit: (res.recentAudit ?? []).map(toAuditEvent),
+      providerSync: (res.providerSync ?? []).map(toConnector),
+      degraded: res.degraded ?? [],
+      auditWithheld: Boolean(res.auditWithheld),
+    };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return composeDashboard(windowHours);
+    }
+    throw error;
+  }
+}
+
+/**
+ * The pre-aggregate path, kept as the fallback.
+ *
+ * Uses `allSettled` so it reports the same partial-failure contract the
+ * aggregate does: a section that fails is named in `degraded` rather than
+ * failing the whole screen.
+ */
+async function composeDashboard(windowHours: number): Promise<DashboardDto> {
+  const [tenant, members, mailboxes, domains, connectors, audit, failures] =
+    await Promise.allSettled([
+      fetchTenant(),
+      fetchMembers(),
+      fetchMailboxes(),
+      fetchDomains(),
+      fetchConnectors(),
+      fetchAuditEvents(6),
+      fetchDeliveryFailures(windowHours),
+    ]);
+
+  // The tenant is the one section with nothing sensible to render without.
+  if (tenant.status === "rejected") throw tenant.reason;
+  if (members.status === "rejected") throw members.reason;
+
+  const degraded: string[] = [];
+  const settled = <T,>(
+    name: string,
+    result: PromiseSettledResult<T>,
+    fallback: T
+  ): T => {
+    if (result.status === "fulfilled") return result.value;
+    degraded.push(name);
+    return fallback;
+  };
+
+  const boxes = settled("mailboxes", mailboxes, []);
+  const doms = settled("domains", domains, []);
+  const conns = settled("connectors", connectors, []);
+  const events = settled("audit", audit, []);
+  const deliveryFailures = asFailureSummary(
+    settled<DeliveryFailureSummaryDto | null>("deliveryFailures", failures, null)
+  );
+  const people = members.value;
+
+  return {
+    tenant: {
+      name: tenant.value.name,
+      planCode: tenant.value.planCode,
+      timezone: tenant.value.timezone ?? "UTC",
+      status: tenant.value.status?.toLowerCase() ?? "unknown",
+    },
+    counts: {
+      people: people.length,
+      pendingInvitations: people.filter((m) => m.status === "INVITED").length,
+      mailboxes: boxes.length,
+      suspendedMailboxes: boxes.filter((m) => m.status === "SUSPENDED").length,
+      connectedAccounts: conns.length,
+      connectedGmail: conns.filter((c) => c.name === "Gmail").length,
+      connectedMicrosoft: conns.filter((c) => c.name === "Microsoft 365").length,
+      domainsVerified: doms.filter((d) => d.verificationStatus === "VERIFIED").length,
+      domainsTotal: doms.length,
+      storageUsedGb: boxes.reduce((sum, m) => sum + m.storageUsedGb, 0),
+      storageLimitGb: boxes.reduce((sum, m) => sum + m.storageLimitGb, 0),
+    },
+    // The old path had no way to know either; unsupported is still the truth.
+    mfa: {
+      supported: false,
+      covered: 0,
+      total: people.filter((m) => m.status === "ACTIVE").length,
+    },
+    deliveryFailures,
+    recentAudit: events.slice(0, 6),
+    providerSync: conns.slice(0, 6),
+    degraded,
+    auditWithheld: false,
+  };
 }
 
 /* ── policies ──────────────────────────────────────────────────────────── */

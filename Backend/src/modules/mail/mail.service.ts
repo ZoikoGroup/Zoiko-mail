@@ -43,6 +43,44 @@ const FAILED_DELIVERY_TYPES = [
 
 type FailedDeliveryType = (typeof FAILED_DELIVERY_TYPES)[number];
 
+/**
+ * Failed-send counts for one workspace over a trailing window.
+ *
+ * Module-level rather than a method so the admin dashboard aggregate can call
+ * it with a tenant id alone. Wrapping it as a method would have meant
+ * assembling a whole MailContext — user, membership, role, email — none of
+ * which this query reads, and a fabricated context is the kind of thing that
+ * later gets trusted for authorization.
+ */
+export async function deliveryFailureSummary(tenantId: string, windowHours: number) {
+  const since = new Date(Date.now() - windowHours * 3_600_000);
+
+  const grouped = await prisma.deliveryEvent.groupBy({
+    by: ["type"],
+    where: {
+      tenantId,
+      type: { in: [...FAILED_DELIVERY_TYPES] },
+      createdAt: { gte: since },
+    },
+    _count: { _all: true },
+  });
+
+  // Every failure type is present with an explicit zero, so the client never
+  // has to distinguish "no failures of this kind" from "key absent".
+  const byType = Object.fromEntries(
+    FAILED_DELIVERY_TYPES.map((type) => [type, 0])
+  ) as Record<FailedDeliveryType, number>;
+
+  let failed = 0;
+  for (const row of grouped) {
+    const count = row._count._all;
+    byType[row.type as FailedDeliveryType] = count;
+    failed += count;
+  }
+
+  return { windowHours, since: since.toISOString(), failed, byType };
+}
+
 const messageInclude = {
   recipients: { orderBy: [{ type: "asc" as const }, { email: "asc" as const }] },
   attachments: {
@@ -758,41 +796,8 @@ export class MailService {
    * without a second call: "3 bounced, 1 rejected" is actionable where a bare
    * 4 is not.
    */
-  async adminDeliveryFailureSummary(
-    input: { windowHours: number },
-    context: MailContext
-  ) {
-    const since = new Date(Date.now() - input.windowHours * 3_600_000);
-
-    const grouped = await prisma.deliveryEvent.groupBy({
-      by: ["type"],
-      where: {
-        tenantId: context.tenantId,
-        type: { in: [...FAILED_DELIVERY_TYPES] },
-        createdAt: { gte: since },
-      },
-      _count: { _all: true },
-    });
-
-    // Every failure type is present with an explicit zero, so the client never
-    // has to distinguish "no failures of this kind" from "key absent".
-    const byType = Object.fromEntries(
-      FAILED_DELIVERY_TYPES.map((type) => [type, 0])
-    ) as Record<FailedDeliveryType, number>;
-
-    let failed = 0;
-    for (const row of grouped) {
-      const count = row._count._all;
-      byType[row.type as FailedDeliveryType] = count;
-      failed += count;
-    }
-
-    return {
-      windowHours: input.windowHours,
-      since: since.toISOString(),
-      failed,
-      byType,
-    };
+  adminDeliveryFailureSummary(input: { windowHours: number }, context: MailContext) {
+    return deliveryFailureSummary(context.tenantId, input.windowHours);
   }
 
   async updateSendingStatus(

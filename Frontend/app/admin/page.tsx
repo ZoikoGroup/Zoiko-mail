@@ -42,8 +42,17 @@ export default function AdminDashboardPage() {
   }
 
   const c = data.counts;
-  const mfaGap = c.mfaTotal - c.mfaCovered;
   const pct = (used: number, total: number) => (total > 0 ? (used / total) * 100 : 0);
+
+  /**
+   * Only warn about MFA when MFA exists.
+   *
+   * The banner used to fire on every load of every workspace, because
+   * coverage is zero and always will be until AC-002 ships. A permanent alarm
+   * with no action behind it trains people to ignore the banner region, which
+   * costs us the next warning that does matter.
+   */
+  const mfaGap = data.mfa.supported ? data.mfa.total - data.mfa.covered : 0;
 
   const failures = data.deliveryFailures;
   /**
@@ -52,7 +61,10 @@ export default function AdminDashboardPage() {
    * dropped so the line names what happened, not what didn't.
    */
   const failureBreakdown = failures
-    ? Object.entries(failures.byType)
+    ? // `?? {}` rather than trusting the field. The mappers already reject a
+      // body that is not a summary, but this is the line that throws if one
+      // ever gets through, and an unhandled error here costs the whole page.
+      Object.entries(failures.byType ?? {})
         .filter(([, count]) => count > 0)
         .sort(([, a], [, b]) => b - a)
         .map(([type, count]) => `${count} ${type.toLowerCase().replace(/_/g, " ")}`)
@@ -78,16 +90,29 @@ export default function AdminDashboardPage() {
         }
       />
 
-      {/*
-        There is no GET /admin/dashboard. This note used to claim one, which
-        made the page look like it had an endpoint nobody could find. The
-        composition is deliberate — see useDashboard — so the note says what
-        the page actually does.
-      */}
       <StaticNote>
-        Composed from the individual reads, so one failing subsystem cannot blank
-        the page
+        One read — GET /admin/dashboard — with each section resolved separately,
+        so a failing subsystem costs one tile rather than the page
       </StaticNote>
+
+      {/*
+        A section the server could not read. Said out loud, because the tiles
+        below it fall back to zero and a confident zero is indistinguishable
+        from good news.
+      */}
+      {data.degraded.length > 0 && (
+        <Notice tone="warn">
+          <b className="text-[var(--warn)]">
+            {data.degraded.length === 1
+              ? "One section could not be read"
+              : `${data.degraded.length} sections could not be read`}
+            :
+          </b>{" "}
+          {data.degraded.join(", ")}. Those tiles show zero because the data is
+          missing, not because the count is zero. The rest of this page is
+          current.
+        </Notice>
+      )}
 
       {mfaGap > 0 && (
         <Notice tone="warn">
@@ -127,12 +152,22 @@ export default function AdminDashboardPage() {
           sub="verified"
           tone="ok"
         />
+        {/*
+          Unsupported and zero-coverage are different claims. Until AC-002
+          ships there is no second factor to count, so the tile says so rather
+          than showing 0/14 in warning amber — which reads as a workspace that
+          neglected to enrol, and points the admin at a control that does not
+          exist.
+        */}
         <StatTile
           label="MFA coverage"
-          value={c.mfaCovered}
-          suffix={`/${c.mfaTotal}`}
-          tone="warn"
-          meter={pct(c.mfaCovered, c.mfaTotal)}
+          value={data.mfa.supported ? data.mfa.covered : "—"}
+          suffix={data.mfa.supported ? `/${data.mfa.total}` : undefined}
+          sub={data.mfa.supported ? undefined : "not available yet"}
+          tone={data.mfa.supported ? "warn" : undefined}
+          meter={
+            data.mfa.supported ? pct(data.mfa.covered, data.mfa.total) : undefined
+          }
         />
         {/*
           Real delivery failures, counted server-side. This tile used to show

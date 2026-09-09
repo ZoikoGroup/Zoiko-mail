@@ -113,15 +113,29 @@ export interface DashboardDto {
     connectedMicrosoft: number;
     domainsVerified: number;
     domainsTotal: number;
-    mfaCovered: number;
-    mfaTotal: number;
     storageUsedGb: number;
     storageLimitGb: number;
   };
+  /**
+   * MFA state, reported rather than inferred.
+   *
+   * `supported: false` says the platform does not offer MFA yet (Security
+   * AC-002 is unimplemented and `AppUser.mfaEnabled` does not exist). That is
+   * a different claim from `covered: 0`, which would read as a workspace that
+   * has neglected to enrol and invite an admin to fix something they cannot.
+   */
+  mfa: { supported: boolean; covered: number; total: number };
   /** Null while the read is in flight or refused; the tile then shows "—". */
   deliveryFailures: DeliveryFailureSummaryDto | null;
   recentAudit: AuditEventDto[];
   providerSync: ConnectorDto[];
+  /**
+   * Sections the server could not read. Empty on a healthy response. Present
+   * so the page can name what is missing instead of showing a confident zero.
+   */
+  degraded: string[];
+  /** True when the audit tail was withheld for lack of `audit.read`. */
+  auditWithheld: boolean;
 }
 
 export interface SupportGrantDto {

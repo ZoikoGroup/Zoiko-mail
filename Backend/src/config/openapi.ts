@@ -715,6 +715,29 @@ export const openApiDocument = {
         responses: { "200": ok("Delivery events returned"), "404": { $ref: "#/components/responses/NotFound" } },
       },
     },
+    "/api/v1/admin/dashboard": {
+      get: {
+        tags: ["Tenants"],
+        summary: "Admin console dashboard aggregate (OWNER/ADMIN)",
+        description:
+          "One read for the admin console's opening screen. Sections resolve independently: a section that fails is named in `degraded` and returned null rather than failing the request. `auditWithheld` is true when the caller does not hold audit.read.",
+        operationId: "adminDashboardSummary",
+        security: bearer,
+        parameters: [
+          {
+            name: "windowHours",
+            in: "query",
+            schema: { type: "integer", minimum: 1, maximum: 168, default: 24 },
+            description: "Trailing window for the delivery-failure count.",
+          },
+        ],
+        responses: {
+          "200": ok("Dashboard summary returned"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "503": ok("Workspace could not be read"),
+        },
+      },
+    },
     "/api/v1/mail/admin/delivery-events/summary": {
       get: {
         tags: ["Mail"],
