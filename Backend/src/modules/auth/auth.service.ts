@@ -11,6 +11,7 @@ import { hashToken } from "../../common/utils/tokenHash.js";
 import { actingRole } from "../../common/utils/workspaceScope.js";
 import type {
   AccessTokenPayload,
+  MfaChallengeTokenPayload,
   PendingTokenPayload,
   PlatformTokenPayload,
   RefreshTokenPayload,
@@ -19,6 +20,7 @@ import type {
   WorkspaceScope,
 } from "../../common/types/jwt.js";
 import { auditService } from "../audit/audit.service.js";
+import { mfaService, roleRequiresMfa } from "./mfa.service.js";
 import { membershipRepository } from "../membership/membership.repository.js";
 import type { MembershipWithRelations } from "../membership/membership.repository.js";
 import { userRepository } from "../user/user.repository.js";
@@ -255,6 +257,63 @@ function buildPlatformToken(
   });
 
   return { token, expiresIn: env.JWT_ACCESS_EXPIRES_IN };
+}
+
+/**
+ * The window a second factor must be answered in.
+ *
+ * Long enough to open an authenticator app or find a recovery code, short
+ * enough that a token intercepted after a password check is not a standing
+ * invitation.
+ */
+const MFA_CHALLENGE_EXPIRES_IN = "10m";
+
+/**
+ * Issued when a privileged sign-in still owes its second factor — AC-002.
+ *
+ * The intent travels inside the token so answering the challenge mints
+ * exactly the session the password earned. Putting it in the token rather
+ * than re-deriving it on the second call also closes a subtle hole: the
+ * account cannot be promoted between the two requests and have the challenge
+ * hand back more than it was issued for.
+ */
+function buildMfaChallengeToken(
+  userId: string,
+  intent: MfaChallengeTokenPayload["intent"],
+  enrolment: boolean
+): { token: string; expiresIn: string } {
+  const payload: MfaChallengeTokenPayload = {
+    sub: userId,
+    type: "mfa",
+    jti: uuidv4(),
+    enrolment,
+    intent,
+  };
+  const token = jwt.sign(payload, env.JWT_ACCESS_SECRET, {
+    expiresIn: MFA_CHALLENGE_EXPIRES_IN,
+  });
+  return { token, expiresIn: MFA_CHALLENGE_EXPIRES_IN };
+}
+
+/**
+ * Decode a challenge token, or refuse.
+ *
+ * Every failure reads the same to the caller — expired, forged, or an access
+ * token presented in its place — because the difference is only useful to
+ * somebody probing.
+ */
+export function readMfaChallengeToken(token: string): MfaChallengeTokenPayload {
+  try {
+    const decoded = jwt.verify(token, env.JWT_ACCESS_SECRET) as MfaChallengeTokenPayload;
+    if (decoded.type !== "mfa") throw new Error("wrong token type");
+    return decoded;
+  } catch {
+    throw new AppError(
+      "This verification session has expired. Sign in again.",
+      401,
+      ErrorCodes.TOKEN_INVALID
+    );
+  }
 }
 
 /**
@@ -543,11 +602,19 @@ export class AuthService {
    * there's no tenant to attach yet), creates the Tenant + OWNER
    * membership, then issues a full session exactly like login does.
    */
+  /**
+   * Returns an AuthState rather than a session, because the account this
+   * creates is an Owner and AC-002 requires a second factor before an Owner
+   * gets a session. Enrolling seconds after sign-up is a deliberate onboarding
+   * cost: the alternative is a brand-new Owner holding an indefinitely
+   * refreshable session that never passed the control, which would make
+   * "enforced" mean "enforced from the second sign-in onwards".
+   */
   async createWorkspace(
     input: CreateWorkspaceInput,
     pendingToken: string,
     context: RequestContext
-  ): Promise<AuthSessionResponse> {
+  ): Promise<AuthState> {
     const userId = this.verifyPendingToken(pendingToken);
 
     const user = await userRepository.findById(userId);
@@ -613,10 +680,29 @@ export class AuthService {
       );
     }
 
-    return issueSession(
-      membershipWithRelations,
-      workspaceScopeForRole(membershipWithRelations.role)
+    const owner = await prisma.appUser.findUniqueOrThrow({ where: { id: userId } });
+    const gate = await this.mfaGate(
+      owner,
+      { id: owner.id, email: owner.email, displayName: owner.displayName },
+      toWorkspaceOption(membershipWithRelations),
+      {
+        kind: "tenant",
+        tenantId: membershipWithRelations.tenantId,
+        membershipId: membershipWithRelations.id,
+        workspace: workspaceScopeForRole(membershipWithRelations.role),
+      },
+      membershipWithRelations.role,
+      context
     );
+    if (gate) return gate;
+
+    return {
+      state: "SIGNED_IN",
+      session: await issueSession(
+        membershipWithRelations,
+        workspaceScopeForRole(membershipWithRelations.role)
+      ),
+    };
   }
 
   /**
@@ -627,11 +713,16 @@ export class AuthService {
    * The whole accept+session runs in one transaction so tokens are only
    * issued when the acceptance actually commits.
    */
+  /**
+   * Also an AuthState: an invitation can be to an Admin or Owner seat, and
+   * accepting one must not hand out a privileged session that skipped the
+   * control every other privileged sign-in passes.
+   */
   async joinWorkspace(
     input: JoinWorkspaceInput,
     pendingToken: string,
     context: RequestContext
-  ): Promise<AuthSessionResponse> {
+  ): Promise<AuthState> {
     const userId = this.verifyPendingToken(pendingToken);
 
     const session = await prisma.$transaction(async (tx) => {
@@ -707,14 +798,43 @@ export class AuthService {
         );
       }
 
-      return issueSession(
-        membershipWithRelations,
-        workspaceScopeForRole(membershipWithRelations.role),
-        tx
-      );
+      return {
+        membership: membershipWithRelations,
+        session: await issueSession(
+          membershipWithRelations,
+          workspaceScopeForRole(membershipWithRelations.role),
+          tx
+        ),
+      };
     });
 
-    return session;
+    // Gated after the transaction, not inside it: the membership must be
+    // committed either way — the invitation has been accepted — and only the
+    // session it would have handed back is withheld.
+    const joiner = await prisma.appUser.findUniqueOrThrow({ where: { id: userId } });
+    const gate = await this.mfaGate(
+      joiner,
+      { id: joiner.id, email: joiner.email, displayName: joiner.displayName },
+      toWorkspaceOption(session.membership),
+      {
+        kind: "tenant",
+        tenantId: session.membership.tenantId,
+        membershipId: session.membership.id,
+        workspace: workspaceScopeForRole(session.membership.role),
+      },
+      session.membership.role,
+      context
+    );
+    if (gate) {
+      // The session minted inside the transaction must not survive the gate.
+      await prisma.refreshToken.updateMany({
+        where: { userId, tenantId: session.membership.tenantId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      return gate;
+    }
+
+    return { state: "SIGNED_IN", session: session.session };
   }
 
   /**
@@ -1098,6 +1218,19 @@ export class AuthService {
 
     // 2. Platform-staff branch — staff resolve to a console, not a tenant.
     if (user.platformRole !== "NONE") {
+      // Support actors are named in AC-002 alongside Owners and Admins, and a
+      // staff console reaches across every workspace, so the gate matters more
+      // here than anywhere.
+      const staffGate = await this.mfaGate(
+        user,
+        publicUser,
+        undefined,
+        { kind: "platform", platformRole: user.platformRole },
+        user.platformRole,
+        context
+      );
+      if (staffGate) return staffGate;
+
       const platform = buildPlatformToken(user.id, user.platformRole);
       await ensureSystemTenant();
       await auditService.record({
@@ -1236,11 +1369,21 @@ export class AuthService {
       throw error;
     }
 
-    // 4. Only a real session spends the login. A pick that resolved to
-    //    anything else — a suspended workspace, a membership still pending —
-    //    issued no session, so the token is returned and the user can choose
-    //    a different workspace instead of being sent back to sign in.
-    if (result.state !== "SIGNED_IN") {
+    // 4. Only a real session — or a challenge that will become one — spends
+    //    the login. A pick that resolved to anything else, a suspended
+    //    workspace or a membership still pending, issued nothing, so the
+    //    token is returned and the user can choose a different workspace
+    //    instead of being sent back to sign in.
+    //
+    //    An MFA challenge counts as spent (AC-002). It is not a dead end: it
+    //    already names the workspace it will open, so releasing the token
+    //    would let one password entry raise challenges for several
+    //    workspaces at once.
+    const spent =
+      result.state === "SIGNED_IN" ||
+      result.state === "MFA_REQUIRED" ||
+      result.state === "MFA_ENROLLMENT_REQUIRED";
+    if (!spent) {
       await this.releaseSelectionToken(jti);
     }
 
@@ -1290,6 +1433,185 @@ export class AuthService {
    * through from resolveAuthState so the session it issues is bound to it.
    * Left undefined it follows the membership role.
    */
+  /**
+   * Whether this sign-in owes a second factor, and the state that asks for it.
+   *
+   * Returns null when the role does not require MFA, which leaves the member
+   * path exactly as it was — AC-002 names Owners, Admins and Support, and
+   * compelling every member into an authenticator would be a different
+   * decision than the one the specification made.
+   */
+  private async mfaGate(
+    user: { id: string },
+    publicUser: PublicUser,
+    workspace: WorkspaceOption | undefined,
+    intent: MfaChallengeTokenPayload["intent"],
+    role: MembershipRole | Exclude<PlatformRole, "NONE">,
+    context: RequestContext
+  ): Promise<AuthState | null> {
+    const required =
+      intent.kind === "platform" || roleRequiresMfa(role as MembershipRole);
+    if (!required) return null;
+
+    const enrolled = await mfaService.isEnrolled(user.id);
+    const challenge = buildMfaChallengeToken(user.id, intent, !enrolled);
+
+    await ensureSystemTenant();
+    await auditService.record({
+      tenantId: intent.kind === "tenant" ? intent.tenantId : SYSTEM_TENANT_ID,
+      actorUserId: user.id,
+      eventType: enrolled ? "MFA_CHALLENGE_ISSUED" : "MFA_ENROLMENT_REQUIRED",
+      targetType: "AppUser",
+      targetId: user.id,
+      requestId: context.requestId,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+      metadata: { role },
+    });
+
+    if (!enrolled) {
+      return {
+        state: "MFA_ENROLLMENT_REQUIRED",
+        user: publicUser,
+        workspace,
+        mfaToken: challenge.token,
+        expiresIn: challenge.expiresIn,
+        requiredBecause: String(role),
+      };
+    }
+
+    return {
+      state: "MFA_REQUIRED",
+      user: publicUser,
+      workspace,
+      mfaToken: challenge.token,
+      expiresIn: challenge.expiresIn,
+      remainingRecoveryCodes: await prisma.mfaRecoveryCode.count({
+        where: { userId: user.id, usedAt: null },
+      }),
+    };
+  }
+
+  /**
+   * Finish a sign-in that was waiting on a second factor.
+   *
+   * The membership is re-read rather than trusted from the token, because
+   * minutes may have passed: a revoked membership, a suspended workspace or a
+   * disabled account must all stop the session here rather than be discovered
+   * on the next request.
+   */
+  async completeMfaChallenge(
+    challengeToken: string,
+    code: string,
+    context: RequestContext
+  ): Promise<AuthState> {
+    const payload = readMfaChallengeToken(challengeToken);
+    await mfaService.verifyChallenge(payload.sub, code, context);
+
+    const user = await prisma.appUser.findUnique({ where: { id: payload.sub } });
+    if (!user || user.status !== "ACTIVE") {
+      throw new AppError("This account cannot sign in", 403, ErrorCodes.FORBIDDEN);
+    }
+
+    if (payload.intent.kind === "platform") {
+      const platform = buildPlatformToken(user.id, payload.intent.platformRole);
+      await ensureSystemTenant();
+      await auditService.record({
+        tenantId: SYSTEM_TENANT_ID,
+        actorUserId: user.id,
+        eventType: AuditEventTypes.LOGIN_SUCCESS,
+        targetType: "AppUser",
+        targetId: user.id,
+        requestId: context.requestId,
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+        metadata: { platformRole: payload.intent.platformRole, mfa: true },
+      });
+      return {
+        state: "STAFF_CONSOLE",
+        user: { id: user.id, email: user.email, displayName: user.displayName },
+        platformRole: payload.intent.platformRole,
+        platformToken: platform.token,
+        expiresIn: platform.expiresIn,
+      };
+    }
+
+    const membership = await membershipRepository.findByUserAndTenant(
+      user.id,
+      payload.intent.tenantId
+    );
+    if (!membership || membership.status !== "ACTIVE" || membership.tenant.status !== "ACTIVE") {
+      throw new AppError("This workspace is no longer available", 403, ErrorCodes.FORBIDDEN);
+    }
+
+    const session = await issueSession(membership, payload.intent.workspace);
+    await auditService.record({
+      tenantId: membership.tenantId,
+      actorUserId: user.id,
+      eventType: AuditEventTypes.LOGIN_SUCCESS,
+      targetType: "AppUser",
+      targetId: user.id,
+      requestId: context.requestId,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+      metadata: { mfa: true },
+    });
+    return { state: "SIGNED_IN", session };
+  }
+
+  /**
+   * Enrol while holding only a challenge token.
+   *
+   * The account has no session yet — that is the point of the state — so
+   * enrolment has to be reachable from the challenge, or a newly privileged
+   * user would be locked out by the very control meant to protect them.
+   */
+  async enrolFromChallenge(challengeToken: string, context: RequestContext) {
+    const payload = readMfaChallengeToken(challengeToken);
+    const user = await prisma.appUser.findUniqueOrThrow({
+      where: { id: payload.sub },
+      select: { email: true },
+    });
+    return mfaService.beginEnrolment(payload.sub, user.email, context);
+  }
+
+  /** Confirm that enrolment, and sign in with the session it was blocking. */
+  async confirmEnrolmentFromChallenge(
+    challengeToken: string,
+    code: string,
+    context: RequestContext
+  ): Promise<{ recoveryCodes: string[]; auth: AuthState }> {
+    const payload = readMfaChallengeToken(challengeToken);
+    const { recoveryCodes } = await mfaService.confirmEnrolment(payload.sub, code, context);
+
+    // The code that just proved the authenticator is spent, so the sign-in
+    // completes from the same act rather than asking for a second code
+    // seconds later.
+    const user = await prisma.appUser.findUniqueOrThrow({ where: { id: payload.sub } });
+    if (payload.intent.kind === "platform") {
+      const platform = buildPlatformToken(user.id, payload.intent.platformRole);
+      return {
+        recoveryCodes,
+        auth: {
+          state: "STAFF_CONSOLE",
+          user: { id: user.id, email: user.email, displayName: user.displayName },
+          platformRole: payload.intent.platformRole,
+          platformToken: platform.token,
+          expiresIn: platform.expiresIn,
+        },
+      };
+    }
+    const membership = await membershipRepository.findByUserAndTenant(
+      user.id,
+      payload.intent.tenantId
+    );
+    if (!membership || membership.status !== "ACTIVE" || membership.tenant.status !== "ACTIVE") {
+      throw new AppError("This workspace is no longer available", 403, ErrorCodes.FORBIDDEN);
+    }
+    const session = await issueSession(membership, payload.intent.workspace);
+    return { recoveryCodes, auth: { state: "SIGNED_IN", session } };
+  }
+
   private async resolveSelectedWorkspace(
     user: { id: string; email: string; displayName: string },
     membership: MembershipWithRelations,
@@ -1329,6 +1651,25 @@ export class AuthService {
         expiresIn: removedPending.expiresIn,
       };
     }
+
+    // AC-002: "MFA is enforced for Owners, Admins and Support actors." The
+    // gate sits here, immediately before the session is minted, because that
+    // is the one place every password, Google and workspace-selection path
+    // converges on.
+    const gate = await this.mfaGate(
+      user,
+      publicUser,
+      workspace,
+      {
+        kind: "tenant",
+        tenantId: membership.tenantId,
+        membershipId: membership.id,
+        workspace: intendedWorkspace ?? workspaceScopeForRole(membership.role),
+      },
+      membership.role,
+      context
+    );
+    if (gate) return gate;
 
     // ACTIVE membership + ACTIVE tenant → sign in.
     const session = await issueSession(

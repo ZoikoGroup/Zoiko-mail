@@ -116,6 +116,21 @@ export function routeAuthState(
     }
     const names = (data.invitations ?? []).map((w: { name: string }) => w.name).join(",");
     href = `/auth-status?state=INVITATION_PENDING${names ? `&invitations=${encodeURIComponent(names)}` : ""}`;
+  } else if (
+    data.state === "MFA_REQUIRED" ||
+    data.state === "MFA_ENROLLMENT_REQUIRED"
+  ) {
+    // AC-002 stops a privileged sign-in until a second factor is proved. The
+    // challenge token is all the account holds at this point — there is no
+    // session — so it goes to its own route, outside ProtectedRoute, for the
+    // same reason /create-workspace does.
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("zoiko.mfa_token", data.mfaToken ?? "");
+      sessionStorage.setItem("zoiko.mfa_state", data.state);
+      sessionStorage.setItem("zoiko.mfa_email", data.user?.email ?? "");
+      sessionStorage.setItem("zoiko.mfa_reason", data.requiredBecause ?? "");
+    }
+    href = "/verify-mfa";
   } else if (data.state === "NO_WORKSPACE") {
     // Every brand-new Google signup lands here: the account exists and is
     // verified, but it belongs to no workspace yet, so there is nothing to
@@ -218,6 +233,16 @@ export function useCreateWorkspace() {
         queryKey: ["me"],
       });
 
+      // Creating a workspace makes this account an Owner, and AC-002 requires
+      // a second factor before an Owner holds a session — so the response may
+      // be an enrolment challenge rather than a session. routeAuthState knows
+      // where each state goes; onboarding is only reachable once one exists.
+      const state = (data as { state?: string }).state;
+      if (state && state !== "SIGNED_IN") {
+        routeAuthState(data as unknown as AuthResponse, router);
+        return;
+      }
+
       // New workspace always needs onboarding
       router.replace("/owner/onboarding");
     },
@@ -239,7 +264,18 @@ export function useJoinWorkspace() {
         queryKey: ["me"],
       });
 
-      router.replace(resolveWorkspaceHref(data.membership?.role));
+      // An invitation can be to an Admin or Owner seat, which AC-002 gates the
+      // same way a sign-in is gated.
+      const state = (data as { state?: string }).state;
+      if (state && state !== "SIGNED_IN") {
+        routeAuthState(data as unknown as AuthResponse, router);
+        return;
+      }
+
+      const session = (data as { session?: { membership?: { role?: string } } }).session;
+      router.replace(
+        resolveWorkspaceHref(session?.membership?.role ?? data.membership?.role)
+      );
     },
   });
 }

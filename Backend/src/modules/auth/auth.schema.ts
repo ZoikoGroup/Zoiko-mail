@@ -77,3 +77,15 @@ export type GoogleLoginInput = z.infer<typeof googleLoginSchema>;
 export const stepUpSchema = z.object({
   password: z.string().min(1).max(200),
 });
+
+/**
+ * A second factor — AC-002.
+ *
+ * One field for both a six-digit code and a recovery code: a locked-out user
+ * should not have to work out which screen they need, and the server can tell
+ * the two apart perfectly well.
+ */
+export const mfaCodeSchema = z.object({
+  code: z.string().trim().min(6).max(20),
+});
+export type MfaCodeInput = z.infer<typeof mfaCodeSchema>;

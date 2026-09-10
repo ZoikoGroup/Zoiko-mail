@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import { createApp } from "../src/app.js";
 import { env } from "../src/config/env.js";
 import { prisma } from "../src/config/prisma.js";
-import { authHeader, registerUser } from "./helpers.js";
+import { authHeader, registerUser, loginUser } from "./helpers.js";
 
 const app = createApp();
 
@@ -136,16 +136,9 @@ describe("Auth security", () => {
       data: { role: "MEMBER" },
     });
 
-    const memberLogin = await request(app)
-      .post("/api/v1/auth/login")
-      .send({
-        email: member.email,
-        password: member.password,
-        tenantId: member.tenantId,
-      })
-      .expect(200);
+    const memberLogin = await loginUser(app, member.email, member.password, member.tenantId);
 
-    const memberToken = memberLogin.body.data.session?.accessToken ?? memberLogin.body.data.accessToken;
+    const memberToken = memberLogin.accessToken;
 
     const denied = await request(app)
       .get("/api/v1/membership/members")
@@ -163,18 +156,11 @@ describe("Auth security", () => {
       data: { role: "SUPPORT" },
     });
 
-    const login = await request(app)
-      .post("/api/v1/auth/login")
-      .send({
-        email: user.email,
-        password: user.password,
-        tenantId: user.tenantId,
-      })
-      .expect(200);
+    const login = await loginUser(app, user.email, user.password, user.tenantId);
 
     const response = await request(app)
       .get("/api/v1/membership/members")
-      .set(authHeader(login.body.data.accessToken))
+      .set(authHeader(login.accessToken))
       .expect(403);
 
     expect(response.body.error.code).toBe("FORBIDDEN");
@@ -224,25 +210,18 @@ describe("Auth flows", () => {
     expect(meResponse.body.data.email).toBe("flow-user@zoiko.test");
     expect(meResponse.body.data.tenant.name).toBe("Flow Tenant");
 
-    const loginResponse = await request(app)
-      .post("/api/v1/auth/login")
-      .send({
-        email: user.email,
-        password: user.password,
-        tenantId: user.tenantId,
-      })
-      .expect(200);
+    const loginResponse = await loginUser(app, user.email, user.password, user.tenantId);
 
-    expect(loginResponse.body.data.accessToken).toBeTruthy();
+    expect(loginResponse.accessToken).toBeTruthy();
 
     await request(app)
       .post("/api/v1/auth/logout")
-      .send({ refreshToken: loginResponse.body.data.refreshToken })
+      .send({ refreshToken: loginResponse.refreshToken })
       .expect(200);
 
     await request(app)
       .post("/api/v1/auth/refresh")
-      .send({ refreshToken: loginResponse.body.data.refreshToken })
+      .send({ refreshToken: loginResponse.refreshToken })
       .expect(401);
   });
 
@@ -269,15 +248,9 @@ describe("Auth flows", () => {
       },
     });
 
-    const selectionResponse = await request(app)
-      .post("/api/v1/auth/login")
-      .send({
-        email: first.email,
-        password: first.password,
-      })
-      .expect(200);
+    const selectionResponse = await loginUser(app, first.email, first.password);
 
-    expect(selectionResponse.body.data.requiresTenantSelection).toBe(true);
-    expect(selectionResponse.body.data.tenants).toHaveLength(2);
+    expect(selectionResponse.requiresTenantSelection).toBe(true);
+    expect(selectionResponse.tenants).toHaveLength(2);
   });
 });

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
-import { authHeader, registerUser } from "./helpers.js";
+import { authHeader, registerUser, loginUser } from "./helpers.js";
 
 const app = createApp();
 
@@ -16,11 +16,8 @@ async function addMember(ownerEmail: string, role: "MEMBER" | "ADMIN") {
     .set(authHeader(owner.accessToken))
     .send({ email: member.email, role })
     .expect(201);
-  const login = await request(app)
-    .post("/api/v1/auth/login")
-    .send({ email: member.email, password: member.password, tenantId: owner.tenantId })
-    .expect(200);
-  return { owner, memberToken: login.body.data.session.accessToken as string };
+  const login = await loginUser(app, member.email, member.password, owner.tenantId);
+  return { owner, memberToken: login.accessToken as string };
 }
 
 describe("GET /api/v1/tenants/usage", () => {
@@ -288,14 +285,11 @@ describe("GET /api/v1/tenants/usage", () => {
       .set(authHeader(owner.accessToken))
       .send({ email: admin.email, role: "ADMIN" })
       .expect(201);
-    const adminLogin = await request(app)
-      .post("/api/v1/auth/login")
-      .send({ email: admin.email, password: admin.password, tenantId: owner.tenantId })
-      .expect(200);
+    const adminLogin = await loginUser(app, admin.email, admin.password, owner.tenantId);
 
     await request(app)
       .get("/api/v1/tenants/usage")
-      .set(authHeader(adminLogin.body.data.session.accessToken))
+      .set(authHeader(adminLogin.accessToken))
       .expect(200);
   });
 

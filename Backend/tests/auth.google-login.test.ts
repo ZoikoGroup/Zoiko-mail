@@ -16,18 +16,32 @@ vi.mock("../src/modules/auth/google.verifier.js", () => ({
 
 const { createApp } = await import("../src/app.js");
 const { prisma } = await import("../src/config/prisma.js");
-const { registerUser, authHeader } = await import("./helpers.js");
+const { registerUser, authHeader, throughMfa } = await import("./helpers.js");
 
 const app = createApp();
 
 const signInWithGoogle = () =>
   request(app).post("/api/v1/auth/google").send({ idToken: "stubbed" });
 
+/**
+ * Google sign-in, carried through the MFA gate.
+ *
+ * A Google assertion proves the address, not possession of a second factor —
+ * so a privileged account signing in this way meets the same challenge as one
+ * using a password. That it does is asserted below; these call sites care
+ * about what happens afterwards.
+ */
+const googleSignIn = async () => throughMfa(app, await signInWithGoogle().expect(200));
+
 describe("Google sign-in opens a session in one step", () => {
   it("signs an existing verified account straight in, with no code step", async () => {
     const user = await registerUser(app, { email: profile.email });
 
-    const res = await signInWithGoogle().expect(200);
+    // The Google path is gated too: an ID token proves the address, not a
+    // second factor (AC-002).
+    const gate = await signInWithGoogle().expect(200);
+    expect(gate.body.data.state).toBe("MFA_REQUIRED");
+    const res = await throughMfa(app, gate.body.data ? gate : gate);
 
     // The point of the single-step flow: selecting the account *is* the
     // sign-in. Google's ID token is already its signed assertion that it
@@ -78,7 +92,7 @@ describe("Google sign-in opens a session in one step", () => {
       },
     });
 
-    const again = await signInWithGoogle().expect(200);
+    const again = await googleSignIn();
     expect(again.body.data.state).toBe("SIGNED_IN");
 
     const identities = await prisma.userIdentity.findMany({
@@ -93,7 +107,7 @@ describe("Google sign-in opens a session in one step", () => {
   });
 
   it("creates an active, verified, password-less account for a brand-new Google user", async () => {
-    const res = await signInWithGoogle().expect(200);
+    const res = await googleSignIn();
 
     // No workspace yet, so there is nothing to sign into — but the response
     // carries a pending token so the client can go on to create one.
@@ -118,11 +132,16 @@ describe("Google sign-in opens a session in one step", () => {
     const start = await signInWithGoogle().expect(200);
     expect(start.body.data.state).toBe("NO_WORKSPACE");
 
-    const created = await request(app)
+    // Creating the workspace makes this account an Owner, so AC-002 stops it
+    // at an enrolment challenge rather than handing over a session. Carrying
+    // that through is what the client does, and what completes the signup.
+    const createdRaw = await request(app)
       .post("/api/v1/auth/create-workspace")
       .set("Authorization", `Bearer ${start.body.data.pendingToken}`)
       .send({ tenantName: "Devon's Workspace", planCode: "starter" })
       .expect(201);
+    expect(createdRaw.body.data.state).toBe("MFA_ENROLLMENT_REQUIRED");
+    const created = await throughMfa(app, createdRaw);
 
     expect(created.body.data.accessToken).toBeTruthy();
     expect(created.body.data.refreshToken).toBeTruthy();
@@ -130,7 +149,7 @@ describe("Google sign-in opens a session in one step", () => {
 
     // And signing in again now resolves to a real session rather than
     // NO_WORKSPACE, which is what the user sees as "it finally lets me in".
-    const again = await signInWithGoogle().expect(200);
+    const again = await googleSignIn();
     expect(again.body.data.state).toBe("SIGNED_IN");
     expect(again.body.data.accessToken).toBeTruthy();
   });
@@ -192,7 +211,7 @@ describe("Google sign-in opens a session in one step", () => {
       .send({ email: profile.email, role: "MEMBER" })
       .expect(201);
 
-    const res = await signInWithGoogle().expect(200);
+    const res = await googleSignIn();
 
     expect(res.body.data.state).toBe("WORKSPACE_SELECTION");
     expect(res.body.data.selectionToken).toBeTruthy();
@@ -252,7 +271,7 @@ describe("Google sign-in opens a session in one step", () => {
     // One workspace, so this resolves straight to a session rather than a
     // pick — which is itself the assertion that Google cannot see a workspace
     // it holds no membership in.
-    const res = await signInWithGoogle().expect(200);
+    const res = await googleSignIn();
     expect(res.body.data.state).toBe("SIGNED_IN");
     expect(res.body.data.session.tenant.id).not.toBe(stranger.tenantId);
   });

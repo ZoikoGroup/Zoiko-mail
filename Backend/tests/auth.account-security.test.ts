@@ -2,17 +2,14 @@ import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
-import { authHeader, registerUser } from "./helpers.js";
+import { authHeader, registerUser, loginUser } from "./helpers.js";
 
 const app = createApp();
 
 describe("Account security", () => {
   it("changes the password, rejects the old password, and revokes all user refresh sessions", async () => {
     const user = await registerUser(app, { email: "password-change@zoiko.test" });
-    const secondLogin = await request(app)
-      .post("/api/v1/auth/login")
-      .send({ email: user.email, password: user.password, tenantId: user.tenantId })
-      .expect(200);
+    const secondLogin = await loginUser(app, user.email, user.password, user.tenantId);
 
     await request(app)
       .post("/api/v1/auth/change-password")
@@ -40,7 +37,7 @@ describe("Account security", () => {
       .send({ email: user.email, password: "NewPassword123!", tenantId: user.tenantId })
       .expect(200);
 
-    expect(secondLogin.body.data.session.refreshToken).toBeTruthy();
+    expect(secondLogin.refreshToken).toBeTruthy();
     const audit = await prisma.auditEvent.findFirst({
       where: { tenantId: user.tenantId, eventType: "PASSWORD_CHANGED" },
     });
@@ -49,10 +46,9 @@ describe("Account security", () => {
 
   it("logs out every refresh session for the current tenant", async () => {
     const user = await registerUser(app, { email: "logout-all@zoiko.test" });
-    await request(app)
-      .post("/api/v1/auth/login")
-      .send({ email: user.email, password: user.password, tenantId: user.tenantId })
-      .expect(200);
+    // A second, real session: the sign-in has to clear the MFA gate to leave a
+    // refresh token behind for logout-all to revoke (AC-002).
+    await loginUser(app, user.email, user.password, user.tenantId, user.mfaSecret);
 
     const response = await request(app)
       .post("/api/v1/auth/logout-all")

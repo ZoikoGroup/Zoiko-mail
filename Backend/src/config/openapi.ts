@@ -428,6 +428,114 @@ export const openApiDocument = {
         responses: { "202": ok("Digest job queued") },
       },
     },
+    "/api/v1/auth/mfa": {
+      get: {
+        tags: ["Authentication"],
+        summary: "Whether this account holds a second factor, and whether it must",
+        description:
+          "AC-002 requires MFA for Owners, Admins and Support actors. `required` says whether this account is one of them, `requiredBecause` names the role, and `remainingRecoveryCodes` is what a settings screen warns on.",
+        security: bearer,
+        responses: { "200": ok("MFA status returned") },
+      },
+    },
+    "/api/v1/auth/mfa/enroll": {
+      post: {
+        tags: ["Authentication"],
+        summary: "Begin enrolment, returning a secret and an otpauth URI",
+        description:
+          "The secret is stored immediately, encrypted, but the factor is not active until a code confirms the authenticator holds it. An account that is already enrolled must remove the old authenticator first: enrolling silently over it would strand whichever device held the previous secret.",
+        security: bearer,
+        responses: {
+          "201": ok("Enrolment started"),
+          "409": { $ref: "#/components/responses/Conflict" },
+        },
+      },
+    },
+    "/api/v1/auth/mfa/confirm": {
+      post: {
+        tags: ["Authentication"],
+        summary: "Confirm enrolment and receive the recovery codes",
+        description:
+          "The recovery codes are returned exactly once; only their hashes are kept, so a second look is impossible by construction rather than by policy.",
+        security: bearer,
+        requestBody: jsonBody({
+          type: "object", required: ["code"],
+          properties: { code: { type: "string", minLength: 6, maxLength: 20 } },
+        }),
+        responses: { "200": ok("MFA enabled"), "401": { $ref: "#/components/responses/Unauthorized" } },
+      },
+    },
+    "/api/v1/auth/mfa/disable": {
+      post: {
+        tags: ["Authentication"],
+        summary: "Remove the second factor, where the role permits it",
+        description:
+          "Refused while the account holds a role AC-002 requires MFA for, which is what makes the requirement an enforcement rather than a default. A valid code is still required otherwise, so a stolen session cannot quietly strip the factor.",
+        security: bearer,
+        requestBody: jsonBody({
+          type: "object", required: ["code"],
+          properties: { code: { type: "string", minLength: 6, maxLength: 20 } },
+        }),
+        responses: {
+          "200": ok("MFA removed"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+        },
+      },
+    },
+    "/api/v1/auth/mfa/recovery-codes": {
+      post: {
+        tags: ["Authentication"],
+        summary: "Replace the recovery codes, voiding the previous set",
+        security: bearer,
+        requestBody: jsonBody({
+          type: "object", required: ["code"],
+          properties: { code: { type: "string", minLength: 6, maxLength: 20 } },
+        }),
+        responses: { "200": ok("New recovery codes returned") },
+      },
+    },
+    "/api/v1/auth/mfa/challenge/verify": {
+      post: {
+        tags: ["Authentication"],
+        summary: "Answer an MFA challenge and complete the sign-in",
+        description:
+          "Bearer token is the short-lived `mfaToken` from an MFA_REQUIRED sign-in, not an access token. Accepts a six-digit code or a single-use recovery code in the same field. Returns the auth state the password already earned: SIGNED_IN for a workspace, STAFF_CONSOLE for platform staff. A code is accepted once (RFC 6238 section 5.2), and repeated wrong codes lock the account out briefly.",
+        requestBody: jsonBody({
+          type: "object", required: ["code"],
+          properties: { code: { type: "string", minLength: 6, maxLength: 20 } },
+        }),
+        responses: {
+          "200": ok("Sign-in completed"),
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "429": ok("Too many incorrect codes"),
+        },
+      },
+    },
+    "/api/v1/auth/mfa/challenge/enroll": {
+      post: {
+        tags: ["Authentication"],
+        summary: "Enrol while holding only an MFA challenge token",
+        description:
+          "Reachable from an MFA_ENROLLMENT_REQUIRED sign-in, where no session exists yet. Without it a newly privileged account would be locked out by the very control meant to protect it.",
+        responses: { "201": ok("Enrolment started") },
+      },
+    },
+    "/api/v1/auth/mfa/challenge/confirm": {
+      post: {
+        tags: ["Authentication"],
+        summary: "Confirm that enrolment and complete the sign-in",
+        description:
+          "Returns the recovery codes and the auth state together: the code that proved the authenticator also completes the sign-in, rather than asking for a second code seconds later.",
+        requestBody: jsonBody({
+          type: "object", required: ["code"],
+          properties: { code: { type: "string", minLength: 6, maxLength: 20 } },
+        }),
+        responses: {
+          "200": ok("MFA enabled and signed in"),
+          "401": { $ref: "#/components/responses/Unauthorized" },
+        },
+      },
+    },
     "/api/v1/lifecycle/exports": {
       post: {
         tags: ["Lifecycle"], summary: "Queue an idempotent tenant data export (OWNER)", security: bearer,

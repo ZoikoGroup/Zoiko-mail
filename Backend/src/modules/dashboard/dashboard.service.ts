@@ -22,18 +22,17 @@ import { deliveryFailureSummary } from "../mail/mail.service.js";
  */
 
 /**
- * MFA is not implemented. Security AC-002 requires enforcement and Data Model
- * §6.2 specifies `AppUser.mfaEnabled`; neither exists.
+ * MFA is implemented now, so the tile reports real coverage — AC-002.
  *
- * Reported as unsupported rather than as zero coverage, because those are
- * different facts. Zero coverage reads as a workspace that has neglected to
- * enrol, and invites an admin to go and fix something they have no way to fix.
- * Unsupported says the platform does not offer it yet, which is true.
- *
- * When AC-002 lands this becomes a real count against the new column and the
- * flag goes true. Nothing else on the dashboard has to change.
+ * This flag used to be false with a note explaining that the platform did not
+ * offer a second factor, because reporting zero coverage would have read as a
+ * workspace that had neglected to enrol and invited an admin to fix something
+ * they had no way to fix. Both counts below are now facts.
  */
-const MFA_SUPPORTED = false;
+const MFA_SUPPORTED = true;
+
+/** The roles AC-002 compels. Kept in step with the enforcement itself. */
+const MFA_REQUIRED_ROLES = ["OWNER", "ADMIN", "SUPPORT"] as const;
 
 /** Sections a caller may see partially. Named so a client can be specific. */
 export type DashboardSection =
@@ -43,7 +42,8 @@ export type DashboardSection =
   | "domains"
   | "connectors"
   | "audit"
-  | "deliveryFailures";
+  | "deliveryFailures"
+  | "mfa";
 
 const BYTES_PER_GB = 1_000_000_000;
 
@@ -156,6 +156,29 @@ export class DashboardService {
           : Promise.resolve(null),
 
       deliveryFailures: () => deliveryFailureSummary(tenantId, windowHours),
+
+      // Coverage, counted two ways. The headline is everybody who could hold a
+      // second factor; the number that actually matters for AC-002 is the
+      // privileged subset, because those are the accounts the control compels
+      // — and a workspace can be fully compliant while most of its members
+      // have never enrolled.
+      mfa: () =>
+        prisma.$transaction([
+          prisma.tenantMembership.count({
+            where: { tenantId, status: "ACTIVE", user: { mfaEnrolledAt: { not: null } } },
+          }),
+          prisma.tenantMembership.count({
+            where: { tenantId, status: "ACTIVE", role: { in: [...MFA_REQUIRED_ROLES] } },
+          }),
+          prisma.tenantMembership.count({
+            where: {
+              tenantId,
+              status: "ACTIVE",
+              role: { in: [...MFA_REQUIRED_ROLES] },
+              user: { mfaEnrolledAt: { not: null } },
+            },
+          }),
+        ]),
     });
 
     // The tenant is the one section with nothing sensible to render without.
@@ -201,13 +224,21 @@ export class DashboardService {
         storageUsedGb: toGb(storage._sum.storageUsed),
         storageLimitGb: toGb(storage._sum.storageLimit),
       },
-      mfa: {
-        supported: MFA_SUPPORTED,
-        covered: 0,
-        // Only active people could hold a second factor, so an invited row is
-        // not counted against coverage.
-        total: activePeople,
-      },
+      mfa: (() => {
+        const [covered, requiredTotal, requiredCovered] = values.mfa ?? [0, 0, 0];
+        return {
+          supported: MFA_SUPPORTED,
+          covered,
+          // Only active people could hold a second factor, so an invited row
+          // is not counted against coverage.
+          total: activePeople,
+          // The AC-002 figure: how many of the accounts that must hold MFA
+          // do. Enforcement is at sign-in, so this should read n of n — a
+          // shortfall means somebody was promoted and has not signed in since.
+          requiredCovered,
+          requiredTotal,
+        };
+      })(),
       deliveryFailures: values.deliveryFailures,
       // Shaped exactly as GET /audit/events and GET /connectors/admin return
       // them, so the client keeps one set of mappers rather than growing a

@@ -1,7 +1,7 @@
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
-import { authHeader, registerUser } from "./helpers.js";
+import { authHeader, registerUser, loginUser } from "./helpers.js";
 
 const app = createApp();
 
@@ -28,14 +28,11 @@ async function memberWithRole(
     .send({ email: user.email, role })
     .expect(201);
 
-  const login = await request(app)
-    .post("/api/v1/auth/login")
-    .send({ email: user.email, password: user.password, tenantId })
-    .expect(200);
+  const login = await loginUser(app, user.email, user.password, tenantId);
 
   return {
     ...user,
-    token: login.body.data.session?.accessToken ?? login.body.data.accessToken,
+    token: login.accessToken,
   };
 }
 

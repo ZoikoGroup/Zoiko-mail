@@ -13,7 +13,7 @@ vi.mock("../src/modules/auth/google.verifier.js", () => ({
 
 const { createApp } = await import("../src/app.js");
 const { prisma } = await import("../src/config/prisma.js");
-const { authHeader, registerUser } = await import("./helpers.js");
+const { authHeader, registerUser, throughMfa } = await import("./helpers.js");
 
 const app = createApp();
 
@@ -84,7 +84,7 @@ describe("a session is bound to the console it was opened for", () => {
       });
       expect(decode(owner.accessToken).workspace).toBe("OWNER");
 
-      const viaGoogle = await signInWithGoogle().expect(200);
+      const viaGoogle = await throughMfa(app, await signInWithGoogle().expect(200));
       expect(viaGoogle.body.data.state).toBe("SIGNED_IN");
 
       // The same person, the same workspace, a different console: signing in
@@ -99,7 +99,7 @@ describe("a session is bound to the console it was opened for", () => {
         tenantName: "Google Owner Surface",
       });
 
-      const viaGoogle = await signInWithGoogle().expect(200);
+      const viaGoogle = await throughMfa(app, await signInWithGoogle().expect(200));
       const refused = await ownerOnly(viaGoogle.body.data.accessToken);
 
       // Authority follows the console, not the membership: this is the whole
@@ -112,7 +112,7 @@ describe("a session is bound to the console it was opened for", () => {
         email: googleProfile.email,
         tenantName: "Google Refresh Workspace",
       });
-      const viaGoogle = await signInWithGoogle().expect(200);
+      const viaGoogle = await throughMfa(app, await signInWithGoogle().expect(200));
 
       const refreshed = await request(app)
         .post("/api/v1/auth/refresh")
@@ -152,14 +152,20 @@ describe("a session is bound to the console it was opened for", () => {
         .send({ email: adminEmail, role: "ADMIN" })
         .expect(201);
 
-      const asAdmin = await request(app)
-        .post("/api/v1/auth/login")
-        .send({
-          email: adminEmail,
-          password: admin.password,
-          tenantId: owner.tenantId,
-        })
-        .expect(200);
+      // An Admin sign-in passes the MFA gate first (AC-002); the console
+      // binding under test is a property of the session it finally issues.
+      const asAdmin = await throughMfa(
+        app,
+        await request(app)
+          .post("/api/v1/auth/login")
+          .send({
+            email: adminEmail,
+            password: admin.password,
+            tenantId: owner.tenantId,
+          })
+          .expect(200),
+        admin.mfaSecret
+      );
 
       const session = asAdmin.body.data.session ?? asAdmin.body.data;
       expect(decode(session.accessToken).workspace).toBe("ADMIN");
@@ -184,10 +190,14 @@ describe("a session is bound to the console it was opened for", () => {
       .send({ email, role: "ADMIN" })
       .expect(201);
 
-    const asAdmin = await request(app)
-      .post("/api/v1/auth/login")
-      .send({ email, password: person.password, tenantId: owner.tenantId })
-      .expect(200);
+    const asAdmin = await throughMfa(
+      app,
+      await request(app)
+        .post("/api/v1/auth/login")
+        .send({ email, password: person.password, tenantId: owner.tenantId })
+        .expect(200),
+      person.mfaSecret
+    );
     const session = asAdmin.body.data.session ?? asAdmin.body.data;
 
     await prisma.tenantMembership.updateMany({

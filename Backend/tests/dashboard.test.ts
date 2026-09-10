@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
-import { authHeader, registerUser } from "./helpers.js";
+import { authHeader, registerUser, loginUser } from "./helpers.js";
 import { prisma } from "../src/config/prisma.js";
 import { auditService } from "../src/modules/audit/audit.service.js";
 
@@ -90,17 +90,50 @@ describe("admin dashboard aggregate", () => {
     expect(body.counts.people).toBe(2);
   });
 
-  it("reports MFA as unsupported, not as zero coverage", async () => {
+  it("reports real MFA coverage now that there is a second factor", async () => {
     const owner = await registerUser(app, {
       email: `dash-mfa-${Date.now()}@zoiko.test`,
     });
 
     const body = (await dashboard(owner.accessToken).expect(200)).body.data;
 
-    // AC-002 is unimplemented. "Nobody has enrolled" would invite an admin to
-    // go and fix something the platform does not offer.
-    expect(body.mfa.supported).toBe(false);
+    // This tile used to report `supported: false` on purpose, because zero
+    // coverage would have read as a workspace that had neglected to enrol and
+    // invited an admin to fix something the platform did not offer. AC-002
+    // landed, so both counts are facts.
+    expect(body.mfa.supported).toBe(true);
     expect(body.mfa.total).toBe(1);
+    // The Owner had to enrol to hold a session at all.
+    expect(body.mfa.covered).toBe(1);
+    expect(body.mfa.requiredTotal).toBe(1);
+    expect(body.mfa.requiredCovered).toBe(1);
+  });
+
+  it("separates the accounts MFA is required for from everyone else", async () => {
+    const suffix = String(Date.now());
+    const owner = await registerUser(app, { email: `dash-mfareq-${suffix}@zoiko.test` });
+    const memberEmail = `dash-mfamember-${suffix}@zoiko.test`;
+    const member = await registerUser(app, { email: memberEmail });
+    await request(app)
+      .post("/api/v1/membership/members")
+      .set(authHeader(owner.accessToken))
+      .send({ email: memberEmail, role: "MEMBER" })
+      .expect(201);
+    // A member is not compelled to enrol, so strip the enrolment their own
+    // Owner role required when they registered.
+    await prisma.appUser.update({
+      where: { id: member.userId },
+      data: { mfaSecret: null, mfaEnrolledAt: null },
+    });
+
+    const body = (await dashboard(owner.accessToken).expect(200)).body.data;
+
+    // Two active people, one enrolled — and full compliance regardless,
+    // because AC-002 compels Owners, Admins and Support, not members.
+    expect(body.mfa.total).toBe(2);
+    expect(body.mfa.covered).toBe(1);
+    expect(body.mfa.requiredTotal).toBe(1);
+    expect(body.mfa.requiredCovered).toBe(1);
   });
 
   it("carries the real delivery-failure count and honours the window", async () => {
@@ -189,11 +222,8 @@ describe("admin dashboard aggregate", () => {
       .send({ email: memberEmail, role: "MEMBER" })
       .expect(201);
 
-    const asMember = await request(app)
-      .post("/api/v1/auth/login")
-      .send({ email: memberEmail, password: member.password, tenantId: owner.tenantId })
-      .expect(200);
-    const session = asMember.body.data.session ?? asMember.body.data;
+    const asMember = await loginUser(app, memberEmail, member.password, owner.tenantId);
+    const session = asMember;
 
     // A Member holds `workspace.settings.read` as READ_ONLY and the resolver
     // allows a read-only hold, so gating this route on that capability would
@@ -226,11 +256,8 @@ describe("admin dashboard aggregate", () => {
       },
     });
 
-    const asAdmin = await request(app)
-      .post("/api/v1/auth/login")
-      .send({ email: adminEmail, password: admin.password, tenantId: owner.tenantId })
-      .expect(200);
-    const session = asAdmin.body.data.session ?? asAdmin.body.data;
+    const asAdmin = await loginUser(app, adminEmail, admin.password, owner.tenantId);
+    const session = asAdmin;
 
     const adminBody = (await dashboard(session.accessToken).expect(200)).body.data;
     const ownerBody = (await dashboard(owner.accessToken).expect(200)).body.data;

@@ -131,6 +131,25 @@ export interface PlatformRefreshTokenPayload {
   jti: string;
 }
 
+/**
+ * Issued when a privileged sign-in still owes a second factor — AC-002.
+ *
+ * Carries the sign-in it will complete, so answering the challenge issues
+ * exactly the session the password already earned: no wider, and no need to
+ * re-resolve which workspace was being entered. `enrolment` distinguishes the
+ * account that has an authenticator from the one that has to set one up,
+ * which are two different screens and two different next calls.
+ */
+export interface MfaChallengeTokenPayload {
+  sub: string;
+  type: "mfa";
+  jti: string;
+  enrolment: boolean;
+  intent:
+    | { kind: "tenant"; tenantId: string; membershipId: string; workspace: WorkspaceScope }
+    | { kind: "platform"; platformRole: Exclude<PlatformRole, "NONE"> };
+}
+
 /** Populated on req.auth by `authenticate` — always a tenant-scoped access token. */
 export interface AuthContext {
   sub: string;

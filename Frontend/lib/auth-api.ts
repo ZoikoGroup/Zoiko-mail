@@ -121,6 +121,11 @@ export interface AuthResponse {
   state?: string;
   platformRole?: string;
   platformToken?: string;
+  // MFA_REQUIRED / MFA_ENROLLMENT_REQUIRED — AC-002. The challenge token is
+  // all the account holds at that point; there is no session yet.
+  mfaToken?: string;
+  requiredBecause?: string;
+  remainingRecoveryCodes?: number;
 }
 
 export interface MeResponse {
@@ -151,6 +156,19 @@ function extractTokens(data: any): { accessToken?: string; refreshToken?: string
       data?.refreshToken ?? data?.refresh_token,
     platformToken: src?.platformToken ?? data?.platformToken,
   };
+}
+
+/**
+ * Store whatever tokens an auth response carries.
+ *
+ * Four paths issue a session now — sign-in, workspace selection, an answered
+ * MFA challenge and an enrolment that completes one — so the token handling
+ * lives in one place rather than being repeated at each.
+ */
+function applyAuthTokens(data: AuthResponse): void {
+  const { accessToken, refreshToken, platformToken } = extractTokens(data);
+  if (accessToken) setTokens(accessToken, refreshToken);
+  if (platformToken) setPlatformToken(platformToken);
 }
 
 export async function login(input: LoginInput): Promise<AuthResponse> {
@@ -272,6 +290,95 @@ export async function resendOtp(
   );
 }
 
+/* ── multi-factor authentication — AC-002 ─────────────────────────────────
+ *
+ * The challenge calls carry the short-lived `mfaToken` from a sign-in that is
+ * still owed a second factor, not an access token: the account has no session
+ * yet, which is the whole point of the state.
+ */
+
+export interface MfaEnrolmentOffer {
+  secret: string;
+  uri: string;
+}
+
+export interface MfaStatus {
+  enrolled: boolean;
+  enrolledAt: string | null;
+  enrolmentPending: boolean;
+  required: boolean;
+  requiredBecause: string | null;
+  remainingRecoveryCodes: number;
+}
+
+/** Answer a challenge with an authenticator code or a recovery code. */
+export async function verifyMfaChallenge(
+  mfaToken: string,
+  code: string
+): Promise<AuthResponse> {
+  const data = await apiRequest<AuthResponse>("/auth/mfa/challenge/verify", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${mfaToken}` },
+    body: { code },
+    auth: false,
+  });
+  applyAuthTokens(data);
+  return data;
+}
+
+/** Start enrolment from a challenge, for an account that has no session yet. */
+export async function beginMfaEnrolmentFromChallenge(
+  mfaToken: string
+): Promise<MfaEnrolmentOffer> {
+  return apiRequest<MfaEnrolmentOffer>("/auth/mfa/challenge/enroll", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${mfaToken}` },
+    auth: false,
+  });
+}
+
+/** Confirm it, which also completes the sign-in the enrolment was blocking. */
+export async function confirmMfaEnrolmentFromChallenge(
+  mfaToken: string,
+  code: string
+): Promise<{ recoveryCodes: string[]; auth: AuthResponse }> {
+  const data = await apiRequest<{ recoveryCodes: string[]; auth: AuthResponse }>(
+    "/auth/mfa/challenge/confirm",
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${mfaToken}` },
+      body: { code },
+      auth: false,
+    }
+  );
+  applyAuthTokens(data.auth);
+  return data;
+}
+
+export async function fetchMfaStatus(): Promise<MfaStatus> {
+  return apiRequest<MfaStatus>("/auth/mfa");
+}
+
+export async function beginMfaEnrolment(): Promise<MfaEnrolmentOffer> {
+  return apiRequest<MfaEnrolmentOffer>("/auth/mfa/enroll", { method: "POST" });
+}
+
+export async function confirmMfaEnrolment(code: string): Promise<{ recoveryCodes: string[] }> {
+  return apiRequest<{ recoveryCodes: string[] }>("/auth/mfa/confirm", {
+    method: "POST",
+    body: { code },
+  });
+}
+
+export async function regenerateMfaRecoveryCodes(
+  code: string
+): Promise<{ recoveryCodes: string[] }> {
+  return apiRequest<{ recoveryCodes: string[] }>("/auth/mfa/recovery-codes", {
+    method: "POST",
+    body: { code },
+  });
+}
+
 export async function createWorkspace(
   input: CreateWorkspaceInput
 ): Promise<CreateWorkspaceResponse> {
@@ -294,10 +401,10 @@ export async function createWorkspace(
       }
     );
 
-  setTokens(
-    data.accessToken,
-    data.refreshToken
-  );
+  // AC-002: creating a workspace makes this account an Owner, so the response
+  // may be an MFA enrolment challenge rather than a session. Store whatever
+  // tokens it did carry and let the caller route on the state.
+  applyAuthTokens(data as unknown as AuthResponse);
 
   return data;
 }

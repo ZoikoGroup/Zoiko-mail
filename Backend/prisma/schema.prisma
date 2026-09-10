@@ -58,6 +58,14 @@ model AppUser {
   email                   String                 @unique
   googleId                String?                @unique @map("google_id")
   passwordHash            String?                @map("password_hash")
+  /// AES-256-GCM ciphertext, not a hash: whoever can read a TOTP secret
+  /// can mint valid codes forever, so it is closer to a plaintext password
+  /// than to the hash beside it (AC-002).
+  mfaSecret               String?                @map("mfa_secret")
+  mfaEnrolledAt           DateTime?              @map("mfa_enrolled_at")
+  /// The last time-step spent, so one code cannot be replayed inside its
+  /// own window (RFC 6238 section 5.2).
+  mfaLastUsedStep         Int?                   @map("mfa_last_used_step")
   displayName             String                 @map("display_name")
   avatarUrl               String?                @map("avatar_url")
   phoneNumber             String?                @map("phone_number")
@@ -97,6 +105,7 @@ model AppUser {
   usedSelectionTokens     UsedSelectionToken[]
   mailboxAccessGrants     MailboxAccess[]        @relation("MailboxAccessGrantor")
   idempotencyRecords      IdempotencyRecord[]    @relation("IdempotencyActor")
+  mfaRecoveryCodes        MfaRecoveryCode[]
   @@map("app_users")
 }
 
@@ -814,6 +823,27 @@ model DataLifecycleRequest {
   @@index([status, hardDeleteDeadline])
   @@index([tenantId, status, createdAt(sort: Desc)])
   @@map("data_lifecycle_requests")
+}
+
+/**
+ * Single-use recovery codes for a lost authenticator — AC-002.
+ *
+ * Hashed the way a password is, because that is what they are: a bearer
+ * secret that grants a session. Enforcing MFA without a recovery path would
+ * turn a lost phone into a lost workspace, and the Security specification
+ * assumes one exists when it forbids support staff from bypassing MFA
+ * "without a security-admin approved exception".
+ */
+model MfaRecoveryCode {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  codeHash  String    @map("code_hash")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  user      AppUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, usedAt])
+  @@map("mfa_recovery_codes")
 }
 
 /**

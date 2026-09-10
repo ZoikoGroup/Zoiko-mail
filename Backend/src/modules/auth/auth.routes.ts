@@ -11,6 +11,7 @@ import {
 import {
   loginSchema,
   changePasswordSchema,
+  mfaCodeSchema,
   stepUpSchema,
   createWorkspaceSchema,
   joinWorkspaceSchema,
@@ -145,6 +146,53 @@ authRouter.post(
   authenticate,
   tenantContext,
   authController.logoutAll
+);
+
+/* ── multi-factor authentication — AC-002 ──────────────────────────────── */
+
+/**
+ * Answering a challenge is a sign-in, so it is rate-limited like one: six
+ * digits is a small space, and the challenge is already reachable with only a
+ * password.
+ */
+authRouter.post(
+  "/mfa/challenge/verify",
+  loginRateLimit,
+  validate(mfaCodeSchema),
+  authController.mfaChallengeVerify
+);
+authRouter.post("/mfa/challenge/enroll", loginRateLimit, authController.mfaChallengeEnrol);
+authRouter.post(
+  "/mfa/challenge/confirm",
+  loginRateLimit,
+  validate(mfaCodeSchema),
+  authController.mfaChallengeConfirm
+);
+
+authRouter.get("/mfa", authenticate, tenantContext, authController.mfaStatus);
+authRouter.post("/mfa/enroll", authenticate, tenantContext, authController.mfaEnrol);
+authRouter.post(
+  "/mfa/confirm",
+  authenticate,
+  tenantContext,
+  validate(mfaCodeSchema),
+  authController.mfaConfirm
+);
+authRouter.post(
+  "/mfa/disable",
+  loginRateLimit,
+  authenticate,
+  tenantContext,
+  validate(mfaCodeSchema),
+  authController.mfaDisable
+);
+authRouter.post(
+  "/mfa/recovery-codes",
+  loginRateLimit,
+  authenticate,
+  tenantContext,
+  validate(mfaCodeSchema),
+  authController.mfaRegenerateRecoveryCodes
 );
 
 export { authRouter };

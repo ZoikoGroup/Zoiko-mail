@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
 import { authService } from "./auth.service.js";
+import { mfaService } from "./mfa.service.js";
 
 function getRequestContext(req: Request) {
   return {
@@ -212,4 +213,75 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response) =>
 export const selectWorkspace = asyncHandler(async (req: Request, res: Response) => {
   const result = await authService.selectWorkspace(req.body, getRequestContext(req));
   res.json({ success: true, data: result });
+});
+
+/* ── multi-factor authentication — AC-002 ─────────────────────────────────
+ *
+ * Two families, deliberately separated by which token they accept.
+ *
+ * The `/challenge/*` routes take the short-lived challenge token from a
+ * sign-in that is still owed a second factor. They exist because the account
+ * has no session yet: a newly privileged user who could not enrol from the
+ * challenge would be locked out by the control meant to protect them.
+ *
+ * The rest take an ordinary access token and belong to a settings screen.
+ */
+
+export const mfaStatus = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mfaService.status(req.auth!.sub), req.requestId);
+});
+
+export const mfaEnrol = asyncHandler(async (req: Request, res: Response) => {
+  const offer = await mfaService.beginEnrolment(
+    req.auth!.sub,
+    req.tenantContext!.user.email,
+    getRequestContext(req)
+  );
+  sendSuccess(res, 201, offer, req.requestId);
+});
+
+export const mfaConfirm = asyncHandler(async (req: Request, res: Response) => {
+  const result = await mfaService.confirmEnrolment(
+    req.auth!.sub,
+    req.body.code,
+    getRequestContext(req)
+  );
+  sendSuccess(res, 200, result, req.requestId);
+});
+
+export const mfaDisable = asyncHandler(async (req: Request, res: Response) => {
+  const result = await mfaService.disable(req.auth!.sub, req.body.code, getRequestContext(req));
+  sendSuccess(res, 200, result, req.requestId);
+});
+
+export const mfaRegenerateRecoveryCodes = asyncHandler(async (req: Request, res: Response) => {
+  const result = await mfaService.regenerateRecoveryCodes(
+    req.auth!.sub,
+    req.body.code,
+    getRequestContext(req)
+  );
+  sendSuccess(res, 200, result, req.requestId);
+});
+
+export const mfaChallengeVerify = asyncHandler(async (req: Request, res: Response) => {
+  const result = await authService.completeMfaChallenge(
+    getBearerToken(req),
+    req.body.code,
+    getRequestContext(req)
+  );
+  sendSuccess(res, 200, result, req.requestId);
+});
+
+export const mfaChallengeEnrol = asyncHandler(async (req: Request, res: Response) => {
+  const offer = await authService.enrolFromChallenge(getBearerToken(req), getRequestContext(req));
+  sendSuccess(res, 201, offer, req.requestId);
+});
+
+export const mfaChallengeConfirm = asyncHandler(async (req: Request, res: Response) => {
+  const result = await authService.confirmEnrolmentFromChallenge(
+    getBearerToken(req),
+    req.body.code,
+    getRequestContext(req)
+  );
+  sendSuccess(res, 200, result, req.requestId);
 });
