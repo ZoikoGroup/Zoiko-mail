@@ -5,12 +5,13 @@ import { ProtectedRoute } from "@/components/owner/ProtectedRoute";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ConnectedAccountsTable } from "@/components/owner/connected-accounts/ConnectedAccountsTable";
 import { useConnectors } from "@/lib/owner-hooks";
-import { useGoogleAuth } from "@/lib/connectors-hooks";
+import { useGoogleAuth, useMicrosoftAuth } from "@/lib/connectors-hooks";
 import { Link2, Loader2, AlertCircle } from "lucide-react";
 
 export default function OwnerConnectedAccountsPage() {
   const { data: connectors = [], isLoading } = useConnectors();
   const googleAuth = useGoogleAuth();
+  const microsoftAuth = useMicrosoftAuth();
   const [authError, setAuthError] = useState<string | null>(null);
 
   const handleConnectGoogle = () => {
@@ -26,6 +27,19 @@ export default function OwnerConnectedAccountsPage() {
     });
   };
 
+  const handleConnectMicrosoft = () => {
+    setAuthError(null);
+    microsoftAuth.mutate(undefined, {
+      onSuccess: (data) => {
+        window.location.href = data.url;
+      },
+      onError: (err: any) => {
+        const msg = err?.message || "Failed to start Microsoft OAuth. Make sure Microsoft 365 credentials are configured in the backend .env.";
+        setAuthError(msg);
+      },
+    });
+  };
+
   return (
     <ProtectedRoute>
       <div className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6">
@@ -33,18 +47,32 @@ export default function OwnerConnectedAccountsPage() {
           title="Connected Accounts"
           description="Manage Gmail and Microsoft 365 connections across your team."
           actions={
-            <button
-              className="zoiko-btn pri"
-              onClick={handleConnectGoogle}
-              disabled={googleAuth.isPending}
-            >
-              {googleAuth.isPending ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Link2 className="h-3.5 w-3.5" />
-              )}
-              Connect Gmail Account
-            </button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                className="zoiko-btn pri"
+                onClick={handleConnectGoogle}
+                disabled={googleAuth.isPending}
+              >
+                {googleAuth.isPending ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Link2 className="h-3.5 w-3.5" />
+                )}
+                Connect Gmail Account
+              </button>
+              <button
+                className="zoiko-btn"
+                onClick={handleConnectMicrosoft}
+                disabled={microsoftAuth.isPending}
+              >
+                {microsoftAuth.isPending ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Link2 className="h-3.5 w-3.5" />
+                )}
+                Connect Microsoft 365 Account
+              </button>
+            </div>
           }
         />
         {authError && (

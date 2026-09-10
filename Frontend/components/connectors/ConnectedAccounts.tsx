@@ -13,6 +13,7 @@ import {
   useDeadLetter,
   useReplayDeadLetter,
   useGoogleAuth,
+  useMicrosoftAuth,
 } from "@/lib/connectors-hooks";
 import {
   READONLY_SCOPES,
@@ -22,6 +23,7 @@ import {
 } from "@/lib/connectors-api";
 import { useMe } from "@/lib/auth-hooks";
 import type { MeResponse } from "@/lib/auth-api";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 const PROVIDER_LABEL: Record<ConnectorProvider, string> = {
   GMAIL: "Gmail",
@@ -54,11 +56,16 @@ export function ConnectedAccounts() {
   const { data: accounts = [], isLoading, error } = useConnectors();
   const disconnect = useDisconnectConnector();
   const [showConnect, setShowConnect] = useState(false);
+  const [toDisconnect, setToDisconnect] = useState<Connector | null>(null);
 
   // Handle OAuth callback success
   const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   const connected = searchParams?.get("connected");
+  const connectedProvider = searchParams?.get("provider");
   const oauthError = searchParams?.get("error");
+
+  const providerName = (p: string | null) =>
+    p === "MICROSOFT_365" ? "Microsoft 365" : p === "GMAIL" ? "Gmail" : "account";
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
@@ -79,7 +86,7 @@ export function ConnectedAccounts() {
 
       {connected === "true" && (
         <div className="mt-4 flex items-center gap-2 rounded-lg border border-[var(--ok)]/30 bg-[var(--ok-soft)] p-4 text-sm text-[var(--ok)]">
-          <CheckCircle2 className="h-4 w-4" /> Account connected successfully!
+          <CheckCircle2 className="h-4 w-4" /> {providerName(connectedProvider ?? null)} connected successfully!
         </div>
       )}
 
@@ -114,11 +121,24 @@ export function ConnectedAccounts() {
           <AccountCard
             key={a.id}
             account={a}
-            onDisconnect={() => disconnect.mutate(a.id)}
+            onDisconnect={() => setToDisconnect(a)}
             busy={disconnect.isPending}
           />
         ))}
       </div>
+
+      <ConfirmDialog
+        open={!!toDisconnect}
+        onClose={() => setToDisconnect(null)}
+        onConfirm={() => {
+          if (toDisconnect) disconnect.mutate(toDisconnect.id);
+          setToDisconnect(null);
+        }}
+        title="Disconnect account"
+        message={`Disconnect ${toDisconnect?.email ?? "this account"}? Syncing will stop and extracted actions will no longer update from it. You can reconnect any time.`}
+        confirmLabel="Disconnect"
+        loading={disconnect.isPending}
+      />
 
       {isAdmin && <AdminPanel />}
     </div>
@@ -160,12 +180,14 @@ function AccountCard({
 
 function ConnectPanel({ onDone }: { onDone: () => void }) {
   const googleAuth = useGoogleAuth();
+  const microsoftAuth = useMicrosoftAuth();
   const create = useCreateConnector();
   const [showManual, setShowManual] = useState(false);
   const [provider, setProvider] = useState<ConnectorProvider>("GMAIL");
   const [email, setEmail] = useState("");
   const [providerAccountId, setProviderAccountId] = useState("");
   const [googleError, setGoogleError] = useState<string | null>(null);
+  const [microsoftError, setMicrosoftError] = useState<string | null>(null);
 
   const handleGoogleConnect = () => {
     setGoogleError(null);
@@ -176,6 +198,19 @@ function ConnectPanel({ onDone }: { onDone: () => void }) {
       onError: (err: any) => {
         const msg = err?.message || "Failed to start Google OAuth. Make sure GOOGLE_CLIENT_ID is configured in the backend .env.";
         setGoogleError(msg);
+      },
+    });
+  };
+
+  const handleMicrosoftConnect = () => {
+    setMicrosoftError(null);
+    microsoftAuth.mutate(undefined, {
+      onSuccess: (data) => {
+        window.location.href = data.url;
+      },
+      onError: (err: any) => {
+        const msg = err?.message || "Failed to start Microsoft OAuth. Make sure MICROSOFT_* credentials are configured in the backend .env.";
+        setMicrosoftError(msg);
       },
     });
   };
@@ -207,7 +242,7 @@ function ConnectPanel({ onDone }: { onDone: () => void }) {
       <div className="space-y-2">
         <button
           onClick={handleGoogleConnect}
-          disabled={googleAuth.isPending}
+          disabled={googleAuth.isPending || microsoftAuth.isPending}
           className="flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-sm font-medium text-[var(--ink)] transition hover:border-[var(--accent)] hover:shadow-[var(--sh2)] disabled:opacity-50"
         >
           {googleAuth.isPending ? (
@@ -224,6 +259,33 @@ function ConnectPanel({ onDone }: { onDone: () => void }) {
         </button>
         {googleError && (
           <p className="mt-2 text-xs text-[var(--crit)]">{googleError}</p>
+        )}
+
+        <div className="flex items-center gap-2">
+          <span className="h-px flex-1 bg-[var(--border)]" />
+          <span className="text-[10px] font-mono-num uppercase tracking-wider text-[var(--ink3)]">or</span>
+          <span className="h-px flex-1 bg-[var(--border)]" />
+        </div>
+
+        <button
+          onClick={handleMicrosoftConnect}
+          disabled={googleAuth.isPending || microsoftAuth.isPending}
+          className="flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-sm font-medium text-[var(--ink)] transition hover:border-[var(--accent)] hover:shadow-[var(--sh2)] disabled:opacity-50"
+        >
+          {microsoftAuth.isPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <svg className="h-5 w-5" viewBox="0 0 21 21">
+              <rect x="1" y="1" width="9" height="9" fill="#F25022" />
+              <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
+              <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
+              <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
+            </svg>
+          )}
+          Continue with Microsoft 365
+        </button>
+        {microsoftError && (
+          <p className="mt-2 text-xs text-[var(--crit)]">{microsoftError}</p>
         )}
       </div>
 

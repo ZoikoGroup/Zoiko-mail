@@ -42,6 +42,7 @@ export interface EmailMessage {
   fromAddress: string | null;
   fromName: string | null;
   createdAt: string;
+  sourceAiActionId?: string | null;
   recipients: MailRecipient[];
   attachments: MailAttachment[];
   author: { id: string; email: string; displayName: string };

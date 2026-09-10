@@ -21,6 +21,7 @@ export interface ActionItem {
   priority: ActionPriority;
   status: ActionStatus;
   snoozedUntil: string | null;
+  sourceAiActionId: string | null;
   createdAt: string;
   updatedAt: string;
 }

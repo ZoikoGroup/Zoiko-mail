@@ -7,6 +7,7 @@ import {
   disconnectConnector,
   getConnectorHealth,
   getGoogleAuthUrl,
+  getMicrosoftAuthUrl,
   listDeadLetter,
   replayDeadLetter,
   type Connector,
@@ -49,6 +50,12 @@ export function useDisconnectConnector() {
 export function useGoogleAuth() {
   return useMutation({
     mutationFn: () => getGoogleAuthUrl(),
+  });
+}
+
+export function useMicrosoftAuth() {
+  return useMutation({
+    mutationFn: () => getMicrosoftAuthUrl(),
   });
 }
 
