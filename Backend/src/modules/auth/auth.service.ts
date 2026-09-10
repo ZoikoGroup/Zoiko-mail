@@ -15,6 +15,7 @@ import type {
   PlatformTokenPayload,
   RefreshTokenPayload,
   SelectionTokenPayload,
+  StepUpTokenPayload,
   WorkspaceScope,
 } from "../../common/types/jwt.js";
 import { auditService } from "../audit/audit.service.js";
@@ -254,6 +255,48 @@ function buildPlatformToken(
   });
 
   return { token, expiresIn: env.JWT_ACCESS_EXPIRES_IN };
+}
+
+/**
+ * Proof of a fresh password check, for the high-risk actions in Security §5.
+ *
+ * Bound to the tenant as well as the user: stepping up in one workspace must
+ * not authorise a destructive action in another, and a session can only act
+ * in one workspace at a time anyway.
+ */
+function buildStepUpToken(userId: string, tenantId: string): { token: string; expiresIn: string } {
+  const payload: StepUpTokenPayload = {
+    sub: userId,
+    tenantId,
+    type: "step-up",
+    jti: uuidv4(),
+  };
+  const token = jwt.sign(payload, env.JWT_ACCESS_SECRET, {
+    expiresIn: env.STEP_UP_EXPIRES_IN as jwt.SignOptions["expiresIn"],
+  });
+  return { token, expiresIn: env.STEP_UP_EXPIRES_IN };
+}
+
+/**
+ * True when the header carries a live step-up for this exact user and tenant.
+ *
+ * Verification failures are all treated the same way — expired, forged,
+ * belonging to someone else — because the caller has nothing useful to do
+ * with the distinction and it would tell an attacker which part they got
+ * right.
+ */
+export function verifyStepUpToken(
+  token: string | undefined,
+  userId: string,
+  tenantId: string
+): boolean {
+  if (!token) return false;
+  try {
+    const decoded = jwt.verify(token, env.JWT_ACCESS_SECRET) as StepUpTokenPayload;
+    return decoded.type === "step-up" && decoded.sub === userId && decoded.tenantId === tenantId;
+  } catch {
+    return false;
+  }
 }
 
 function toWorkspaceOption(m: MembershipWithRelations): WorkspaceOption {
@@ -1450,6 +1493,54 @@ export class AuthService {
         userAgent: context.userAgent,
       });
     }
+  }
+
+  /**
+   * Re-authenticate for a high-risk action — Security §5, AC-003.
+   *
+   * Deliberately re-checks the password rather than trusting the access
+   * token: the token proves who signed in hours ago, and §5 wants evidence
+   * that the person at the keyboard right now is the account holder.
+   *
+   * Audited whether it succeeds or fails. A run of failures against a
+   * privileged action is exactly the signal §18's identity category exists
+   * to capture.
+   */
+  async stepUp(
+    input: { password: string },
+    context: { userId: string; tenantId: string; requestId?: string; ipAddress?: string | null; userAgent?: string | null }
+  ) {
+    const user = await prisma.appUser.findUnique({
+      where: { id: context.userId },
+      select: { id: true, passwordHash: true },
+    });
+    if (!user) throw new AppError("Account not found", 404, ErrorCodes.NOT_FOUND);
+
+    // A Google-only account has no password to re-enter. Saying so plainly
+    // beats a generic refusal the person cannot act on.
+    if (!user.passwordHash) {
+      throw new AppError(
+        "This account signs in with Google and has no password to confirm. Set a password before performing this action.",
+        409,
+        ErrorCodes.CONFLICT,
+        { reason: "NO_PASSWORD_SET" }
+      );
+    }
+
+    const ok = await verifyPassword(input.password, user.passwordHash);
+    await auditService.record({
+      tenantId: context.tenantId,
+      actorUserId: context.userId,
+      eventType: ok ? "STEP_UP_SUCCEEDED" : "STEP_UP_FAILED",
+      targetType: "AppUser",
+      targetId: context.userId,
+      requestId: context.requestId,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+    });
+    if (!ok) throw new AppError("Password is incorrect", 401, ErrorCodes.UNAUTHORIZED);
+
+    return buildStepUpToken(context.userId, context.tenantId);
   }
 
   async changePassword(

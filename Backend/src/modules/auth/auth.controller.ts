@@ -161,6 +161,25 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
   sendSuccess(res, 200, { message: "Password changed successfully" }, req.requestId);
 });
 
+/**
+ * Re-authenticate for a high-risk action — Security §5, AC-003.
+ *
+ * Returns a short-lived token the client sends back as `x-step-up-token` on
+ * the privileged request. Kept out of the session so it expires on its own
+ * rather than riding along for the life of the login.
+ */
+export const stepUp = asyncHandler(async (req: Request, res: Response) => {
+  const tenant = req.tenantContext!;
+  const { token, expiresIn } = await authService.stepUp(req.body, {
+    userId: tenant.userId,
+    tenantId: tenant.tenantId,
+    ...getRequestContext(req),
+  });
+  // Named for what it is rather than a bare `token`: the client has an
+  // access token already, and the two go in different headers.
+  sendSuccess(res, 200, { stepUpToken: token, expiresIn }, req.requestId);
+});
+
 export const logoutAll = asyncHandler(async (req: Request, res: Response) => {
   const tenant = req.tenantContext!;
   const revokedSessionCount = await authService.logoutAll(

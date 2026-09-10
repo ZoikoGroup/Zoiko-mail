@@ -11,6 +11,7 @@ import {
 import {
   loginSchema,
   changePasswordSchema,
+  stepUpSchema,
   createWorkspaceSchema,
   joinWorkspaceSchema,
   logoutSchema,
@@ -126,6 +127,17 @@ authRouter.post(
   tenantContext,
   validate(changePasswordSchema),
   authController.changePassword
+);
+
+// Rate-limited like a login, because it is one: an unlimited step-up
+// endpoint is a password oracle behind an authenticated session.
+authRouter.post(
+  "/step-up",
+  loginRateLimit,
+  authenticate,
+  tenantContext,
+  validate(stepUpSchema),
+  authController.stepUp
 );
 
 authRouter.post(

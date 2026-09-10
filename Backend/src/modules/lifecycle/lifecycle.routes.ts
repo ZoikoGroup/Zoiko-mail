@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { authenticate, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
+import { authenticate, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
 import { prisma } from "../../config/prisma.js";
@@ -16,9 +16,24 @@ const confirmDeletionBody = z.object({
   confirmation: z.literal("DELETE_TENANT_PERMANENTLY"),
   tenantName: z.string().trim().min(1).max(200),
 });
+/**
+ * Owner-gated as a floor, with the export itself behind its capability.
+ *
+ * The matrix marks `data.export` STEP_UP, but this router gated on the role
+ * alone — so the export ran without the fresh re-authentication AC-003
+ * requires, and the capability layer's answer was simply never asked for.
+ * The export routes below now ask.
+ *
+ * The deletion chain stays role-gated on purpose. `tenant.delete` is
+ * TWO_PERSON in the matrix and two-person approval does not exist yet, so
+ * routing it through the capability would resolve closed and make tenant
+ * deletion impossible rather than safer. That is the same class of gap this
+ * change closes for export, and it stays open until a second-approver
+ * mechanism exists.
+ */
 lifecycleRouter.use(authenticate, tenantContext, requireRole("OWNER"));
 lifecycleRouter.get("/", asyncHandler(async (req, res) => { sendSuccess(res, 200, { requests: await prisma.dataLifecycleRequest.findMany({ where: { tenantId: req.tenantContext!.tenantId }, include: { job: true }, orderBy: { createdAt: "desc" } }) }, req.requestId); }));
-lifecycleRouter.post("/exports", validate(body), asyncHandler(async (req, res) => {
+lifecycleRouter.post("/exports", requireCapability("data.export"), validate(body), asyncHandler(async (req, res) => {
   const c=req.tenantContext!;
   const result=await prisma.$transaction(async tx => {
     const job=await jobService.enqueue({ tenantId:c.tenantId,userId:c.userId,type:"DATA_EXPORT",payload:{scope:"TENANT"},idempotencyKey:`export:${req.body.idempotencyKey}` },tx);
@@ -29,7 +44,7 @@ lifecycleRouter.post("/exports", validate(body), asyncHandler(async (req, res) =
     return {request,job};
   }); sendSuccess(res,202,result,req.requestId);
 }));
-lifecycleRouter.get("/exports/:requestId/download", validate(params, "params"), asyncHandler(async (req, res) => {
+lifecycleRouter.get("/exports/:requestId/download", requireCapability("data.export"), validate(params, "params"), asyncHandler(async (req, res) => {
   const context = req.tenantContext!;
   const item = await prisma.dataLifecycleRequest.findFirst({
     where: {

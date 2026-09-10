@@ -7,18 +7,37 @@ import { prisma } from "../src/config/prisma.js";
 
 const app = createApp();
 
+/**
+ * Export now requires a fresh password check (Security §5, AC-003).
+ *
+ * These calls used to pass on the Owner role alone, because the route gated
+ * on the role while the capability matrix marked `data.export` STEP_UP — so
+ * the requirement existed on paper and was never asked for. It is asked for
+ * now, and these tests have to answer it like any other caller.
+ */
+async function stepUpToken(user: { accessToken: string; password: string }) {
+  const res = await request(app)
+    .post("/api/v1/auth/step-up")
+    .set(authHeader(user.accessToken))
+    .send({ password: user.password })
+    .expect(200);
+  return res.body.data.stepUpToken as string;
+}
+
 describe("Background jobs and data lifecycle", () => {
   it("creates idempotent exports and approval-gated deletion jobs", async () => {
     const owner = await registerUser(app, { email: "lifecycle@zoiko.test" });
     const payload = { idempotencyKey: "export-run-0001", reason: "Customer backup" };
-    const first = await request(app).post("/api/v1/lifecycle/exports").set(authHeader(owner.accessToken)).send(payload).expect(202);
-    const second = await request(app).post("/api/v1/lifecycle/exports").set(authHeader(owner.accessToken)).send(payload).expect(202);
+    const proof = await stepUpToken(owner);
+    const first = await request(app).post("/api/v1/lifecycle/exports").set(authHeader(owner.accessToken)).set("x-step-up-token", proof).send(payload).expect(202);
+    const second = await request(app).post("/api/v1/lifecycle/exports").set(authHeader(owner.accessToken)).set("x-step-up-token", proof).send(payload).expect(202);
     expect(second.body.data.job.id).toBe(first.body.data.job.id);
     const processedExport = await jobService.processNext();
     expect(processedExport.processed).toBe(true);
     const download = await request(app)
       .get(`/api/v1/lifecycle/exports/${first.body.data.request.id}/download`)
       .set(authHeader(owner.accessToken))
+      .set("x-step-up-token", proof)
       .expect(200);
     expect(download.body.format).toBe("zoiko-mail-tenant-export");
     const serialized = JSON.stringify(download.body);
@@ -40,6 +59,7 @@ describe("Background jobs and data lifecycle", () => {
     const first = await registerUser(app, { email: "jobs-first@zoiko.test" });
     const second = await registerUser(app, { email: "jobs-second@zoiko.test" });
     const queued = await request(app).post("/api/v1/lifecycle/exports").set(authHeader(first.accessToken))
+      .set("x-step-up-token", await stepUpToken(first))
       .send({ idempotencyKey: "worker-job-0001" }).expect(202);
     await request(app).get(`/api/v1/jobs/${queued.body.data.job.id}`).set(authHeader(second.accessToken)).expect(404);
 

@@ -32,6 +32,9 @@ export const envSchema = z.object({
   JWT_ACCESS_SECRET: z.string().min(32),
   JWT_REFRESH_SECRET: z.string().min(32),
   JWT_ACCESS_EXPIRES_IN: z.string().regex(/^\d+[smhd]$/).default("12h"),
+  // Minutes, not hours: a step-up proves freshness, and a long-lived one
+  // would just be a second access token (Security §5).
+  STEP_UP_EXPIRES_IN: z.string().default("5m"),
   JWT_REFRESH_EXPIRES_IN: z.string().regex(/^\d+[smhd]$/).default("7d"),
   APP_URL: z.string().url().default("http://localhost:3000"),
   CORS_ORIGIN: z.string().default("http://localhost:3000"),

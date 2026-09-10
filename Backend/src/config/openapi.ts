@@ -113,6 +113,31 @@ export const openApiDocument = {
       },
     },
 
+    "/api/v1/auth/step-up": {
+      post: {
+        tags: ["Authentication"],
+        summary: "Re-authenticate for a high-risk action",
+        description:
+          "Security §5 / AC-003. Verifies the password again and returns a short-lived token; send it back as the x-step-up-token header on the privileged request. Bound to the caller and the workspace, so a step-up taken in one cannot authorise an action in another. Both success and failure are audited.",
+        operationId: "stepUp",
+        security: bearer,
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { type: "object", required: ["password"], properties: { password: { type: "string" } } },
+              example: { password: "CorrectHorseBattery1!" },
+            },
+          },
+        },
+        responses: {
+          "200": ok("Step-up token issued"),
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "409": ok("The account signs in with Google and has no password to confirm"),
+          "429": ok("Too many attempts"),
+        },
+      },
+    },
     "/api/v1/auth/forgot-password": {
       post: {
         tags: ["Authentication"], summary: "Request a password reset code",

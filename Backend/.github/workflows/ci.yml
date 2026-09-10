@@ -1,9 +1,20 @@
 name: CI
 
-# Must live at the repository root: GitHub Actions only reads
-# .github/workflows from there. Copies previously sat under Backend/.github and
-# Frontend/.github, where Actions never looked, so nothing in this pipeline had
-# ever run against a commit.
+# NOT RUNNING. GitHub Actions only reads .github/workflows from the repository
+# root, and this file is not there — it sits under Backend/ to keep the root to
+# Backend and Frontend only, which is a deliberate project constraint.
+#
+# Nothing in this pipeline executes against a commit while it lives here. It
+# was briefly at the root and green; it was moved back on request. To turn CI
+# back on, from the repository root:
+#
+#     mkdir -p .github/workflows
+#     git mv Backend/.github/workflows/ci.yml       .github/workflows/ci.yml
+#     git mv Backend/.github/workflows/security.yml .github/workflows/security.yml
+#
+# Until then every gate below — 326 backend tests, both type checks, lint,
+# the OpenAPI contract lint, migration drift, the container build — runs only
+# when a developer remembers to run it locally.
 
 on:
   push:

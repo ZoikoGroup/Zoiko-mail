@@ -1,6 +1,6 @@
 import type { MembershipRole, PlatformRole } from "@prisma/client";
 
-export type TokenType = "access" | "refresh" | "pending" | "platform" | "selection";
+export type TokenType = "access" | "refresh" | "pending" | "platform" | "selection" | "step-up";
 
 /**
  * The one workspace a session may act in.
@@ -18,6 +18,24 @@ export type TokenType = "access" | "refresh" | "pending" | "platform" | "selecti
  * is, so reaching a console takes a deliberate sign-in.
  */
 export type WorkspaceScope = "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT";
+
+/**
+ * Proof that the caller re-entered their password just now — Security §5,
+ * AC-003, RBAC §2 "fresh step-up authentication required at action time".
+ *
+ * Separate from the access token and deliberately short-lived, because the
+ * point is freshness: an access token proves who you are for hours, and the
+ * high-risk actions in §5 want evidence that the person at the keyboard is
+ * still the account holder. Bound to the tenant as well as the user, so a
+ * step-up performed in one workspace cannot authorise a destructive action
+ * in another.
+ */
+export interface StepUpTokenPayload {
+  sub: string;
+  tenantId: string;
+  type: "step-up";
+  jti: string;
+}
 
 export interface AccessTokenPayload {
   sub: string;

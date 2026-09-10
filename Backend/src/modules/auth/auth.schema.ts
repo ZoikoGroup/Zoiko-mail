@@ -72,3 +72,8 @@ export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 export type SelectWorkspaceInput = z.infer<typeof selectWorkspaceSchema>;
 export type JoinWorkspaceInput = z.infer<typeof joinWorkspaceSchema>;
 export type GoogleLoginInput = z.infer<typeof googleLoginSchema>;
+
+/** Re-entering the password for a high-risk action (Security §5, AC-003). */
+export const stepUpSchema = z.object({
+  password: z.string().min(1).max(200),
+});

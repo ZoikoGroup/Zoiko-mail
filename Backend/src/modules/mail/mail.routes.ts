@@ -13,13 +13,13 @@ mailRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBE
 // stops the next nested route being swallowed.
 mailRouter.get(
   "/admin/delivery-events/summary",
-  requireRole("OWNER", "ADMIN"),
+  requireCapability("workspace.mailboxes.manage"),
   validate(adminDeliverySummaryQuerySchema, "query"),
   controller.adminDeliveryFailureSummary
 );
 mailRouter.get(
   "/admin/delivery-events",
-  requireRole("OWNER", "ADMIN"),
+  requireCapability("workspace.mailboxes.manage"),
   validate(adminDeliveryEventsQuerySchema, "query"),
   controller.adminListDeliveryEvents
 );
