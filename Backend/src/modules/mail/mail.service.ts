@@ -594,41 +594,6 @@ export class MailService {
           }
         }
 
-        // await tx.mailboxMessage.update({
-        //   where: {
-        //     mailboxId_messageId: { mailboxId: senderMailbox.id, messageId },
-        //     tenantId: context.tenantId,
-        //   },
-        //   data: { folder: "SENT", isRead: true },
-        // });
-        // const message = await tx.emailMessage.update({
-        //   where: { id: messageId, tenantId: context.tenantId },
-        //   data: { status: "SENT", sentAt, scheduledAt: null, scheduleLastError: null },
-        //   include: messageInclude,
-        // });
-        // if (message.threadId) {
-        //   await tx.messageThread.update({
-        //     where: { id: message.threadId, tenantId: context.tenantId },
-        //     data: { lastMessageAt: sentAt },
-        //   });
-        // }
-        // const hasExternalRecipients = await tx.messageRecipient.count({
-        //   where: { tenantId: context.tenantId, messageId, recipientMembershipId: null },
-        // }) > 0;
-        // if (
-        //   hasExternalRecipients
-        //   && env.MAIL_PROVIDER_ENABLED
-        //   && context.tenantId === env.MAIL_PROVIDER_TENANT_ID
-        //   && context.membershipId === env.MAIL_PROVIDER_MEMBERSHIP_ID
-        // ) {
-        //   await jobService.enqueue({
-        //     tenantId: context.tenantId,
-        //     userId: context.userId,
-        //     type: "SMTP_SEND",
-        //     payload: { messageId },
-        //     idempotencyKey: `smtp-send:${messageId}`,
-        //   }, tx);
-        // }
         await tx.mailboxMessage.update({
           where: {
             mailboxId_messageId: { mailboxId: senderMailbox.id, messageId },
@@ -661,7 +626,43 @@ export class MailService {
           status = "SENDING";
           // sentAt stays null — the worker sets it on real SMTP success.
         } else {
-          status = "FAILED";
+          // Nothing exists to carry the external half of this message.
+          //
+          // Two corrections to the original shape of this branch, which
+          // marked the whole message FAILED. It reported a message as failed
+          // when its internal recipients had demonstrably received it a few
+          // lines above, and it left those external recipients reading QUEUED
+          // — "in flight" — while the message said FAILED, so the two levels
+          // contradicted each other.
+          //
+          // Per-recipient status is the level that can tell the truth here, so
+          // the black hole is recorded there: the external recipients fail,
+          // and the message is only failed when nobody received it at all.
+          const externals = await tx.messageRecipient.findMany({
+            where: { tenantId: context.tenantId, messageId, recipientMembershipId: null },
+            select: { id: true },
+          });
+          const deliveredCount = await tx.messageRecipient.count({
+            where: { tenantId: context.tenantId, messageId, deliveryStatus: "DELIVERED" },
+          });
+
+          await tx.messageRecipient.updateMany({
+            where: { tenantId: context.tenantId, messageId, recipientMembershipId: null },
+            data: { deliveryStatus: "FAILED" },
+          });
+          await tx.deliveryEvent.createMany({
+            data: externals.map((recipient) => ({
+              tenantId: context.tenantId,
+              messageId,
+              recipientId: recipient.id,
+              type: "FAILED" as const,
+              failureCode: "EXTERNAL_DELIVERY_NOT_CONFIGURED",
+              failureReason: "External delivery is not configured for this tenant",
+            })),
+          });
+
+          status = deliveredCount > 0 ? "SENT" : "FAILED";
+          messageSentAt = deliveredCount > 0 ? sentAt : null;
           scheduleLastError = "External delivery is not configured for this tenant";
         }
 

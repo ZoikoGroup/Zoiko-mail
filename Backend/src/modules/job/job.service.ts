@@ -69,14 +69,6 @@ export class JobService {
         await this.complete(job.id, job.tenantId, result);
         return { processed: true, jobId: job.id, type: job.type, result };
       }
-      // if (job.type === "SMTP_SEND") {
-      //   const messageId = typeof job.payload === "object" && job.payload !== null && !Array.isArray(job.payload)
-      //     && typeof job.payload.messageId === "string" ? job.payload.messageId : null;
-      //   if (!messageId) throw new Error("SMTP job has no message id");
-      //   const result = await providerMailService.sendMessage(messageId, job.tenantId);
-      //   await this.complete(job.id, job.tenantId, result);
-      //   return { processed: true, jobId: job.id, type: job.type, result };
-      // }
       if (job.type === "SMTP_SEND") {
         const messageId = typeof job.payload === "object" && job.payload !== null && !Array.isArray(job.payload)
           && typeof job.payload.messageId === "string" ? job.payload.messageId : null;
@@ -96,11 +88,6 @@ export class JobService {
       const result = await this.processDigest(job.id, job.tenantId, job.createdByUserId, job.payload);
       return { processed: true, jobId: job.id, type: job.type, result };
 
-      // } catch (error) {
-      //   const message = error instanceof Error ? error.message : "Background job failed";
-      //   await this.fail(job.id, job.tenantId, message);
-      //   return { processed: true, jobId: job.id, type: job.type, error: message };
-      // }
       
     } catch (error) {
       const message = error instanceof Error ? error.message : "Background job failed";

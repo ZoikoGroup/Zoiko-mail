@@ -69,6 +69,29 @@ beforeEach(async () => {
     await tx.emailMessage.deleteMany();
     await tx.tenantPolicy.deleteMany();
     await tx.tenantMembership.deleteMany();
+
+    // Second pass, immediately before the users are removed.
+    //
+    // AuditEvent.actor is an optional relation with no onDelete, so Prisma
+    // defaults it to SetNull: deleting an AppUser issues
+    // `UPDATE audit_events SET actor_user_id = NULL`. The append-only trigger
+    // refuses UPDATE unconditionally — its `zoiko.audit_purge` escape hatch
+    // covers DELETE only — so that cascade fails with 42501.
+    //
+    // The pass above usually prevents it, but only usually: an audit write
+    // still in flight from the previous test can commit after it and before
+    // this line, and then the cascade has a row to try to rewrite. That made
+    // the whole suite fail intermittently under load, in whichever file
+    // happened to be running, which is the worst shape a flake can take —
+    // it reads as a bug in unrelated code.
+    //
+    // Deleting them again here is cheap and removes the race. The underlying
+    // asymmetry is still there: any production path that deletes an AppUser
+    // while audit rows reference them will hit the same 42501. Nothing in
+    // src/ does today, so it is latent rather than live, and it belongs with
+    // the AC-012 user-deletion work rather than in a test helper.
+    await tx.auditEvent.deleteMany();
+
     await tx.appUser.deleteMany();
     await tx.tenant.deleteMany();
   });

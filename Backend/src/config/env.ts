@@ -10,7 +10,14 @@ const blankAsUndefined = (value: unknown) => (value === "" ? undefined : value);
 const boolFlag = (fallback: "true" | "false") =>
   z.enum(["true", "false"]).default(fallback).transform((value: "true" | "false") => value === "true");
 
-const envSchema = z.object({
+/**
+ * Exported so the validation rules can be tested directly.
+ *
+ * `env` below is parsed once at import time from the real process
+ * environment, which makes the rules themselves — the TLS guard in
+ * particular — untestable without spawning a process per case.
+ */
+export const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(5000),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
@@ -129,15 +136,33 @@ const envSchema = z.object({
         context.addIssue({ code: "custom", path: [key], message: "is required when MAIL_PROVIDER_ENABLED=true" });
       }
     }
-    // if (!value.IMAP_SECURE || !value.SMTP_SECURE) {
-    //   context.addIssue({ code: "custom", path: ["MAIL_PROVIDER_ENABLED"], message: "IMAP and SMTP TLS must remain enabled" });
-    // }
-    if (
-      value.SMTP_HOST !== "localhost" &&
-      value.IMAP_HOST !== "localhost" &&
-      (!value.IMAP_SECURE || !value.SMTP_SECURE)
-    ) {
-      context.addIssue({ code: "custom", path: ["MAIL_PROVIDER_ENABLED"], message: "IMAP and SMTP TLS must remain enabled" });
+    // TLS is required per protocol, and the exemption is per protocol too.
+    //
+    // Security §16 requires TLS for provider traffic and Infrastructure §8
+    // sets TLS 1.2 as the floor, but a local mail container has no
+    // certificate, so a plaintext loopback hop has to be allowed for
+    // development. The narrow form matters: the previous version was
+    //
+    //     SMTP_HOST !== "localhost" && IMAP_HOST !== "localhost" && (...)
+    //
+    // which skips the check for *both* protocols as soon as *either* host is
+    // localhost. A developer pointing SMTP at a local container while IMAP
+    // still reached a real server would have had IMAP_SECURE=false accepted
+    // in silence. Each protocol now answers for itself.
+    const loopbackHosts = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+    if (!value.IMAP_SECURE && !loopbackHosts.has(value.IMAP_HOST)) {
+      context.addIssue({
+        code: "custom",
+        path: ["IMAP_SECURE"],
+        message: `IMAP TLS must remain enabled for ${value.IMAP_HOST}`,
+      });
+    }
+    if (!value.SMTP_SECURE && !loopbackHosts.has(value.SMTP_HOST)) {
+      context.addIssue({
+        code: "custom",
+        path: ["SMTP_SECURE"],
+        message: `SMTP TLS must remain enabled for ${value.SMTP_HOST}`,
+      });
     }
   }
   if (value.FLAG_GOOGLE_LOGIN_ENABLED && !value.GOOGLE_CLIENT_ID) {

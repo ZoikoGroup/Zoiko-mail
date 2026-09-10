@@ -5,8 +5,6 @@ import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 
 export interface ProviderMailConfig {
-  // imap: { host: string; port: number; secure: true };
-  // smtp: { host: string; port: number; secure: true };
   imap: { host: string; port: number; secure: boolean };
   smtp: { host: string; port: number; secure: boolean };
   username: string;
@@ -64,16 +62,6 @@ const defaultImapFactory: ImapFactory = (config) => new ImapFlow({
   disableAutoIdle: true,
 }) as unknown as ImapClient;
 
-// const defaultSmtpFactory: SmtpFactory = (config) => nodemailer.createTransport({
-//   host: config.smtp.host,
-//   port: config.smtp.port,
-//   secure: config.smtp.secure,
-//   auth: { user: config.username, pass: config.password },
-//   connectionTimeout: config.connectionTimeoutMs,
-//   greetingTimeout: config.connectionTimeoutMs,
-//   socketTimeout: config.connectionTimeoutMs * 2,
-//   tls: { rejectUnauthorized: true, minVersion: "TLSv1.2" },
-// });
 const defaultSmtpFactory: SmtpFactory = (config) => nodemailer.createTransport({
   host: config.smtp.host,
   port: config.smtp.port,
