@@ -132,6 +132,18 @@ export interface CreateDraftInput {
   textBody?: string | null;
   htmlBody?: string | null;
   recipients: Recipients;
+  /** Send as a shared mailbox instead of one's own address (Security §10). */
+  sendAsMailboxId?: string;
+}
+
+/** An address the caller may compose from. */
+export interface SendableMailbox {
+  id: string;
+  address: string;
+  type: "USER" | "SHARED" | "DISTRIBUTION" | "SYSTEM" | "NO_REPLY";
+  shared: boolean;
+  /** Listed but unusable: sending from this mailbox is currently suspended. */
+  sendSuspended: boolean;
 }
 
 export type BulkAction =
@@ -228,17 +240,38 @@ export async function scheduleDraft(messageId: string, scheduledAt: string) {
   });
 }
 
-export async function reply(messageId: string, body: { textBody?: string; htmlBody?: string }) {
+/**
+ * Addresses the caller may send from.
+ *
+ * Their own mailbox plus any shared mailbox they hold send on — the server
+ * decides that, so a mailbox they can only read never reaches the picker.
+ */
+export async function listSendableMailboxes(): Promise<{ mailboxes: SendableMailbox[] }> {
+  return apiRequest<{ mailboxes: SendableMailbox[] }>("/mail/send-as");
+}
+
+export async function reply(
+  messageId: string,
+  body: { textBody?: string; htmlBody?: string; sendAsMailboxId?: string }
+) {
   return apiRequest<MailItem>(`/mail/${messageId}/reply`, { method: "POST", body });
 }
 
-export async function replyAll(messageId: string, body: { textBody?: string; htmlBody?: string }) {
+export async function replyAll(
+  messageId: string,
+  body: { textBody?: string; htmlBody?: string; sendAsMailboxId?: string }
+) {
   return apiRequest<MailItem>(`/mail/${messageId}/reply-all`, { method: "POST", body });
 }
 
 export async function forward(
   messageId: string,
-  body: { recipients: Recipients; textBody?: string; htmlBody?: string }
+  body: {
+    recipients: Recipients;
+    textBody?: string;
+    htmlBody?: string;
+    sendAsMailboxId?: string;
+  }
 ) {
   return apiRequest<MailItem>(`/mail/${messageId}/forward`, { method: "POST", body });
 }

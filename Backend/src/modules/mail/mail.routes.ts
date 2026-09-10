@@ -2,7 +2,7 @@ import { Router } from "express";
 import { authenticate, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./mail.controller.js";
 import { attachmentUpload } from "./attachment.middleware.js";
-import { adminDeliveryEventsQuerySchema, adminDeliverySummaryQuerySchema, adminUpdateMailboxSchema, assignMailboxSchema, createSharedMailboxSchema, mailboxAssigneeParamsSchema, createAliasSchema, createForwardingSchema, aliasParamsSchema, forwardingParamsSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
+import { adminDeliveryEventsQuerySchema, adminDeliverySummaryQuerySchema, adminUpdateMailboxSchema, assignMailboxSchema, createSharedMailboxSchema, mailboxAssigneeParamsSchema, createAliasSchema, createForwardingSchema, aliasParamsSchema, forwardingParamsSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, mailboxScopeSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
 
 const mailRouter = Router();
 mailRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBER"));
@@ -24,6 +24,9 @@ mailRouter.get(
   controller.adminListDeliveryEvents
 );
 // Same rule for the unread-count badge endpoint.
+// The compose screen's From picker. Above /:messageId so "send-as" is not
+// parsed as a message id.
+mailRouter.get("/send-as", controller.listSendableMailboxes);
 mailRouter.get("/unread-counts", controller.unreadCounts);
 mailRouter.get("/", validate(listMailSchema, "query"), controller.list);
 mailRouter.post("/drafts", validate(createDraftSchema), controller.createDraft);
@@ -134,7 +137,12 @@ mailRouter.patch(
   controller.adminUpdateMailbox
 );
 
-mailRouter.get("/:messageId", validate(messageIdParamsSchema, "params"), controller.get);
+mailRouter.get(
+  "/:messageId",
+  validate(messageIdParamsSchema, "params"),
+  validate(mailboxScopeSchema, "query"),
+  controller.get
+);
 mailRouter.patch("/:messageId", validate(messageIdParamsSchema, "params"), validate(updateMailboxItemSchema), controller.updateMailboxItem);
 mailRouter.delete("/:messageId", validate(messageIdParamsSchema, "params"), controller.permanentlyDelete);
 mailRouter.patch("/drafts/:messageId", validate(messageIdParamsSchema, "params"), validate(updateDraftSchema), controller.updateDraft);

@@ -21,6 +21,7 @@ describe("API documentation", () => {
     expect(response.body.paths).toHaveProperty("/api/v1/policies/retention/preview");
     expect(response.body.paths).toHaveProperty("/api/v1/policies/retention/execute");
     expect(response.body.paths).toHaveProperty("/api/v1/mail/drafts");
+    expect(response.body.paths).toHaveProperty("/api/v1/mail/send-as");
     expect(response.body.paths).toHaveProperty("/api/v1/mail/drafts/{messageId}");
     expect(response.body.paths).toHaveProperty("/api/v1/mail/trash");
     expect(response.body.paths).toHaveProperty("/api/v1/mail/bulk");

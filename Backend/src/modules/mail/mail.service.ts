@@ -127,16 +127,55 @@ export class MailService {
     });
   }
 
+  /**
+   * The shared mailbox a draft was composed in, if it was, having re-checked
+   * that the caller may still send from it.
+   *
+   * Re-checked rather than trusted from the row: a draft can sit for days and
+   * §10 makes access revocation immediate, so an assignment removed in between
+   * has to stop the edit as well as the send. Returns null for an ordinary
+   * personal draft, and for anything the caller does not author — the callers
+   * scope on authorship themselves and would 404 a moment later.
+   */
+  private async resolveDraftMailbox(messageId: string, context: MailContext) {
+    const draft = await prisma.emailMessage.findFirst({
+      where: {
+        id: messageId,
+        tenantId: context.tenantId,
+        authorUserId: context.userId,
+        status: "DRAFT",
+      },
+      select: { sentAsMailboxId: true },
+    });
+    if (!draft?.sentAsMailboxId) return null;
+    return sharedMailboxService.resolveAccessibleMailbox(context, draft.sentAsMailboxId, "canSend");
+  }
+
   async createDraft(input: CreateDraftInput, context: MailContext) {
+    // Sending as a shared mailbox needs `canSend` on it. Resolved before the
+    // transaction so a refusal costs nothing, and outside it because the
+    // check reads rows this transaction has no reason to lock.
+    const sendAs = input.sendAsMailboxId
+      ? await sharedMailboxService.resolveAccessibleMailbox(
+          context,
+          input.sendAsMailboxId,
+          "canSend"
+        )
+      : null;
+
     return prisma.$transaction(async (tx) => {
-      const mailbox = await this.mailbox(context, tx);
+      const own = await this.mailbox(context, tx);
+      // The draft lives in whichever mailbox it will be sent from, so a
+      // shared draft is visible to everyone assigned to that mailbox rather
+      // than hidden in the author's own folder.
+      const mailbox = sendAs ? { id: sendAs.id } : own;
       const now = new Date();
       const thread = await tx.messageThread.create({
         data: {
           tenantId: context.tenantId,
           subjectNormalized: normalizeSubject(input.subject),
           participants: uniqueParticipants([
-            context.email,
+            sendAs?.address ?? context.email,
             ...input.recipients.to,
             ...input.recipients.cc,
             ...input.recipients.bcc,
@@ -153,6 +192,10 @@ export class MailService {
           subject: input.subject,
           textBody: input.textBody,
           htmlBody: input.htmlBody,
+          // §10: the actor is authorUserId, the mailbox is this. Both are
+          // needed to answer "who sent that, as whom".
+          sentAsMailboxId: sendAs?.id ?? null,
+          fromAddress: sendAs?.address ?? null,
           recipients: {
             create: recipientRows(input)!.map((recipient) => ({ ...recipient, tenantId: context.tenantId })),
           },
@@ -168,8 +211,14 @@ export class MailService {
   }
 
   async updateDraft(messageId: string, input: UpdateDraftInput, context: MailContext) {
+    // A send-as draft sits in the shared mailbox, so it cannot be found by
+    // looking in the author's own. Authorship still scopes the edit — only
+    // the author may change their draft — and the mailbox clause asks only
+    // that the draft still be a draft somewhere.
+    const shared = await this.resolveDraftMailbox(messageId, context);
+
     return prisma.$transaction(async (tx) => {
-      const mailbox = await this.mailbox(context, tx);
+      const mailbox = shared ?? (await this.mailbox(context, tx));
       const draft = await tx.emailMessage.findFirst({
         where: {
           id: messageId,
@@ -252,8 +301,16 @@ export class MailService {
     return { deleted: true };
   }
 
-  private async accessibleMessage(messageId: string, context: MailContext) {
-    const mailbox = await this.mailbox(context);
+  /**
+   * A message the caller can see, in their own mailbox or in a shared one.
+   *
+   * `mailboxId` names a shared mailbox, and reading out of it needs `canRead`
+   * on it — the same check the list and detail reads make.
+   */
+  private async accessibleMessage(messageId: string, context: MailContext, mailboxId?: string) {
+    const mailbox = mailboxId
+      ? await sharedMailboxService.resolveAccessibleMailbox(context, mailboxId, "canRead")
+      : await this.mailbox(context);
     const item = await prisma.mailboxMessage.findFirst({
       where: { tenantId: context.tenantId, mailboxId: mailbox.id, messageId },
       include: { message: { include: { recipients: true, author: { select: { email: true } }, thread: { select: { participants: true } } } } },
@@ -264,21 +321,36 @@ export class MailService {
 
   async createReply(
     messageId: string,
-    input: { textBody?: string | null; htmlBody?: string | null },
+    input: { textBody?: string | null; htmlBody?: string | null; sendAsMailboxId?: string },
     replyAll: boolean,
     context: MailContext
   ) {
-    const { mailbox, message: source } = await this.accessibleMessage(messageId, context);
+    // Sending as a shared mailbox needs send on it; the source is read out of
+    // that same mailbox, which needs read. Both are asked for, because the two
+    // permissions are separable and one does not imply the other.
+    const sendAs = input.sendAsMailboxId
+      ? await sharedMailboxService.resolveAccessibleMailbox(context, input.sendAsMailboxId, "canSend")
+      : null;
+    const { mailbox, message: source } = await this.accessibleMessage(
+      messageId,
+      context,
+      input.sendAsMailboxId
+    );
     if (!source.threadId) throw new AppError("Source message has no thread", 409, ErrorCodes.CONFLICT);
-    const self = context.email.toLowerCase();
+    // The addresses that are "us" for this reply. With a send-as that includes
+    // the shared address, or reply-all would put the team mailbox in its own
+    // reply's To line.
+    const ours = new Set([context.email.toLowerCase()]);
+    if (sendAs) ours.add(sendAs.address.toLowerCase());
+    const self = (sendAs?.address ?? context.email).toLowerCase();
     const author = source.author.email.toLowerCase();
     const to = new Set<string>();
     const cc = new Set<string>();
-    if (author !== self) to.add(author);
+    if (!ours.has(author)) to.add(author);
     if (replyAll) {
       for (const recipient of source.recipients) {
         const email = recipient.email.toLowerCase();
-        if (email === self || recipient.type === "BCC") continue;
+        if (ours.has(email) || recipient.type === "BCC") continue;
         if (recipient.type === "CC") cc.add(email);
         else to.add(email);
       }
@@ -300,6 +372,9 @@ export class MailService {
           subject,
           textBody,
           htmlBody,
+          // §10, as on any other send-as draft.
+          sentAsMailboxId: sendAs?.id ?? null,
+          fromAddress: sendAs?.address ?? null,
           recipients: {
             create: [
               ...[...to].map((email) => ({ tenantId: context.tenantId, email, type: "TO" as const })),
@@ -316,13 +391,17 @@ export class MailService {
           messageCount: { increment: 1 },
           participants: uniqueParticipants([
             ...(Array.isArray(source.thread?.participants) ? source.thread.participants.filter((value): value is string => typeof value === "string") : []),
-            context.email,
+            self,
             ...to,
             ...cc,
           ]),
         },
       });
-      await this.audit(tx, context, replyAll ? "MAIL_REPLY_ALL_DRAFT_CREATED" : "MAIL_REPLY_DRAFT_CREATED", draft.id, { sourceMessageId: source.id, threadId: source.threadId });
+      await this.audit(tx, context, replyAll ? "MAIL_REPLY_ALL_DRAFT_CREATED" : "MAIL_REPLY_DRAFT_CREATED", draft.id, {
+        sourceMessageId: source.id,
+        threadId: source.threadId,
+        sentAsMailboxId: sendAs?.id ?? null,
+      });
       return draft;
     });
   }
@@ -332,7 +411,13 @@ export class MailService {
     input: Omit<CreateDraftInput, "subject">,
     context: MailContext
   ) {
-    const { message: source } = await this.accessibleMessage(messageId, context);
+    // createDraft below does the canSend check and the §10 recording; here the
+    // only extra question is which mailbox the forwarded message is read from.
+    const { message: source } = await this.accessibleMessage(
+      messageId,
+      context,
+      input.sendAsMailboxId
+    );
     const subject = /^fwd:/i.test(source.subject) ? source.subject : `Fwd: ${source.subject}`;
     const textBody = `${input.textBody ?? ""}\n\n--- Forwarded message ---\nFrom: ${source.author.email}\nSubject: ${source.subject}\n\n${source.textBody ?? ""}`.trim();
     const draft = await this.createDraft({ ...input, subject, textBody, htmlBody: input.htmlBody ?? null }, context);
@@ -464,7 +549,21 @@ export class MailService {
     }
     await deliveryProtectionService.assertRecipientsAllowed(context.tenantId, externalEmails);
 
-    const senderMailbox = await this.mailbox(context);
+    // The mailbox the message is actually sent from. For a shared-mailbox
+    // send that is the shared mailbox, so its warm-up ladder, send caps and
+    // SENT folder are the ones used — charging a team send against the
+    // author's personal limits would let a team bypass its own cap, and the
+    // sent copy would land where their colleagues cannot see it.
+    //
+    // Re-checked here rather than trusted from the draft: a draft can sit for
+    // days, and access may have been revoked in between (§10).
+    const senderMailbox = draft.sentAsMailboxId
+      ? await sharedMailboxService.resolveAccessibleMailbox(
+          context,
+          draft.sentAsMailboxId,
+          "canSend"
+        )
+      : await this.mailbox(context);
     const warmupReserved = senderMailbox.sendSuspendedAt
       ? true
       : await deliveryProtectionService.reserveWarmup(
@@ -690,7 +789,15 @@ export class MailService {
           }, tx);
         }
 
-        await this.audit(tx, context, "MAIL_SENT", message.id, { recipientCount: recipients.length });
+        // §10: "all shared mailbox sends must capture actor_user_id and
+      // mailbox_id". The actor is already the audit actor; the mailbox has to
+      // be said explicitly, or the record cannot answer who sent that as the
+      // support address.
+      await this.audit(tx, context, "MAIL_SENT", message.id, {
+        recipientCount: recipients.length,
+        sentAsMailboxId: draft.sentAsMailboxId ?? null,
+        sentAsAddress: draft.sentAsMailboxId ? senderMailbox.address : null,
+      });
         return message;
       });
     } catch (error) {
@@ -983,8 +1090,12 @@ export class MailService {
     return { counts };
   }
 
-  async get(messageId: string, context: MailContext) {
-    const mailbox = await this.mailbox(context);
+  async get(messageId: string, context: MailContext, mailboxId?: string) {
+    // list() already accepts a shared mailbox; without the same option here a
+    // shared message could be listed and never opened.
+    const mailbox = mailboxId
+      ? await sharedMailboxService.resolveAccessibleMailbox(context, mailboxId, "canRead")
+      : await this.mailbox(context);
     const item = await prisma.mailboxMessage.findFirst({
       where: { tenantId: context.tenantId, mailboxId: mailbox.id, messageId },
       include: {
@@ -1236,7 +1347,12 @@ export class MailService {
   }
 
   async addAttachment(messageId: string, file: Express.Multer.File, context: MailContext) {
-    const mailbox = await this.mailbox(context);
+    // Storage is charged to the mailbox holding the draft, which for a
+    // send-as draft is the shared one. Charging the author's quota for a team
+    // attachment would bill the wrong mailbox and let a team route around its
+    // own limit.
+    const shared = await this.resolveDraftMailbox(messageId, context);
+    const mailbox = shared ?? (await this.mailbox(context));
     const draft = await prisma.emailMessage.findFirst({
       where: {
         id: messageId,
@@ -1248,7 +1364,14 @@ export class MailService {
       select: { id: true },
     });
     if (!draft) throw new AppError("Draft not found", 404, ErrorCodes.NOT_FOUND);
-    if (mailbox.storageUsed + BigInt(file.size) > mailbox.storageLimit) {
+    // Read separately rather than carried on the resolved mailbox: these are
+    // BigInt columns, and the resolver's result is handed to callers that
+    // serialise it.
+    const quota = await prisma.mailbox.findUniqueOrThrow({
+      where: { id: mailbox.id },
+      select: { storageUsed: true, storageLimit: true },
+    });
+    if (quota.storageUsed + BigInt(file.size) > quota.storageLimit) {
       throw new AppError("Mailbox storage quota exceeded", 413, ErrorCodes.VALIDATION_ERROR);
     }
 
@@ -1347,6 +1470,48 @@ export class MailService {
   }
 
   // ─── Admin: List all tenant mailboxes ────────────────────────────────────────
+
+  /**
+   * The mailboxes this caller may compose from — their own, plus any shared
+   * mailbox they hold `canSend` on.
+   *
+   * A member-level read, unlike the admin listings below: compose needs it to
+   * offer a From picker, and it must not name shared mailboxes the caller
+   * cannot actually send from, which would turn the picker into a directory of
+   * the workspace's team addresses.
+   */
+  async listSendableMailboxes(context: MailContext) {
+    const own = await this.mailbox(context);
+    const shared = await prisma.mailboxAccess.findMany({
+      where: { tenantId: context.tenantId, membershipId: context.membershipId, canSend: true },
+      select: {
+        mailbox: { select: { id: true, address: true, type: true, sendSuspendedAt: true } },
+      },
+      orderBy: { mailbox: { address: "asc" } },
+    });
+
+    // Suspended mailboxes are listed but flagged, so the reason a send is
+    // refused is visible before it is attempted rather than the entry simply
+    // being absent.
+    return {
+      mailboxes: [
+        {
+          id: own.id,
+          address: own.address,
+          type: own.type,
+          shared: false,
+          sendSuspended: own.sendSuspendedAt !== null,
+        },
+        ...shared.map((row) => ({
+          id: row.mailbox.id,
+          address: row.mailbox.address,
+          type: row.mailbox.type,
+          shared: true,
+          sendSuspended: row.mailbox.sendSuspendedAt !== null,
+        })),
+      ],
+    };
+  }
 
   async listAllMailboxes(tenantId: string) {
     const mailboxes = await prisma.mailbox.findMany({

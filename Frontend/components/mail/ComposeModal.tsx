@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { X, Send, Save, Clock, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
-import { useComposerSubmit, type ComposerMode } from "@/lib/mail-hooks";
+import { useComposerSubmit, useSendableMailboxes, type ComposerMode } from "@/lib/mail-hooks";
 import type { MailItem, Recipients } from "@/lib/mail-api";
 
 function parseEmails(raw: string): string[] {
@@ -31,7 +31,14 @@ export function ComposeModal({
   onClose: () => void;
 }) {
   const submit = useComposerSubmit();
+  // The From options. A workspace with no shared mailboxes gets exactly one
+  // entry, and the picker stays hidden — nobody should have to choose between
+  // one thing.
+  const { data: sendable } = useSendableMailboxes();
+  const options = sendable?.mailboxes ?? [];
+  const ownAddress = options.find((mailbox) => !mailbox.shared)?.address;
 
+  const [sendAsMailboxId, setSendAsMailboxId] = useState("");
   const [to, setTo] = useState("");
   const [cc, setCc] = useState("");
   const [subject, setSubject] = useState("");
@@ -49,6 +56,10 @@ export function ComposeModal({
     setShowSchedule(false);
     setScheduledAt("");
     setNotice(null);
+    // Defaults to one's own address every time the composer opens, rather than
+    // remembering the last shared mailbox used: sending as the team by
+    // accident is the mistake worth designing against.
+    setSendAsMailboxId("");
     if (mode === "new") setSubject("");
     // reply/forward subjects are derived server-side, so we don't edit them here
   }, [open, mode, source?.messageId]);
@@ -84,6 +95,7 @@ export function ComposeModal({
         recipients,
         textBody: body,
         action,
+        sendAsMailboxId: sendAsMailboxId || undefined,
         scheduledAt: action === "schedule" ? new Date(scheduledAt).toISOString() : undefined,
       },
       {
@@ -127,6 +139,36 @@ export function ComposeModal({
                 <> — recipients are set automatically from the original message.</>
               )}
             </div>
+          )}
+
+          {options.length > 1 && (
+            <label className="flex items-center gap-2 text-xs text-[var(--ink3)]">
+              <span className="shrink-0">From</span>
+              <select
+                className={field}
+                value={sendAsMailboxId}
+                onChange={(e) => setSendAsMailboxId(e.target.value)}
+              >
+                <option value="">{ownAddress ?? "My address"}</option>
+                {options
+                  .filter((mailbox) => mailbox.shared)
+                  .map((mailbox) => (
+                    <option key={mailbox.id} value={mailbox.id} disabled={mailbox.sendSuspended}>
+                      {mailbox.address}
+                      {mailbox.sendSuspended ? " — sending suspended" : ""}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          )}
+
+          {sendAsMailboxId && (
+            // Sending in a team's name is worth stating plainly. The audit
+            // trail records both the mailbox and the person either way.
+            <p className="text-xs text-[var(--ink3)]">
+              This goes out from the shared address, and the reply comes back to
+              the shared mailbox. Your name stays on it in the audit trail.
+            </p>
           )}
 
           {needsRecipients && (

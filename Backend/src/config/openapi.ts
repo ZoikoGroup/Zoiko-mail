@@ -603,6 +603,16 @@ export const openApiDocument = {
         responses: { "200": ok("Grant revoked"), "403": { $ref: "#/components/responses/Forbidden" }, "404": { $ref: "#/components/responses/NotFound" } },
       },
     },
+    "/api/v1/mail/send-as": {
+      get: {
+        tags: ["Mail"],
+        summary: "Addresses the caller may compose from",
+        description:
+          "The caller's own mailbox plus every shared mailbox they hold canSend on. A shared mailbox they can only read is deliberately absent: read access is not permission to know the workspace can send from that address (Security §10).",
+        operationId: "listSendableMailboxes", security: bearer,
+        responses: { "200": ok("Sendable mailboxes returned") },
+      },
+    },
     "/api/v1/mail/drafts": {
       post: {
         tags: ["Mail"], summary: "Create a draft", security: bearer,
@@ -1090,8 +1100,16 @@ export const openApiDocument = {
     },
     "/api/v1/mail/{messageId}": {
       get: {
-        tags: ["Mail"], summary: "Get a message from the current user's mailbox", security: bearer,
-        parameters: [{ name: "messageId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        tags: ["Mail"], summary: "Get a message from the current user's mailbox, or a shared one", security: bearer,
+        parameters: [
+          { name: "messageId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+          {
+            name: "mailboxId", in: "query", required: false,
+            schema: { type: "string", format: "uuid" },
+            description:
+              "Read the message out of a shared mailbox the caller holds canRead on, matching the same parameter on the list endpoint. Absent means their own mailbox.",
+          },
+        ],
         responses: { "200": ok("Message returned"), "404": { $ref: "#/components/responses/NotFound" } },
       },
       patch: {
@@ -1107,13 +1125,57 @@ export const openApiDocument = {
       },
     },
     "/api/v1/mail/{messageId}/reply": {
-      post: { tags: ["Mail"], summary: "Create a reply draft in the existing thread", security: bearer, responses: { "201": ok("Reply draft created"), "404": { $ref: "#/components/responses/NotFound" } } },
+      post: { tags: ["Mail"], summary: "Create a reply draft in the existing thread", security: bearer, requestBody: jsonBody({
+        type: "object",
+        properties: {
+          textBody: { type: "string", nullable: true },
+          htmlBody: { type: "string", nullable: true },
+          sendAsMailboxId: {
+            type: "string", format: "uuid",
+            description:
+              "Answer as a shared mailbox. Needs canSend on it to compose and canRead on it to read the message being answered — the two permissions are separable, so both are checked (Security §10).",
+          },
+        },
+      }), responses: { "201": ok("Reply draft created"), "404": { $ref: "#/components/responses/NotFound" } } },
     },
     "/api/v1/mail/{messageId}/reply-all": {
-      post: { tags: ["Mail"], summary: "Create a reply-all draft without BCC disclosure", security: bearer, responses: { "201": ok("Reply-all draft created"), "404": { $ref: "#/components/responses/NotFound" } } },
+      post: { tags: ["Mail"], summary: "Create a reply-all draft without BCC disclosure", security: bearer, requestBody: jsonBody({
+        type: "object",
+        properties: {
+          textBody: { type: "string", nullable: true },
+          htmlBody: { type: "string", nullable: true },
+          sendAsMailboxId: {
+            type: "string", format: "uuid",
+            description:
+              "Answer as a shared mailbox. Needs canSend on it to compose and canRead on it to read the message being answered — the two permissions are separable, so both are checked (Security §10).",
+          },
+        },
+      }), responses: { "201": ok("Reply-all draft created"), "404": { $ref: "#/components/responses/NotFound" } } },
     },
     "/api/v1/mail/{messageId}/forward": {
-      post: { tags: ["Mail"], summary: "Create a forwarded-message draft in a new thread", security: bearer, responses: { "201": ok("Forward draft created"), "404": { $ref: "#/components/responses/NotFound" } } },
+      post: {
+        tags: ["Mail"], summary: "Create a forwarded-message draft in a new thread", security: bearer,
+        requestBody: jsonBody({
+          type: "object", required: ["recipients"],
+          properties: {
+            recipients: {
+              type: "object", required: ["to"],
+              properties: {
+                to: { type: "array", minItems: 1, maxItems: 100, items: { type: "string", format: "email" } },
+                cc: { type: "array", maxItems: 100, items: { type: "string", format: "email" } },
+                bcc: { type: "array", maxItems: 100, items: { type: "string", format: "email" } },
+              },
+            },
+            textBody: { type: "string", nullable: true },
+            htmlBody: { type: "string", nullable: true },
+            sendAsMailboxId: {
+              type: "string", format: "uuid",
+              description: "Forward from a shared mailbox, on the same terms as a reply.",
+            },
+          },
+        }),
+        responses: { "201": ok("Forward draft created"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
     },
     "/api/v1/audit/events/{eventId}": {
       get: {
@@ -1239,6 +1301,11 @@ export const openApiDocument = {
               cc: { type: "array", maxItems: 100, items: { type: "string", format: "email" } },
               bcc: { type: "array", maxItems: 100, items: { type: "string", format: "email" } },
             },
+          },
+          sendAsMailboxId: {
+            type: "string", format: "uuid",
+            description:
+              "Compose as a shared mailbox. Requires canSend on it, re-checked when the draft is sent; the draft and the sent copy live in that mailbox, its send caps and warm-up ladder apply, and the mailbox is recorded on the message and in the MAIL_SENT audit event (Security §10). Omit for an ordinary personal send.",
           },
         },
       },

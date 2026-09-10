@@ -12,6 +12,15 @@ export const createDraftSchema = z.object({
   textBody: z.string().max(2_000_000).nullable().optional(),
   htmlBody: z.string().max(2_000_000).nullable().optional(),
   recipients: recipientsSchema,
+  /**
+   * Send as a shared mailbox instead of your own — Security §10.
+   *
+   * Absent means your own mailbox, which is what every existing caller gets.
+   * Present requires `canSend` on that mailbox; until now that permission was
+   * stored and returned but never enforced anywhere, because there was no way
+   * to send as a shared mailbox at all.
+   */
+  sendAsMailboxId: z.string().uuid().optional(),
 });
 
 export const updateDraftSchema = createDraftSchema.partial();
@@ -26,6 +35,9 @@ export const attachmentParamsSchema = z.object({
   attachmentId: z.string().uuid(),
 });
 export const mailboxIdParamsSchema = z.object({ mailboxId: z.string().uuid() });
+
+/** Reading one message out of a shared mailbox rather than one's own. */
+export const mailboxScopeSchema = z.object({ mailboxId: z.string().uuid().optional() });
 export const updateSendingStatusSchema = z.object({
   suspended: z.boolean(),
   reason: z.string().trim().min(3).max(500).optional(),
@@ -170,6 +182,10 @@ export const updateLabelSchema = createLabelSchema.partial()
 export const replySchema = z.object({
   textBody: z.string().max(2_000_000).nullable().optional(),
   htmlBody: z.string().max(2_000_000).nullable().optional(),
+  // Replying as a shared mailbox is the shape the support workflow actually
+  // takes: the message being answered sits in the team mailbox, and the answer
+  // has to go out from it rather than from whoever happened to pick it up.
+  sendAsMailboxId: z.string().uuid().optional(),
 });
 
 export const forwardSchema = replySchema.extend({

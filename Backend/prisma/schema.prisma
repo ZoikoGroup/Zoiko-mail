@@ -275,6 +275,7 @@ model Mailbox {
   access               MailboxAccess[]
   aliases              Alias[]
   forwardingRules      ForwardingRule[]
+  sentAsMessages       EmailMessage[]   @relation("SentAsMailbox")
 
   @@unique([tenantId, address])
   @@index([tenantId, membershipId])
@@ -304,11 +305,17 @@ model EmailMessage {
   providerUid       String?             @map("provider_uid")
   fromAddress       String?             @map("from_address")
   fromName          String?             @map("from_name")
+  /// The shared mailbox this was sent as, when it was not sent as the
+  /// author's own — Security §10: "All shared mailbox sends must capture
+  /// actor_user_id and mailbox_id". `authorUserId` is the actor; this is the
+  /// mailbox. Null means an ordinary personal send.
+  sentAsMailboxId   String?             @map("sent_as_mailbox_id") @db.Uuid
   createdAt         DateTime            @default(now()) @map("created_at")
   updatedAt         DateTime            @updatedAt @map("updated_at")
   tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   author            AppUser             @relation("MessageAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
   thread            MessageThread?      @relation(fields: [threadId], references: [id], onDelete: SetNull)
+  sentAsMailbox     Mailbox?            @relation("SentAsMailbox", fields: [sentAsMailboxId], references: [id], onDelete: SetNull)
   recipients        MessageRecipient[]
   mailboxItems      MailboxMessage[]
   attachments       MessageAttachment[]
@@ -316,6 +323,7 @@ model EmailMessage {
 
   @@index([tenantId, authorUserId, createdAt])
   @@index([tenantId, threadId, createdAt])
+  @@index([sentAsMailboxId])
   @@unique([tenantId, providerType, providerMessageId])
   @@map("email_messages")
 }

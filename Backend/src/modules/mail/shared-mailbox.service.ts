@@ -271,7 +271,17 @@ export class SharedMailboxService {
   ) {
     const mailbox = await prisma.mailbox.findFirst({
       where: { id: mailboxId, tenantId: context.tenantId },
-      select: { id: true, address: true, type: true, membershipId: true, aiEnabled: true },
+      // sendSuspendedAt travels with the mailbox because deliver() decides
+      // whether to charge the warm-up ladder from it, and a shared mailbox is
+      // suspended independently of its assignees.
+      select: {
+        id: true,
+        address: true,
+        type: true,
+        membershipId: true,
+        aiEnabled: true,
+        sendSuspendedAt: true,
+      },
     });
     if (!mailbox) throw new AppError("Mailbox not found", 404, ErrorCodes.NOT_FOUND);
 

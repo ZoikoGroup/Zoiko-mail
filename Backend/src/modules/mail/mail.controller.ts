@@ -44,7 +44,13 @@ export const unreadCounts = asyncHandler(async (req: Request, res: Response) => 
   sendSuccess(res, 200, await mailService.unreadCounts(context(req)), req.requestId);
 });
 export const get = asyncHandler(async (req: Request, res: Response) => {
-  sendSuccess(res, 200, await mailService.get(String(req.params.messageId), context(req)), req.requestId);
+  const mailboxId = req.query.mailboxId ? String(req.query.mailboxId) : undefined;
+  sendSuccess(
+    res,
+    200,
+    await mailService.get(String(req.params.messageId), context(req), mailboxId),
+    req.requestId
+  );
 });
 export const updateMailboxItem = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await mailService.updateMailboxItem(String(req.params.messageId), req.body, context(req)), req.requestId);
@@ -137,6 +143,10 @@ export const adminDeliveryFailureSummary = asyncHandler(async (req: Request, res
     req.requestId
   );
 });
+export const listSendableMailboxes = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailService.listSendableMailboxes(context(req)), req.requestId);
+});
+
 /* ── aliases and forwarding — Data Model §6.17, §6.18 ────────────────── */
 
 export const listMailboxRouting = asyncHandler(async (req: Request, res: Response) => {
