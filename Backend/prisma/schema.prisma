@@ -245,6 +245,16 @@ model Mailbox {
   bounceCount          Int              @default(0) @map("bounce_count")
   complaintCount       Int              @default(0) @map("complaint_count")
   customWarmupCap      Int?             @map("custom_warmup_cap")
+  /// Whether AI may process this mailbox's content — Data Model §6.16,
+  /// Security §9 and AC-008. A mailbox with this off is what the security
+  /// spec calls a restricted mailbox: AI is excluded from it until an
+  /// Owner or Admin explicitly turns it back on, and that change is audited.
+  ///
+  /// Defaults true because AI eligibility was previously hardcoded true for
+  /// every mailbox. Defaulting false would have silently switched AI off for
+  /// every existing workspace on migration, which is a product change wearing
+  /// a schema change's clothes.
+  aiEnabled            Boolean          @default(true) @map("ai_enabled")
   createdAt            DateTime         @default(now()) @map("created_at")
   updatedAt            DateTime         @updatedAt @map("updated_at")
   tenant               Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)

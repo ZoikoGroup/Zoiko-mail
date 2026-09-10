@@ -1,6 +1,6 @@
 "use client";
 
-import { useMailboxes } from "@/lib/admin-hooks";
+import { useMailboxes, useSetMailboxAi } from "@/lib/admin-hooks";
 import { useCan } from "@/lib/admin-capabilities";
 import {
   Card,
@@ -20,6 +20,8 @@ import {
 export default function AdminMailboxesPage() {
   const can = useCan();
   const { data: mailboxes, isLoading, error } = useMailboxes();
+  const setAi = useSetMailboxAi();
+  const canManage = can("workspace.mailboxes.manage");
   const suspended = mailboxes?.filter((m) => m.status === "SUSPENDED") ?? [];
 
   return (
@@ -28,7 +30,7 @@ export default function AdminMailboxesPage() {
         title="Mailboxes"
         subtitle="Provider-backed hosted mailboxes under acme.test and zoikomail.com"
         action={
-          can("workspace.mailboxes.manage") ? (
+          canManage ? (
             <button type="button" className="zoiko-btn pri">
               Create mailbox
             </button>
@@ -39,6 +41,13 @@ export default function AdminMailboxesPage() {
       <StaticNote>
         Shared mailboxes need the schema rework — Mailbox.membershipId is currently unique
       </StaticNote>
+
+      {setAi.isError && (
+        <Notice tone="crit">
+          <b className="text-[var(--crit)]">Could not change AI access.</b>{" "}
+          {(setAi.error as Error).message}
+        </Notice>
+      )}
 
       <Card
         title={mailboxes ? `${mailboxes.length} mailboxes` : "Mailboxes"}
@@ -78,9 +87,36 @@ export default function AdminMailboxesPage() {
                       {mailbox.storageUsedGb} / {mailbox.storageLimitGb} GB
                     </Td>
                     <Td>
-                      <Pill tone={mailbox.aiEnabled ? "ai" : "nu"}>
-                        {mailbox.aiEnabled ? "On" : "Off"}
-                      </Pill>
+                      {/*
+                        A control, not a label. Turning this off is what makes
+                        a mailbox restricted (AC-008): the AI service refuses
+                        to process it, and the change is audited with both the
+                        old and the new value.
+                      */}
+                      <button
+                        type="button"
+                        disabled={!canManage || setAi.isPending}
+                        aria-pressed={mailbox.aiEnabled}
+                        aria-label={`AI processing for ${mailbox.address}`}
+                        title={
+                          canManage
+                            ? mailbox.aiEnabled
+                              ? "Restrict this mailbox from AI processing"
+                              : "Allow AI to process this mailbox"
+                            : "Requires workspace.mailboxes.manage"
+                        }
+                        onClick={() =>
+                          setAi.mutate({
+                            mailboxId: mailbox.id,
+                            aiEnabled: !mailbox.aiEnabled,
+                          })
+                        }
+                        className="cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <Pill tone={mailbox.aiEnabled ? "ai" : "nu"}>
+                          {mailbox.aiEnabled ? "On" : "Off"}
+                        </Pill>
+                      </button>
                     </Td>
                     <Td>
                       <Pill tone={mailbox.status === "ACTIVE" ? "ok" : "crit"}>
@@ -91,7 +127,7 @@ export default function AdminMailboxesPage() {
                       <button
                         type="button"
                         className="zoiko-btn sm"
-                        disabled={!can("workspace.mailboxes.manage")}
+                        disabled={!canManage}
                       >
                         Manage
                       </button>

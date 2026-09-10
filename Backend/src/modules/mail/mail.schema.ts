@@ -59,6 +59,9 @@ export const adminUpdateMailboxSchema = z
     // Per-day send cap overriding the warm-up ladder. Null clears the override
     // and returns the mailbox to the standard schedule.
     customWarmupCap: z.coerce.number().int().min(1).max(100_000).nullable().optional(),
+    // Whether AI may process this mailbox (AC-008). Turning it off is what
+    // makes a mailbox "restricted" in the security spec's sense.
+    aiEnabled: z.boolean().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "Provide at least one field to update",

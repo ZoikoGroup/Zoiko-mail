@@ -32,6 +32,7 @@ import {
   fetchPolicyGroups,
   fetchSettings,
   fetchSyncErrors,
+  setMailboxAi,
 } from "./admin-queries";
 import type { InvitationDraftInput, WorkspaceSettingsPatch } from "./admin-queries";
 import { CAPABILITY_MATRIX, GUARDRAILS } from "./admin-api";
@@ -107,6 +108,16 @@ export function useInvitations(): QueryLike<InvitationDto[]> {
 
 export function useMailboxes(): QueryLike<MailboxDto[]> {
   return shape(useQuery({ queryKey: ["mailboxes"], queryFn: fetchMailboxes, ...LIVE }));
+}
+
+/** Restrict or unrestrict a mailbox for AI processing. */
+export function useSetMailboxAi() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ mailboxId, aiEnabled }: { mailboxId: string; aiEnabled: boolean }) =>
+      setMailboxAi(mailboxId, aiEnabled),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["mailboxes"] }),
+  });
 }
 
 export function useDomains(): QueryLike<DomainDto[]> {

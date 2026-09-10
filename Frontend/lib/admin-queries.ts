@@ -119,6 +119,7 @@ interface ApiMailbox {
   storageLimit: number | string;
   sendSuspendedAt: string | null;
   sendSuspensionReason: string | null;
+  aiEnabled: boolean;
 }
 
 export async function fetchMailboxes(): Promise<MailboxDto[]> {
@@ -135,10 +136,25 @@ export async function fetchMailboxes(): Promise<MailboxDto[]> {
     status: m.sendSuspendedAt ? "SUSPENDED" : "ACTIVE",
     storageUsedGb: gb(m.storageUsed),
     storageLimitGb: gb(m.storageLimit),
-    // Per-mailbox AI enablement (AC-008) is not implemented.
-    aiEnabled: false,
+    // The real column now (AC-008). A mailbox with this off is what the
+    // security spec calls restricted: AI is refused on it server-side.
+    aiEnabled: m.aiEnabled ?? true,
     sendSuspensionReason: m.sendSuspensionReason,
   }));
+}
+
+/**
+ * Turn AI processing on or off for one mailbox.
+ *
+ * The refusal is enforced in the AI service, not here — this only records the
+ * intent. Audited server-side with the old and new value, because §14.1
+ * requires mailbox-level AI enablement to leave evidence.
+ */
+export async function setMailboxAi(mailboxId: string, aiEnabled: boolean): Promise<void> {
+  await apiRequest(`/mail/admin/mailboxes/${mailboxId}`, {
+    method: "PATCH",
+    body: { aiEnabled },
+  });
 }
 
 /* ── domains ───────────────────────────────────────────────────────────── */

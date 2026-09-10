@@ -768,6 +768,76 @@ export const openApiDocument = {
         responses: { "200": ok("Delivery events returned"), "403": { $ref: "#/components/responses/Forbidden" } },
       },
     },
+    "/api/v1/mail/admin/mailboxes": {
+      get: {
+        tags: ["Mail"], summary: "List every mailbox in the workspace (OWNER/ADMIN)",
+        operationId: "adminListMailboxes", security: bearer,
+        responses: { "200": ok("Mailboxes returned"), "403": { $ref: "#/components/responses/Forbidden" } },
+      },
+      post: {
+        tags: ["Mail"], summary: "Provision a mailbox for a member (OWNER/ADMIN)",
+        operationId: "adminCreateMailbox", security: bearer,
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object", required: ["membershipId"],
+                properties: { membershipId: { type: "string", format: "uuid" } },
+              },
+              example: { membershipId: "0f8f2b1e-6c1a-4a5e-9a2b-6d3c1f0a7e44" },
+            },
+          },
+        },
+        responses: {
+          "201": ok("Mailbox created"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "409": ok("Mailbox already exists, or the plan mailbox limit is reached"),
+        },
+      },
+    },
+    "/api/v1/mail/admin/mailboxes/{mailboxId}": {
+      patch: {
+        tags: ["Mail"],
+        summary: "Update mailbox quota, warm-up cap or AI access (OWNER/ADMIN)",
+        description:
+          "aiEnabled false is what the security spec calls a restricted mailbox: the AI service refuses to process it (AC-008). Every change is audited with the previous and new value.",
+        operationId: "adminUpdateMailbox", security: bearer,
+        parameters: [{ name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object", minProperties: 1,
+                properties: {
+                  storageLimit: { type: "integer", minimum: 1048576, maximum: 1099511627776, description: "Bytes." },
+                  customWarmupCap: { type: "integer", minimum: 1, maximum: 100000, nullable: true },
+                  aiEnabled: { type: "boolean" },
+                },
+              },
+              example: { aiEnabled: false },
+            },
+          },
+        },
+        responses: {
+          "200": ok("Mailbox updated"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+          "409": ok("Quota is below current usage"),
+        },
+      },
+      delete: {
+        tags: ["Mail"], summary: "Delete a mailbox (OWNER/ADMIN)",
+        operationId: "adminDeleteMailbox", security: bearer,
+        parameters: [{ name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: {
+          "200": ok("Mailbox deleted"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
+      },
+    },
     "/api/v1/mail/admin/mailboxes/{mailboxId}/sending": {
       patch: {
         tags: ["Mail"], summary: "Suspend or resume mailbox sending (OWNER/ADMIN)", security: bearer,

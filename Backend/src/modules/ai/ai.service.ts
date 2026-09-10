@@ -12,7 +12,25 @@ export class AIService {
       ? await prisma.emailMessage.findFirst({ where: { id: input.messageId, tenantId: context.tenantId, mailboxItems: { some: { tenantId: context.tenantId, mailboxId: mailbox.id } } } })
       : await prisma.messageThread.findFirst({ where: { id: input.threadId, tenantId: context.tenantId, messages: { some: { tenantId: context.tenantId, mailboxItems: { some: { tenantId: context.tenantId, mailboxId: mailbox.id } } } } } }));
     if (!accessible) throw new AppError("AI source not found", 404, ErrorCodes.NOT_FOUND);
-    const decision = await policyService.evaluate({ type: "AI", context: { actionType: input.actionType, mailbox: { eligible: true } } }, context);
+
+    // AC-008: AI may not process a restricted mailbox. `mailbox.eligible` was
+    // hardcoded true here, so the criterion had nothing to read and the tenant
+    // policy could not gate on it even if it wanted to. It is the real column
+    // now, and a disabled mailbox is refused outright rather than left to a
+    // policy condition that a workspace may never have written.
+    if (!mailbox!.aiEnabled) {
+      throw new AppError(
+        "AI processing is disabled for this mailbox",
+        403,
+        ErrorCodes.FORBIDDEN,
+        { mailboxId: mailbox!.id, reason: "MAILBOX_AI_DISABLED" }
+      );
+    }
+
+    const decision = await policyService.evaluate(
+      { type: "AI", context: { actionType: input.actionType, mailbox: { eligible: mailbox!.aiEnabled } } },
+      context
+    );
     if (decision.effect === "DENY") throw new AppError(`AI processing denied by tenant policy (${decision.reason})`, 403, ErrorCodes.FORBIDDEN);
     const action = await prisma.aIAction.create({ data: { tenantId: context.tenantId, createdByUserId: context.userId, actionType: input.actionType, messageId: input.messageId, threadId: input.threadId, inputHash: createHash("sha256").update(`${context.tenantId}:${input.actionType}:${input.messageId ?? input.threadId}`).digest("hex") } });
     await auditService.record({ tenantId: context.tenantId, actorUserId: context.userId, eventType: "AI_ACTION_REQUESTED", targetType: "AIAction", targetId: action.id });

@@ -1417,12 +1417,15 @@ export class MailService {
   async adminUpdateMailbox(
     tenantId: string,
     mailboxId: string,
-    input: { storageLimit?: number; customWarmupCap?: number | null },
+    input: { storageLimit?: number; customWarmupCap?: number | null; aiEnabled?: boolean },
     context: MailContext
   ) {
     const existing = await prisma.mailbox.findFirst({
       where: { id: mailboxId, tenantId },
-      select: { id: true, address: true, storageLimit: true, customWarmupCap: true, storageUsed: true },
+      select: {
+        id: true, address: true, storageLimit: true, customWarmupCap: true,
+        storageUsed: true, aiEnabled: true,
+      },
     });
     if (!existing) throw new AppError("Mailbox not found", 404, ErrorCodes.NOT_FOUND);
 
@@ -1441,6 +1444,7 @@ export class MailService {
       data: {
         ...(input.storageLimit !== undefined ? { storageLimit: BigInt(input.storageLimit) } : {}),
         ...(input.customWarmupCap !== undefined ? { customWarmupCap: input.customWarmupCap } : {}),
+        ...(input.aiEnabled !== undefined ? { aiEnabled: input.aiEnabled } : {}),
       },
       include: {
         membership: {
@@ -1463,10 +1467,12 @@ export class MailService {
         before: {
           storageLimit: Number(existing.storageLimit),
           customWarmupCap: existing.customWarmupCap,
+          aiEnabled: existing.aiEnabled,
         },
         after: {
           storageLimit: Number(mailbox.storageLimit),
           customWarmupCap: mailbox.customWarmupCap,
+          aiEnabled: mailbox.aiEnabled,
         },
       },
     });
