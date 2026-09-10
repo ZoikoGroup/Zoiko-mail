@@ -1,6 +1,6 @@
 import type { Request } from "express";
 import { Router } from "express";
-import { authenticate, idempotency, authenticateStaff, requireCapability, requireRole, requireSupportAccess, tenantContext, validate } from "../../common/middleware/index.js";
+import { authenticate, idempotency, authenticateStaff, requireCapability, requireRole, requireSupportAccess, tenantContext, validate, crossTenantScope} from "../../common/middleware/index.js";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
 import { createGrantSchema, domainParamSchema, grantIdSchema, mailboxParamSchema, platformListQuerySchema, tenantParamSchema } from "./support.schema.js";
@@ -64,7 +64,9 @@ function listQuery(req: Request): ListQuery {
 }
 
 export const supportPlatformRouter = Router();
-supportPlatformRouter.use(authenticateStaff, requireSupportAccess);
+// The platform console reads across every workspace by design (AC-006), so it
+// declares that rather than being refused by the row-level policies.
+supportPlatformRouter.use(crossTenantScope, authenticateStaff, requireSupportAccess);
 
 supportPlatformRouter.get("/overview", asyncHandler(async (req, res) => {
   sendSuccess(res, 200, await supportService.platformOverview(), req.requestId);

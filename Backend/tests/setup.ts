@@ -85,6 +85,7 @@ testPrototype.end = function patchedEnd(
 
 beforeEach(async () => {
   const { prisma } = await import("../src/config/prisma.js");
+  const { withCrossTenant } = await import("../src/config/tenantScope.js");
 
   // audit_events is append-only at the database (migration
   // 20260820120000_audit_events_append_only), and deleting tenants cascades
@@ -92,6 +93,12 @@ beforeEach(async () => {
   // itself the same way the confirmed tenant-deletion path does. One
   // transaction, because SET LOCAL is transaction-scoped — issuing it outside
   // one would either leak onto a pooled connection or not apply at all.
+  // Wiping every workspace is exactly the cross-tenant operation the
+  // row-level policies refuse by default (AC-004). Without this the deletes
+  // below would silently affect nothing, which is the worst possible failure
+  // for a teardown: every test would then run against the previous test's
+  // data.
+  await withCrossTenant(async () => {
   await prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe("SET LOCAL zoiko.audit_purge = 'on'");
 
@@ -135,6 +142,7 @@ beforeEach(async () => {
 
     await tx.appUser.deleteMany();
     await tx.tenant.deleteMany();
+  });
   });
 
   await prisma.tenant.create({

@@ -1,5 +1,6 @@
 import type { JobType, Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
+import { withCrossTenant } from "../../config/tenantScope.js";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
@@ -54,62 +55,65 @@ export class JobService {
   }
 
   async processNext() {
-    const job = await this.claimSupported();
-    if (!job) return { processed: false };
-    try {
-      if (job.type === "DATA_EXPORT") {
-        const result = await this.processExport(job.id, job.tenantId, job.createdByUserId);
-        return { processed: true, jobId: job.id, type: job.type, result };
-      }
-      if (job.type === "DATA_DELETION") {
-        const result = await this.processDeletion(job.id, job.tenantId, job.createdByUserId, job.payload);
-        return { processed: true, jobId: job.id, type: job.type, result };
-      }
-      if (job.type === "IMAP_SYNC") {
-        const result = await providerMailService.syncInbox();
-        await this.complete(job.id, job.tenantId, result);
-        return { processed: true, jobId: job.id, type: job.type, result };
-      }
-      if (job.type === "SMTP_SEND") {
-        const messageId = typeof job.payload === "object" && job.payload !== null && !Array.isArray(job.payload)
-          && typeof job.payload.messageId === "string" ? job.payload.messageId : null;
-        if (!messageId) throw new Error("SMTP job has no message id");
-        const result = await providerMailService.sendMessage(messageId, job.tenantId);
+    // The job worker claims whatever is due, from any workspace, so it declares that it crosses the boundary rather than being refused by the row-level policies (AC-004).
+    return withCrossTenant(async () => {
+      const job = await this.claimSupported();
+      if (!job) return { processed: false };
+      try {
+        if (job.type === "DATA_EXPORT") {
+          const result = await this.processExport(job.id, job.tenantId, job.createdByUserId);
+          return { processed: true, jobId: job.id, type: job.type, result };
+        }
+        if (job.type === "DATA_DELETION") {
+          const result = await this.processDeletion(job.id, job.tenantId, job.createdByUserId, job.payload);
+          return { processed: true, jobId: job.id, type: job.type, result };
+        }
+        if (job.type === "IMAP_SYNC") {
+          const result = await providerMailService.syncInbox();
+          await this.complete(job.id, job.tenantId, result);
+          return { processed: true, jobId: job.id, type: job.type, result };
+        }
+        if (job.type === "SMTP_SEND") {
+          const messageId = typeof job.payload === "object" && job.payload !== null && !Array.isArray(job.payload)
+            && typeof job.payload.messageId === "string" ? job.payload.messageId : null;
+          if (!messageId) throw new Error("SMTP job has no message id");
+          const result = await providerMailService.sendMessage(messageId, job.tenantId);
 
-        // Real SMTP delivery happened — flip the message from SENDING → SENT.
-        // No-op if it's already SENT (idempotent retry after a race).
-        await prisma.emailMessage.updateMany({
-          where: { id: messageId, tenantId: job.tenantId, status: "SENDING" },
-          data: { status: "SENT", sentAt: new Date(), scheduleLastError: null },
-        });
-
-        await this.complete(job.id, job.tenantId, result);
-        return { processed: true, jobId: job.id, type: job.type, result };
-      }
-      const result = await this.processDigest(job.id, job.tenantId, job.createdByUserId, job.payload);
-      return { processed: true, jobId: job.id, type: job.type, result };
-
-      
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Background job failed";
-      const failedJob = await this.fail(job.id, job.tenantId, message);
-
-      // If SMTP_SEND has exhausted retries, mark the message FAILED so the
-      // UI stops showing SENDING forever. During retries, leave it as
-      // SENDING — the worker will try again shortly.
-      if (job.type === "SMTP_SEND" && failedJob.status === "FAILED") {
-        const messageId = typeof job.payload === "object" && job.payload !== null && !Array.isArray(job.payload)
-          && typeof job.payload.messageId === "string" ? job.payload.messageId : null;
-        if (messageId) {
+          // Real SMTP delivery happened — flip the message from SENDING → SENT.
+          // No-op if it's already SENT (idempotent retry after a race).
           await prisma.emailMessage.updateMany({
             where: { id: messageId, tenantId: job.tenantId, status: "SENDING" },
-            data: { status: "FAILED", scheduleLastError: message.slice(0, 1000) },
+            data: { status: "SENT", sentAt: new Date(), scheduleLastError: null },
           });
-        }
-      }
 
-      return { processed: true, jobId: job.id, type: job.type, error: message };
-    }
+          await this.complete(job.id, job.tenantId, result);
+          return { processed: true, jobId: job.id, type: job.type, result };
+        }
+        const result = await this.processDigest(job.id, job.tenantId, job.createdByUserId, job.payload);
+        return { processed: true, jobId: job.id, type: job.type, result };
+
+      
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Background job failed";
+        const failedJob = await this.fail(job.id, job.tenantId, message);
+
+        // If SMTP_SEND has exhausted retries, mark the message FAILED so the
+        // UI stops showing SENDING forever. During retries, leave it as
+        // SENDING — the worker will try again shortly.
+        if (job.type === "SMTP_SEND" && failedJob.status === "FAILED") {
+          const messageId = typeof job.payload === "object" && job.payload !== null && !Array.isArray(job.payload)
+            && typeof job.payload.messageId === "string" ? job.payload.messageId : null;
+          if (messageId) {
+            await prisma.emailMessage.updateMany({
+              where: { id: messageId, tenantId: job.tenantId, status: "SENDING" },
+              data: { status: "FAILED", scheduleLastError: message.slice(0, 1000) },
+            });
+          }
+        }
+
+        return { processed: true, jobId: job.id, type: job.type, error: message };
+      }
+    });
   }
 
   private async processExport(jobId: string, tenantId: string, actorUserId: string) {

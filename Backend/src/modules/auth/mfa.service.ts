@@ -8,6 +8,7 @@ import {
 import bcrypt from "bcrypt";
 import type { MembershipRole, Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
+import { withCrossTenant } from "../../config/tenantScope.js";
 import { env } from "../../config/env.js";
 import { logger } from "../../config/logger.js";
 import { AppError } from "../../common/errors/AppError.js";
@@ -462,25 +463,34 @@ export class MfaService {
     context: ActorContext,
     metadata?: Prisma.InputJsonValue
   ) {
-    // The same sentinel-tenant upsert the auth service does before recording a
-    // pre-membership event. Repeated here rather than imported: auth.service
-    // imports this module for the enforcement gate, and reaching back into it
-    // would close a cycle. Only the constant is shared, from a types module.
-    await prisma.tenant.upsert({
-      where: { id: SYSTEM_TENANT_ID },
-      update: {},
-      create: { id: SYSTEM_TENANT_ID, name: "System", status: "ACTIVE", planCode: "system" },
-    });
-    await auditService.record({
-      tenantId: SYSTEM_TENANT_ID,
-      actorUserId: userId,
-      eventType,
-      targetType: "AppUser",
-      targetId: userId,
-      requestId: context.requestId,
-      ipAddress: context.ipAddress,
-      userAgent: context.userAgent,
-      metadata,
+    // Written outside the request's own tenant scope, because these rows
+    // belong to the system tenant and a request bound to a workspace cannot
+    // write them under the row-level policies (AC-004). That is the policy
+    // working: an MFA challenge is a platform-level identity event, so it
+    // says so rather than being filed under whichever workspace the account
+    // happened to be signing into.
+    return withCrossTenant(async () => {
+      // The same sentinel-tenant upsert the auth service does before
+      // recording a pre-membership event. Repeated here rather than imported:
+      // auth.service imports this module for the enforcement gate, and
+      // reaching back into it would close a cycle. Only the constant is
+      // shared, from a types module.
+      await prisma.tenant.upsert({
+        where: { id: SYSTEM_TENANT_ID },
+        update: {},
+        create: { id: SYSTEM_TENANT_ID, name: "System", status: "ACTIVE", planCode: "system" },
+      });
+      await auditService.record({
+        tenantId: SYSTEM_TENANT_ID,
+        actorUserId: userId,
+        eventType,
+        targetType: "AppUser",
+        targetId: userId,
+        requestId: context.requestId,
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+        metadata,
+      });
     });
   }
 }

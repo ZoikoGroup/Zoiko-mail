@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Prisma, type ConnectorProvider } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
+import { withCrossTenant } from "../../config/tenantScope.js";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
@@ -589,84 +590,87 @@ export class ConnectorService {
   }
 
   async processNextEvent() {
-    const event = await this.claimEvent();
-    if (!event) return { processed: false };
-    try {
-      const reauthEvents = new Set(["AUTH_REVOKED", "REAUTH_REQUIRED", "PERMISSION_MISMATCH"]);
-      const degradedEvents = new Set(["WATCH_EXPIRED", "SUBSCRIPTION_EXPIRED", "MISSED_NOTIFICATION"]);
-      const retryableEvents = new Set(["PROVIDER_RATE_LIMIT", "PROVIDER_UNAVAILABLE", "TEMPORARY_FAILURE"]);
-      if (retryableEvents.has(event.eventType)) {
-        throw new Error(event.eventType);
-      }
+    // Provider events arrive for any workspace, so this sweep is cross-tenant (AC-004).
+    return withCrossTenant(async () => {
+      const event = await this.claimEvent();
+      if (!event) return { processed: false };
+      try {
+        const reauthEvents = new Set(["AUTH_REVOKED", "REAUTH_REQUIRED", "PERMISSION_MISMATCH"]);
+        const degradedEvents = new Set(["WATCH_EXPIRED", "SUBSCRIPTION_EXPIRED", "MISSED_NOTIFICATION"]);
+        const retryableEvents = new Set(["PROVIDER_RATE_LIMIT", "PROVIDER_UNAVAILABLE", "TEMPORARY_FAILURE"]);
+        if (retryableEvents.has(event.eventType)) {
+          throw new Error(event.eventType);
+        }
 
-      await prisma.$transaction(async (tx) => {
-        await deliveryProtectionService.processProviderSignal(tx, event);
-        const accountData = reauthEvents.has(event.eventType)
-          ? { status: "REAUTH_REQUIRED" as const, lastErrorCode: event.eventType }
-          : degradedEvents.has(event.eventType)
-            ? { status: "DEGRADED" as const, lastErrorCode: event.eventType }
-            : {
-                status: "ACTIVE" as const,
-                lastErrorCode: null,
-                lastSyncedAt: new Date(),
-              };
-        await tx.connectedAccount.update({
-          where: { id: event.connectedAccountId },
-          data: accountData,
-        });
-        await tx.providerEvent.update({
-          where: { id: event.id },
-          data: {
-            processingStatus: "PROCESSED", processedAt: new Date(),
-            lockedAt: null, errorCode: null,
-          },
-        });
-        await auditService.record({
-          tenantId: event.tenantId,
-          eventType: "PROVIDER_EVENT_PROCESSED",
-          targetType: "ProviderEvent",
-          targetId: event.id,
-          requestId: event.requestId,
-          metadata: { provider: event.provider, eventType: event.eventType },
-        }, tx);
-      });
-      return { processed: true, eventId: event.id, status: "PROCESSED" as const };
-    } catch (error) {
-      const errorCode = error instanceof Error ? error.message.slice(0, 100) : "PROCESSING_FAILED";
-      const deadLetter = event.attempts >= event.maxAttempts;
-      const jitter = Math.floor(Math.random() * Math.max(1, env.PROVIDER_EVENT_RETRY_BASE_MS / 4));
-      const delay = env.PROVIDER_EVENT_RETRY_BASE_MS * 2 ** Math.max(0, event.attempts - 1) + jitter;
-      await prisma.$transaction(async (tx) => {
-        await tx.providerEvent.update({
-          where: { id: event.id },
-          data: {
-            processingStatus: deadLetter ? "DEAD_LETTER" : "RETRY",
-            runAt: deadLetter ? event.runAt : new Date(Date.now() + delay),
-            lockedAt: null,
-            processedAt: deadLetter ? new Date() : null,
-            errorCode,
-          },
-        });
-        await tx.connectedAccount.update({
-          where: { id: event.connectedAccountId },
-          data: { status: "DEGRADED", lastErrorCode: errorCode },
-        });
-        if (deadLetter) {
+        await prisma.$transaction(async (tx) => {
+          await deliveryProtectionService.processProviderSignal(tx, event);
+          const accountData = reauthEvents.has(event.eventType)
+            ? { status: "REAUTH_REQUIRED" as const, lastErrorCode: event.eventType }
+            : degradedEvents.has(event.eventType)
+              ? { status: "DEGRADED" as const, lastErrorCode: event.eventType }
+              : {
+                  status: "ACTIVE" as const,
+                  lastErrorCode: null,
+                  lastSyncedAt: new Date(),
+                };
+          await tx.connectedAccount.update({
+            where: { id: event.connectedAccountId },
+            data: accountData,
+          });
+          await tx.providerEvent.update({
+            where: { id: event.id },
+            data: {
+              processingStatus: "PROCESSED", processedAt: new Date(),
+              lockedAt: null, errorCode: null,
+            },
+          });
           await auditService.record({
             tenantId: event.tenantId,
-            eventType: "PROVIDER_EVENT_DEAD_LETTERED",
+            eventType: "PROVIDER_EVENT_PROCESSED",
             targetType: "ProviderEvent",
             targetId: event.id,
             requestId: event.requestId,
-            metadata: { provider: event.provider, eventType: event.eventType, attempts: event.attempts },
+            metadata: { provider: event.provider, eventType: event.eventType },
           }, tx);
-        }
-      });
-      return {
-        processed: true, eventId: event.id,
-        status: deadLetter ? "DEAD_LETTER" as const : "RETRY" as const,
-      };
-    }
+        });
+        return { processed: true, eventId: event.id, status: "PROCESSED" as const };
+      } catch (error) {
+        const errorCode = error instanceof Error ? error.message.slice(0, 100) : "PROCESSING_FAILED";
+        const deadLetter = event.attempts >= event.maxAttempts;
+        const jitter = Math.floor(Math.random() * Math.max(1, env.PROVIDER_EVENT_RETRY_BASE_MS / 4));
+        const delay = env.PROVIDER_EVENT_RETRY_BASE_MS * 2 ** Math.max(0, event.attempts - 1) + jitter;
+        await prisma.$transaction(async (tx) => {
+          await tx.providerEvent.update({
+            where: { id: event.id },
+            data: {
+              processingStatus: deadLetter ? "DEAD_LETTER" : "RETRY",
+              runAt: deadLetter ? event.runAt : new Date(Date.now() + delay),
+              lockedAt: null,
+              processedAt: deadLetter ? new Date() : null,
+              errorCode,
+            },
+          });
+          await tx.connectedAccount.update({
+            where: { id: event.connectedAccountId },
+            data: { status: "DEGRADED", lastErrorCode: errorCode },
+          });
+          if (deadLetter) {
+            await auditService.record({
+              tenantId: event.tenantId,
+              eventType: "PROVIDER_EVENT_DEAD_LETTERED",
+              targetType: "ProviderEvent",
+              targetId: event.id,
+              requestId: event.requestId,
+              metadata: { provider: event.provider, eventType: event.eventType, attempts: event.attempts },
+            }, tx);
+          }
+        });
+        return {
+          processed: true, eventId: event.id,
+          status: deadLetter ? "DEAD_LETTER" as const : "RETRY" as const,
+        };
+      }
+    });
   }
 }
 

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { LifecycleTargetType, Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
+import { withCrossTenant } from "../../config/tenantScope.js";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
@@ -325,46 +326,50 @@ export class LifecycleService {
    * late deletion into a flood.
    */
   async sweepOverdue(now = new Date()) {
-    const overdue = await prisma.dataLifecycleRequest.findMany({
-      where: {
-        type: "DELETION",
-        status: OPEN_STATUSES,
-        hardDeleteDeadline: { lt: now },
-      },
-      select: { id: true, tenantId: true, requestedByUserId: true, hardDeleteDeadline: true },
-      take: 100,
-    });
-    if (overdue.length === 0) return { breached: 0 };
-
-    const alreadyFlagged = await prisma.auditEvent.findMany({
-      where: {
-        eventType: "DATA_DELETION_SLA_BREACHED",
-        targetId: { in: overdue.map((request) => request.id) },
-      },
-      select: { targetId: true },
-    });
-    const flagged = new Set(alreadyFlagged.map((event) => event.targetId));
-
-    let breached = 0;
-    for (const request of overdue) {
-      if (flagged.has(request.id)) continue;
-      await auditService.record({
-        tenantId: request.tenantId,
-        // The actor is the requester, not the sweep: nobody performed this,
-        // and inventing a system actor would misattribute it.
-        actorUserId: request.requestedByUserId,
-        eventType: "DATA_DELETION_SLA_BREACHED",
-        targetType: "DataLifecycleRequest",
-        targetId: request.id,
-        metadata: {
-          hardDeleteDeadline: request.hardDeleteDeadline?.toISOString() ?? null,
-          slaDays: HARD_DELETE_SLA_DAYS,
-          detectedAt: now.toISOString(),
+    // Deliberately unscoped: an SLA breach is a platform-level event, and
+    // §6.14 makes the deadline index cross-tenant for exactly this sweep.
+    return withCrossTenant(async () => {
+      const overdue = await prisma.dataLifecycleRequest.findMany({
+        where: {
+          type: "DELETION",
+          status: OPEN_STATUSES,
+          hardDeleteDeadline: { lt: now },
         },
+        select: { id: true, tenantId: true, requestedByUserId: true, hardDeleteDeadline: true },
+        take: 100,
       });
-      breached += 1;
-    }
-    return { breached };
+      if (overdue.length === 0) return { breached: 0 };
+
+      const alreadyFlagged = await prisma.auditEvent.findMany({
+        where: {
+          eventType: "DATA_DELETION_SLA_BREACHED",
+          targetId: { in: overdue.map((request) => request.id) },
+        },
+        select: { targetId: true },
+      });
+      const flagged = new Set(alreadyFlagged.map((event) => event.targetId));
+
+      let breached = 0;
+      for (const request of overdue) {
+        if (flagged.has(request.id)) continue;
+        await auditService.record({
+          tenantId: request.tenantId,
+          // The actor is the requester, not the sweep: nobody performed this,
+          // and inventing a system actor would misattribute it.
+          actorUserId: request.requestedByUserId,
+          eventType: "DATA_DELETION_SLA_BREACHED",
+          targetType: "DataLifecycleRequest",
+          targetId: request.id,
+          metadata: {
+            hardDeleteDeadline: request.hardDeleteDeadline?.toISOString() ?? null,
+            slaDays: HARD_DELETE_SLA_DAYS,
+            detectedAt: now.toISOString(),
+          },
+        });
+        breached += 1;
+      }
+      return { breached };
+    });
   }
 
   /**

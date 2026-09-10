@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   authenticate,
+  crossTenantScope,
   loginRateLimit,
   refreshRateLimit,
   registerRateLimit,
@@ -28,6 +29,16 @@ import { verifyOtpSchema } from "./otp.schema.js";
 import { requireFlag } from "../../common/flags/index.js";
 
 const authRouter = Router();
+
+/**
+ * Signing in is not a tenant-scoped operation: it is what decides which
+ * workspace you are in. It still writes audit rows — a failed sign-in, an MFA
+ * challenge — and those rows name a tenant the request has not been bound to
+ * yet, so the row-level policies need to be told this path crosses the
+ * boundary (AC-004). Routes further down that do establish a tenant context
+ * narrow it again themselves.
+ */
+authRouter.use(crossTenantScope);
 
 authRouter.post(
   "/register",

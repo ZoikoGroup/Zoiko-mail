@@ -1,5 +1,6 @@
 import { Prisma, type DeliveryEventType, type MailFolder, type MembershipRole, type MessageStatus, type RecipientType } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
+import { withCrossTenant } from "../../config/tenantScope.js";
 import { env } from "../../config/env.js";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
@@ -816,82 +817,85 @@ export class MailService {
   }
 
   async processDueScheduled(limit = 25) {
-    const due = await prisma.emailMessage.findMany({
-      where: { status: "SCHEDULED", scheduledAt: { lte: new Date() } },
-      select: { id: true, tenantId: true, authorUserId: true },
-      orderBy: { scheduledAt: "asc" },
-      take: Math.min(Math.max(limit, 1), 100),
-    });
-    let sent = 0;
-    let failed = 0;
-    for (const candidate of due) {
-      const claimed = await prisma.emailMessage.updateMany({
-        where: {
-          id: candidate.id,
-          tenantId: candidate.tenantId,
-          status: "SCHEDULED",
-          scheduledAt: { lte: new Date() },
-        },
-        data: { status: "SENDING", scheduleAttempts: { increment: 1 } },
+    // The scheduler sweeps due messages across every workspace (AC-004).
+    return withCrossTenant(async () => {
+      const due = await prisma.emailMessage.findMany({
+        where: { status: "SCHEDULED", scheduledAt: { lte: new Date() } },
+        select: { id: true, tenantId: true, authorUserId: true },
+        orderBy: { scheduledAt: "asc" },
+        take: Math.min(Math.max(limit, 1), 100),
       });
-      if (claimed.count === 0) continue;
+      let sent = 0;
+      let failed = 0;
+      for (const candidate of due) {
+        const claimed = await prisma.emailMessage.updateMany({
+          where: {
+            id: candidate.id,
+            tenantId: candidate.tenantId,
+            status: "SCHEDULED",
+            scheduledAt: { lte: new Date() },
+          },
+          data: { status: "SENDING", scheduleAttempts: { increment: 1 } },
+        });
+        if (claimed.count === 0) continue;
 
-      const membership = await prisma.tenantMembership.findFirst({
-        where: {
+        const membership = await prisma.tenantMembership.findFirst({
+          where: {
+            tenantId: candidate.tenantId,
+            userId: candidate.authorUserId,
+            status: "ACTIVE",
+            tenant: { status: "ACTIVE" },
+            user: { status: "ACTIVE" },
+          },
+          include: { user: { select: { email: true } } },
+        });
+        if (!membership) {
+          await prisma.emailMessage.update({
+            where: { id: candidate.id, tenantId: candidate.tenantId },
+            data: { status: "FAILED", scheduleLastError: "Sender membership is inactive" },
+          });
+          failed += 1;
+          continue;
+        }
+
+        const workerContext: MailContext = {
           tenantId: candidate.tenantId,
           userId: candidate.authorUserId,
-          status: "ACTIVE",
-          tenant: { status: "ACTIVE" },
-          user: { status: "ACTIVE" },
-        },
-        include: { user: { select: { email: true } } },
-      });
-      if (!membership) {
-        await prisma.emailMessage.update({
-          where: { id: candidate.id, tenantId: candidate.tenantId },
-          data: { status: "FAILED", scheduleLastError: "Sender membership is inactive" },
-        });
-        failed += 1;
-        continue;
+          membershipId: membership.id,
+          role: membership.role,
+          email: membership.user.email,
+        };
+        try {
+          await this.deliver(candidate.id, workerContext, ["SENDING"]);
+          sent += 1;
+        } catch (error) {
+          const current = await prisma.emailMessage.findFirst({
+            where: { id: candidate.id, tenantId: candidate.tenantId },
+            select: { scheduleAttempts: true },
+          });
+          const terminal = (current?.scheduleAttempts ?? env.MAIL_SCHEDULE_MAX_ATTEMPTS) >= env.MAIL_SCHEDULE_MAX_ATTEMPTS;
+          const message = error instanceof Error ? error.message.slice(0, 1000) : "Scheduled send failed";
+          await prisma.emailMessage.update({
+            where: { id: candidate.id, tenantId: candidate.tenantId },
+            data: {
+              status: terminal ? "FAILED" : "SCHEDULED",
+              scheduledAt: terminal ? null : new Date(Date.now() + 30_000),
+              scheduleLastError: message,
+            },
+          });
+          await auditService.record({
+            tenantId: candidate.tenantId,
+            actorUserId: candidate.authorUserId,
+            eventType: terminal ? "MAIL_SCHEDULE_FAILED" : "MAIL_SCHEDULE_RETRY",
+            targetType: "EmailMessage",
+            targetId: candidate.id,
+            metadata: { error: message, attempt: current?.scheduleAttempts ?? null },
+          });
+          failed += 1;
+        }
       }
-
-      const workerContext: MailContext = {
-        tenantId: candidate.tenantId,
-        userId: candidate.authorUserId,
-        membershipId: membership.id,
-        role: membership.role,
-        email: membership.user.email,
-      };
-      try {
-        await this.deliver(candidate.id, workerContext, ["SENDING"]);
-        sent += 1;
-      } catch (error) {
-        const current = await prisma.emailMessage.findFirst({
-          where: { id: candidate.id, tenantId: candidate.tenantId },
-          select: { scheduleAttempts: true },
-        });
-        const terminal = (current?.scheduleAttempts ?? env.MAIL_SCHEDULE_MAX_ATTEMPTS) >= env.MAIL_SCHEDULE_MAX_ATTEMPTS;
-        const message = error instanceof Error ? error.message.slice(0, 1000) : "Scheduled send failed";
-        await prisma.emailMessage.update({
-          where: { id: candidate.id, tenantId: candidate.tenantId },
-          data: {
-            status: terminal ? "FAILED" : "SCHEDULED",
-            scheduledAt: terminal ? null : new Date(Date.now() + 30_000),
-            scheduleLastError: message,
-          },
-        });
-        await auditService.record({
-          tenantId: candidate.tenantId,
-          actorUserId: candidate.authorUserId,
-          eventType: terminal ? "MAIL_SCHEDULE_FAILED" : "MAIL_SCHEDULE_RETRY",
-          targetType: "EmailMessage",
-          targetId: candidate.id,
-          metadata: { error: message, attempt: current?.scheduleAttempts ?? null },
-        });
-        failed += 1;
-      }
-    }
-    return { claimed: due.length, sent, failed };
+      return { claimed: due.length, sent, failed };
+    });
   }
 
   async listDeliveryEvents(messageId: string, context: MailContext) {
