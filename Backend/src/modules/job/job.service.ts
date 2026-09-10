@@ -5,6 +5,7 @@ import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
 import { exportStorage } from "../lifecycle/export.storage.js";
 import { attachmentStorage } from "../mail/attachment.storage.js";
+import { lifecycleService } from "../lifecycle/lifecycle.service.js";
 import { createHash } from "node:crypto";
 import { providerMailService } from "../provider-mail/provider-mail.service.js";
 export class JobService {
@@ -244,6 +245,37 @@ export class JobService {
     const requestId = typeof payload === "object" && payload !== null && !Array.isArray(payload)
       && payload.confirmed === true && typeof payload.requestId === "string" ? payload.requestId : null;
     if (!requestId) throw new Error("Tenant deletion lacks final confirmation");
+
+    // §6.14 gives a deletion request a target, and the two executable targets
+    // do very different things: a tenant erase destroys everything and issues
+    // a receipt, a user request anonymizes one person and leaves the
+    // workspace standing. Dispatched here rather than in two job types so the
+    // SLA, the deadline and the audit trail stay in one workflow.
+    const targeted = await prisma.dataLifecycleRequest.findFirst({
+      where: { id: requestId, tenantId, type: "DELETION" },
+      select: { id: true, targetType: true, targetId: true, status: true },
+    });
+    if (targeted?.targetType === "USER") {
+      if (!targeted.targetId) throw new Error("User deletion request has no target");
+      if (!["APPROVED", "SCHEDULED", "PROCESSING"].includes(targeted.status)) {
+        throw new Error("User deletion request is not approved");
+      }
+      await prisma.dataLifecycleRequest.update({
+        where: { id: targeted.id, tenantId },
+        data: { status: "PROCESSING" },
+      });
+      const outcome = await lifecycleService.anonymizeUser(tenantId, targeted.targetId, {
+        tenantId,
+        userId: actorUserId,
+      });
+      const completed = await prisma.dataLifecycleRequest.update({
+        where: { id: targeted.id, tenantId },
+        data: { status: "COMPLETED", completedAt: new Date() },
+      });
+      await this.complete(jobId, tenantId, { ...outcome, completedAt: completed.completedAt });
+      return outcome;
+    }
+
     const [tenant, request, attachmentRows, jobs, counts] = await Promise.all([
       prisma.tenant.findFirst({ where: { id: tenantId }, select: { id: true, name: true } }),
       prisma.dataLifecycleRequest.findFirst({

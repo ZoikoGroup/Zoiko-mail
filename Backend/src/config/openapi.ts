@@ -443,8 +443,84 @@ export const openApiDocument = {
     },
     "/api/v1/lifecycle/deletions": {
       post: {
-        tags: ["Lifecycle"], summary: "Request approval-gated tenant deletion (OWNER)", security: bearer,
-        responses: { "202": ok("Deletion requested") },
+        tags: ["Lifecycle"],
+        summary: "Request an approval-gated deletion (OWNER)",
+        description:
+          "Approval is also verification, which starts the 30-day hard-delete clock required by AC-012. TENANT targets keep their second, name-typed confirmation; USER targets are confirmed by the approval itself and are anonymized irreversibly rather than deleted, because audit records must survive the erasure. Target types with no executor are refused rather than queued against an SLA that cannot be met.",
+        security: bearer,
+        requestBody: jsonBody({
+          type: "object",
+          properties: {
+            targetType: {
+              type: "string",
+              enum: ["TENANT", "MAILBOX", "CONNECTED_ACCOUNT", "USER", "AI_OUTPUTS", "SYNCED_DATA"],
+              default: "TENANT",
+              description: "Only TENANT and USER can be executed today.",
+            },
+            targetId: { type: "string", format: "uuid", description: "Required for any target narrower than the workspace." },
+            reason: { type: "string", minLength: 3, maxLength: 500 },
+            idempotencyKey: { type: "string", minLength: 8, maxLength: 120, description: "Optional; the Idempotency-Key header is the contract." },
+          },
+        }),
+        responses: {
+          "202": ok("Deletion requested"),
+          "422": ok("Target type has no executor, target id missing, or the requester is the target"),
+        },
+      },
+    },
+    "/api/v1/lifecycle/sla": {
+      get: {
+        tags: ["Lifecycle"],
+        summary: "Hard-delete SLA position for the workspace (OWNER)",
+        description:
+          "AC-012 monitoring: deletions past their deadline, deletions due inside a week, and deletions lawfully held. Overdue and blocked are reported separately on purpose — one is an incident, the other is a decision.",
+        security: bearer,
+        responses: { "200": ok("SLA position returned") },
+      },
+    },
+    "/api/v1/lifecycle/{requestId}/block": {
+      post: {
+        tags: ["Lifecycle"],
+        summary: "Place a legal or security hold on a deletion (OWNER)",
+        description:
+          "Suspends the SLA clock rather than extending it: the deadline is cleared, so monitoring stops counting down instead of reporting a permanent breach for data the workspace is required to keep. Any pending deletion job is cancelled. The stated basis is mandatory — a hold with no reason is indistinguishable from a missed deadline.",
+        security: bearer,
+        parameters: [{ name: "requestId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        requestBody: jsonBody({
+          type: "object", required: ["reason"],
+          properties: { reason: { type: "string", minLength: 10, maxLength: 500 } },
+        }),
+        responses: { "200": ok("Deletion blocked"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/lifecycle/{requestId}/unblock": {
+      post: {
+        tags: ["Lifecycle"],
+        summary: "Lift a hold, returning the request for re-approval (OWNER)",
+        description:
+          "Starts a fresh 30 days rather than resuming an expired countdown: the data was lawfully retained while held, and the SLA is measured from verification, so the request returns to REQUESTED and must be approved again.",
+        security: bearer,
+        parameters: [{ name: "requestId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: { "200": ok("Hold lifted"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/lifecycle/{requestId}/schedule": {
+      post: {
+        tags: ["Lifecycle"],
+        summary: "Defer execution to a time inside the SLA window (OWNER)",
+        description:
+          "Moves the queued job as well as the record, since the worker only claims jobs whose run time has arrived. A time after the hard-delete deadline is refused here and by a CHECK constraint, because a scheduling bug that pushed execution past the deadline would breach the SLA silently.",
+        security: bearer,
+        parameters: [{ name: "requestId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        requestBody: jsonBody({
+          type: "object", required: ["scheduledFor"],
+          properties: { scheduledFor: { type: "string", format: "date-time" } },
+        }),
+        responses: {
+          "200": ok("Execution scheduled"),
+          "422": ok("Time is in the past or after the hard-delete deadline"),
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
       },
     },
     "/api/v1/lifecycle/{requestId}/confirm-deletion": {

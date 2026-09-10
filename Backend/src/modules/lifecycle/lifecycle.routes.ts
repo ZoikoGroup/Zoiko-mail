@@ -9,6 +9,7 @@ import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
 import { jobService } from "../job/job.service.js";
 import { exportStorage } from "./export.storage.js";
+import { HARD_DELETE_SLA_DAYS, hardDeleteDeadlineFrom, lifecycleService } from "./lifecycle.service.js";
 export const lifecycleRouter = Router();
 // The body key predates API §7's header and fed the job queue's own
 // deduplication. It stays accepted so existing clients keep working, but it is
@@ -20,6 +21,26 @@ const body = z.object({
   reason: z.string().trim().min(3).max(500).optional(),
 });
 const params = z.object({ requestId: z.string().uuid() });
+/**
+ * A deletion request names what it erases — the target_type of §6.14.
+ *
+ * TENANT keeps the two-step, name-confirmed path it always had. USER is
+ * approval-gated in one step: it affects one person rather than everyone, and
+ * it anonymizes rather than destroys.
+ */
+const deletionBody = body.extend({
+  targetType: z
+    .enum(["TENANT", "MAILBOX", "CONNECTED_ACCOUNT", "USER", "AI_OUTPUTS", "SYNCED_DATA"])
+    .default("TENANT"),
+  targetId: z.string().uuid().optional(),
+});
+const blockBody = z.object({
+  // Free text, because the bases named in §6.14 (law, contract, fraud,
+  // security, payment dispute, legal preservation) are categories rather than
+  // an enumeration anyone can close.
+  reason: z.string().trim().min(10).max(500),
+});
+const scheduleBody = z.object({ scheduledFor: z.coerce.date() });
 const confirmDeletionBody = z.object({
   confirmation: z.literal("DELETE_TENANT_PERMANENTLY"),
   tenantName: z.string().trim().min(1).max(200),
@@ -75,8 +96,113 @@ lifecycleRouter.get("/exports/:requestId/download", requireCapability("data.expo
   res.setHeader("Content-Length", data.length);
   res.status(200).send(data);
 }));
-lifecycleRouter.post("/deletions", validate(body), asyncHandler(async (req,res)=>{const c=req.tenantContext!;const request=await prisma.dataLifecycleRequest.create({data:{tenantId:c.tenantId,requestedByUserId:c.userId,type:"DELETION",reason:req.body.reason}});await auditService.record({tenantId:c.tenantId,actorUserId:c.userId,eventType:"DATA_DELETION_REQUESTED",targetType:"DataLifecycleRequest",targetId:request.id});sendSuccess(res,202,request,req.requestId);}));
-lifecycleRouter.post("/:requestId/approve",validate(params,"params"),asyncHandler(async(req,res)=>{const c=req.tenantContext!;const item=await prisma.dataLifecycleRequest.findFirst({where:{id:String(req.params.requestId),tenantId:c.tenantId,type:"DELETION",status:"REQUESTED"}});if(!item)throw new AppError("Deletion request not found",404,ErrorCodes.NOT_FOUND);const result=await prisma.$transaction(async tx=>{const job=await jobService.enqueue({tenantId:c.tenantId,userId:c.userId,type:"DATA_DELETION",payload:{requestId:item.id},idempotencyKey:`deletion:${item.id}`},tx);const request=await tx.dataLifecycleRequest.update({where:{id:item.id,tenantId:c.tenantId},data:{status:"APPROVED",approvedAt:new Date(),jobId:job.id}});await auditService.record({tenantId:c.tenantId,actorUserId:c.userId,eventType:"DATA_DELETION_APPROVED",targetType:"DataLifecycleRequest",targetId:item.id},tx);return{request,job};});sendSuccess(res,202,result,req.requestId);}));
+lifecycleRouter.post("/deletions", validate(deletionBody), asyncHandler(async (req, res) => {
+  const c = req.tenantContext!;
+  const targetType = req.body.targetType as "TENANT" | "USER";
+  // Refused rather than accepted and never run: a request for a target with no
+  // executor would sit in the queue accruing an SLA it can never meet.
+  lifecycleService.assertExecutableTarget(req.body.targetType);
+  if (targetType !== "TENANT" && !req.body.targetId) {
+    throw new AppError("A target id is required for this target type", 422, ErrorCodes.VALIDATION_ERROR);
+  }
+  // Anonymizing the acting Owner would remove the only account that can
+  // administer the workspace, mid-request.
+  if (targetType === "USER" && req.body.targetId === c.userId) {
+    throw new AppError("Request your own deletion from another Owner", 422, ErrorCodes.VALIDATION_ERROR);
+  }
+  const request = await prisma.dataLifecycleRequest.create({
+    data: {
+      tenantId: c.tenantId,
+      requestedByUserId: c.userId,
+      type: "DELETION",
+      targetType,
+      targetId: targetType === "TENANT" ? null : req.body.targetId,
+      reason: req.body.reason,
+    },
+  });
+  await auditService.record({
+    tenantId: c.tenantId,
+    actorUserId: c.userId,
+    eventType: "DATA_DELETION_REQUESTED",
+    targetType: "DataLifecycleRequest",
+    targetId: request.id,
+    metadata: { deletionTargetType: targetType, deletionTargetId: request.targetId },
+  });
+  sendSuccess(res, 202, request, req.requestId);
+}));
+/**
+ * Approval is also verification, which is where §6.14 starts the clock.
+ *
+ * The deadline is computed here and never read from the request body: "the
+ * scheduler enforces 30 days" is only true if the server owns the number.
+ */
+lifecycleRouter.post("/:requestId/approve", validate(params, "params"), asyncHandler(async (req, res) => {
+  const c = req.tenantContext!;
+  const item = await prisma.dataLifecycleRequest.findFirst({
+    where: { id: String(req.params.requestId), tenantId: c.tenantId, type: "DELETION", status: "REQUESTED" },
+  });
+  if (!item) throw new AppError("Deletion request not found", 404, ErrorCodes.NOT_FOUND);
+  const verifiedAt = new Date();
+  const hardDeleteDeadline = hardDeleteDeadlineFrom(verifiedAt);
+  // A user anonymization is confirmed by the approval itself; a tenant erase
+  // still needs its second, name-typed confirmation before the worker will
+  // touch it.
+  const confirmed = item.targetType === "USER";
+  const result = await prisma.$transaction(async (tx) => {
+    const job = await jobService.enqueue({
+      tenantId: c.tenantId,
+      userId: c.userId,
+      type: "DATA_DELETION",
+      payload: { requestId: item.id, ...(confirmed ? { confirmed: true } : {}) },
+      idempotencyKey: `deletion:${item.id}`,
+    }, tx);
+    const request = await tx.dataLifecycleRequest.update({
+      where: { id: item.id, tenantId: c.tenantId },
+      data: {
+        status: "APPROVED",
+        approvedAt: verifiedAt,
+        verifiedAt,
+        hardDeleteDeadline,
+        scheduledFor: verifiedAt,
+        jobId: job.id,
+      },
+    });
+    await auditService.record({
+      tenantId: c.tenantId,
+      actorUserId: c.userId,
+      eventType: "DATA_DELETION_APPROVED",
+      targetType: "DataLifecycleRequest",
+      targetId: item.id,
+      metadata: {
+        verifiedAt: verifiedAt.toISOString(),
+        hardDeleteDeadline: hardDeleteDeadline.toISOString(),
+        slaDays: HARD_DELETE_SLA_DAYS,
+      },
+    }, tx);
+    return { request, job };
+  });
+  sendSuccess(res, 202, result, req.requestId);
+}));
+
+/** SLA monitoring: what is late, what is close, what is lawfully held. */
+lifecycleRouter.get("/sla", asyncHandler(async (req, res) => {
+  sendSuccess(res, 200, await lifecycleService.slaReport(req.tenantContext!.tenantId), req.requestId);
+}));
+
+lifecycleRouter.post("/:requestId/block", validate(params, "params"), validate(blockBody), asyncHandler(async (req, res) => {
+  const c = req.tenantContext!;
+  sendSuccess(res, 200, await lifecycleService.block(c.tenantId, String(req.params.requestId), req.body.reason, c), req.requestId);
+}));
+
+lifecycleRouter.post("/:requestId/unblock", validate(params, "params"), asyncHandler(async (req, res) => {
+  const c = req.tenantContext!;
+  sendSuccess(res, 200, await lifecycleService.unblock(c.tenantId, String(req.params.requestId), c), req.requestId);
+}));
+
+lifecycleRouter.post("/:requestId/schedule", validate(params, "params"), validate(scheduleBody), asyncHandler(async (req, res) => {
+  const c = req.tenantContext!;
+  sendSuccess(res, 200, await lifecycleService.schedule(c.tenantId, String(req.params.requestId), req.body.scheduledFor, c), req.requestId);
+}));
 lifecycleRouter.post("/:requestId/confirm-deletion", validate(params, "params"), validate(confirmDeletionBody), asyncHandler(async (req, res) => {
   const context = req.tenantContext!;
   const tenant = await prisma.tenant.findFirst({ where: { id: context.tenantId }, select: { name: true } });
@@ -88,7 +214,10 @@ lifecycleRouter.post("/:requestId/confirm-deletion", validate(params, "params"),
       id: String(req.params.requestId),
       tenantId: context.tenantId,
       type: "DELETION",
-      status: "APPROVED",
+      status: { in: ["APPROVED", "SCHEDULED"] },
+      // The typed tenant name is what confirms a tenant erase. A user
+      // anonymization has no equivalent second gate and does not come here.
+      targetType: "TENANT",
     },
     include: { job: true },
   });

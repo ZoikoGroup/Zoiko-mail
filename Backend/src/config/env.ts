@@ -52,6 +52,10 @@ export const envSchema = z.object({
   MAIL_SCHEDULER_INTERVAL_MS: z.coerce.number().int().min(1_000).default(15_000),
   MAIL_SCHEDULE_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
   JOB_WORKER_INTERVAL_MS: z.coerce.number().int().min(1_000).default(10_000),
+  // Compliance housekeeping: flags deletions past their 30-day SLA and
+  // drops expired idempotency records. Minutes rather than seconds, since
+  // both are measured in hours and days.
+  COMPLIANCE_SWEEP_INTERVAL_MS: z.coerce.number().int().positive().default(900_000),
   EXPORT_STORAGE_PATH: z.string().min(1).default("storage/exports"),
   OPERATIONS_KEY: z.string().min(32).default("change-me-operations-key-min-32-chars"),
   OTP_CODE_LENGTH: z.coerce.number().int().min(4).max(10).default(6),

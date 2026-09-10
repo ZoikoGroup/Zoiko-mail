@@ -766,23 +766,53 @@ model BackgroundJob {
   @@map("background_jobs")
 }
 
+/**
+ * Export and deletion workflows — Data Model §6.14, AC-012.
+ *
+ * The deletion half carries a service-level agreement: "customer data subject
+ * to deletion must be hard-deleted or irreversibly anonymized within 30 days
+ * unless legal/security retention exception applies". That makes three fields
+ * load-bearing and none of them existed — the request had no verification
+ * moment to count from, no deadline, and no way to record a legal hold. A
+ * workflow that cannot say when a deletion is late does not have an SLA.
+ *
+ * `hardDeleteDeadline` is derived by the server from `verifiedAt` and never
+ * accepted from a client, which is what §6.14's "scheduler enforces <= 30
+ * days" means in practice.
+ */
 model DataLifecycleRequest {
-  id                String          @id @default(uuid()) @db.Uuid
-  tenantId          String          @map("tenant_id") @db.Uuid
-  requestedByUserId String          @map("requested_by_user_id") @db.Uuid
-  type              LifecycleType
-  status            LifecycleStatus @default(REQUESTED)
-  reason            String?
-  jobId             String?         @unique @map("job_id") @db.Uuid
-  approvedAt        DateTime?       @map("approved_at")
-  completedAt       DateTime?       @map("completed_at")
-  createdAt         DateTime        @default(now()) @map("created_at")
-  updatedAt         DateTime        @updatedAt @map("updated_at")
-  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  requestedBy       AppUser         @relation("LifecycleRequester", fields: [requestedByUserId], references: [id], onDelete: Restrict)
-  job               BackgroundJob?  @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  id                 String               @id @default(uuid()) @db.Uuid
+  tenantId           String               @map("tenant_id") @db.Uuid
+  requestedByUserId  String               @map("requested_by_user_id") @db.Uuid
+  type               LifecycleType
+  status             LifecycleStatus      @default(REQUESTED)
+  /// What is being erased. Null on export requests, which target nothing.
+  targetType         LifecycleTargetType? @map("target_type")
+  /// The target id, where the target is narrower than the workspace.
+  targetId           String?              @map("target_id") @db.Uuid
+  reason             String?
+  jobId              String?              @unique @map("job_id") @db.Uuid
+  approvedAt         DateTime?            @map("approved_at")
+  /// When the request was verified. The SLA clock starts here (§6.14).
+  verifiedAt         DateTime?            @map("verified_at")
+  /// When execution is due. Never later than the deadline.
+  scheduledFor       DateTime?            @map("scheduled_for")
+  /// verifiedAt + 30 days, or null while a legal hold suspends the clock.
+  hardDeleteDeadline DateTime?            @map("hard_delete_deadline")
+  /// Legal, security, payment or fraud basis for retaining past the SLA.
+  blockReason        String?              @map("block_reason")
+  completedAt        DateTime?            @map("completed_at")
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @updatedAt @map("updated_at")
+  tenant             Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  requestedBy        AppUser              @relation("LifecycleRequester", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  job                BackgroundJob?       @relation(fields: [jobId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, type, status])
+  // §6.14's two indexes: the first is SLA monitoring, which sweeps by deadline
+  // across tenants; the second is the per-workspace queue view.
+  @@index([status, hardDeleteDeadline])
+  @@index([tenantId, status, createdAt(sort: Desc)])
   @@map("data_lifecycle_requests")
 }
 
@@ -1104,11 +1134,31 @@ enum LifecycleType {
 
 enum LifecycleStatus {
   REQUESTED
+  /// Verified, which is when §6.14 starts the 30-day clock.
+  VERIFIED
   APPROVED
+  /// Retained past the SLA on a recorded legal or security basis.
+  BLOCKED
+  /// Verified and waiting for its execution time inside the window.
+  SCHEDULED
   PROCESSING
   COMPLETED
+  FAILED
   REJECTED
   CANCELLED
+}
+
+/// What a deletion request erases — §6.14's target_type. Only TENANT and USER
+/// execute today; the rest are declared because the SLA applies to each of
+/// them and a request has to be able to name its target. Asking for one that
+/// has no executor is refused at the API rather than accepted and never run.
+enum LifecycleTargetType {
+  TENANT
+  MAILBOX
+  CONNECTED_ACCOUNT
+  USER
+  AI_OUTPUTS
+  SYNCED_DATA
 }
 
 enum IdempotencyStatus {
