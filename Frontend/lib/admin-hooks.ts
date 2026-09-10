@@ -22,6 +22,10 @@ import {
   fetchDashboard,
   fetchDomains,
   fetchGroups,
+  fetchGroupAssignees,
+  createGroup,
+  assignToGroup,
+  removeFromGroup,
   fetchInvitations,
   previewInvitation,
   sendInvitation,
@@ -34,7 +38,11 @@ import {
   fetchSyncErrors,
   setMailboxAi,
 } from "./admin-queries";
-import type { InvitationDraftInput, WorkspaceSettingsPatch } from "./admin-queries";
+import type {
+  GroupAssigneeDto,
+  InvitationDraftInput,
+  WorkspaceSettingsPatch,
+} from "./admin-queries";
 import { CAPABILITY_MATRIX, GUARDRAILS } from "./admin-api";
 import type {
   AuditEventDto,
@@ -124,10 +132,62 @@ export function useDomains(): QueryLike<DomainDto[]> {
   return shape(useQuery({ queryKey: ["domains"], queryFn: fetchDomains, ...LIVE }));
 }
 
-/** No Group model exists server-side; the screen shows its error state. */
+/** Shared mailboxes and distribution addresses. */
 export function useGroups(): QueryLike<GroupDto[]> {
+  return shape(useQuery({ queryKey: ["groups"], queryFn: fetchGroups, ...LIVE }));
+}
+
+/** Who is assigned to one shared mailbox, and with which permissions. */
+export function useGroupAssignees(mailboxId: string | null): QueryLike<GroupAssigneeDto[]> {
   return shape(
-    useQuery({ queryKey: ["groups"], queryFn: fetchGroups, retry: false, ...LIVE })
+    useQuery({
+      queryKey: ["group-assignees", mailboxId],
+      queryFn: () => fetchGroupAssignees(mailboxId as string),
+      enabled: Boolean(mailboxId),
+      ...LIVE,
+    })
+  );
+}
+
+/** Invalidates both the roster and the group list, whose counts move with it. */
+function useGroupMutation<T>(fn: (input: T) => Promise<void>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["groups"] }),
+        qc.invalidateQueries({ queryKey: ["group-assignees"] }),
+      ]);
+    },
+  });
+}
+
+export function useCreateGroup() {
+  return useGroupMutation((input: { address: string; type: "SHARED" | "DISTRIBUTION" }) =>
+    createGroup(input)
+  );
+}
+
+export function useAssignToGroup() {
+  return useGroupMutation(
+    (input: {
+      mailboxId: string;
+      membershipId: string;
+      canRead?: boolean;
+      canSend?: boolean;
+      canManage?: boolean;
+      canAssign?: boolean;
+    }) => {
+      const { mailboxId, ...rest } = input;
+      return assignToGroup(mailboxId, rest);
+    }
+  );
+}
+
+export function useRemoveFromGroup() {
+  return useGroupMutation((input: { mailboxId: string; membershipId: string }) =>
+    removeFromGroup(input.mailboxId, input.membershipId)
   );
 }
 

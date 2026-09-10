@@ -120,6 +120,7 @@ interface ApiMailbox {
   sendSuspendedAt: string | null;
   sendSuspensionReason: string | null;
   aiEnabled: boolean;
+  type: "USER" | "SHARED" | "DISTRIBUTION" | "SYSTEM" | "NO_REPLY";
 }
 
 export async function fetchMailboxes(): Promise<MailboxDto[]> {
@@ -130,9 +131,10 @@ export async function fetchMailboxes(): Promise<MailboxDto[]> {
   return rows.map((m) => ({
     id: m.id,
     address: m.address,
-    // Shared mailboxes need a model that does not exist yet, so every mailbox
-    // is individual by construction rather than by assumption.
-    type: "INDIVIDUAL",
+    // Real now. Anything without a single owning membership is shared as far
+    // as this screen is concerned; the Groups screen draws the finer
+    // shared/distribution distinction.
+    type: m.type === "USER" ? "INDIVIDUAL" : "SHARED",
     status: m.sendSuspendedAt ? "SUSPENDED" : "ACTIVE",
     storageUsedGb: gb(m.storageUsed),
     storageLimitGb: gb(m.storageLimit),
@@ -675,13 +677,96 @@ export async function fetchActiveSupportGrant(): Promise<SupportGrantDto | null>
 
 /* ── groups ────────────────────────────────────────────────────────────── */
 
+interface ApiSharedMailbox {
+  id: string;
+  address: string;
+  type: "SHARED" | "DISTRIBUTION";
+  memberCount: number;
+  status: "ACTIVE" | "SUSPENDED";
+}
+
 /**
- * There is no Group model, module or endpoint in the backend. This throws so
- * the screen shows its error state, which is the honest rendering of a feature
- * that does not exist — a fixture here would look like a working feature.
+ * Shared mailboxes and distribution addresses.
+ *
+ * This used to throw, because no Group model existed. There is still no
+ * separate one: Data Model §6.16 models both as a mailbox with a type, and
+ * the screen's own "shared mailbox / distribution only" split is exactly
+ * that distinction, so inventing a second entity would have been a parallel
+ * truth to keep in sync.
  */
 export async function fetchGroups(): Promise<GroupDto[]> {
-  throw new Error("Groups are not implemented in the API yet");
+  const res = await apiRequest<{ groups: ApiSharedMailbox[] }>(
+    "/mail/admin/shared-mailboxes"
+  );
+  return (res.groups ?? []).map((g) => ({
+    id: g.id,
+    address: g.address,
+    kind: g.type === "DISTRIBUTION" ? "DISTRIBUTION" : "SHARED",
+    memberCount: g.memberCount,
+    status: g.status,
+  }));
+}
+
+export interface GroupAssigneeDto {
+  membershipId: string;
+  name: string;
+  email: string;
+  canRead: boolean;
+  canSend: boolean;
+  canManage: boolean;
+  canAssign: boolean;
+}
+
+interface ApiAssignee {
+  membershipId: string;
+  canRead: boolean;
+  canSend: boolean;
+  canManage: boolean;
+  canAssign: boolean;
+  membership: { user: { email: string; displayName: string | null } };
+}
+
+export async function fetchGroupAssignees(mailboxId: string): Promise<GroupAssigneeDto[]> {
+  const res = await apiRequest<{ assignees: ApiAssignee[] }>(
+    `/mail/admin/shared-mailboxes/${mailboxId}/assignees`
+  );
+  return (res.assignees ?? []).map((a) => ({
+    membershipId: a.membershipId,
+    name: personName(a.membership.user),
+    email: a.membership.user.email,
+    canRead: a.canRead,
+    canSend: a.canSend,
+    canManage: a.canManage,
+    canAssign: a.canAssign,
+  }));
+}
+
+export async function createGroup(input: {
+  address: string;
+  type: "SHARED" | "DISTRIBUTION";
+}): Promise<void> {
+  await apiRequest("/mail/admin/shared-mailboxes", { method: "POST", body: input });
+}
+
+/** Grant or change one person's access. Omitted permissions default closed. */
+export async function assignToGroup(
+  mailboxId: string,
+  input: { membershipId: string } & Partial<Omit<GroupAssigneeDto, "membershipId" | "name" | "email">>
+): Promise<void> {
+  await apiRequest(`/mail/admin/shared-mailboxes/${mailboxId}/assignees`, {
+    method: "POST",
+    body: input,
+  });
+}
+
+export async function removeFromGroup(
+  mailboxId: string,
+  membershipId: string
+): Promise<void> {
+  await apiRequest(
+    `/mail/admin/shared-mailboxes/${mailboxId}/assignees/${membershipId}`,
+    { method: "DELETE" }
+  );
 }
 
 /** The drafted invitation letter, as the API returns it. */

@@ -67,8 +67,37 @@ export const adminUpdateMailboxSchema = z
     message: "Provide at least one field to update",
   });
 
+/* ── shared mailboxes — Security §10 ─────────────────────────────────── */
+
+export const createSharedMailboxSchema = z.object({
+  address: emailSchema,
+  // SHARED holds mail the assignees read; DISTRIBUTION only fans out.
+  type: z.enum(["SHARED", "DISTRIBUTION"]).default("SHARED"),
+});
+
+/**
+ * Four separable permissions, per §10. Omitted fields default to read-only
+ * rather than to the caller's last values: widening access should be typed
+ * out, not inherited.
+ */
+export const assignMailboxSchema = z.object({
+  membershipId: z.string().uuid(),
+  canRead: z.boolean().optional(),
+  canSend: z.boolean().optional(),
+  canManage: z.boolean().optional(),
+  canAssign: z.boolean().optional(),
+});
+
+export const mailboxAssigneeParamsSchema = z.object({
+  mailboxId: z.string().uuid(),
+  membershipId: z.string().uuid(),
+});
+
 export const listMailSchema = z.object({
   folder: z.enum(["DRAFTS", "INBOX", "ARCHIVE", "SENT", "TRASH", "QUARANTINE"]).default("INBOX"),
+  // Absent means the caller's own mailbox, which is what every existing
+  // caller gets. Present means a shared mailbox they must hold read on.
+  mailboxId: z.string().uuid().optional(),
   starredOnly: z.coerce.boolean().default(false),
   unreadOnly: z.coerce.boolean().default(false),
   labelId: z.string().uuid().optional(),

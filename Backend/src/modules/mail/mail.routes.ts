@@ -2,7 +2,7 @@ import { Router } from "express";
 import { authenticate, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./mail.controller.js";
 import { attachmentUpload } from "./attachment.middleware.js";
-import { adminDeliveryEventsQuerySchema, adminDeliverySummaryQuerySchema, adminUpdateMailboxSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
+import { adminDeliveryEventsQuerySchema, adminDeliverySummaryQuerySchema, adminUpdateMailboxSchema, assignMailboxSchema, createSharedMailboxSchema, mailboxAssigneeParamsSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
 
 const mailRouter = Router();
 mailRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBER"));
@@ -44,6 +44,40 @@ mailRouter.put("/:messageId/labels/:labelId", validate(messageLabelParamsSchema,
 mailRouter.delete("/:messageId/labels/:labelId", validate(messageLabelParamsSchema, "params"), controller.removeLabel);
 
 // ─── Admin: Mailbox management (must be before /:messageId wildcard) ──────────
+// ─── Shared mailboxes and group addresses — Security §10 ─────────────────
+// Gated on workspace.groups.manage, which the matrix gives Owner and Admin
+// and withholds from Member. Registered before "/admin/mailboxes/:mailboxId"
+// so "shared" is not read as a mailbox id.
+mailRouter.get(
+  "/admin/shared-mailboxes",
+  requireCapability("workspace.groups.manage"),
+  controller.listSharedMailboxes
+);
+mailRouter.post(
+  "/admin/shared-mailboxes",
+  requireCapability("workspace.groups.manage"),
+  validate(createSharedMailboxSchema),
+  controller.createSharedMailbox
+);
+mailRouter.get(
+  "/admin/shared-mailboxes/:mailboxId/assignees",
+  requireCapability("workspace.groups.manage"),
+  validate(mailboxIdParamsSchema, "params"),
+  controller.listMailboxAssignees
+);
+mailRouter.post(
+  "/admin/shared-mailboxes/:mailboxId/assignees",
+  requireCapability("workspace.groups.manage"),
+  validate(mailboxIdParamsSchema, "params"),
+  validate(assignMailboxSchema),
+  controller.assignMailbox
+);
+mailRouter.delete(
+  "/admin/shared-mailboxes/:mailboxId/assignees/:membershipId",
+  requireCapability("workspace.groups.manage"),
+  validate(mailboxAssigneeParamsSchema, "params"),
+  controller.unassignMailbox
+);
 mailRouter.get("/admin/mailboxes", requireCapability("workspace.mailboxes.manage"), controller.listAllMailboxes);
 mailRouter.post("/admin/mailboxes", requireCapability("workspace.mailboxes.manage"), controller.adminCreateMailbox);
 mailRouter.delete("/admin/mailboxes/:mailboxId", requireCapability("workspace.mailboxes.manage"), validate(mailboxIdParamsSchema, "params"), controller.adminDeleteMailbox);

@@ -768,6 +768,101 @@ export const openApiDocument = {
         responses: { "200": ok("Delivery events returned"), "403": { $ref: "#/components/responses/Forbidden" } },
       },
     },
+    "/api/v1/mail/admin/shared-mailboxes": {
+      get: {
+        tags: ["Mail"], summary: "List shared mailboxes and distribution addresses (OWNER/ADMIN)",
+        operationId: "listSharedMailboxes", security: bearer,
+        responses: { "200": ok("Shared mailboxes returned"), "403": { $ref: "#/components/responses/Forbidden" } },
+      },
+      post: {
+        tags: ["Mail"],
+        summary: "Create a shared mailbox or distribution address (OWNER/ADMIN)",
+        description:
+          "The mailbox has no owning membership: it belongs to the workspace. Nobody can reach it until they are assigned (Security §10).",
+        operationId: "createSharedMailbox", security: bearer,
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object", required: ["address"],
+                properties: {
+                  address: { type: "string", format: "email" },
+                  type: { type: "string", enum: ["SHARED", "DISTRIBUTION"], default: "SHARED" },
+                },
+              },
+              example: { address: "support@acme.test", type: "SHARED" },
+            },
+          },
+        },
+        responses: {
+          "201": ok("Shared mailbox created"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "409": { $ref: "#/components/responses/Conflict" },
+        },
+      },
+    },
+    "/api/v1/mail/admin/shared-mailboxes/{mailboxId}/assignees": {
+      get: {
+        tags: ["Mail"], summary: "Who is assigned to a shared mailbox (OWNER/ADMIN)",
+        operationId: "listMailboxAssignees", security: bearer,
+        parameters: [{ name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: {
+          "200": ok("Assignees returned"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
+      },
+      post: {
+        tags: ["Mail"],
+        summary: "Assign a member, or change their permissions (OWNER/ADMIN)",
+        description:
+          "Read, send, manage and assign are separable per Security §10. Omitted permissions default closed, and re-posting for an existing assignee updates rather than duplicating. Audited with the previous and new permissions.",
+        operationId: "assignMailbox", security: bearer,
+        parameters: [{ name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object", required: ["membershipId"],
+                properties: {
+                  membershipId: { type: "string", format: "uuid" },
+                  canRead: { type: "boolean", default: true },
+                  canSend: { type: "boolean", default: false },
+                  canManage: { type: "boolean", default: false },
+                  canAssign: { type: "boolean", default: false },
+                },
+              },
+              example: { membershipId: "0f8f2b1e-6c1a-4a5e-9a2b-6d3c1f0a7e44", canRead: true, canSend: true },
+            },
+          },
+        },
+        responses: {
+          "200": ok("Assignment created or updated"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
+      },
+    },
+    "/api/v1/mail/admin/shared-mailboxes/{mailboxId}/assignees/{membershipId}": {
+      delete: {
+        tags: ["Mail"],
+        summary: "Revoke a member's access to a shared mailbox (OWNER/ADMIN)",
+        description:
+          "Takes effect on the caller's next request: access is read per request rather than cached, which is what makes Security §10's session-invalidation requirement hold.",
+        operationId: "unassignMailbox", security: bearer,
+        parameters: [
+          { name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+          { name: "membershipId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+        ],
+        responses: {
+          "200": ok("Access revoked"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
+      },
+    },
     "/api/v1/mail/admin/mailboxes": {
       get: {
         tags: ["Mail"], summary: "List every mailbox in the workspace (OWNER/ADMIN)",

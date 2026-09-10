@@ -14,6 +14,7 @@ import {
   uniqueParticipants,
 } from "../message/message.utils.js";
 import { deliveryProtectionService } from "../delivery-protection/delivery-protection.service.js";
+import { sharedMailboxService } from "./shared-mailbox.service.js";
 import { jobService } from "../job/job.service.js";
 import type { BulkMailboxActionInput, CreateDraftInput, CreateLabelInput, ListMailInput, UpdateDraftInput, UpdateLabelInput, UpdateMailboxItemInput } from "./mail.schema.js";
 
@@ -906,7 +907,13 @@ export class MailService {
   }
 
   async list(filters: ListMailInput, context: MailContext) {
-    const mailbox = await this.mailbox(context);
+    // No mailboxId means the caller's own mailbox, which is what every
+    // existing caller gets. With one, the caller must hold read on that
+    // shared mailbox — a tenant role does not substitute for the
+    // assignment (Security §9, §10).
+    const mailbox = filters.mailboxId
+      ? await sharedMailboxService.resolveAccessibleMailbox(context, filters.mailboxId, "canRead")
+      : await this.mailbox(context);
     const where = {
       tenantId: context.tenantId,
       mailboxId: mailbox.id,

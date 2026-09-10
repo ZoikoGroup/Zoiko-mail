@@ -45,6 +45,7 @@ model Tenant {
   domainDnsChecks     DomainDnsCheck[]
   subscriptions       Subscription[]
   invoices            Invoice[]
+  mailboxAccess       MailboxAccess[]
 
   @@map("tenants")
 }
@@ -91,6 +92,7 @@ model AppUser {
   connectedAccounts       ConnectedAccount[]
   identities              UserIdentity[]
   usedSelectionTokens     UsedSelectionToken[]
+  mailboxAccessGrants     MailboxAccess[]        @relation("MailboxAccessGrantor")
   @@map("app_users")
 }
 
@@ -160,6 +162,7 @@ model TenantMembership {
   tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user                AppUser              @relation(fields: [userId], references: [id], onDelete: Cascade)
   mailbox             Mailbox?
+  mailboxAccess       MailboxAccess[]
   receivedMessages    MessageRecipient[]
   supportAccessGrants SupportAccessGrant[]
   connectedAccounts   ConnectedAccount[]
@@ -229,7 +232,13 @@ model TenantPolicy {
 model Mailbox {
   id                   String           @id @default(uuid()) @db.Uuid
   tenantId             String           @map("tenant_id") @db.Uuid
-  membershipId         String           @unique @map("membership_id") @db.Uuid
+  /// Null for a shared or distribution mailbox, which belongs to the
+  /// workspace rather than to one person. Still unique when present, so a
+  /// member has at most one personal mailbox. Requiring it was what made
+  /// shared mailboxes unrepresentable (Security §10).
+  membershipId         String?          @unique @map("membership_id") @db.Uuid
+  /// Data Model §6.16 mailbox_type.
+  type                 MailboxType      @default(USER)
   address              String
   storageUsed          BigInt           @default(0) @map("storage_used")
   storageLimit         BigInt           @default(1073741824) @map("storage_limit")
@@ -258,9 +267,10 @@ model Mailbox {
   createdAt            DateTime         @default(now()) @map("created_at")
   updatedAt            DateTime         @updatedAt @map("updated_at")
   tenant               Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  membership           TenantMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  membership           TenantMembership? @relation(fields: [membershipId], references: [id], onDelete: Cascade)
   items                MailboxMessage[]
   labels               MailLabel[]
+  access               MailboxAccess[]
 
   @@unique([tenantId, address])
   @@index([tenantId, membershipId])
@@ -338,6 +348,36 @@ model MessageRecipient {
   @@unique([messageId, email, type])
   @@index([tenantId, email])
   @@map("message_recipients")
+}
+
+/**
+ * Who may act in a shared mailbox, and how — Security §10 and §9.1.
+ *
+ * "Users must be assigned to a shared mailbox before access", and "read,
+ * send, manage and assign permissions must be separable", so they are four
+ * columns rather than one role. A personal mailbox needs no row here: its
+ * owner is Mailbox.membershipId.
+ */
+model MailboxAccess {
+  id              String           @id @default(uuid()) @db.Uuid
+  tenantId        String           @map("tenant_id") @db.Uuid
+  mailboxId       String           @map("mailbox_id") @db.Uuid
+  membershipId    String           @map("membership_id") @db.Uuid
+  canRead         Boolean          @default(true) @map("can_read")
+  canSend         Boolean          @default(false) @map("can_send")
+  canManage       Boolean          @default(false) @map("can_manage")
+  canAssign       Boolean          @default(false) @map("can_assign")
+  grantedByUserId String           @map("granted_by_user_id") @db.Uuid
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  mailbox         Mailbox          @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  membership      TenantMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  grantedBy       AppUser          @relation("MailboxAccessGrantor", fields: [grantedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([mailboxId, membershipId])
+  @@index([tenantId, membershipId])
+  @@map("mailbox_access")
 }
 
 model MailboxMessage {
@@ -783,6 +823,20 @@ enum DeliveryStatus {
   DELIVERED
   QUEUED
   FAILED
+}
+
+/**
+ * Data Model §6.16 names user, shared, system and no_reply. DISTRIBUTION is
+ * added for a group address that fans out without storing mail of its own —
+ * the admin Groups screen distinguishes it, and PRD §11.3 lists basic group
+ * addresses.
+ */
+enum MailboxType {
+  USER
+  SHARED
+  DISTRIBUTION
+  SYSTEM
+  NO_REPLY
 }
 
 enum MailFolder {

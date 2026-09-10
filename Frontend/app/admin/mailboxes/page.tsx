@@ -39,7 +39,8 @@ export default function AdminMailboxesPage() {
       />
 
       <StaticNote>
-        Shared mailboxes need the schema rework — Mailbox.membershipId is currently unique
+        Shared mailboxes live on the Groups screen, where assignments and their
+        read/send/manage/assign permissions are managed
       </StaticNote>
 
       {setAi.isError && (
