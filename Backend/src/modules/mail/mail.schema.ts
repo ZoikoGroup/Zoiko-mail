@@ -93,6 +93,27 @@ export const mailboxAssigneeParamsSchema = z.object({
   membershipId: z.string().uuid(),
 });
 
+/* ── aliases and forwarding — Data Model §6.17, §6.18 ────────────────── */
+
+export const createAliasSchema = z.object({ address: emailSchema });
+
+export const createForwardingSchema = z.object({
+  forwardToAddress: emailSchema,
+  // Default true: a rule that silently stops delivering to the mailbox is a
+  // surprising default for something an operator sets on someone else's mail.
+  keepCopy: z.boolean().default(true),
+});
+
+export const aliasParamsSchema = z.object({
+  mailboxId: z.string().uuid(),
+  aliasId: z.string().uuid(),
+});
+
+export const forwardingParamsSchema = z.object({
+  mailboxId: z.string().uuid(),
+  ruleId: z.string().uuid(),
+});
+
 export const listMailSchema = z.object({
   folder: z.enum(["DRAFTS", "INBOX", "ARCHIVE", "SENT", "TRASH", "QUARANTINE"]).default("INBOX"),
   // Absent means the caller's own mailbox, which is what every existing

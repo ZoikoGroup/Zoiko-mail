@@ -159,6 +159,62 @@ export async function setMailboxAi(mailboxId: string, aiEnabled: boolean): Promi
   });
 }
 
+/* ── aliases and forwarding — Data Model §6.17, §6.18 ─────────────────── */
+
+export interface AliasDto {
+  id: string;
+  address: string;
+  status: "ACTIVE" | "SUSPENDED";
+}
+
+export interface ForwardingDto {
+  id: string;
+  forwardToAddress: string;
+  keepCopy: boolean;
+  status: "ACTIVE" | "SUSPENDED";
+}
+
+export interface MailboxRoutingDto {
+  aliases: AliasDto[];
+  forwarding: ForwardingDto[];
+}
+
+export async function fetchMailboxRouting(mailboxId: string): Promise<MailboxRoutingDto> {
+  const res = await apiRequest<MailboxRoutingDto>(
+    `/mail/admin/mailboxes/${mailboxId}/routing`
+  );
+  return { aliases: res.aliases ?? [], forwarding: res.forwarding ?? [] };
+}
+
+export async function createAlias(mailboxId: string, address: string): Promise<void> {
+  await apiRequest(`/mail/admin/mailboxes/${mailboxId}/aliases`, {
+    method: "POST",
+    body: { address },
+  });
+}
+
+export async function deleteAlias(mailboxId: string, aliasId: string): Promise<void> {
+  await apiRequest(`/mail/admin/mailboxes/${mailboxId}/aliases/${aliasId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function createForwarding(
+  mailboxId: string,
+  input: { forwardToAddress: string; keepCopy: boolean }
+): Promise<void> {
+  await apiRequest(`/mail/admin/mailboxes/${mailboxId}/forwarding`, {
+    method: "POST",
+    body: input,
+  });
+}
+
+export async function deleteForwarding(mailboxId: string, ruleId: string): Promise<void> {
+  await apiRequest(`/mail/admin/mailboxes/${mailboxId}/forwarding/${ruleId}`, {
+    method: "DELETE",
+  });
+}
+
 /* ── domains ───────────────────────────────────────────────────────────── */
 
 interface ApiDomain {

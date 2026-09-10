@@ -2,7 +2,7 @@ import { Router } from "express";
 import { authenticate, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./mail.controller.js";
 import { attachmentUpload } from "./attachment.middleware.js";
-import { adminDeliveryEventsQuerySchema, adminDeliverySummaryQuerySchema, adminUpdateMailboxSchema, assignMailboxSchema, createSharedMailboxSchema, mailboxAssigneeParamsSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
+import { adminDeliveryEventsQuerySchema, adminDeliverySummaryQuerySchema, adminUpdateMailboxSchema, assignMailboxSchema, createSharedMailboxSchema, mailboxAssigneeParamsSchema, createAliasSchema, createForwardingSchema, aliasParamsSchema, forwardingParamsSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
 
 const mailRouter = Router();
 mailRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBER"));
@@ -77,6 +77,42 @@ mailRouter.delete(
   requireCapability("workspace.groups.manage"),
   validate(mailboxAssigneeParamsSchema, "params"),
   controller.unassignMailbox
+);
+// ─── Aliases and forwarding — Data Model §6.17, §6.18, Security §9 ──────
+// Under the mailbox they belong to, and gated the same way mailbox settings
+// are. Registered before "/admin/mailboxes/:mailboxId" so the nested paths
+// are not swallowed by the patch route.
+mailRouter.get(
+  "/admin/mailboxes/:mailboxId/routing",
+  requireCapability("workspace.mailboxes.manage"),
+  validate(mailboxIdParamsSchema, "params"),
+  controller.listMailboxRouting
+);
+mailRouter.post(
+  "/admin/mailboxes/:mailboxId/aliases",
+  requireCapability("workspace.mailboxes.manage"),
+  validate(mailboxIdParamsSchema, "params"),
+  validate(createAliasSchema),
+  controller.createAlias
+);
+mailRouter.delete(
+  "/admin/mailboxes/:mailboxId/aliases/:aliasId",
+  requireCapability("workspace.mailboxes.manage"),
+  validate(aliasParamsSchema, "params"),
+  controller.deleteAlias
+);
+mailRouter.post(
+  "/admin/mailboxes/:mailboxId/forwarding",
+  requireCapability("workspace.mailboxes.manage"),
+  validate(mailboxIdParamsSchema, "params"),
+  validate(createForwardingSchema),
+  controller.createForwarding
+);
+mailRouter.delete(
+  "/admin/mailboxes/:mailboxId/forwarding/:ruleId",
+  requireCapability("workspace.mailboxes.manage"),
+  validate(forwardingParamsSchema, "params"),
+  controller.deleteForwarding
 );
 mailRouter.get("/admin/mailboxes", requireCapability("workspace.mailboxes.manage"), controller.listAllMailboxes);
 mailRouter.post("/admin/mailboxes", requireCapability("workspace.mailboxes.manage"), controller.adminCreateMailbox);

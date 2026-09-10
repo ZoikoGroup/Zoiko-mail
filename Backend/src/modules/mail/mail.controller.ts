@@ -3,6 +3,7 @@ import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
 import { mailService } from "./mail.service.js";
 import { sharedMailboxService } from "./shared-mailbox.service.js";
+import { aliasService } from "./alias.service.js";
 
 function context(req: Request) {
   const tenant = req.tenantContext!;
@@ -136,6 +137,53 @@ export const adminDeliveryFailureSummary = asyncHandler(async (req: Request, res
     req.requestId
   );
 });
+/* ── aliases and forwarding — Data Model §6.17, §6.18 ────────────────── */
+
+export const listMailboxRouting = asyncHandler(async (req: Request, res: Response) => {
+  const ctx = context(req);
+  sendSuccess(res, 200, await aliasService.list(ctx.tenantId, String(req.params.mailboxId)), req.requestId);
+});
+
+export const createAlias = asyncHandler(async (req: Request, res: Response) => {
+  const ctx = context(req);
+  sendSuccess(
+    res,
+    201,
+    await aliasService.createAlias(ctx.tenantId, String(req.params.mailboxId), req.body.address, ctx),
+    req.requestId
+  );
+});
+
+export const deleteAlias = asyncHandler(async (req: Request, res: Response) => {
+  const ctx = context(req);
+  sendSuccess(
+    res,
+    200,
+    await aliasService.deleteAlias(ctx.tenantId, String(req.params.mailboxId), String(req.params.aliasId), ctx),
+    req.requestId
+  );
+});
+
+export const createForwarding = asyncHandler(async (req: Request, res: Response) => {
+  const ctx = context(req);
+  sendSuccess(
+    res,
+    201,
+    await aliasService.createForwarding(ctx.tenantId, String(req.params.mailboxId), req.body, ctx),
+    req.requestId
+  );
+});
+
+export const deleteForwarding = asyncHandler(async (req: Request, res: Response) => {
+  const ctx = context(req);
+  sendSuccess(
+    res,
+    200,
+    await aliasService.deleteForwarding(ctx.tenantId, String(req.params.mailboxId), String(req.params.ruleId), ctx),
+    req.requestId
+  );
+});
+
 /* ── shared mailboxes — Security §10 ─────────────────────────────────── */
 
 export const listSharedMailboxes = asyncHandler(async (req: Request, res: Response) => {

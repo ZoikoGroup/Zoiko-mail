@@ -768,6 +768,105 @@ export const openApiDocument = {
         responses: { "200": ok("Delivery events returned"), "403": { $ref: "#/components/responses/Forbidden" } },
       },
     },
+    "/api/v1/mail/admin/mailboxes/{mailboxId}/routing": {
+      get: {
+        tags: ["Mail"], summary: "Aliases and forwarding for a mailbox (OWNER/ADMIN)",
+        operationId: "listMailboxRouting", security: bearer,
+        parameters: [{ name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: {
+          "200": ok("Aliases and forwarding rules returned"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
+      },
+    },
+    "/api/v1/mail/admin/mailboxes/{mailboxId}/aliases": {
+      post: {
+        tags: ["Mail"],
+        summary: "Add an alias address to a mailbox (OWNER/ADMIN)",
+        description:
+          "Alias addresses are unique globally, not per tenant (Data Model §6.17): an address has to route somewhere unambiguous. A conflict does not disclose which workspace holds it.",
+        operationId: "createAlias", security: bearer,
+        parameters: [{ name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { type: "object", required: ["address"], properties: { address: { type: "string", format: "email" } } },
+              example: { address: "sales@acme.test" },
+            },
+          },
+        },
+        responses: {
+          "201": ok("Alias created"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+          "409": { $ref: "#/components/responses/Conflict" },
+        },
+      },
+    },
+    "/api/v1/mail/admin/mailboxes/{mailboxId}/aliases/{aliasId}": {
+      delete: {
+        tags: ["Mail"], summary: "Remove an alias (OWNER/ADMIN)",
+        operationId: "deleteAlias", security: bearer,
+        parameters: [
+          { name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+          { name: "aliasId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+        ],
+        responses: {
+          "200": ok("Alias removed"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
+      },
+    },
+    "/api/v1/mail/admin/mailboxes/{mailboxId}/forwarding": {
+      post: {
+        tags: ["Mail"],
+        summary: "Forward a mailbox to another address (OWNER/ADMIN)",
+        description:
+          "Creation is audited by name, per Security §9. keepCopy defaults true; false redirects without leaving a copy behind. A mailbox cannot forward to itself.",
+        operationId: "createForwarding", security: bearer,
+        parameters: [{ name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object", required: ["forwardToAddress"],
+                properties: {
+                  forwardToAddress: { type: "string", format: "email" },
+                  keepCopy: { type: "boolean", default: true },
+                },
+              },
+              example: { forwardToAddress: "archive@example.test", keepCopy: true },
+            },
+          },
+        },
+        responses: {
+          "201": ok("Forwarding rule created"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+          "409": { $ref: "#/components/responses/Conflict" },
+          "422": ok("A mailbox cannot forward to itself"),
+        },
+      },
+    },
+    "/api/v1/mail/admin/mailboxes/{mailboxId}/forwarding/{ruleId}": {
+      delete: {
+        tags: ["Mail"], summary: "Remove a forwarding rule (OWNER/ADMIN)",
+        operationId: "deleteForwarding", security: bearer,
+        parameters: [
+          { name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+          { name: "ruleId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+        ],
+        responses: {
+          "200": ok("Forwarding rule removed"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
+      },
+    },
     "/api/v1/mail/admin/shared-mailboxes": {
       get: {
         tags: ["Mail"], summary: "List shared mailboxes and distribution addresses (OWNER/ADMIN)",

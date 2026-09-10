@@ -1,6 +1,16 @@
 "use client";
 
-import { useMailboxes, useSetMailboxAi } from "@/lib/admin-hooks";
+import { useState } from "react";
+
+import {
+  useCreateAlias,
+  useCreateForwarding,
+  useDeleteAlias,
+  useDeleteForwarding,
+  useMailboxes,
+  useMailboxRouting,
+  useSetMailboxAi,
+} from "@/lib/admin-hooks";
 import { useCan } from "@/lib/admin-capabilities";
 import {
   Card,
@@ -22,6 +32,7 @@ export default function AdminMailboxesPage() {
   const { data: mailboxes, isLoading, error } = useMailboxes();
   const setAi = useSetMailboxAi();
   const canManage = can("workspace.mailboxes.manage");
+  const [openId, setOpenId] = useState<string | null>(null);
   const suspended = mailboxes?.filter((m) => m.status === "SUSPENDED") ?? [];
 
   return (
@@ -129,12 +140,24 @@ export default function AdminMailboxesPage() {
                         type="button"
                         className="zoiko-btn sm"
                         disabled={!canManage}
+                        onClick={() => setOpenId(openId === mailbox.id ? null : mailbox.id)}
                       >
-                        Manage
+                        {openId === mailbox.id ? "Close" : "Manage"}
                       </button>
                     </Td>
                   </tr>
                 ))}
+                {/* Rendered as its own row so the panel spans the table
+                    rather than squeezing into the actions column. */}
+                {mailboxes
+                  .filter((mailbox) => mailbox.id === openId)
+                  .map((mailbox) => (
+                    <tr key={`${mailbox.id}-routing`}>
+                      <td colSpan={6} className="bg-[var(--s1)] px-4 py-3">
+                        <Routing mailboxId={mailbox.id} address={mailbox.address} />
+                      </td>
+                    </tr>
+                  ))}
               </tbody>
             </Table>
           </TableWrap>
@@ -149,5 +172,149 @@ export default function AdminMailboxesPage() {
         </Notice>
       ))}
     </>
+  );
+}
+
+
+/* ── aliases and forwarding ────────────────────────────────────────────── */
+
+/**
+ * The routing attached to one mailbox.
+ *
+ * Aliases and forwarding sit together because they answer the same question
+ * from opposite ends: which addresses arrive here, and where does what
+ * arrives get sent on to. Forwarding is the one an operator should look at
+ * twice, which is why the server audits its creation by name (Security §9).
+ */
+function Routing({ mailboxId, address }: { mailboxId: string; address: string }) {
+  const { data, isLoading, error } = useMailboxRouting(mailboxId);
+  const createAlias = useCreateAlias();
+  const deleteAlias = useDeleteAlias();
+  const createForwarding = useCreateForwarding();
+  const deleteForwarding = useDeleteForwarding();
+
+  const [alias, setAlias] = useState("");
+  const [forwardTo, setForwardTo] = useState("");
+  const [keepCopy, setKeepCopy] = useState(true);
+
+  const failure =
+    (createAlias.error ?? deleteAlias.error ?? createForwarding.error ?? deleteForwarding.error) as
+      | Error
+      | undefined;
+
+  if (error) return <InlineError message={error.message} />;
+  if (isLoading || !data) return <LoadingRows rows={2} />;
+
+  return (
+    <div className="flex flex-col gap-4">
+      <section>
+        <h4 className="font-mono-num mb-2 text-[10px] uppercase tracking-wider text-[var(--ink3)]">
+          Aliases — other addresses that arrive at {address}
+        </h4>
+        {data.aliases.length === 0 ? (
+          <p className="text-[11.5px] text-[var(--ink3)]">No aliases.</p>
+        ) : (
+          <ul className="mb-2 flex flex-wrap gap-2">
+            {data.aliases.map((entry) => (
+              <li key={entry.id} className="flex items-center gap-1.5">
+                <Pill tone="nu">{entry.address}</Pill>
+                <button
+                  type="button"
+                  className="zoiko-btn sm"
+                  disabled={deleteAlias.isPending}
+                  onClick={() => deleteAlias.mutate({ mailboxId, aliasId: entry.id })}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <form
+          className="flex flex-wrap items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            createAlias.mutate(
+              { mailboxId, address: alias.trim() },
+              { onSuccess: () => setAlias("") }
+            );
+          }}
+        >
+          <input
+            className="zoiko-input"
+            placeholder="sales@acme.test"
+            value={alias}
+            onChange={(event) => setAlias(event.target.value)}
+            required
+          />
+          <button type="submit" className="zoiko-btn sm" disabled={createAlias.isPending}>
+            Add alias
+          </button>
+        </form>
+      </section>
+
+      <section>
+        <h4 className="font-mono-num mb-2 text-[10px] uppercase tracking-wider text-[var(--ink3)]">
+          Forwarding — where mail arriving here is sent on
+        </h4>
+        {data.forwarding.length === 0 ? (
+          <p className="text-[11.5px] text-[var(--ink3)]">No forwarding.</p>
+        ) : (
+          <ul className="mb-2 flex flex-col gap-1.5">
+            {data.forwarding.map((rule) => (
+              <li key={rule.id} className="flex flex-wrap items-center gap-2">
+                <Pill tone="nu">{rule.forwardToAddress}</Pill>
+                <span className="text-[11px] text-[var(--ink3)]">
+                  {rule.keepCopy ? "copy kept in this mailbox" : "not kept in this mailbox"}
+                </span>
+                <button
+                  type="button"
+                  className="zoiko-btn sm"
+                  disabled={deleteForwarding.isPending}
+                  onClick={() => deleteForwarding.mutate({ mailboxId, ruleId: rule.id })}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <form
+          className="flex flex-wrap items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            createForwarding.mutate(
+              { mailboxId, forwardToAddress: forwardTo.trim(), keepCopy },
+              { onSuccess: () => setForwardTo("") }
+            );
+          }}
+        >
+          <input
+            className="zoiko-input"
+            placeholder="archive@example.test"
+            value={forwardTo}
+            onChange={(event) => setForwardTo(event.target.value)}
+            required
+          />
+          <label className="flex items-center gap-1 text-[11px]">
+            <input
+              type="checkbox"
+              checked={keepCopy}
+              onChange={(event) => setKeepCopy(event.target.checked)}
+            />
+            Keep a copy
+          </label>
+          <button type="submit" className="zoiko-btn sm" disabled={createForwarding.isPending}>
+            Add forwarding
+          </button>
+        </form>
+      </section>
+
+      {failure && (
+        <Notice tone="crit">
+          <b className="text-[var(--crit)]">Could not change routing.</b> {failure.message}
+        </Notice>
+      )}
+    </div>
   );
 }

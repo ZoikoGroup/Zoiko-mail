@@ -46,6 +46,8 @@ model Tenant {
   subscriptions       Subscription[]
   invoices            Invoice[]
   mailboxAccess       MailboxAccess[]
+  aliases             Alias[]
+  forwardingRules     ForwardingRule[]
 
   @@map("tenants")
 }
@@ -271,6 +273,8 @@ model Mailbox {
   items                MailboxMessage[]
   labels               MailLabel[]
   access               MailboxAccess[]
+  aliases              Alias[]
+  forwardingRules      ForwardingRule[]
 
   @@unique([tenantId, address])
   @@index([tenantId, membershipId])
@@ -378,6 +382,64 @@ model MailboxAccess {
   @@unique([mailboxId, membershipId])
   @@index([tenantId, membershipId])
   @@map("mailbox_access")
+}
+
+/**
+ * An extra address that routes to a mailbox — Data Model §6.17.
+ *
+ * §6.17 specifies `unique(lower(alias_address)) where status = active`, a
+ * partial unique index, which the Prisma schema language cannot express;
+ * writing it in raw SQL alone would show up forever as schema drift and fail
+ * the migrate-diff gate in CI. So the status enum drops `deleted` and removal
+ * deletes the row: a plain unique on the address then gives exactly the
+ * routing guarantee §6.17 is after, and a suspended alias still holds its
+ * address, which is the point of suspending it. The audit log keeps the
+ * history the soft-delete row would have.
+ *
+ * Unique globally rather than per tenant, matching §6.17 and the domain rule
+ * beside it: an address has to route somewhere unambiguous.
+ */
+model Alias {
+  id        String      @id @default(uuid()) @db.Uuid
+  tenantId  String      @map("tenant_id") @db.Uuid
+  mailboxId String      @map("mailbox_id") @db.Uuid
+  address   String      @unique
+  status    AliasStatus @default(ACTIVE)
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+  tenant    Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  mailbox   Mailbox     @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, mailboxId, status])
+  @@map("aliases")
+}
+
+/**
+ * Where a mailbox's incoming mail is copied or redirected — Data Model §6.18.
+ *
+ * Same reasoning as Alias on the missing `deleted` status. Uniqueness is per
+ * mailbox and destination so the same address cannot be added twice, which is
+ * §6.18's ux_forwarding_unique_active.
+ *
+ * Creating one is audited because Security §9 requires it: forwarding is how
+ * mail quietly leaves an organisation, so the record of who set it up matters
+ * more than for most settings.
+ */
+model ForwardingRule {
+  id               String      @id @default(uuid()) @db.Uuid
+  tenantId         String      @map("tenant_id") @db.Uuid
+  mailboxId        String      @map("mailbox_id") @db.Uuid
+  forwardToAddress String      @map("forward_to_address")
+  keepCopy         Boolean     @default(true) @map("keep_copy")
+  status           AliasStatus @default(ACTIVE)
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+  tenant           Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  mailbox          Mailbox     @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+
+  @@unique([mailboxId, forwardToAddress])
+  @@index([tenantId, mailboxId, status])
+  @@map("forwarding_rules")
 }
 
 model MailboxMessage {
@@ -831,6 +893,12 @@ enum DeliveryStatus {
  * the admin Groups screen distinguishes it, and PRD §11.3 lists basic group
  * addresses.
  */
+/** §6.17 and §6.18 name active, suspended and deleted; see the Alias note. */
+enum AliasStatus {
+  ACTIVE
+  SUSPENDED
+}
+
 enum MailboxType {
   USER
   SHARED

@@ -37,9 +37,15 @@ import {
   fetchSettings,
   fetchSyncErrors,
   setMailboxAi,
+  fetchMailboxRouting,
+  createAlias,
+  deleteAlias,
+  createForwarding,
+  deleteForwarding,
 } from "./admin-queries";
 import type {
   GroupAssigneeDto,
+  MailboxRoutingDto,
   InvitationDraftInput,
   WorkspaceSettingsPatch,
 } from "./admin-queries";
@@ -126,6 +132,54 @@ export function useSetMailboxAi() {
       setMailboxAi(mailboxId, aiEnabled),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["mailboxes"] }),
   });
+}
+
+/** Aliases and forwarding for one mailbox. */
+export function useMailboxRouting(mailboxId: string | null): QueryLike<MailboxRoutingDto> {
+  return shape(
+    useQuery({
+      queryKey: ["mailbox-routing", mailboxId],
+      queryFn: () => fetchMailboxRouting(mailboxId as string),
+      enabled: Boolean(mailboxId),
+      ...LIVE,
+    })
+  );
+}
+
+function useRoutingMutation<T>(fn: (input: T) => Promise<void>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["mailbox-routing"] }),
+  });
+}
+
+export function useCreateAlias() {
+  return useRoutingMutation((input: { mailboxId: string; address: string }) =>
+    createAlias(input.mailboxId, input.address)
+  );
+}
+
+export function useDeleteAlias() {
+  return useRoutingMutation((input: { mailboxId: string; aliasId: string }) =>
+    deleteAlias(input.mailboxId, input.aliasId)
+  );
+}
+
+export function useCreateForwarding() {
+  return useRoutingMutation(
+    (input: { mailboxId: string; forwardToAddress: string; keepCopy: boolean }) =>
+      createForwarding(input.mailboxId, {
+        forwardToAddress: input.forwardToAddress,
+        keepCopy: input.keepCopy,
+      })
+  );
+}
+
+export function useDeleteForwarding() {
+  return useRoutingMutation((input: { mailboxId: string; ruleId: string }) =>
+    deleteForwarding(input.mailboxId, input.ruleId)
+  );
 }
 
 export function useDomains(): QueryLike<DomainDto[]> {
