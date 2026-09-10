@@ -7,7 +7,16 @@ export const openApiDocument = {
   info: {
     title: "Zoiko Mail API",
     version: "1.0.0",
-    description: "Multi-tenant Zoiko Mail API. Tenant context is always derived from the verified access token.",
+    description:
+      "Multi-tenant Zoiko Mail API. Tenant context is always derived from the verified access token. " +
+      "**Idempotency (section 7).** Every side-effecting request to a tenant-scoped endpoint must carry an " +
+      "`Idempotency-Key` header. Records are scoped to tenant + actor + endpoint family + key and held for " +
+      "24 hours: repeating a request with the same key and the same payload returns the original response " +
+      "(with `Idempotent-Replay: true`), while the same key with a different payload is refused with 409 " +
+      "`IDEMPOTENCY_PAYLOAD_MISMATCH`. A request that fails releases its key, so the same key may be retried. " +
+      "Unauthenticated endpoints, the platform support console and signature-verified provider callbacks are " +
+      "outside the contract: the first two have no tenant to scope a record to, and callbacks deduplicate on " +
+      "the provider's own event id.",
   },
   servers: [{ url: "http://localhost:5000", description: "Local development" }],
   tags: ["System", "Authentication", "Users", "Tenants", "Memberships", "Policies", "Mail", "Messages", "Threads", "Domains", "AI", "Actions", "Notifications", "Integrations", "Connectors", "Delivery Protection", "Lifecycle", "Support", "Audit", "Billing"].map((name) => ({ name })),
@@ -1232,10 +1241,23 @@ export const openApiDocument = {
   },
   components: {
     securitySchemes: { bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" } },
-    parameters: { MembershipId: { name: "membershipId", in: "path", required: true, schema: { type: "string", format: "uuid" } } },
+    parameters: {
+      MembershipId: { name: "membershipId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+      IdempotencyKey: {
+        name: "Idempotency-Key", in: "header", required: true,
+        schema: { type: "string", minLength: 8, maxLength: 200 },
+        description:
+          "Client-generated key identifying this operation, per API §7. One key per intent: a retry of the same intent must reuse it.",
+      },
+    },
     responses: {
       ValidationError: { description: "Request validation failed" }, Unauthorized: { description: "Authentication failed" },
       Forbidden: { description: "Tenant or role access denied" }, NotFound: { description: "Tenant-scoped resource not found" }, Conflict: { description: "Resource state conflict" },
+      IdempotencyKeyRequired: { description: "The Idempotency-Key header is missing (IDEMPOTENCY_KEY_REQUIRED)" },
+      IdempotencyConflict: {
+        description:
+          "The key was already used with a different payload (IDEMPOTENCY_PAYLOAD_MISMATCH), or a request using it is still in flight (IDEMPOTENCY_REQUEST_IN_PROGRESS)",
+      },
     },
     schemas: {
       RegisterRequest: {
@@ -1342,3 +1364,61 @@ export const openApiDocument = {
     },
   },
 } as const;
+
+/**
+ * The idempotency header, applied to the operations that actually require it.
+ *
+ * Written as a pass over the document rather than by hand on each of the
+ * hundred-odd write operations: the middleware is mounted per router, so the
+ * rule really is "every tenant-scoped write", and stating it once here keeps
+ * the document from drifting away from the code the next time an endpoint is
+ * added.
+ */
+const IDEMPOTENCY_EXEMPT = [
+  // No tenant to scope a record to.
+  "/api/v1/auth/",
+  // Staff sessions, which carry no tenant context.
+  "/api/v1/support/platform",
+  // Deduplicated on the provider's own event id instead (§7).
+  "/api/v1/connectors/callbacks/",
+  "/api/v1/billing/webhook",
+];
+
+const WRITE_METHODS = ["post", "patch", "put", "delete"] as const;
+
+type Operation = {
+  parameters?: unknown[];
+  responses?: Record<string, unknown>;
+};
+
+function applyIdempotencyContract(document: typeof openApiDocument) {
+  const paths = document.paths as unknown as Record<string, Record<string, Operation>>;
+  for (const [path, item] of Object.entries(paths)) {
+    // Only tenant-scoped API endpoints; /api/health and friends are neither
+    // versioned nor tenant-scoped.
+    if (!path.startsWith("/api/v1/")) continue;
+    if (IDEMPOTENCY_EXEMPT.some((prefix) => path.startsWith(prefix))) continue;
+
+    for (const method of WRITE_METHODS) {
+      const operation = item[method];
+      if (!operation) continue;
+      operation.parameters = [
+        ...(operation.parameters ?? []),
+        { $ref: "#/components/parameters/IdempotencyKey" },
+      ];
+      operation.responses = {
+        ...(operation.responses ?? {}),
+        "400": { $ref: "#/components/responses/IdempotencyKeyRequired" },
+        "409": operation.responses?.["409"] ?? {
+          $ref: "#/components/responses/IdempotencyConflict",
+        },
+      };
+    }
+  }
+  return document;
+}
+
+export const openApiSpec = applyIdempotencyContract(
+  // Cloned so the `as const` document above stays the literal it reads as.
+  JSON.parse(JSON.stringify(openApiDocument)) as typeof openApiDocument
+);

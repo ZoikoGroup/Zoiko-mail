@@ -1,6 +1,8 @@
 import { afterAll, beforeEach } from "vitest";
 import { config as loadEnv } from "dotenv";
 import { resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import supertest from "supertest";
 
 loadEnv({ path: resolve(process.cwd(), ".env") });
 
@@ -41,6 +43,45 @@ if (process.env.TEST_DATABASE_URL) {
   process.env.DATABASE_URL =
     "postgresql://postgres:postgres@localhost:5432/zoiko_mail_test?schema=public";
 }
+
+/**
+ * Every write from these suites carries an Idempotency-Key, because API §7
+ * requires one and every real client sends one.
+ *
+ * Patched onto the test client rather than relaxed in the middleware: the
+ * middleware runs in full here, exactly as it will in production, and a fresh
+ * key per request is what a client that generates one key per user action
+ * produces. The contract itself — a missing key refused, a reused key with a
+ * different payload refused, a repeat replayed — is asserted directly in
+ * tests/idempotency.test.ts, which sets its own keys and does not rely on
+ * this.
+ *
+ * Without it, adding the header would have meant editing several hundred
+ * call sites across forty-four files to say the same thing.
+ */
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+const testPrototype = Object.getPrototypeOf(
+  supertest("http://127.0.0.1").post("/")
+) as { end: (...args: unknown[]) => unknown };
+const originalEnd = testPrototype.end;
+testPrototype.end = function patchedEnd(
+  this: {
+    method?: string;
+    _header?: Record<string, string>;
+    set: (field: string, value: string) => unknown;
+  },
+  ...args: unknown[]
+) {
+  const method = String(this.method ?? "").toUpperCase();
+  // The opt-out exists so tests/idempotency.test.ts can assert that a missing
+  // header is refused. Without it, this patch would make that case unreachable
+  // and the requirement would go unverified.
+  const optedOut = this._header?.["x-test-omit-idempotency-key"] !== undefined;
+  if (!SAFE_METHODS.has(method) && !optedOut && !this._header?.["idempotency-key"]) {
+    this.set("Idempotency-Key", `test-${randomUUID()}`);
+  }
+  return originalEnd.apply(this, args);
+};
 
 beforeEach(async () => {
   const { prisma } = await import("../src/config/prisma.js");

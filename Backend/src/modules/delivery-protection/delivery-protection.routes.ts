@@ -1,12 +1,12 @@
 import { Router } from "express";
-import { authenticate, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
+import { authenticate, idempotency, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
 import { createSuppressionSchema, suppressionIdSchema, warmupMailboxSchema } from "./delivery-protection.schema.js";
 import { deliveryProtectionService } from "./delivery-protection.service.js";
 
 export const deliveryProtectionRouter = Router();
-deliveryProtectionRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN"));
+deliveryProtectionRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN"), idempotency);
 
 deliveryProtectionRouter.get("/suppressions", asyncHandler(async (req, res) => {
   sendSuccess(res, 200, { entries: await deliveryProtectionService.listSuppressions(req.tenantContext!.tenantId) }, req.requestId);

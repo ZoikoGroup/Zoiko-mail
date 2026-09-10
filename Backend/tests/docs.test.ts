@@ -63,3 +63,40 @@ describe("API documentation", () => {
     expect(response.text).toContain('id="swagger-ui"');
   });
 });
+
+describe("the idempotency contract is documented where it applies", () => {
+  it("marks tenant-scoped writes as requiring the header", async () => {
+    const response = await request(app).get("/api/docs.json").expect(200);
+    const send = response.body.paths["/api/v1/mail/drafts/{messageId}/send"].post;
+
+    // API §7 applies to every tenant-scoped write, so the document says so on
+    // the operations rather than only in prose.
+    expect(send.parameters).toContainEqual({
+      $ref: "#/components/parameters/IdempotencyKey",
+    });
+    expect(response.body.components.parameters["Idempotency-Key"] ?? response.body.components.parameters.IdempotencyKey).toMatchObject({
+      name: "Idempotency-Key",
+      in: "header",
+      required: true,
+    });
+  });
+
+  it("leaves reads and the exempt families alone", async () => {
+    const response = await request(app).get("/api/docs.json").expect(200);
+    const refs = (operation: { parameters?: Array<{ $ref?: string }> }) =>
+      (operation?.parameters ?? []).map((parameter) => parameter.$ref);
+
+    // A GET that demanded a key would make every list endpoint unusable.
+    expect(refs(response.body.paths["/api/v1/mail"].get)).not.toContain(
+      "#/components/parameters/IdempotencyKey"
+    );
+    // Signing in has no tenant to scope a record to, and a provider callback
+    // deduplicates on the provider's own event id.
+    expect(refs(response.body.paths["/api/v1/auth/login"].post)).not.toContain(
+      "#/components/parameters/IdempotencyKey"
+    );
+    expect(
+      refs(response.body.paths["/api/v1/connectors/callbacks/{provider}"].post)
+    ).not.toContain("#/components/parameters/IdempotencyKey");
+  });
+});

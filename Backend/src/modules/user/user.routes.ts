@@ -1,10 +1,10 @@
 import { Router } from "express";
-import { authenticate, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
+import { authenticate, idempotency, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./user.controller.js";
 import { updateProfileSchema } from "./user.schema.js";
 
 const userRouter = Router();
-userRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBER", "SUPPORT"));
+userRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBER", "SUPPORT"), idempotency);
 userRouter.get("/me", controller.getMe);
 userRouter.patch("/me", validate(updateProfileSchema), controller.updateMe);
 // Every role may read its own capability set — that is what makes the UI

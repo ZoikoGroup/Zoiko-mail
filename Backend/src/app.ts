@@ -13,7 +13,7 @@ import {
   requestLogger,
 } from "./common/middleware/index.js";
 import { apiRouter } from "./routes/index.js";
-import { openApiDocument } from "./config/openapi.js";
+import { openApiSpec } from "./config/openapi.js";
 import { billingController } from "./modules/billing/billing.controller.js";
 import { prisma } from "./config/prisma.js";
 import { asyncHandler } from "./common/middleware/asyncHandler.js";
@@ -184,7 +184,7 @@ export function createApp() {
     })
   );
 
-  app.get("/api/docs.json", (_req, res) => res.status(200).json(openApiDocument));
+  app.get("/api/docs.json", (_req, res) => res.status(200).json(openApiSpec));
   app.use(
     "/api/docs",
     (_req: Request, res: Response, next: NextFunction) => {
@@ -192,7 +192,7 @@ export function createApp() {
       next();
     },
     swaggerUi.serve,
-    swaggerUi.setup(openApiDocument, { customSiteTitle: "Zoiko Mail API Docs" })
+    swaggerUi.setup(openApiSpec, { customSiteTitle: "Zoiko Mail API Docs" })
   );
 
   app.use("/api/v1", apiRouter);

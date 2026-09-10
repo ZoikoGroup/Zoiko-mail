@@ -42,7 +42,6 @@ interface RequestOptions {
     auth?: boolean;
     headers?: Record<string, string>;
     _retried?: boolean;
-    idempotent?: boolean;
     tenantId?: string | null;
     accessToken?: string | null;
 }
@@ -90,7 +89,6 @@ export async function apiRequest<T = unknown>(
         auth = true,
         headers: customHeaders,
         _retried = false,
-        idempotent,
         tenantId,
         accessToken,
     } = opts;
@@ -99,7 +97,16 @@ export async function apiRequest<T = unknown>(
         "Content-Type": "application/json",
         ...customHeaders,
     };
-    if (idempotent) headers["Idempotency-Key"] = `idem_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 8)}`;
+    // API §7: every side-effecting request carries an Idempotency-Key, and the
+    // server refuses writes without one. It used to be an opt-in flag that no
+    // caller ever set, so in practice no request sent a key at all.
+    //
+    // One key per call, which is one key per user action. Kept in `headers`
+    // rather than regenerated so the refresh-retry below replays the same
+    // operation instead of starting a second one.
+    if (method !== "GET" && !headers["Idempotency-Key"]) {
+        headers["Idempotency-Key"] = newIdempotencyKey();
+    }
     if (auth) {
         const token = accessToken ?? getAccessToken();
         if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -142,7 +149,21 @@ export async function apiRequest<T = unknown>(
             clearTokens();
         } else {
             const refreshed = await tryRefresh();
-            if (refreshed) return apiRequest<T>(path, { ...opts, _retried: true });
+            if (refreshed) {
+                // The same Idempotency-Key, so the retry is a replay of one
+                // operation rather than a second one. Only that header is
+                // carried over — Authorization is rebuilt from the refreshed
+                // token, and passing the old one along would defeat the
+                // refresh.
+                const idempotencyKey = headers["Idempotency-Key"];
+                return apiRequest<T>(path, {
+                    ...opts,
+                    headers: idempotencyKey
+                        ? { ...customHeaders, "Idempotency-Key": idempotencyKey }
+                        : customHeaders,
+                    _retried: true,
+                });
+            }
             clearTokens(); // refresh failed -> force re-login
         }
     }

@@ -1,11 +1,11 @@
 import { Router } from "express";
-import { authenticate, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
+import { authenticate, idempotency, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./mail.controller.js";
 import { attachmentUpload } from "./attachment.middleware.js";
 import { adminDeliveryEventsQuerySchema, adminDeliverySummaryQuerySchema, adminUpdateMailboxSchema, assignMailboxSchema, createSharedMailboxSchema, mailboxAssigneeParamsSchema, createAliasSchema, createForwardingSchema, aliasParamsSchema, forwardingParamsSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, mailboxScopeSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
 
 const mailRouter = Router();
-mailRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBER"));
+mailRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBER"), idempotency);
 // Admin literal paths MUST be registered before any /:messageId routes,
 // otherwise "/admin/delivery-events" is captured as messageId="admin".
 // The count goes before the feed: both are exact literals so Express would

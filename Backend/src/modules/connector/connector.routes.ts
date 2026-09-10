@@ -3,7 +3,7 @@ import { Router, type RequestHandler } from "express";
 import rateLimit from "express-rate-limit";
 import jwt from "jsonwebtoken";
 import { env } from "../../config/env.js";
-import { authenticate, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
+import { authenticate, idempotency, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
 import {
@@ -120,7 +120,7 @@ connectorRouter.post(
 
 // ─── Authenticated routes ────────────────────────────────────────────────────
 
-connectorRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBER"));
+connectorRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBER"), idempotency);
 
 connectorRouter.get("/", asyncHandler(async (req, res) => {
   sendSuccess(res, 200, {

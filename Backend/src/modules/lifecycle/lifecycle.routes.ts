@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { authenticate, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
+import { authenticate, idempotency, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
 import { prisma } from "../../config/prisma.js";
@@ -10,7 +10,15 @@ import { auditService } from "../audit/audit.service.js";
 import { jobService } from "../job/job.service.js";
 import { exportStorage } from "./export.storage.js";
 export const lifecycleRouter = Router();
-const body = z.object({ idempotencyKey: z.string().trim().min(8).max(120), reason: z.string().trim().min(3).max(500).optional() });
+// The body key predates API §7's header and fed the job queue's own
+// deduplication. It stays accepted so existing clients keep working, but it is
+// optional now: the header is required on every write, so demanding both would
+// make callers say the same thing twice — and let them say two different
+// things.
+const body = z.object({
+  idempotencyKey: z.string().trim().min(8).max(120).optional(),
+  reason: z.string().trim().min(3).max(500).optional(),
+});
 const params = z.object({ requestId: z.string().uuid() });
 const confirmDeletionBody = z.object({
   confirmation: z.literal("DELETE_TENANT_PERMANENTLY"),
@@ -31,12 +39,12 @@ const confirmDeletionBody = z.object({
  * change closes for export, and it stays open until a second-approver
  * mechanism exists.
  */
-lifecycleRouter.use(authenticate, tenantContext, requireRole("OWNER"));
+lifecycleRouter.use(authenticate, tenantContext, requireRole("OWNER"), idempotency);
 lifecycleRouter.get("/", asyncHandler(async (req, res) => { sendSuccess(res, 200, { requests: await prisma.dataLifecycleRequest.findMany({ where: { tenantId: req.tenantContext!.tenantId }, include: { job: true }, orderBy: { createdAt: "desc" } }) }, req.requestId); }));
 lifecycleRouter.post("/exports", requireCapability("data.export"), validate(body), asyncHandler(async (req, res) => {
   const c=req.tenantContext!;
   const result=await prisma.$transaction(async tx => {
-    const job=await jobService.enqueue({ tenantId:c.tenantId,userId:c.userId,type:"DATA_EXPORT",payload:{scope:"TENANT"},idempotencyKey:`export:${req.body.idempotencyKey}` },tx);
+    const job=await jobService.enqueue({ tenantId:c.tenantId,userId:c.userId,type:"DATA_EXPORT",payload:{scope:"TENANT"},idempotencyKey:`export:${req.body.idempotencyKey ?? req.header("Idempotency-Key")}` },tx);
     const existing=await tx.dataLifecycleRequest.findFirst({where:{tenantId:c.tenantId,jobId:job.id}});
     if(existing)return {request:existing,job};
     const request=await tx.dataLifecycleRequest.create({data:{tenantId:c.tenantId,requestedByUserId:c.userId,type:"EXPORT",status:"APPROVED",approvedAt:new Date(),jobId:job.id,reason:req.body.reason}});

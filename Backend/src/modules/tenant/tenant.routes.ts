@@ -1,10 +1,10 @@
 import { Router } from "express";
-import { authenticate, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
+import { authenticate, idempotency, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./tenant.controller.js";
 import { updateTenantSchema, updateGeneralSettingsSchema } from "./tenant.schema.js";
 
 const tenantRouter = Router();
-tenantRouter.use(authenticate, tenantContext);
+tenantRouter.use(authenticate, tenantContext, idempotency);
 tenantRouter.get("/current", requireRole("OWNER", "ADMIN", "MEMBER"), controller.getCurrent);
 tenantRouter.get("/onboarding-status", requireRole("OWNER", "ADMIN", "MEMBER"), controller.getOnboardingStatus);
 tenantRouter.get("/usage", requireRole("OWNER", "ADMIN"), controller.getUsage);

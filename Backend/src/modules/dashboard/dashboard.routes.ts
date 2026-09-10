@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   authenticate,
+  idempotency,
   requireCapability,
   tenantContext,
   validate,
@@ -23,7 +24,7 @@ export const dashboardRouter = Router();
  * of the workspace. `people.read` is held by Owner and Admin and by neither
  * Member nor Support, which is exactly the audience for this screen.
  */
-dashboardRouter.use(authenticate, tenantContext, requireCapability("people.read"));
+dashboardRouter.use(authenticate, tenantContext, requireCapability("people.read"), idempotency);
 
 dashboardRouter.get(
   "/dashboard",
