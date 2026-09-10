@@ -473,6 +473,14 @@ export const openApiDocument = {
         responses: { "200": ok("Account disconnected"), "404": { $ref: "#/components/responses/NotFound" } },
       },
     },
+    "/api/v1/connectors/{accountId}/sync": {
+      post: {
+        tags: ["Connectors"], summary: "Trigger an on-demand sync for the current member's provider account",
+        security: bearer,
+        parameters: [{ name: "accountId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: { "200": ok("Sync completed"), "404": { $ref: "#/components/responses/NotFound" }, "502": { $ref: "#/components/responses/BadGateway" } },
+      },
+    },
     "/api/v1/connectors/{accountId}/events": {
       get: {
         tags: ["Connectors"], summary: "List sanitized normalized events for an owned account",
@@ -858,6 +866,7 @@ export const openApiDocument = {
     responses: {
       ValidationError: { description: "Request validation failed" }, Unauthorized: { description: "Authentication failed" },
       Forbidden: { description: "Tenant or role access denied" }, NotFound: { description: "Tenant-scoped resource not found" }, Conflict: { description: "Resource state conflict" },
+      BadGateway: { description: "Upstream provider call failed" },
     },
     schemas: {
       RegisterRequest: {

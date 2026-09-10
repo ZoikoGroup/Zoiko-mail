@@ -134,6 +134,35 @@ describe("Track A connector foundation", () => {
     });
   });
 
+  it("rejects on-demand sync for other tenants and disconnected accounts, and fails cleanly without tokens", async () => {
+    const owner = await registerUser(app, { email: "sync-owner@zoiko.test" });
+    const other = await registerUser(app, { email: "sync-other@zoiko.test" });
+    const account = await request(app).post("/api/v1/connectors")
+      .set(authHeader(owner.accessToken))
+      .send({
+        provider: "GMAIL",
+        providerAccountId: "gmail-sync-now",
+        email: "sync-now@gmail.test",
+        scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+      }).expect(201);
+
+    await request(app).post(`/api/v1/connectors/${account.body.data.id}/sync`)
+      .set(authHeader(other.accessToken)).expect(404);
+
+    await prisma.mailbox.create({
+      data: { tenantId: owner.tenantId, membershipId: owner.membershipId, address: "sync-now@zoiko.test" },
+    });
+
+    const noToken = await request(app).post(`/api/v1/connectors/${account.body.data.id}/sync`)
+      .set(authHeader(owner.accessToken)).expect(401);
+    expect(noToken.body.error.code).toBe("UNAUTHORIZED");
+
+    await request(app).delete(`/api/v1/connectors/${account.body.data.id}`)
+      .set(authHeader(owner.accessToken)).expect(200);
+    await request(app).post(`/api/v1/connectors/${account.body.data.id}/sync`)
+      .set(authHeader(owner.accessToken)).expect(409);
+  });
+
   it("retries temporary failures, dead-letters them and supports audited replay", async () => {
     const owner = await registerUser(app, { email: "dead-letter-owner@zoiko.test" });
     await request(app).post("/api/v1/connectors").set(authHeader(owner.accessToken))

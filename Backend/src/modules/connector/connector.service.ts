@@ -219,6 +219,54 @@ export class ConnectorService {
     });
   }
 
+  /**
+   * On-demand sync for a single connected account (Sync Now).
+   *
+   * Deliberately caller-scoped like `list` / `disconnect`: the caller must own
+   * the account. Dispatches to the provider's incremental sync (Gmail history /
+   * M365 delta) so a user can pull latest mail without waiting for a webhook or
+   * catch-up timer. No tokens or secrets are returned to the caller.
+   */
+  async syncNow(
+    accountId: string,
+    context: { tenantId: string; membershipId: string; userId: string; requestId?: string }
+  ) {
+    const account = await prisma.connectedAccount.findFirst({
+      where: { id: accountId, tenantId: context.tenantId, membershipId: context.membershipId },
+      select: { id: true, provider: true, status: true },
+    });
+    if (!account) throw new AppError("Connected account not found", 404, ErrorCodes.NOT_FOUND);
+    if (account.status === "DISCONNECTED") {
+      throw new AppError("Disconnected accounts cannot sync", 409, ErrorCodes.CONFLICT);
+    }
+
+    try {
+      const result =
+        account.provider === "GMAIL"
+          ? await (await import("./gmail/gmail.connector.js")).gmailConnector.syncHistory(account.id, context.tenantId)
+          : await (await import("./m365/m365.connector.js")).microsoftConnector.syncInbox(account.id, context.tenantId);
+
+      await auditService.record({
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        eventType: "CONNECTED_ACCOUNT_SYNCED",
+        targetType: "ConnectedAccount",
+        targetId: account.id,
+        requestId: context.requestId,
+        metadata: { provider: account.provider, ...result },
+      });
+
+      return { synced: true, provider: account.provider, result };
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      logger.error(
+        { accountId: account.id, provider: account.provider, error, requestId: context.requestId },
+        "On-demand connector sync failed"
+      );
+      throw new AppError("Sync failed — the provider may be unavailable or needs reauthorization", 502, "PROVIDER_ERROR");
+    }
+  }
+
   async listEvents(accountId: string, tenantId: string, membershipId: string) {
     const account = await prisma.connectedAccount.findFirst({
       where: { id: accountId, tenantId, membershipId },

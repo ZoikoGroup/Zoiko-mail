@@ -5,6 +5,7 @@ import {
   listConnectors,
   createConnector,
   disconnectConnector,
+  syncConnector,
   getConnectorHealth,
   getGoogleAuthUrl,
   getMicrosoftAuthUrl,
@@ -44,6 +45,14 @@ export function useDisconnectConnector() {
       if (ctx?.prev) qc.setQueryData(KEY, ctx.prev);
     },
     onSettled: () => qc.invalidateQueries({ queryKey: KEY }),
+  });
+}
+
+export function useSyncConnector() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (accountId: string) => syncConnector(accountId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
   });
 }
 
