@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
+import { participantSummarySelect, toParticipantSummary } from "../participant/participant.service.js";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import type { ListMessagesInput, ListThreadsInput } from "./message.schema.js";
@@ -143,6 +144,12 @@ export class MessageService {
             orderBy: { createdAt: "desc" },
             take: 1,
           },
+          // §13 lists "participants" among the fields a thread row carries,
+          // and §12 wants them as summaries rather than opaque ids.
+          participantLinks: {
+            select: { roles: true, participant: { select: participantSummarySelect } },
+            orderBy: { createdAt: "asc" },
+          },
         },
         orderBy: [{ lastMessageAt: "desc" }, { id: "desc" }],
         skip: (filters.page - 1) * filters.limit,
@@ -154,6 +161,10 @@ export class MessageService {
       threads: threads.map((thread) => ({
         ...thread,
         messages: thread.messages.map((message) => toListMessage(message, context.userId)),
+        participantSummaries: thread.participantLinks.map((link) => ({
+          ...toParticipantSummary(link.participant),
+          roles: link.roles,
+        })),
       })),
       pagination: {
         page: filters.page,
@@ -187,12 +198,20 @@ export class MessageService {
           include: messageInclude,
           orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         },
+        participantLinks: {
+          select: { roles: true, participant: { select: participantSummarySelect } },
+          orderBy: { createdAt: "asc" },
+        },
       },
     });
     if (!thread) throw new AppError("Thread not found", 404, ErrorCodes.NOT_FOUND);
     return {
       ...thread,
       messages: thread.messages.map((message) => protectBcc(message, context.userId)),
+      participantSummaries: thread.participantLinks.map((link) => ({
+        ...toParticipantSummary(link.participant),
+        roles: link.roles,
+      })),
     };
   }
 }

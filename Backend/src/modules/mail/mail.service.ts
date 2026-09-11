@@ -16,6 +16,7 @@ import {
 } from "../message/message.utils.js";
 import { deliveryProtectionService } from "../delivery-protection/delivery-protection.service.js";
 import { sharedMailboxService } from "./shared-mailbox.service.js";
+import { participantService } from "../participant/participant.service.js";
 import { jobService } from "../job/job.service.js";
 import type { BulkMailboxActionInput, CreateDraftInput, CreateLabelInput, ListMailInput, UpdateDraftInput, UpdateLabelInput, UpdateMailboxItemInput } from "./mail.schema.js";
 
@@ -206,6 +207,28 @@ export class MailService {
         },
         include: messageInclude,
       });
+      // §6.7/§6.8: every address involved becomes a resolvable participant,
+      // and the thread's denormalised list is written from the same pass so
+      // the two cannot drift.
+      const canonical = await participantService.recordThreadParticipation(
+        {
+          tenantId: context.tenantId,
+          threadId: thread.id,
+          messageId: message.id,
+          addresses: [
+            { email: sendAs?.address ?? context.email, role: "SENDER" },
+            ...input.recipients.to.map((email) => ({ email, role: "RECIPIENT" as const })),
+            ...input.recipients.cc.map((email) => ({ email, role: "CC" as const })),
+            ...input.recipients.bcc.map((email) => ({ email, role: "BCC" as const })),
+          ],
+        },
+        tx
+      );
+      await tx.messageThread.update({
+        where: { id: thread.id, tenantId: context.tenantId },
+        data: { participants: canonical },
+      });
+
       await this.audit(tx, context, "MAIL_DRAFT_CREATED", message.id);
       return message;
     });
@@ -248,11 +271,31 @@ export class MailService {
           where: { tenantId: context.tenantId, messageId },
           select: { email: true },
         });
+        // Recorded again on edit, not only at creation: a draft's recipients
+        // change while it is being written, and the thread's participant list
+        // has to describe the message as it now stands.
+        const canonical = await participantService.recordThreadParticipation(
+          {
+            tenantId: context.tenantId,
+            threadId: draft.threadId,
+            messageId: message.id,
+            addresses: [
+              // The draft's own from-address when it is being sent as a
+              // shared mailbox, otherwise the author.
+              { email: message.fromAddress ?? context.email, role: "SENDER" },
+              ...allRecipients.map((recipient) => ({
+                email: recipient.email,
+                role: "RECIPIENT" as const,
+              })),
+            ],
+          },
+          tx
+        );
         await tx.messageThread.update({
           where: { id: draft.threadId, tenantId: context.tenantId },
           data: {
             subjectNormalized: normalizeSubject(message.subject),
-            participants: uniqueParticipants([context.email, ...allRecipients.map((recipient) => recipient.email)]),
+            participants: canonical,
           },
         });
       }
@@ -386,10 +429,26 @@ export class MailService {
         },
         include: messageInclude,
       });
+      await participantService.recordThreadParticipation(
+        {
+          tenantId: context.tenantId,
+          threadId: source.threadId!,
+          messageId: draft.id,
+          addresses: [
+            { email: self, role: "SENDER" },
+            ...[...to].map((email) => ({ email, role: "RECIPIENT" as const })),
+            ...[...cc].map((email) => ({ email, role: "CC" as const })),
+          ],
+        },
+        tx
+      );
       await tx.messageThread.update({
         where: { id: source.threadId!, tenantId: context.tenantId },
         data: {
           messageCount: { increment: 1 },
+          // The existing addresses are carried forward rather than replaced:
+          // a reply narrows the recipient list, and the thread should still
+          // remember everyone who has been in it.
           participants: uniqueParticipants([
             ...(Array.isArray(source.thread?.participants) ? source.thread.participants.filter((value): value is string => typeof value === "string") : []),
             self,

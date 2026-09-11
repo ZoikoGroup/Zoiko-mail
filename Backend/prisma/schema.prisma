@@ -49,6 +49,8 @@ model Tenant {
   aliases             Alias[]
   forwardingRules     ForwardingRule[]
   idempotencyRecords  IdempotencyRecord[]
+  participants        Participant[]
+  threadParticipants  ThreadParticipant[]
 
   @@map("tenants")
 }
@@ -106,6 +108,7 @@ model AppUser {
   mailboxAccessGrants     MailboxAccess[]        @relation("MailboxAccessGrantor")
   idempotencyRecords      IdempotencyRecord[]    @relation("IdempotencyActor")
   mfaRecoveryCodes        MfaRecoveryCode[]
+  participantIdentities   Participant[]          @relation("ParticipantIdentity")
   @@map("app_users")
 }
 
@@ -339,6 +342,78 @@ model EmailMessage {
   @@map("email_messages")
 }
 
+/**
+ * A person or address, normalized once per workspace — Data Model §6.7.
+ *
+ * "Normalizes a person or email identity inside a tenant so commitments can
+ * be owed by and owed to stable entities across messages and threads." Before
+ * this, a participant was a string in a JSON array on the thread: you could
+ * not ask what else an address had been involved in, and a commitment could
+ * only be owned by an internal user, so an obligation owed *to* a customer
+ * had nowhere to point.
+ *
+ * `canonicalEmail` is citext, so `Alex@example.com` and `alex@example.com`
+ * are the same participant at the database rather than only when the
+ * application remembers to lowercase. The uniqueness the specification asks
+ * for is partial — one *active* participant per address — and Prisma cannot
+ * express a partial index, so it lives in the migration and deliberately not
+ * here; declaring it would report as permanent drift.
+ */
+model Participant {
+  id               String             @id @default(uuid()) @db.Uuid
+  tenantId         String             @map("tenant_id") @db.Uuid
+  canonicalEmail   String             @map("canonical_email") @db.Citext
+  displayName      String?            @map("display_name")
+  participantType  ParticipantType    @default(UNKNOWN) @map("participant_type")
+  /// Set when the address belongs to a member of this workspace.
+  linkedUserId     String?            @map("linked_user_id") @db.Uuid
+  organizationName String?            @map("organization_name")
+  firstSeenAt      DateTime           @default(now()) @map("first_seen_at")
+  lastSeenAt       DateTime           @default(now()) @map("last_seen_at")
+  /// The row this one was folded into, when two turned out to be one person.
+  mergeParentId    String?            @map("merge_parent_id") @db.Uuid
+  status           ParticipantStatus  @default(ACTIVE)
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+  tenant           Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  linkedUser       AppUser?           @relation("ParticipantIdentity", fields: [linkedUserId], references: [id], onDelete: SetNull)
+  mergeParent      Participant?       @relation("ParticipantMerge", fields: [mergeParentId], references: [id], onDelete: SetNull)
+  mergedFrom       Participant[]      @relation("ParticipantMerge")
+  threadLinks      ThreadParticipant[]
+  owedCommitments  Commitment[]       @relation("CommitmentOwedBy")
+  awaitedCommitments Commitment[]     @relation("CommitmentOwedTo")
+
+  @@index([tenantId, lastSeenAt(sort: Desc)])
+  @@index([tenantId, linkedUserId])
+  @@map("participants")
+}
+
+/**
+ * What a participant did in a thread — Data Model §6.8.
+ *
+ * Roles accumulate rather than replace: somebody who sent the first message
+ * and was copied on the third is both, and a timeline that forgot the first
+ * would misattribute the conversation.
+ */
+model ThreadParticipant {
+  id             String                  @id @default(uuid()) @db.Uuid
+  tenantId       String                  @map("tenant_id") @db.Uuid
+  threadId       String                  @map("thread_id") @db.Uuid
+  participantId  String                  @map("participant_id") @db.Uuid
+  roles          ThreadParticipantRole[]
+  firstMessageId String?                 @map("first_message_id") @db.Uuid
+  lastMessageId  String?                 @map("last_message_id") @db.Uuid
+  createdAt      DateTime                @default(now()) @map("created_at")
+  updatedAt      DateTime                @updatedAt @map("updated_at")
+  tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  thread         MessageThread           @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  participant    Participant             @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, threadId, participantId])
+  @@index([tenantId, participantId, updatedAt(sort: Desc)])
+  @@map("thread_participants")
+}
+
 model MessageThread {
   id                String         @id @default(uuid()) @db.Uuid
   tenantId          String         @map("tenant_id") @db.Uuid
@@ -351,6 +426,7 @@ model MessageThread {
   updatedAt         DateTime       @updatedAt @map("updated_at")
   tenant            Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   messages          EmailMessage[]
+  participantLinks  ThreadParticipant[]
 
   @@index([tenantId, lastMessageAt])
   @@map("message_threads")
@@ -635,6 +711,12 @@ model Commitment {
   threadId        String?          @map("thread_id") @db.Uuid
   ownerUserId     String           @map("owner_user_id") @db.Uuid
   createdByUserId String           @map("created_by_user_id") @db.Uuid
+  /// Who owes the action, and who is waiting for it (§6.10). Either may be
+  /// somebody outside the workspace, which is why they are participants
+  /// rather than users — an obligation owed to a customer had nowhere to
+  /// point before.
+  owedByParticipantId String?      @map("owed_by_participant_id") @db.Uuid
+  owedToParticipantId String?      @map("owed_to_participant_id") @db.Uuid
   text            String
   dueAt           DateTime?        @map("due_at")
   priority        ActionPriority   @default(MEDIUM)
@@ -645,8 +727,12 @@ model Commitment {
   tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   owner           AppUser          @relation("CommitmentOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
   createdBy       AppUser          @relation("CommitmentCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  owedBy          Participant?     @relation("CommitmentOwedBy", fields: [owedByParticipantId], references: [id], onDelete: SetNull)
+  owedTo          Participant?     @relation("CommitmentOwedTo", fields: [owedToParticipantId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, ownerUserId, status, dueAt])
+  @@index([tenantId, owedByParticipantId])
+  @@index([tenantId, owedToParticipantId])
   @@map("commitments")
 }
 
@@ -1189,6 +1275,36 @@ enum LifecycleTargetType {
   USER
   AI_OUTPUTS
   SYNCED_DATA
+}
+
+/// §6.7: internal_user, external_person, group_address, system, unknown.
+enum ParticipantType {
+  INTERNAL_USER
+  EXTERNAL_PERSON
+  /// A shared mailbox, distribution address or alias rather than a person.
+  GROUP_ADDRESS
+  /// no-reply, mailer-daemon and friends: nobody is behind the address.
+  SYSTEM
+  UNKNOWN
+}
+
+/// §6.7: active, merged, suppressed, deleted.
+enum ParticipantStatus {
+  ACTIVE
+  /// Folded into another row; `mergeParentId` names the survivor.
+  MERGED
+  SUPPRESSED
+  DELETED
+}
+
+/// §6.8: sender, recipient, cc, bcc, mentioned, inferred_owner.
+enum ThreadParticipantRole {
+  SENDER
+  RECIPIENT
+  CC
+  BCC
+  MENTIONED
+  INFERRED_OWNER
 }
 
 enum IdempotencyStatus {

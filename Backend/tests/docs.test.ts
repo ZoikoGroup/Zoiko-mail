@@ -24,6 +24,9 @@ describe("API documentation", () => {
     expect(response.body.paths).toHaveProperty("/api/v1/mail/send-as");
     expect(response.body.paths).toHaveProperty("/api/v1/lifecycle/sla");
     expect(response.body.paths).toHaveProperty("/api/v1/auth/mfa");
+    expect(response.body.paths).toHaveProperty("/api/v1/participants");
+    expect(response.body.paths).toHaveProperty("/api/v1/participants/{participantId}");
+    expect(response.body.paths).toHaveProperty("/api/v1/threads/{threadId}/participants");
     expect(response.body.paths).toHaveProperty("/api/v1/auth/mfa/challenge/verify");
     expect(response.body.paths).toHaveProperty("/api/v1/lifecycle/{requestId}/block");
     expect(response.body.paths).toHaveProperty("/api/v1/mail/drafts/{messageId}");

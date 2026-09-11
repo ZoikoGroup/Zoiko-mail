@@ -19,6 +19,7 @@ import { connectorRouter } from "../modules/connector/connector.routes.js";
 import { deliveryProtectionRouter } from "../modules/delivery-protection/delivery-protection.routes.js";
 import { billingRouter } from "../modules/billing/billing.routes.js";
 import { dashboardRouter } from "../modules/dashboard/dashboard.routes.js";
+import { participantRouter } from "../modules/participant/participant.routes.js";
 
 const apiRouter = Router();
 
@@ -33,6 +34,7 @@ apiRouter.use("/tenants", tenantRouter);
 apiRouter.use("/audit", auditRouter);
 apiRouter.use("/policies", policyRouter);
 apiRouter.use("/mail", mailRouter);
+apiRouter.use("/participants", participantRouter);
 apiRouter.use("/messages", messageRouter);
 apiRouter.use("/threads", threadRouter);
 apiRouter.use("/domains", domainRouter);

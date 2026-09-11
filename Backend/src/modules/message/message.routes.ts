@@ -12,5 +12,13 @@ const threadRouter = Router();
 threadRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBER"), idempotency);
 threadRouter.get("/", validate(listThreadsSchema, "query"), controller.listThreads);
 threadRouter.get("/:threadId", validate(threadIdParamsSchema, "params"), controller.getThread);
+// §12 lists this under the Participant API, but it hangs off a thread, so it
+// lives with the thread routes rather than making /participants own a path
+// that starts with a different resource.
+threadRouter.get(
+  "/:threadId/participants",
+  validate(threadIdParamsSchema, "params"),
+  controller.listThreadParticipants
+);
 
 export { messageRouter, threadRouter };

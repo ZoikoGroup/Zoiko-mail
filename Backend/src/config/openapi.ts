@@ -19,7 +19,7 @@ export const openApiDocument = {
       "the provider's own event id.",
   },
   servers: [{ url: "http://localhost:5000", description: "Local development" }],
-  tags: ["System", "Authentication", "Users", "Tenants", "Memberships", "Policies", "Mail", "Messages", "Threads", "Domains", "AI", "Actions", "Notifications", "Integrations", "Connectors", "Delivery Protection", "Lifecycle", "Support", "Audit", "Billing"].map((name) => ({ name })),
+  tags: ["System", "Authentication", "Users", "Tenants", "Memberships", "Policies", "Mail", "Messages", "Threads", "Participants", "Domains", "AI", "Actions", "Notifications", "Integrations", "Connectors", "Delivery Protection", "Lifecycle", "Support", "Audit", "Billing"].map((name) => ({ name })),
   paths: {
     "/api/health": {
       get: { tags: ["System"], summary: "Health check", responses: { "200": ok("API is healthy") } },
@@ -354,6 +354,80 @@ export const openApiDocument = {
           { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 25 } },
         ],
         responses: { "200": ok("Mailbox items returned") },
+      },
+    },
+    "/api/v1/participants": {
+      get: {
+        tags: ["Participants"],
+        summary: "List participants the workspace has corresponded with",
+        description:
+          "API §12. A participant is a normalized person or address inside one workspace, derived from the mail that mentions them. Supports search by address or name, and filtering by kind — INTERNAL_USER for a colleague, GROUP_ADDRESS for a shared mailbox or distribution address, SYSTEM for a no-reply, EXTERNAL_PERSON for everybody else. Merged and deleted rows are history and are not listed.",
+        security: bearer,
+        parameters: [
+          { name: "q", in: "query", schema: { type: "string", maxLength: 200 }, description: "Matches address or display name." },
+          {
+            name: "type", in: "query",
+            schema: { type: "string", enum: ["INTERNAL_USER", "EXTERNAL_PERSON", "GROUP_ADDRESS", "SYSTEM", "UNKNOWN"] },
+          },
+          { name: "page", in: "query", schema: { type: "integer", minimum: 1, default: 1 } },
+          { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 25 } },
+        ],
+        responses: { "200": ok("Participants returned") },
+      },
+    },
+    "/api/v1/participants/{participantId}": {
+      get: {
+        tags: ["Participants"],
+        summary: "Resolve one participant",
+        description:
+          "The resolution path §12 requires, so a commitment or thread never has to expose an id a client cannot turn into a person. A merged id still resolves: it answers with the surviving row and names the id it was asked about, because that id may be sitting in a client cache and a 404 would make a successful deduplication look like data loss.",
+        security: bearer,
+        parameters: [{ name: "participantId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: {
+          "200": ok("Participant resolved"),
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
+      },
+    },
+    "/api/v1/participants/{participantId}/threads": {
+      get: {
+        tags: ["Participants"],
+        summary: "Threads this participant appears in (metadata only)",
+        description:
+          "Metadata only, and that is load-bearing rather than a style note: this read is keyed by somebody else's address, so returning bodies would make it a way to read mail by asking about the person instead of the message (AC-011).",
+        security: bearer,
+        parameters: [
+          { name: "participantId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+          { name: "page", in: "query", schema: { type: "integer", minimum: 1, default: 1 } },
+          { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 25 } },
+        ],
+        responses: { "200": ok("Threads returned"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/participants/{participantId}/commitments": {
+      get: {
+        tags: ["Participants"],
+        summary: "Commitments owed by or to this participant",
+        description:
+          "Either side may be somebody outside the workspace, which is what participants exist for: before them a commitment could only be owned by an internal user, so an obligation owed to a customer had nowhere to point.",
+        security: bearer,
+        parameters: [
+          { name: "participantId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+          { name: "page", in: "query", schema: { type: "integer", minimum: 1, default: 1 } },
+          { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 25 } },
+        ],
+        responses: { "200": ok("Commitments returned"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/threads/{threadId}/participants": {
+      get: {
+        tags: ["Participants"],
+        summary: "Participants on a thread, with the roles they held",
+        description:
+          "Roles accumulate across the thread — sender, recipient, cc, bcc — so somebody who sent the first message and was copied on the third is both.",
+        security: bearer,
+        parameters: [{ name: "threadId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: { "200": ok("Thread participants returned"), "404": { $ref: "#/components/responses/NotFound" } },
       },
     },
     "/api/v1/messages": {
