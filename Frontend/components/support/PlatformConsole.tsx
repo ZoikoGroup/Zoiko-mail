@@ -3,10 +3,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ApiError, apiRequest } from "@/lib/api-client";
-import { getPlatformToken, isLoggedIn, setPlatformToken } from "@/lib/auth-storage";
+import {
+  clearTokens,
+  getPlatformToken,
+  isLoggedIn,
+  setPlatformToken,
+  setSignOutNotice,
+} from "@/lib/auth-storage";
 // import { useLogout } from "@/lib/auth-hooks";
 import { useLogout, useMe } from "@/lib/auth-hooks";
-import { resolveWorkspaceHref } from "@/lib/workspace";
+import { resolveWorkspaceHref, workspaceDenialNotice } from "@/lib/workspace";
 import Image from "next/image";
 import {
   fetchPlatformDiagnostics,
@@ -44,6 +50,28 @@ import {
 import { supportStyles } from "@/components/support/support-styles";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { AccessDenied } from "@/components/ui/AccessDenied";
+import {
+  AlertCircle,
+  AlertTriangle,
+  Ban,
+  BellRing,
+  Boxes,
+  Building2,
+  Cog,
+  Globe,
+  KeyRound,
+  Link2,
+  Mail,
+  RotateCw,
+  ScrollText,
+  Send,
+  Server,
+  ShieldAlert,
+  ShieldCheck,
+  Users,
+  XCircle,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 type PageId = "overview" | "tenants" | "mailboxes" | "domains" | "suppressions" | "provider-events" | "delivery-events" | "jobs" | "audit" | "grants";
 
@@ -59,6 +87,19 @@ const PAGES: Array<{ id: PageId; label: string; icon: string }> = [
   { id: "audit", label: "Audit", icon: "🛡" },
   { id: "grants", label: "Support Grants", icon: "🗝" },
 ];
+
+const COUNT_ICONS: Record<string, LucideIcon> = {
+  members: Users,
+  mailboxes: Mail,
+  domains: Globe,
+  connectedAccounts: Link2,
+  providerEvents: BellRing,
+  deliveryEvents: Send,
+  jobs: Cog,
+  audit: ScrollText,
+  grants: KeyRound,
+  suppressions: Ban,
+};
 
 function apiErrorMessage(e: unknown): string {
   if (e instanceof ApiError) return e.message;
@@ -178,16 +219,18 @@ function Spinner() {
 
 function Table({ headers, children }: { headers: string[]; children: React.ReactNode }) {
   return (
-    <table>
-      <thead>
-        <tr>
-          {headers.map((h) => (
-            <th key={h}>{h}</th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>{children}</tbody>
-    </table>
+    <div className="tblwrap">
+      <table>
+        <thead>
+          <tr>
+            {headers.map((h) => (
+              <th key={h}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>{children}</tbody>
+      </table>
+    </div>
   );
 }
 
@@ -208,16 +251,16 @@ function OverviewPage({
 }) {
   if (!data) return null;
   const s = data.stats;
-  const stats: Array<{ label: string; val: string | number; tone: string; sub: string }> = [
-    { label: "Active Tenants", val: s.activeTenants, tone: "", sub: "across the platform" },
-    { label: "Members", val: s.tenantMembers, tone: "", sub: "tenant users" },
-    { label: "Active Mailboxes", val: s.activeMailboxes, tone: "", sub: "connected inboxes" },
-    { label: "Configured Domains", val: s.configuredDomains, tone: "", sub: "verified + pending" },
-    { label: "Provider Accounts", val: s.providerAccounts, tone: "", sub: "connected OAuth accounts" },
-    { label: "Failed Sends 24h", val: s.failedSends24h, tone: s.failedSends24h > 0 ? "crit" : "ok", sub: "rejected / bounced" },
-    { label: "Sync Failures 24h", val: s.syncFailures24h, tone: s.syncFailures24h > 0 ? "warn" : "ok", sub: "provider webhook errors" },
-    { label: "Failed Jobs", val: s.failedJobs, tone: s.failedJobs > 0 ? "crit" : "ok", sub: "exhausted retries" },
-    { label: "Retry Jobs", val: s.retryJobs, tone: s.retryJobs > 0 ? "warn" : "ok", sub: "scheduled to retry" },
+  const stats: Array<{ label: string; val: string | number; tone: string; sub: string; icon?: LucideIcon }> = [
+    { label: "Active Tenants", val: s.activeTenants, tone: "", sub: "across the platform", icon: Building2 },
+    { label: "Members", val: s.tenantMembers, tone: "", sub: "tenant users", icon: Users },
+    { label: "Active Mailboxes", val: s.activeMailboxes, tone: "", sub: "connected inboxes", icon: Mail },
+    { label: "Configured Domains", val: s.configuredDomains, tone: "", sub: "verified + pending", icon: Globe },
+    { label: "Provider Accounts", val: s.providerAccounts, tone: "", sub: "connected OAuth accounts", icon: Link2 },
+    { label: "Failed Sends 24h", val: s.failedSends24h, tone: s.failedSends24h > 0 ? "crit" : "ok", sub: "rejected / bounced", icon: AlertCircle },
+    { label: "Sync Failures 24h", val: s.syncFailures24h, tone: s.syncFailures24h > 0 ? "warn" : "ok", sub: "provider webhook errors", icon: AlertTriangle },
+    { label: "Failed Jobs", val: s.failedJobs, tone: s.failedJobs > 0 ? "crit" : "ok", sub: "exhausted retries", icon: XCircle },
+    { label: "Retry Jobs", val: s.retryJobs, tone: s.retryJobs > 0 ? "warn" : "ok", sub: "scheduled to retry", icon: RotateCw },
   ];
 
   return (
@@ -225,7 +268,14 @@ function OverviewPage({
       <div className="stats">
         {stats.map((st) => (
           <div key={st.label} className={`stat ${st.tone}`}>
-            <div className="lbl">{st.label}</div>
+            <div className="stt">
+              <div className="lbl">{st.label}</div>
+              {st.icon && (
+                <span className="ic">
+                  <st.icon size={14} />
+                </span>
+              )}
+            </div>
             <div className="val">{st.val}</div>
             <div className="sub">{st.sub}</div>
           </div>
@@ -368,12 +418,20 @@ function TenantDetail({
       </div>
 
       <div className="stats">
-        {Object.entries(counts).map(([k, v]) => (
-          <div key={k} className="stat">
-            <div className="lbl">{k}</div>
-            <div className="val">{String(v)}</div>
-          </div>
-        ))}
+        {Object.entries(counts).map(([k, v]) => {
+          const Icon = COUNT_ICONS[k] ?? Boxes;
+          return (
+            <div key={k} className="stat">
+              <div className="stt">
+                <div className="lbl">{k}</div>
+                <span className="ic">
+                  <Icon size={14} />
+                </span>
+              </div>
+              <div className="val">{String(v)}</div>
+            </div>
+          );
+        })}
       </div>
 
       {sections.map((sec) => (
@@ -482,10 +540,22 @@ function DomainDetail({ data, onBack }: { data: PlatformDomainDetail; onBack: ()
         </div>
       </div>
       <div className="stats">
-        <div className="stat"><div className="lbl">MX</div><div className="val"><Pill status={d.mxStatus} /></div></div>
-        <div className="stat"><div className="lbl">SPF</div><div className="val"><Pill status={d.spfStatus} /></div></div>
-        <div className="stat"><div className="lbl">DKIM</div><div className="val"><Pill status={d.dkimStatus} /></div></div>
-        <div className="stat"><div className="lbl">DMARC</div><div className="val"><Pill status={d.dmarcStatus} /></div></div>
+        <div className="stat">
+          <div className="stt"><div className="lbl">MX</div><span className="ic"><Server size={14} /></span></div>
+          <div className="val"><Pill status={d.mxStatus} /></div>
+        </div>
+        <div className="stat">
+          <div className="stt"><div className="lbl">SPF</div><span className="ic"><ShieldCheck size={14} /></span></div>
+          <div className="val"><Pill status={d.spfStatus} /></div>
+        </div>
+        <div className="stat">
+          <div className="stt"><div className="lbl">DKIM</div><span className="ic"><KeyRound size={14} /></span></div>
+          <div className="val"><Pill status={d.dkimStatus} /></div>
+        </div>
+        <div className="stat">
+          <div className="stt"><div className="lbl">DMARC</div><span className="ic"><ShieldAlert size={14} /></span></div>
+          <div className="val"><Pill status={d.dmarcStatus} /></div>
+        </div>
       </div>
       {d.errorDetails && (
         <div className="card">
@@ -722,7 +792,7 @@ function TenantsPage({
   return (
     <div>
       <div className="filterbar">
-        <div className="gsearch" style={{ width: 360, marginLeft: 0 }}>
+        <div className="gsearch" style={{ maxWidth: 360, marginLeft: 0 }}>
           <span>⌕</span>
           <input
             placeholder="Search tenants by name or id…"
@@ -1334,7 +1404,13 @@ function GrantsPage() {
 // New standalone list pages
 // ---------------------------------------------------------------------------
 
-function MailboxesPage() {
+function MailboxesPage({
+  initialOpen,
+  onConsumed,
+}: {
+  initialOpen?: { tenantId: string; mailboxId: string } | null;
+  onConsumed?: () => void;
+}) {
   const [q, setQ] = useState("");
   const [applied, setApplied] = useState("");
   const [mailboxes, setMailboxes] = useState<PlatformMailbox[]>([]);
@@ -1373,6 +1449,14 @@ function MailboxesPage() {
     }
   }, []);
 
+  useEffect(() => {
+    if (initialOpen) {
+      void openDetail(initialOpen.tenantId, initialOpen.mailboxId);
+      onConsumed?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialOpen]);
+
   if (detailLoading) return <Spinner />;
   if (detailError) return <LoadErr error={detailError} onRetry={() => { setDetailError(null); }} />;
   if (detail) return <MailboxDetail data={detail} onBack={() => setDetail(null)} />;
@@ -1380,7 +1464,7 @@ function MailboxesPage() {
   return (
     <div>
       <div className="filterbar">
-        <div className="gsearch" style={{ width: 360, marginLeft: 0 }}>
+        <div className="gsearch" style={{ maxWidth: 360, marginLeft: 0 }}>
           <span>⌕</span>
           <input placeholder="Search mailboxes by address or tenant…" value={q} onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") { setApplied(q); search(q); } }} />
@@ -1415,7 +1499,13 @@ function MailboxesPage() {
   );
 }
 
-function DomainsPage() {
+function DomainsPage({
+  initialOpen,
+  onConsumed,
+}: {
+  initialOpen?: { tenantId: string; domainId: string } | null;
+  onConsumed?: () => void;
+}) {
   const [q, setQ] = useState("");
   const [applied, setApplied] = useState("");
   const [domains, setDomains] = useState<PlatformDomain[]>([]);
@@ -1454,6 +1544,14 @@ function DomainsPage() {
     }
   }, []);
 
+  useEffect(() => {
+    if (initialOpen) {
+      void openDetail(initialOpen.tenantId, initialOpen.domainId);
+      onConsumed?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialOpen]);
+
   if (detailLoading) return <Spinner />;
   if (detailError) return <LoadErr error={detailError} onRetry={() => { setDetailError(null); }} />;
   if (detail) return <DomainDetail data={detail} onBack={() => setDetail(null)} />;
@@ -1461,7 +1559,7 @@ function DomainsPage() {
   return (
     <div>
       <div className="filterbar">
-        <div className="gsearch" style={{ width: 360, marginLeft: 0 }}>
+        <div className="gsearch" style={{ maxWidth: 360, marginLeft: 0 }}>
           <span>⌕</span>
           <input placeholder="Search domains by name or tenant…" value={q} onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") { setApplied(q); search(q); } }} />
@@ -1541,6 +1639,23 @@ function SuppressionsPage() {
 // Shell
 // ---------------------------------------------------------------------------
 
+function RailMenu({ current, onNavigate }: { current: PageId; onNavigate?: (id: PageId) => void }) {
+  return (
+    <>
+      {PAGES.map((p) => (
+        <button
+          key={p.id}
+          className={`railitem ${current === p.id ? "on" : ""}`}
+          onClick={() => onNavigate?.(p.id)}
+        >
+          <span className="ico">{p.icon}</span>
+          <span>{p.label}</span>
+        </button>
+      ))}
+    </>
+  );
+}
+
 export default function PlatformConsole() {
   const router = useRouter();
   const logout = useLogout();
@@ -1549,9 +1664,26 @@ export default function PlatformConsole() {
   const [overview, setOverview] = useState<PlatformOverview | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [globQ, setGlobQ] = useState("");
+  const [globOpen, setGlobOpen] = useState(false);
+  const [globLoading, setGlobLoading] = useState(false);
+  const [globError, setGlobError] = useState<string | null>(null);
+  const [globResults, setGlobResults] = useState<{
+    tenants: PlatformTenant[];
+    mailboxes: PlatformMailbox[];
+    domains: PlatformDomain[];
+  } | null>(null);
+  const [pendingMailbox, setPendingMailbox] = useState<{ tenantId: string; mailboxId: string } | null>(null);
+  const [pendingDomain, setPendingDomain] = useState<{ tenantId: string; domainId: string } | null>(null);
 
-  const isPlatform = !!getPlatformToken();
-  // const { data: me, isLoading: meLoading } = useMe();
+  // The platform token lives in localStorage, which does not exist during
+  // SSR. Reading it at render time makes the server tree differ from the
+  // client tree (a staff refresh of /support with a stored token) and throws
+  // a React hydration error. Resolve it into state on mount so the first
+  // render always matches the server.
+  const [mounted, setMounted] = useState(false);
+  const [isPlatform, setIsPlatform] = useState(false);
 
   // Only fetch /auth/me when we're a tenant user. Staff platform tokens are
   // not valid for /auth/me, and calling it triggers a 401 -> refresh-fail ->
@@ -1565,6 +1697,16 @@ export default function PlatformConsole() {
   // and store ONLY the platform token (tenant sessions stay untouched).
   // TODO: remove this bypass once the staff login flow is sorted.
   const [devBypass, setDevBypass] = useState(false);
+  // True once the dev-bypass / staff-token resolution above has finished. We
+  // keep the loading gate up until then so non-staff tenant roles don't see a
+  // "You have no access" flash while the bypass is about to promote them to
+  // the staff console.
+  const [bypassSettled, setBypassSettled] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    setIsPlatform(!!getPlatformToken());
+  }, []);
 
   const loadOverview = useCallback(async () => {
     setOverviewLoading(true);
@@ -1596,7 +1738,10 @@ export default function PlatformConsole() {
             });
             const src = data?.session ?? data?.tokens ?? data ?? {};
             const platformToken = src?.platformToken ?? data?.platformToken;
-            if (platformToken) setPlatformToken(platformToken);
+            if (platformToken) {
+              setPlatformToken(platformToken);
+              setIsPlatform(true);
+            }
           } catch {
             // fall through — the isLoggedIn() check below redirects to /login
           }
@@ -1607,6 +1752,7 @@ export default function PlatformConsole() {
         router.replace("/login");
         return;
       }
+      setBypassSettled(true);
       loadOverview();
     })();
     return () => {
@@ -1614,26 +1760,93 @@ export default function PlatformConsole() {
     };
   }, [router, loadOverview]);
 
-  // Backend's requireSupportAccess only allows a staff platform token OR a
-  // tenant member with role SUPPORT — OWNER/ADMIN/MEMBER get a 403 from every
-  // call on this page. Match that here so they never see the shell either.
-  // useEffect(() => {
-  //   if (isPlatform) return;
-  //   if (!meLoading && me && me.membership.role !== "SUPPORT") {
-  //     router.replace(resolveWorkspaceHref(me.membership.role));
-  //   }
-  // }, [isPlatform, me, meLoading, router]);
+  // Workspace guard: this is the support workspace, so a tenant session may
+  // only be here if it was opened for support.
+  //
+  // The commented-out version below gated on the role and redirected to
+  // whichever console the role implied. That let a session opened elsewhere
+  // render this shell — every API call 403s, but the console still drew, the
+  // same way /owner drew for an admin session. Reaching another workspace
+  // requires signing in for it, so the session that belongs elsewhere is
+  // ended here rather than merely redirected.
+  //
+  // Staff are exempt: a platform token has no tenant membership and no
+  // workspace scope, and it is the legitimate way into this console.
+  useEffect(() => {
+    if (isPlatform || meLoading || !me) return;
+    if (me.workspace === "SUPPORT") return;
+
+    setSignOutNotice(workspaceDenialNotice("SUPPORT", me.workspace));
+    clearTokens();
+    router.replace("/login");
+  }, [isPlatform, me, meLoading, router]);
 
   const openTenant = useCallback((tenantId: string) => {
     setPendingTenant(tenantId);
     setPage("tenants");
   }, []);
 
+  const runGlobalSearch = useCallback(async (raw: string) => {
+    const query = raw.trim();
+    setGlobLoading(true);
+    setGlobError(null);
+    try {
+      const [t, m, d] = await Promise.all([
+        searchPlatformTenants(query, 8),
+        searchPlatformMailboxes(query, 8),
+        searchPlatformDomains(query, 8),
+      ]);
+      setGlobResults({ tenants: t.tenants, mailboxes: m.mailboxes, domains: d.domains });
+      setGlobOpen(true);
+    } catch (e) {
+      setGlobError(apiErrorMessage(e));
+      setGlobResults(null);
+      setGlobOpen(true);
+    } finally {
+      setGlobLoading(false);
+    }
+  }, []);
+
+  const closeGlobalSearch = useCallback(() => {
+    setGlobOpen(false);
+    setGlobQ("");
+    setGlobResults(null);
+    setGlobError(null);
+  }, []);
+
+  const openGlobTenant = useCallback((tenantId: string) => {
+    closeGlobalSearch();
+    openTenant(tenantId);
+  }, [closeGlobalSearch, openTenant]);
+
+  const openGlobMailbox = useCallback((tenantId: string, mailboxId: string) => {
+    closeGlobalSearch();
+    setPendingMailbox({ tenantId, mailboxId });
+    setPage("mailboxes");
+  }, [closeGlobalSearch]);
+
+  const openGlobDomain = useCallback((tenantId: string, domainId: string) => {
+    closeGlobalSearch();
+    setPendingDomain({ tenantId, domainId });
+    setPage("domains");
+  }, [closeGlobalSearch]);
+
+  // Hydration guard: until mount, render the exact same static tree the
+  // server sent (localStorage-aware state is only resolved in the effect
+  // above). Everything below can then safely depend on the browser.
+  if (!mounted) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-sm">Loading…</div>
+      </div>
+    );
+  }
+
   // Loading gate: don't render the staff console until we know whether the
   // user has staff platform access OR the tenant SUPPORT role. Without this,
   // a member briefly sees the console UI before the guard redirects them.
   // Staff platform users skip this because their access doesn't depend on /auth/me.
-  if (!isPlatform && (meLoading || !me)) {
+  if (!isPlatform && (meLoading || !me || !bypassSettled)) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-sm">Loading…</div>
@@ -1645,7 +1858,7 @@ export default function PlatformConsole() {
   // }
 
   // Loading gate change:
-  if (!isPlatform && me && me.membership.role !== "SUPPORT") {
+  if (!isPlatform && me && me.membership.role !== "SUPPORT" && bypassSettled) {
     return <AccessDenied role={me.membership.role} dashboard="support" />;
   }
 
@@ -1655,47 +1868,142 @@ export default function PlatformConsole() {
         {supportStyles}
       </style>
 
-      <div className="topbar">
-        <div className="brand">
-          {/* <img src="/ZoikoMail_Logo_DarkBG_PNG.png" alt="Zoiko Mail" style={{ height: 28, width: "auto" }} /> */}
-          <Image src="/ZoikoMail_Logo_DarkBG_PNG.png" width={400} height={100} alt="Zoiko Mail" style={{ height: 28, width: "auto" }} priority />
-        </div>
-        <div className="gsearch" style={{ flex: 1, maxWidth: 420, marginLeft: 16 }}>
-          <span>⌕</span>
-          <input placeholder="Cross-tenant search (API endpoint)…" readOnly />
-        </div>
-        <div className="sp" />
-        <ThemeToggle />
-        <span className={`pill ${isPlatform ? "violet" : "accent"}`}>
-          {isPlatform ? "Platform (staff)" : "Support member"}
-        </span>
-        <div className="who">
-          <div className="avatar">P</div>
-          <div>
-            <b>Support Staff</b>
-            <span>Staff Console</span>
+      {mobileOpen && (
+        <div className="drawer">
+          <div className="scrim" onClick={() => setMobileOpen(false)} />
+          <div className="panel">
+<div className="drawerhead">
+              <Image src="/ZoikoMail_Logo_DarkBG_PNG.png" width={400} height={100} className="h-10 w-auto" alt="Zoiko Mail" priority />
+              <button className="menubtn" onClick={() => setMobileOpen(false)} aria-label="Close menu">
+                ✕
+              </button>
+            </div>
+            <RailMenu
+              current={page}
+              onNavigate={(id) => {
+                setPage(id);
+                setMobileOpen(false);
+              }}
+            />
           </div>
-          <button className="btn sm" onClick={() => logout.mutate()}>
-            Log out
-          </button>
         </div>
-      </div>
+      )}
 
       <div className="shell">
         <nav className="rail">
-          {PAGES.map((p) => (
-            <button
-              key={p.id}
-              className={`railitem ${page === p.id ? "on" : ""}`}
-              onClick={() => setPage(p.id)}
-            >
-              <span className="ico">{p.icon}</span>
-              <span>{p.label}</span>
-            </button>
-          ))}
+          <div className="rail-brand">
+            <Image src="/ZoikoMail_Logo_DarkBG_PNG.png" width={400} height={100} className="h-10 w-auto" alt="Zoiko Mail" priority />
+          </div>
+          <RailMenu current={page} onNavigate={setPage} />
         </nav>
 
-        <main>
+        <div className="body">
+          <div className="topbar">
+            <button className="menubtn" onClick={() => setMobileOpen(true)} aria-label="Open menu">
+              ☰
+            </button>
+            <div style={{ position: "relative", flex: 1, maxWidth: 420, marginLeft: 16, minWidth: 0 }}
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setGlobOpen(false);
+              }}
+            >
+              <div className="gsearch" style={{ flex: 1, maxWidth: "none", marginLeft: 0 }}>
+                <span>{globLoading ? "…" : "⌕"}</span>
+                <input
+                  placeholder="Search tenants, mailboxes, domains…"
+                  value={globQ}
+                  onChange={(e) => {
+                    setGlobQ(e.target.value);
+                    if (e.target.value.trim() === "") setGlobOpen(false);
+                  }}
+                  onFocus={() => {
+                    if (globResults || globError) setGlobOpen(true);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void runGlobalSearch(globQ);
+                    if (e.key === "Escape") setGlobOpen(false);
+                  }}
+                />
+              </div>
+              {globOpen && (
+                <div className="globdd">
+                  {globError && <div className="gitem muted">{globError}</div>}
+                  {globResults &&
+                    (globResults.tenants.length === 0 &&
+                    globResults.mailboxes.length === 0 &&
+                    globResults.domains.length === 0 ? (
+                      <div className="gitem muted">No matches for “{globQ}”.</div>
+                    ) : (
+                      <>
+                        {globResults.tenants.length > 0 && (
+                          <>
+                            <div className="gh">Tenants</div>
+                            {globResults.tenants.map((t) => (
+                              <button key={t.id} className="gitem" onMouseDown={() => openGlobTenant(t.id)}>
+                                <span className="gname">{t.name}</span>
+                                <span className="gsub">
+                                  {t.planCode} · {t.mailboxes} mailboxes · {t.status}
+                                </span>
+                              </button>
+                            ))}
+                          </>
+                        )}
+                        {globResults.mailboxes.length > 0 && (
+                          <>
+                            <div className="gh">Mailboxes</div>
+                            {globResults.mailboxes.map((m) => (
+                              <button
+                                key={m.id}
+                                className="gitem"
+                                onMouseDown={() => openGlobMailbox(m.tenantId, m.id)}
+                              >
+                                <span className="gname">{m.address}</span>
+                                <span className="gsub">{m.tenantName}</span>
+                              </button>
+                            ))}
+                          </>
+                        )}
+                        {globResults.domains.length > 0 && (
+                          <>
+                            <div className="gh">Domains</div>
+                            {globResults.domains.map((d) => (
+                              <button
+                                key={d.id}
+                                className="gitem"
+                                onMouseDown={() => openGlobDomain(d.tenant.id, d.id)}
+                              >
+                                <span className="gname">{d.domainName}</span>
+                                <span className="gsub">
+                                  {d.tenant.name} · {d.verificationStatus}
+                                </span>
+                              </button>
+                            ))}
+                          </>
+                        )}
+                      </>
+                    ))}
+                </div>
+              )}
+            </div>
+            <div className="sp" />
+            <ThemeToggle />
+            <span className={`pill ${isPlatform ? "violet" : "accent"}`}>
+              {isPlatform ? "Platform (staff)" : "Support member"}
+            </span>
+            <div className="who">
+              <div className="avatar">P</div>
+              <div>
+                <b>Support Staff</b>
+                <span>Staff Console</span>
+              </div>
+              <button className="btn sm" onClick={() => logout.mutate()}>
+                Log out
+              </button>
+            </div>
+          </div>
+
+          <main>
+          <div className="page">
           <div className="crumbs">
             <span>Support Workspace</span>
             <span>/</span>
@@ -1723,15 +2031,27 @@ export default function PlatformConsole() {
               onConsumed={() => setPendingTenant(null)}
             />
           )}
-          {page === "mailboxes" && <MailboxesPage />}
-          {page === "domains" && <DomainsPage />}
+          {page === "mailboxes" && (
+            <MailboxesPage
+              initialOpen={pendingMailbox}
+              onConsumed={() => setPendingMailbox(null)}
+            />
+          )}
+          {page === "domains" && (
+            <DomainsPage
+              initialOpen={pendingDomain}
+              onConsumed={() => setPendingDomain(null)}
+            />
+          )}
           {page === "suppressions" && <SuppressionsPage />}
           {page === "provider-events" && <ProviderEventsPage />}
           {page === "delivery-events" && <DeliveryEventsPage />}
           {page === "jobs" && <JobsPage />}
           {page === "audit" && <AuditPage />}
           {page === "grants" && <GrantsPage />}
-        </main>
+          </div>
+          </main>
+        </div>
       </div>
     </div>
   );

@@ -96,16 +96,18 @@ async function resetAcmeFixture(): Promise<void> {
   await prisma.$executeRawUnsafe(`ALTER TABLE audit_events DISABLE TRIGGER audit_events_no_update`);
   await prisma.$executeRawUnsafe(`ALTER TABLE audit_events DISABLE TRIGGER audit_events_no_truncate`);
 
-  // Deleting the tenant cascades memberships, mailboxes, domains, connectors,
-  // audit events, notifications, grants and policies.
-  await prisma.tenant.deleteMany({ where: { id: ACME_TENANT_ID } });
-  await prisma.appUser.deleteMany({ where: { email: { endsWith: "@acme.test" } } });
-  await prisma.appUser.deleteMany({ where: { email: { endsWith: "@zoikosupport.test" } } });
-
-  // Re-enable the triggers.
-  await prisma.$executeRawUnsafe(`ALTER TABLE audit_events ENABLE TRIGGER audit_events_no_delete`);
-  await prisma.$executeRawUnsafe(`ALTER TABLE audit_events ENABLE TRIGGER audit_events_no_update`);
-  await prisma.$executeRawUnsafe(`ALTER TABLE audit_events ENABLE TRIGGER audit_events_no_truncate`);
+  try {
+    // Deleting the tenant cascades memberships, mailboxes, domains, connectors,
+    // audit events, notifications, grants and policies.
+    await prisma.tenant.deleteMany({ where: { id: ACME_TENANT_ID } });
+    await prisma.appUser.deleteMany({ where: { email: { endsWith: "@acme.test" } } });
+    await prisma.appUser.deleteMany({ where: { email: { endsWith: "@zoikosupport.test" } } });
+  } finally {
+    // Re-enable the triggers — always, even if seeding fails.
+    await prisma.$executeRawUnsafe(`ALTER TABLE audit_events ENABLE TRIGGER audit_events_no_delete`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE audit_events ENABLE TRIGGER audit_events_no_update`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE audit_events ENABLE TRIGGER audit_events_no_truncate`);
+  }
 }
 
 async function main(): Promise<void> {

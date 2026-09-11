@@ -78,15 +78,17 @@ const envSchema = z.object({
   // "gcp" routes through Secret Manager and fails loudly until it is wired.
   SECRET_STORE: z.enum(["env", "gcp"]).default("env"),
   SECRET_CACHE_TTL_MS: z.coerce.number().int().min(0).max(3_600_000).default(300_000),
+  // Where the env/file-backed writable store persists secrets for local dev
+  // (JSON/real Secret Manager is used in production). Must be a local dir that
+  // is gitignored; connector OAuth tokens are written here.
+  SECRET_FILE_DIR: z.string().min(1).default(".secrets"),
+  // GCP Secret Manager project id. When absent the SDK falls back to ADC /
+  // GOOGLE_CLOUD_PROJECT; set it explicitly for multi-account environments.
+  SECRET_MANAGER_PROJECT: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
   // Google OAuth 2.0 client ID and allowed hosted domain for login.
   GOOGLE_CLIENT_ID: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
   GOOGLE_ALLOWED_HD: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
   FLAG_GOOGLE_LOGIN_ENABLED: boolFlag("false"),
-  // Feature flags and kill switches — Infrastructure spec §15. A global "false"
-  // is a kill switch: no tenant/domain/mailbox override can re-enable it.
-  // Track B capabilities default off so hosted mail ships built-but-disabled.
-  // Google OAuth — used for connecting Gmail accounts via OAuth 2.0
-  // GOOGLE_CLIENT_ID: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
   GOOGLE_CLIENT_SECRET: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
   GOOGLE_REDIRECT_URI: z.preprocess(blankAsUndefined, z.string().url().optional()),
   // The client ID the browser's Sign In with Google button is initialized
@@ -104,8 +106,35 @@ const envSchema = z.object({
   STRIPE_PUBLISHABLE_KEY: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
   FLAG_CONNECTOR_GMAIL_ENABLED: boolFlag("true"),
   FLAG_CONNECTOR_M365_ENABLED: boolFlag("true"),
+  // Gmail connector — users.watch Pub/Sub push topic + catch-up sync cadence.
+  // GMAIL_PUBSUB_TOPIC is optional: without it watch is skipped and sync runs
+  // on the catch-up interval only.
+  GMAIL_PUBSUB_TOPIC: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  GMAIL_SYNC_INTERVAL_MS: z.coerce.number().int().min(60_000).default(300_000),
+  GMAIL_HISTORY_PAGE_SIZE: z.coerce.number().int().min(1).max(500).default(100),
+  // Microsoft 365 connector — MSAL confidential client + Graph change
+  // notifications. All optional until the app is provisioned.
+  MICROSOFT_CLIENT_ID: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  MICROSOFT_CLIENT_SECRET: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  MICROSOFT_TENANT_ID: z.string().min(1).default("common"),
+  MICROSOFT_REDIRECT_URI: z.preprocess(blankAsUndefined, z.string().url().optional()),
+  MICROSOFT_SYNC_INTERVAL_MS: z.coerce.number().int().min(60_000).default(300_000),
+  // Public HTTPS URL receiving Graph change notifications + lifecycle events.
+  MICROSOFT_NOTIFICATION_URL: z.preprocess(blankAsUndefined, z.string().url().optional()),
+  MICROSOFT_NOTIFICATION_CLIENT_STATE: z.string().min(8).default("zoiko-connector-beta"),
   FLAG_AI_EXTRACTION_ENABLED: boolFlag("true"),
   FLAG_AI_DRAFTING_ENABLED: boolFlag("true"),
+  // AI extraction pipeline (ZM-BE-007/008/009): provider is configurable.
+  // "mock" runs deterministic heuristics with no external calls (tests + local
+  // dev); "openai" requires OPENAI_API_KEY.
+  AI_PROVIDER: z.enum(["mock", "openai"]).default("mock"),
+  OPENAI_API_KEY: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  OPENAI_MODEL: z.string().min(1).default("gpt-4o-mini"),
+  // OpenAI SDK timeout for a single request and retry budget for transient
+  // failures (429 rate limits, 5xx, connection errors). The SDK backs off
+  // automatically; exhausted retries surface as a retryable job failure.
+  OPENAI_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(300_000).default(30_000),
+  OPENAI_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
   FLAG_HOSTED_MAIL_PILOT_ENABLED: boolFlag("false"),
   FLAG_OUTBOUND_SENDING_ENABLED: boolFlag("true"),
   FLAG_CUSTOM_DOMAIN_ENABLED: boolFlag("false"),
@@ -173,11 +202,6 @@ const envSchema = z.object({
       message: "GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI configure the Gmail connector and require GOOGLE_CLIENT_ID too; sign-in alone needs only GOOGLE_CLIENT_ID",
     });
   }
-  // Google OAuth vars must all be present or all absent
-  // const googleVars = [value.GOOGLE_CLIENT_ID, value.GOOGLE_CLIENT_SECRET, value.GOOGLE_REDIRECT_URI] as const;
-  // if (googleVars.some(Boolean) && !googleVars.every(Boolean)) {
-  //   context.addIssue({ code: "custom", path: ["GOOGLE_CLIENT_ID"], message: "GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI must all be set together" });
-  // }
 });
 
 export type Env = z.infer<typeof envSchema>;

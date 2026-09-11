@@ -42,6 +42,7 @@ export interface EmailMessage {
   fromAddress: string | null;
   fromName: string | null;
   createdAt: string;
+  sourceAiActionId?: string | null;
   recipients: MailRecipient[];
   attachments: MailAttachment[];
   author: { id: string; email: string; displayName: string };
@@ -74,14 +75,6 @@ export interface ListMailResponse {
   items: MailItem[];
   pagination: MailPagination;
 }
-
-// export interface ListMailParams {
-//   folder?: MailFolder;
-//   starredOnly?: boolean;
-//   labelId?: string;
-//   page?: number;
-//   limit?: number;
-// }
 
 export interface ListMailParams {
   folder?: MailFolder;

@@ -27,6 +27,16 @@ async function activateAllowSendingPolicy(accessToken: string) {
 describe("Mail module", () => {
   it("creates a draft and fails closed when no sending policy is active", async () => {
     const owner = await registerUser(app, { email: "mail-policy@zoiko.test" });
+
+    // Workspace creation now seeds a permissive default SENDING policy, so the
+    // no-active-policy state has to be reached deliberately. Archiving it keeps
+    // this test on its actual subject — that sending is refused when nothing
+    // authorises it — rather than on how many policies a new tenant starts with.
+    await prisma.tenantPolicy.updateMany({
+      where: { tenantId: owner.tenantId, type: "SENDING", status: "ACTIVE" },
+      data: { status: "ARCHIVED" },
+    });
+
     const draft = await request(app)
       .post("/api/v1/mail/drafts")
       .set(authHeader(owner.accessToken))
@@ -287,7 +297,7 @@ describe("Mail module", () => {
       .set(authHeader(outsider.accessToken)).send({ textBody: "Unauthorized" }).expect(404);
   });
 
-  it("deletes owned drafts and permanently cleans only the current mailbox trash", async () => {
+  it("soft-deletes owned drafts into trash and permanently cleans only the current mailbox trash", async () => {
     const owner = await registerUser(app, { email: "cleanup-owner@zoiko.test" });
     const member = await registerUser(app, { email: "cleanup-member@zoiko.test" });
     await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
@@ -300,7 +310,15 @@ describe("Mail module", () => {
       .send({ subject: "Unused", recipients: { to: ["outside@example.com"] } }).expect(201);
     await request(app).delete(`/api/v1/mail/drafts/${unusedDraft.body.data.id}`)
       .set(authHeader(memberToken)).expect(404);
+    // Deleting a draft moves it to TRASH (recoverable), not to the void.
     await request(app).delete(`/api/v1/mail/drafts/${unusedDraft.body.data.id}`)
+      .set(authHeader(owner.accessToken)).expect(200);
+    const ownerTrash = await request(app).get("/api/v1/mail?folder=TRASH")
+      .set(authHeader(owner.accessToken)).expect(200);
+    expect(ownerTrash.body.data.items.map((item: { messageId: string }) => item.messageId))
+      .toContain(unusedDraft.body.data.id);
+    // Permanently deleting from trash makes it truly gone.
+    await request(app).delete(`/api/v1/mail/${unusedDraft.body.data.id}`)
       .set(authHeader(owner.accessToken)).expect(200);
     await request(app).get(`/api/v1/mail/${unusedDraft.body.data.id}`)
       .set(authHeader(owner.accessToken)).expect(404);

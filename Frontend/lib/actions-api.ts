@@ -21,6 +21,7 @@ export interface ActionItem {
   priority: ActionPriority;
   status: ActionStatus;
   snoozedUntil: string | null;
+  sourceAiActionId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -52,11 +53,6 @@ export interface ListActionsParams {
   dueBefore?: string;  // ISO datetime, filters dueAt <= dueBefore
   dueAfter?: string;   // ISO datetime, filters dueAt >= dueAfter
 }
-
-// export async function listActions(): Promise<ActionItem[]> {
-//   const data = await apiRequest<ListActionsResponse>("/actions");
-//   return data.actions ?? [];
-// }
 
 export async function listActions(params?: ListActionsParams): Promise<ActionItem[]> {
   const query = new URLSearchParams();

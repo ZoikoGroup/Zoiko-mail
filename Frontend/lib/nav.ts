@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, Inbox, Link2, MessagesSquare, Bell, Sparkles,
-  Mail, Globe, Users, ShieldCheck, FileText, KeyRound, Settings,
+  Mail, KeyRound, Settings,
   type LucideIcon,
 } from "lucide-react";
 
@@ -77,37 +77,6 @@ export const MEMBER_NAV: NavItem[] = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-// ADMIN_NAV — items visible to OWNER / ADMIN on the admin dashboard.
-// Extends MEMBER_NAV with governance and domain-management items. The
-// admin dashboard route (/admin) does not exist yet in the codebase; this
-// array is defined here so the teammate building it has one place to plug
-// in extra items without touching the member config.
-// ---------------------------------------------------------------------------
-// export const ADMIN_NAV: NavItem[] = [
-//   ...MEMBER_NAV,
-
-  
-//   {
-//     section: "Track B · Hosted mail", label: "Domains & DNS", href: "/domains", icon: Globe, status: "soon",
-//     desc: "Add a domain and verify MX / SPF / DKIM / DMARC."
-//   },
-
-  
-//   {
-//     section: "Team & governance", label: "Members & roles", href: "/members", icon: Users, status: "soon",
-//     desc: "Invite teammates and manage roles."
-//   },
-//   {
-//     section: "Team & governance", label: "Policies", href: "/policies", icon: ShieldCheck, status: "soon",
-//     desc: "Control AI and data-handling policy for the workspace."
-//   },
-//   {
-//     section: "Team & governance", label: "Audit log", href: "/audit", icon: FileText, status: "soon",
-//     desc: "Every privileged and AI action, append-only."
-//   },
-// ];
-
 // Ordered, de-duplicated section names for grouped rendering.
 // Takes a nav array so callers pass whichever role's nav they're rendering.
 export function sectionsFor(nav: NavItem[]): string[] {
@@ -116,10 +85,3 @@ export function sectionsFor(nav: NavItem[]): string[] {
     return acc;
   }, []);
 }
-
-// Back-compat aliases so nothing that imports `NAV` or `SECTIONS` breaks
-// immediately — AppShell and app/page.tsx will be updated in the next steps
-// to use MEMBER_NAV / sectionsFor(MEMBER_NAV) explicitly, and then these
-// two lines can be removed.
-// export const NAV = MEMBER_NAV;
-// export const SECTIONS = sectionsFor(MEMBER_NAV);

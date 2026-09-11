@@ -8,8 +8,13 @@ import { env } from "../../config/env.js";
 import { generateOpaqueToken, hashToken } from "../../common/utils/tokenHash.js";
 import { hashPassword } from "../../common/utils/password.js";
 import { systemMailer } from "../../common/mailer/system-mailer.js";
+import {
+  draftInvitationLetter,
+  fullName,
+  type InvitationLetter,
+} from "./invitation-letter.js";
 import { logger } from "../../config/logger.js";
-import type { AcceptInvitationInput, AddMemberInput, CreateInvitationInput, UpdateMemberInput } from "./membership.schema.js";
+import type { AcceptInvitationInput, AddMemberInput, CreateInvitationInput, PreviewInvitationInput, UpdateMemberInput } from "./membership.schema.js";
 
 interface ActorContext {
   tenantId: string;
@@ -172,7 +177,13 @@ export class MembershipService {
           data: {
             email: input.email,
             passwordHash: await hashPassword(generateOpaqueToken()),
-            displayName: input.email.split("@")[0] ?? input.email,
+            // The invitee's own name when the inviter gave one, rather than
+            // the local part of their address. It is what every screen shows
+            // them as until they register and set it themselves.
+            displayName:
+              fullName(input.firstName, input.lastName) ??
+              input.email.split("@")[0] ??
+              input.email,
             status: "INVITED",
           },
         });
@@ -219,17 +230,70 @@ export class MembershipService {
     });
 
     // Send invitation email (fire-and-forget — don't block the response)
-    const tenant = await prisma.tenant.findUnique({ where: { id: context.tenantId }, select: { name: true } });
-    const actor = await prisma.appUser.findUnique({ where: { id: context.userId }, select: { displayName: true, email: true } });
+    const letter = await this.buildLetter(input, context);
     const acceptUrl = `${env.APP_URL}/accept-invitation?token=${invitationToken}`;
-    systemMailer.sendInvitationEmail(
-      input.email,
-      actor?.displayName ?? actor?.email ?? "A team member",
-      tenant?.name ?? "the workspace",
-      acceptUrl,
-    ).catch((err) => logger.error({ err }, "Failed to send invitation email"));
+    systemMailer
+      .sendInvitationEmail(input.email, letter, acceptUrl)
+      .catch((err) => logger.error({ err }, "Failed to send invitation email"));
 
     return { membership, invitationToken, expiresAt: inviteExpiresAt };
+  }
+
+  /**
+   * The letter this invitation will send.
+   *
+   * One place, used by both the preview and the send, so what the admin
+   * reviews is what actually goes out. An edited body replaces the drafted
+   * paragraphs and nothing else: the greeting, the accept button and the
+   * expiry footer are facts about the invitation rather than prose, so they
+   * are not the admin's to rewrite.
+   */
+  private async buildLetter(
+    input: CreateInvitationInput | PreviewInvitationInput,
+    context: ActorContext
+  ): Promise<InvitationLetter> {
+    const [tenant, actor] = await Promise.all([
+      prisma.tenant.findUnique({
+        where: { id: context.tenantId },
+        select: { name: true },
+      }),
+      prisma.appUser.findUnique({
+        where: { id: context.userId },
+        select: { displayName: true, email: true },
+      }),
+    ]);
+
+    const letter = draftInvitationLetter({
+      firstName: input.firstName,
+      lastName: input.lastName,
+      email: input.email,
+      role: input.role,
+      workspaceName: tenant?.name ?? "the workspace",
+      inviterName: actor?.displayName ?? actor?.email ?? "A team member",
+      expiresInHours: env.INVITATION_EXPIRES_IN_HOURS,
+    });
+
+    const edited = "letterBody" in input ? input.letterBody : undefined;
+    return edited && edited.length > 0
+      ? { ...letter, paragraphs: edited }
+      : letter;
+  }
+
+  /**
+   * Draft the letter without inviting anyone.
+   *
+   * Deliberately has no side effects — no membership, no account, no email —
+   * so an admin can read what would be sent, and change it, before a stranger
+   * receives anything. The role ceiling is still checked here: previewing an
+   * invitation the caller could not send would be a way to probe the
+   * boundary.
+   */
+  async previewInvitation(
+    input: PreviewInvitationInput,
+    context: ActorContext
+  ): Promise<InvitationLetter> {
+    assertAdminBoundary(context.role, input.role);
+    return this.buildLetter(input, context);
   }
 
   async acceptInvitation(input: AcceptInvitationInput, context: InviteeContext) {

@@ -75,6 +75,8 @@ export function authenticateStaff(
         role: decoded.role,
         // Older tokens minted before Phase 4 may lack platformRole; default NONE.
         platformRole: decoded.platformRole ?? "NONE",
+        // Guaranteed by isAccessTokenPayload, which now requires a console.
+        workspace: decoded.workspace!,
         type: "access",
       };
       next();

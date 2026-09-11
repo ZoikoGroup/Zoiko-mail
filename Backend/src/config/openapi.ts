@@ -381,6 +381,22 @@ export const openApiDocument = {
       get: { tags: ["AI"], summary: "List the user's governed AI actions", security: bearer, responses: { "200": ok("AI actions returned") } },
       post: { tags: ["AI"], summary: "Request a policy-checked AI action without invoking a provider", security: bearer, responses: { "202": ok("AI action queued") } },
     },
+    "/api/v1/ai/actions/{aiActionId}/result": {
+      parameters: [{ name: "aiActionId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+      patch: {
+        tags: ["AI"], summary: "Record an AI extraction/draft result on a pending action (OWNER/ADMIN)",
+        security: bearer, requestBody: jsonBody({ type: "object", properties: { output: { type: "object" }, confidenceScore: { type: "number" }, sourceExcerpt: { type: "string" } }, required: ["output", "confidenceScore", "sourceExcerpt"] }),
+        responses: { "200": ok("Action completed"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/ai/actions/{aiActionId}/review": {
+      parameters: [{ name: "aiActionId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+      patch: {
+        tags: ["AI"], summary: "Confirm or dismiss a completed AI action; confirming materializes a Commitment",
+        security: bearer, requestBody: jsonBody({ type: "object", properties: { status: { type: "string", enum: ["CONFIRMED", "DISMISSED"] } }, required: ["status"] }),
+        responses: { "200": ok("Action reviewed"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
     "/api/v1/actions": {
       get: { tags: ["Actions"], summary: "List owned commitments", security: bearer, responses: { "200": ok("Actions returned") } },
       post: { tags: ["Actions"], summary: "Create or assign a source-linked commitment", security: bearer, responses: { "201": ok("Action created") } },

@@ -62,27 +62,6 @@ export interface JoinWorkspaceInput {
   membershipId: string;
 }
 
-// export interface CreateWorkspaceResponse {
-//   success: boolean;
-//   data: {
-//     tenant: {
-//       id: string;
-//       name: string;
-//       slug: string;
-//       planCode: string;
-//     };
-
-//     membership: {
-//       id: string;
-//       role: string;
-//     };
-
-//     accessToken: string;
-//     refreshToken: string;
-//     expiresIn: string;
-//   };
-// }
-
 export interface CreateWorkspaceResponse {
   accessToken: string;
   refreshToken: string;
@@ -142,10 +121,6 @@ export interface AuthResponse {
   state?: string;
   platformRole?: string;
   platformToken?: string;
-  // OTP_REQUIRED: Google verified the identity, the code is still owed.
-  // The address is echoed back so the code screen can name it without
-  // the client having to remember which account was picked.
-  sentTo?: string;
 }
 
 export interface MeResponse {
@@ -153,7 +128,14 @@ export interface MeResponse {
   email: string;
   displayName: string;
   tenant: { id: string; name: string; planCode: string };
+  /** The acting role, already narrowed by the session's workspace scope. */
   membership: { id: string; role: "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT" | string };
+  /**
+   * The workspace this session was opened for. Every shell gates on this, so
+   * it must come from the server: a role alone cannot say which console a
+   * session belongs to, because one role can sign into more than one.
+   */
+  workspace?: "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT";
 }
 
 // Pull tokens out regardless of which shape the endpoint used.
@@ -170,18 +152,6 @@ function extractTokens(data: any): { accessToken?: string; refreshToken?: string
     platformToken: src?.platformToken ?? data?.platformToken,
   };
 }
-
-// export async function login(input: LoginInput): Promise<AuthResponse> {
-//   const data = await apiRequest<AuthResponse>("/auth/login", {
-//     method: "POST",
-//     body: input,
-//     auth: false,
-//   });
-//   const { accessToken, refreshToken, platformToken } = extractTokens(data);
-//   if (accessToken) setTokens(accessToken, refreshToken);
-//   if (platformToken) setPlatformToken(platformToken);
-//   return data;
-// }
 
 export async function login(input: LoginInput): Promise<AuthResponse> {
   const data = await apiRequest<AuthResponse>("/auth/login", {
@@ -205,27 +175,6 @@ export async function login(input: LoginInput): Promise<AuthResponse> {
   return data;
 }
 
-export interface GoogleLoginInput {
-  credential: string;
-  tenantId?: string;
-}
-
-export async function loginWithGoogle(input: GoogleLoginInput): Promise<AuthResponse> {
-  const data = await apiRequest<AuthResponse>("/auth/google", {
-    method: "POST",
-    body: input,
-    auth: false,
-  });
-  const { accessToken, refreshToken, platformToken } = extractTokens(data);
-
-  clearTokens();
-  clearPlatformToken();
-
-  if (accessToken) setTokens(accessToken, refreshToken);
-  if (platformToken) setPlatformToken(platformToken);
-  return data;
-}
-
 export async function googleLogin(idToken: string): Promise<AuthResponse> {
   const data = await apiRequest<AuthResponse>("/auth/google", {
     method: "POST",
@@ -240,42 +189,6 @@ export async function googleLogin(idToken: string): Promise<AuthResponse> {
   if (accessToken) setTokens(accessToken, refreshToken);
   if (platformToken) setPlatformToken(platformToken);
   return data;
-}
-
-/**
- * Second leg of Google sign-in: the emailed code in exchange for a session.
- *
- * Session handling is identical to `login` and `googleLogin` because the
- * response is the same AuthState union — this is where a Google sign-in
- * actually becomes a session, so it is the first point tokens exist.
- */
-export async function googleVerifyOtp(
-  pendingToken: string,
-  code: string
-): Promise<AuthResponse> {
-  const data = await apiRequest<AuthResponse>("/auth/google/verify-otp", {
-    method: "POST",
-    body: { pendingToken, code },
-    auth: false,
-  });
-  const { accessToken, refreshToken, platformToken } = extractTokens(data);
-
-  // A new session must replace any previous one, for the same reason as login.
-  clearTokens();
-  clearPlatformToken();
-  if (accessToken) setTokens(accessToken, refreshToken);
-  if (platformToken) setPlatformToken(platformToken);
-  return data;
-}
-
-export async function googleResendOtp(
-  pendingToken: string
-): Promise<{ cooldownMs: number }> {
-  return apiRequest<{ cooldownMs: number }>("/auth/google/resend-otp", {
-    method: "POST",
-    body: { pendingToken },
-    auth: false,
-  });
 }
 
 export async function register(input: RegisterInput): Promise<AuthResponse> {

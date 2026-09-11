@@ -55,6 +55,10 @@ export async function getGoogleAuthUrl(): Promise<{ url: string }> {
   return apiRequest<{ url: string }>("/connectors/auth/google");
 }
 
+export async function getMicrosoftAuthUrl(): Promise<{ url: string }> {
+  return apiRequest<{ url: string }>("/connectors/auth/microsoft");
+}
+
 // ---- admin endpoints (OWNER/ADMIN) ----------------------------------------
 // Response shapes not yet confirmed, so these return `unknown` and the UI reads
 // them defensively. Tighten the types once the real responses are captured.

@@ -1,3 +1,5 @@
+import type { WorkspaceScope } from "../../common/types/jwt.js";
+
 export const AuditEventTypes = {
   USER_REGISTERED: "USER_REGISTERED",
   WORKSPACE_CREATED: "WORKSPACE_CREATED",
@@ -48,6 +50,12 @@ export interface AuthSessionResponse {
     id: string;
     role: string;
   };
+  /**
+   * The console this session is bound to. The client routes on this rather
+   * than on the role, so a session can never be carried into a console it
+   * was not issued for.
+   */
+  workspace: WorkspaceScope;
 }
 
 export interface TenantSelectionResponse {
