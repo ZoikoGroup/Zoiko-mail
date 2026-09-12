@@ -205,21 +205,21 @@ export class MembershipService {
 
       const result = existing
         ? await tx.tenantMembership.update({
-            where: { id: existing.id },
-            data: { role: input.role, status: "INVITED", inviteToken, inviteExpiresAt },
-            select: memberSelect,
-          })
+          where: { id: existing.id },
+          data: { role: input.role, status: "INVITED", inviteToken, inviteExpiresAt },
+          select: memberSelect,
+        })
         : await tx.tenantMembership.create({
-            data: {
-              tenantId: context.tenantId,
-              userId: user.id,
-              role: input.role,
-              status: "INVITED",
-              inviteToken,
-              inviteExpiresAt,
-            },
-            select: memberSelect,
-          });
+          data: {
+            tenantId: context.tenantId,
+            userId: user.id,
+            role: input.role,
+            status: "INVITED",
+            inviteToken,
+            inviteExpiresAt,
+          },
+          select: memberSelect,
+        });
 
       await this.audit(tx, context, "MEMBERSHIP_INVITED", result.id, {
         userId: user.id,
@@ -353,6 +353,21 @@ export class MembershipService {
 
       // Enforce the tenant-level user limit before the invitee becomes active.
       await billingService.assertUserWithinLimit(invitation.tenantId, 1);
+
+      // Promote the placeholder AppUser from INVITED → ACTIVE.
+      // createInvitation creates the user with status INVITED when they
+      // don't have an account yet; accepting the invitation proves they
+      // control the email, so activate the account.
+      const invitedUser = await tx.appUser.findUnique({ where: { id: invitation.userId } });
+      if (invitedUser && invitedUser.status === "INVITED") {
+        await tx.appUser.update({
+          where: { id: invitation.userId },
+          data: {
+            status: "ACTIVE",
+            emailVerifiedAt: invitedUser.emailVerifiedAt ?? new Date(),
+          },
+        });
+      }
 
       const membership = await tx.tenantMembership.update({
         where: { id: invitation.id },
