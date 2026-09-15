@@ -17,6 +17,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchActiveSupportGrant,
   fetchAuditEvents,
+  exportAuditEvents,
   fetchCommitments,
   fetchConnectors,
   fetchDashboard,
@@ -49,6 +50,8 @@ import {
   deleteForwarding,
 } from "./admin-queries";
 import type {
+  AuditPage,
+  AuditQuery,
   GroupAssigneeDto,
   MailboxRoutingDto,
   InvitationDraftInput,
@@ -252,10 +255,35 @@ export function useRemoveFromGroup() {
   );
 }
 
-export function useAuditEvents(): QueryLike<AuditEventDto[]> {
+/**
+ * One page of the audit log, filtered by the server.
+ *
+ * The query is part of the key, so changing a category or a date range is a
+ * new read rather than a re-filter of what happened to be in memory.
+ * `placeholderData` keeps the previous page on screen while the next one
+ * loads, so paging does not blink through an empty table.
+ */
+export function useAuditEvents(query: AuditQuery = {}): QueryLike<AuditPage> {
   return shape(
-    useQuery({ queryKey: ["audit"], queryFn: () => fetchAuditEvents(50), ...LIVE })
+    useQuery({
+      queryKey: ["audit", query],
+      queryFn: () => fetchAuditEvents(query),
+      placeholderData: (previous) => previous,
+      ...LIVE,
+    })
   );
+}
+
+/**
+ * Download the audit log.
+ *
+ * A mutation rather than a query: it is an action with a side effect the
+ * server records, and it should run when asked rather than when a key changes.
+ */
+export function useExportAuditEvents() {
+  return useMutation({
+    mutationFn: (query: AuditQuery) => exportAuditEvents(query),
+  });
 }
 
 export function useConnectors(): QueryLike<ConnectorDto[]> {

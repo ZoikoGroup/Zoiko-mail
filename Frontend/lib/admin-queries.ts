@@ -15,7 +15,7 @@
  *     one — a fabricated MFA method or last-seen time is worse than an honest
  *     blank, because it reads as real.
  */
-import { ApiError, apiRequest } from "./api-client";
+import { ApiError, apiDownload, apiRequest } from "./api-client";
 import type {
   AuditEventDto,
   CommitmentDto,
@@ -305,11 +305,77 @@ function toAuditEvent(e: ApiAuditEvent): AuditEventDto {
   };
 }
 
-export async function fetchAuditEvents(limit = 50): Promise<AuditEventDto[]> {
-  const res = await apiRequest<{ events: ApiAuditEvent[] }>(
-    `/audit/events?limit=${limit}`
+/**
+ * What the audit screen can ask the server for.
+ *
+ * All of it goes over the wire. The screen used to read a fixed 50 rows and
+ * filter them in the browser, so a category or a date range answered from the
+ * newest 50 events and reported an empty result with total confidence when
+ * the matching rows were older than that.
+ */
+export interface AuditQuery {
+  page?: number;
+  limit?: number;
+  /** Event-type prefixes, OR-ed. A category is a set of them, not one type. */
+  eventTypePrefix?: string[];
+  /** ISO instants; the server refuses a range that ends before it starts. */
+  from?: string;
+  to?: string;
+}
+
+export interface AuditPage {
+  events: AuditEventDto[];
+  pagination: { page: number; limit: number; total: number; totalPages: number };
+}
+
+function auditSearchParams(query: AuditQuery): URLSearchParams {
+  const params = new URLSearchParams();
+  if (query.page) params.set("page", String(query.page));
+  if (query.limit) params.set("limit", String(query.limit));
+  // Repeated rather than joined: the server reads them as a list, and a comma
+  // would become part of one prefix.
+  for (const prefix of query.eventTypePrefix ?? []) {
+    params.append("eventTypePrefix", prefix);
+  }
+  if (query.from) params.set("from", query.from);
+  if (query.to) params.set("to", query.to);
+  return params;
+}
+
+export async function fetchAuditEvents(query: AuditQuery = {}): Promise<AuditPage> {
+  const params = auditSearchParams({ limit: 25, page: 1, ...query });
+  const res = await apiRequest<{
+    events: ApiAuditEvent[];
+    pagination?: AuditPage["pagination"];
+  }>(`/audit/events?${params.toString()}`);
+
+  const events = (res.events ?? []).map(toAuditEvent);
+  return {
+    events,
+    // A server that sends no pagination block still gets a truthful one rather
+    // than a fabricated total: what came back is all that is known to exist.
+    pagination: res.pagination ?? {
+      page: query.page ?? 1,
+      limit: query.limit ?? 25,
+      total: events.length,
+      totalPages: 1,
+    },
+  };
+}
+
+/**
+ * Download every row the current filters match, not the page on screen.
+ *
+ * Page and limit are deliberately dropped: an export that paginated would be
+ * the defect it exists to fix.
+ */
+export async function exportAuditEvents(query: AuditQuery = {}): Promise<void> {
+  const params = auditSearchParams({ ...query, page: undefined, limit: undefined });
+  const suffix = params.toString();
+  await apiDownload(
+    `/audit/events/export${suffix ? `?${suffix}` : ""}`,
+    "audit-log.csv"
   );
-  return (res.events ?? []).map(toAuditEvent);
 }
 
 /* ── connectors ────────────────────────────────────────────────────────── */
@@ -503,7 +569,7 @@ async function composeDashboard(windowHours: number): Promise<DashboardDto> {
       fetchMailboxes(),
       fetchDomains(),
       fetchConnectors(),
-      fetchAuditEvents(6),
+      fetchAuditEvents({ limit: 6 }),
       fetchDeliveryFailures(windowHours),
     ]);
 
@@ -525,7 +591,11 @@ async function composeDashboard(windowHours: number): Promise<DashboardDto> {
   const boxes = settled("mailboxes", mailboxes, []);
   const doms = settled("domains", domains, []);
   const conns = settled("connectors", connectors, []);
-  const events = settled("audit", audit, []);
+  // The dashboard wants the rows, not the page metadata.
+  const events = settled<AuditPage>("audit", audit, {
+    events: [],
+    pagination: { page: 1, limit: 6, total: 0, totalPages: 0 },
+  }).events;
   const deliveryFailures = asFailureSummary(
     settled<DeliveryFailureSummaryDto | null>("deliveryFailures", failures, null)
   );
