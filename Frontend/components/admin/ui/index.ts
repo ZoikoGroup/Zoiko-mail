@@ -32,3 +32,4 @@ export { InlineEmpty, LoadingRows, InlineError } from "./States";
 export { ToggleRow } from "./ToggleRow";
 export { FilterChips } from "./FilterChips";
 export { GuardRow } from "./GuardRow";
+export { RequireCapability } from "./RequireCapability";

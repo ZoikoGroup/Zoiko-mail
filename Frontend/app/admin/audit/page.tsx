@@ -13,6 +13,7 @@ import {
   Notice,
   PageHeader,
   Pill,
+  RequireCapability,
   Row,
   type Tone,
 } from "@/components/admin/ui";
@@ -57,7 +58,21 @@ function endOfDay(value: string): string | undefined {
   return value ? new Date(`${value}T23:59:59.999Z`).toISOString() : undefined;
 }
 
+/**
+ * The rail hides this link without `audit.read`, but hiding a link is not
+ * access control: the URL can be typed and a bookmark survives a demotion.
+ * The API refuses the reads regardless; this makes the refusal a sentence
+ * instead of a screen of failed requests.
+ */
 export default function AdminAuditPage() {
+  return (
+    <RequireCapability capability="audit.read">
+      <AuditLog />
+    </RequireCapability>
+  );
+}
+
+function AuditLog() {
   const [category, setCategory] = useState<string>(CATEGORIES[0]!.label);
   const [fromDay, setFromDay] = useState("");
   const [toDay, setToDay] = useState("");

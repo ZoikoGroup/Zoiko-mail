@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import {
   Link2, Plus, X, Loader2, AlertCircle, RefreshCw, Trash2, Mail,
   CheckCircle2, Clock, ShieldAlert, Activity,
@@ -10,9 +10,6 @@ import {
   useCreateConnector,
   useDisconnectConnector,
   useSyncConnector,
-  useConnectorHealth,
-  useDeadLetter,
-  useReplayDeadLetter,
   useGoogleAuth,
   useMicrosoftAuth,
 } from "@/lib/connectors-hooks";
@@ -22,8 +19,6 @@ import {
   type ConnectorProvider,
   type ConnectorStatus,
 } from "@/lib/connectors-api";
-import { useMe } from "@/lib/auth-hooks";
-import type { MeResponse } from "@/lib/auth-api";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 const PROVIDER_LABEL: Record<ConnectorProvider, string> = {
@@ -52,9 +47,6 @@ function formatDate(iso: string | null): string {
 }
 
 export function ConnectedAccounts() {
-  const { data } = useMe();
-  const me = data as MeResponse | undefined;
-  const isAdmin = me?.membership.role === "OWNER" || me?.membership.role === "ADMIN";
 
   const { data: accounts = [], isLoading, error } = useConnectors();
   const disconnect = useDisconnectConnector();
@@ -192,7 +184,7 @@ export function ConnectedAccounts() {
         loading={disconnect.isPending}
       />
 
-      {isAdmin && <AdminPanel />}
+
     </div>
   );
 }
@@ -424,77 +416,3 @@ function ConnectPanel({ onDone }: { onDone: () => void }) {
 }
 
 // ---- OWNER/ADMIN operational panel ----------------------------------------
-function AdminPanel() {
-  const health = useConnectorHealth(true);
-  const dead = useDeadLetter(true);
-  const replay = useReplayDeadLetter();
-
-  // Defensive: real response shapes not yet confirmed.
-  const deadEvents: any[] = useMemo(() => {
-    const d: any = dead.data;
-    if (Array.isArray(d)) return d;
-    return d?.events ?? d?.deadLetter ?? d?.items ?? [];
-  }, [dead.data]);
-
-  return (
-    <div className="mt-10">
-      <h2 className="font-mono-num flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
-        <Activity className="h-4 w-4" /> Provider operations (admin)
-      </h2>
-
-      {/* Health */}
-      <div className="zoiko-card mt-3 p-4">
-        <div className="mb-2 flex items-center justify-between">
-          <span className="text-sm font-medium text-[var(--ink2)]">Provider health</span>
-          <button onClick={() => health.refetch()} className="inline-flex items-center gap-1 text-xs text-[var(--accent-ink)] hover:underline">
-            <RefreshCw className="h-3 w-3" /> Refresh
-          </button>
-        </div>
-        {health.isLoading && <p className="text-sm text-[var(--ink3)]">Loading…</p>}
-        {health.error && <p className="text-sm text-[var(--crit)]">Couldn&rsquo;t load health.</p>}
-        {health.data != null && (
-          <pre className="overflow-auto rounded-lg bg-[var(--s2)] p-3 text-xs text-[var(--ink2)]">
-            {JSON.stringify(health.data, null, 2)}
-          </pre>
-        )}
-      </div>
-
-      {/* Dead-letter */}
-      <div className="zoiko-card mt-4 p-4">
-        <div className="mb-2 flex items-center justify-between">
-          <span className="text-sm font-medium text-[var(--ink2)]">Failed events (dead-letter)</span>
-          <button onClick={() => dead.refetch()} className="inline-flex items-center gap-1 text-xs text-[var(--accent-ink)] hover:underline">
-            <RefreshCw className="h-3 w-3" /> Refresh
-          </button>
-        </div>
-        {dead.isLoading && <p className="text-sm text-[var(--ink3)]">Loading…</p>}
-        {dead.error && <p className="text-sm text-[var(--crit)]">Couldn&rsquo;t load dead-letter events.</p>}
-        {!dead.isLoading && deadEvents.length === 0 && (
-          <p className="inline-flex items-center gap-1.5 text-sm text-[var(--ink3)]">
-            <CheckCircle2 className="h-4 w-4 text-[var(--ok)]" /> No failed events.
-          </p>
-        )}
-        <div className="space-y-2">
-          {deadEvents.map((e, i) => {
-            const id = e?.id ?? e?.eventId ?? String(i);
-            return (
-              <div key={id} className="rounded-lg border border-[var(--border)] bg-[var(--s2)] p-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <span className="font-mono-num text-xs text-[var(--ink3)]">{id}</span>
-                  <button
-                    onClick={() => replay.mutate(id)}
-                    disabled={replay.isPending}
-                    className="zoiko-btn pri sm disabled:opacity-50"
-                  >
-                    <RefreshCw className="h-3 w-3" /> Replay
-                  </button>
-                </div>
-                <pre className="overflow-auto text-[11px] text-[var(--ink2)]">{JSON.stringify(e, null, 2)}</pre>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
