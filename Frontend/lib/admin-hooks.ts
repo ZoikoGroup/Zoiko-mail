@@ -37,6 +37,11 @@ import {
   fetchSettings,
   fetchSyncErrors,
   setMailboxAi,
+  updateMember,
+  removeMember,
+  cancelInvitation,
+  markNotificationRead,
+  replayDeadLetter,
   fetchMailboxRouting,
   createAlias,
   deleteAlias,
@@ -49,6 +54,7 @@ import type {
   InvitationDraftInput,
   WorkspaceSettingsPatch,
 } from "./admin-queries";
+import { useUnreadCounts } from "./mail-hooks";
 import { CAPABILITY_MATRIX, GUARDRAILS } from "./admin-api";
 import type {
   AuditEventDto,
@@ -62,6 +68,7 @@ import type {
   InvitationDto,
   MailboxDto,
   MemberDto,
+  MembershipRole,
   NotificationDto,
   PolicyGroupDto,
   SettingsDto,
@@ -333,6 +340,8 @@ export function useAdminNavCounts(): Partial<Record<string, number>> {
   const domains = useDomains();
   const notifications = useNotifications();
   const commitments = useCommitments();
+  const groups = useGroups();
+  const unread = useUnreadCounts();
 
   const counts: Partial<Record<string, number>> = {};
   if (people.data) counts["/admin/users"] = people.data.length;
@@ -343,6 +352,10 @@ export function useAdminNavCounts(): Partial<Record<string, number>> {
     counts["/admin/notifications"] = notifications.data.filter((n) => !n.readAt).length;
   }
   if (commitments.data) counts["/admin/commitments"] = commitments.data.length;
+  if (groups.data) counts["/admin/groups"] = groups.data.length;
+  // The rail badge on a mailbox means unread, not total — the same thing the
+  // member shell counts, so an Admin reading their own inbox sees one number.
+  if (unread.data) counts["/admin/inbox"] = unread.data.INBOX ?? 0;
   return counts;
 }
 
@@ -393,8 +406,11 @@ export function useSendInvitation() {
     onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["invitations"] }),
-        // The roster shows invited people too, so it is stale as well.
-        qc.invalidateQueries({ queryKey: ["people"] }),
+        // The roster shows invited people too, so it is stale as well. Keyed
+        // ["members"] to match useMembers — ["people"] is the name of the
+        // derived hook, not of any query, so invalidating it refreshed nothing
+        // and a new invitation did not appear until the poll came round.
+        qc.invalidateQueries({ queryKey: ["members"] }),
       ]);
     },
   });
@@ -417,6 +433,106 @@ export function useUpdateWorkspaceSettings() {
         // The tenant name shows in the shell header too, and settings is
         // derived from the same read.
         qc.invalidateQueries({ queryKey: ["tenant"] }),
+      ]);
+    },
+  });
+}
+
+/* ── acting on people ──────────────────────────────────────────────────── */
+
+/**
+ * Invalidate everything a membership change can move.
+ *
+ * A role change, a suspension and a removal all alter the roster, the pending
+ * invitations derived from it, and the rail badges counted off both. Listing
+ * them once keeps the three mutations below from drifting apart.
+ */
+function invalidatePeople(qc: ReturnType<typeof useQueryClient>) {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: ["members"] }),
+    qc.invalidateQueries({ queryKey: ["invitations"] }),
+  ]);
+}
+
+export function useUpdateMember() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      membershipId,
+      patch,
+    }: {
+      membershipId: string;
+      patch: { role?: MembershipRole; status?: "ACTIVE" | "SUSPENDED" };
+    }) => updateMember(membershipId, patch),
+    onSuccess: () => invalidatePeople(qc),
+  });
+}
+
+export function useRemoveMember() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (membershipId: string) => removeMember(membershipId),
+    onSuccess: () => invalidatePeople(qc),
+  });
+}
+
+export function useCancelInvitation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (membershipId: string) => cancelInvitation(membershipId),
+    onSuccess: () => invalidatePeople(qc),
+  });
+}
+
+/* ── notifications ─────────────────────────────────────────────────────── */
+
+export function useMarkNotificationRead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (notificationId: string) => markNotificationRead(notificationId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
+  });
+}
+
+/**
+ * Mark every unread notification read.
+ *
+ * There is no bulk endpoint, so this fans out — and uses `allSettled` rather
+ * than `all` so one failure does not discard the ones that succeeded. The
+ * refetch afterwards is what tells the truth about which actually landed,
+ * rather than the screen assuming all of them did.
+ */
+export function useMarkAllNotificationsRead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (notificationIds: string[]) => {
+      const results = await Promise.allSettled(
+        notificationIds.map((id) => markNotificationRead(id))
+      );
+      const failed = results.filter((r) => r.status === "rejected").length;
+      if (failed > 0) {
+        throw new Error(
+          failed === notificationIds.length
+            ? "Could not mark them read."
+            : `Marked ${notificationIds.length - failed} of ${notificationIds.length} read.`
+        );
+      }
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
+  });
+}
+
+/* ── provider events ───────────────────────────────────────────────────── */
+
+export function useReplayDeadLetter() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (eventId: string) => replayDeadLetter(eventId),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["sync-errors"] }),
+        // A replayed event can bring its account back out of DEGRADED.
+        qc.invalidateQueries({ queryKey: ["connectors"] }),
       ]);
     },
   });

@@ -13,7 +13,6 @@ import {
   PageHeader,
   Pill,
   Row,
-  StaticNote,
   type Tone,
 } from "@/components/admin/ui";
 
@@ -55,9 +54,10 @@ export default function AdminAuditPage() {
         action={<button type="button" className="zoiko-btn">Export</button>}
       />
 
-      <StaticNote>
-        Backend is complete — GET /audit/events; no create, update or delete endpoint exists
-      </StaticNote>
+      <Notice tone="info">
+        This log is append-only. Events cannot be edited or deleted by anyone, including
+        an Owner — there is no endpoint that does it.
+      </Notice>
 
       <Notice tone="info">
         <b className="text-[var(--ai)]">Append-only.</b> Rows are never updated or deleted, including

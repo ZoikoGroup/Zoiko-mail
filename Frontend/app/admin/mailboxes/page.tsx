@@ -20,7 +20,6 @@ import {
   Notice,
   PageHeader,
   Pill,
-  StaticNote,
   Table,
   TableWrap,
   Td,
@@ -49,10 +48,10 @@ export default function AdminMailboxesPage() {
         }
       />
 
-      <StaticNote>
+      <Notice tone="info">
         Shared mailboxes live on the Groups screen, where assignments and their
-        read/send/manage/assign permissions are managed
-      </StaticNote>
+        read, send, manage and assign permissions are set.
+      </Notice>
 
       {setAi.isError && (
         <Notice tone="crit">

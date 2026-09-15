@@ -1,17 +1,20 @@
 "use client";
 
-import { useState } from "react";
-import { useNotifications } from "@/lib/admin-hooks";
+import {
+  useMarkAllNotificationsRead,
+  useMarkNotificationRead,
+  useNotifications,
+} from "@/lib/admin-hooks";
 import type { NotificationDto } from "@/lib/admin-api";
 import {
   Card,
   InlineEmpty,
   InlineError,
   LoadingRows,
+  Notice,
   PageHeader,
   Pill,
   Row,
-  StaticNote,
   type Tone,
 } from "@/components/admin/ui";
 
@@ -25,11 +28,15 @@ const SEVERITY: Record<NotificationDto["severity"], { label: string; tone: Tone 
 export default function AdminNotificationsPage() {
   const { data: notifications, isLoading, error } = useNotifications();
 
-  // Local read state so the screen behaves before PATCH /notifications/:id/read.
-  const [readIds, setReadIds] = useState<Set<string>>(new Set());
-  const markRead = (id: string) => setReadIds((prev) => new Set(prev).add(id));
+  // Read state belongs to the server. It used to live in a local Set, so
+  // clearing an alert lasted until the next refresh and the rail badge never
+  // moved — the screen looked like it worked and changed nothing.
+  const markRead = useMarkNotificationRead();
+  const markAll = useMarkAllNotificationsRead();
 
-  const unread = notifications?.filter((n) => !n.readAt && !readIds.has(n.id)).length ?? 0;
+  const unreadIds = (notifications ?? []).filter((n) => !n.readAt).map((n) => n.id);
+  const unread = unreadIds.length;
+  const busy = markRead.isPending || markAll.isPending;
 
   return (
     <>
@@ -41,15 +48,21 @@ export default function AdminNotificationsPage() {
             <button
               type="button"
               className="zoiko-btn sm"
-              onClick={() => setReadIds(new Set(notifications?.map((n) => n.id) ?? []))}
+              disabled={busy}
+              onClick={() => markAll.mutate(unreadIds)}
             >
-              Mark all read
+              {markAll.isPending ? "Marking…" : "Mark all read"}
             </button>
           ) : undefined
         }
       />
 
-      <StaticNote>Backend is complete — GET /notifications and mark-read</StaticNote>
+      {/* A partial failure is reported rather than swallowed: the list refetches
+          either way, so the rows themselves already show what actually landed. */}
+      {markAll.error ? <Notice tone="warn">{markAll.error.message}</Notice> : null}
+      {markRead.error ? (
+        <Notice tone="warn">Could not mark that notification read. {markRead.error.message}</Notice>
+      ) : null}
 
       <Card
         title="Recent"
@@ -64,7 +77,8 @@ export default function AdminNotificationsPage() {
         ) : (
           notifications.map((notification) => {
             const severity = SEVERITY[notification.severity];
-            const isRead = Boolean(notification.readAt) || readIds.has(notification.id);
+            const isRead = Boolean(notification.readAt);
+            const marking = markRead.isPending && markRead.variables === notification.id;
             return (
               <Row
                 key={notification.id}
@@ -84,9 +98,10 @@ export default function AdminNotificationsPage() {
                       <button
                         type="button"
                         className="zoiko-btn sm"
-                        onClick={() => markRead(notification.id)}
+                        disabled={busy}
+                        onClick={() => markRead.mutate(notification.id)}
                       >
-                        Mark read
+                        {marking ? "Marking…" : "Mark read"}
                       </button>
                     )}
                   </>

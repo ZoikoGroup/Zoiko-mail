@@ -27,6 +27,7 @@ import type {
   InvitationDto,
   MailboxDto,
   MemberDto,
+  MembershipRole,
   NotificationDto,
   PolicyGroupDto,
   SettingsDto,
@@ -116,7 +117,9 @@ export async function fetchInvitations(): Promise<InvitationDto[]> {
       // The membership row records no inviter and no expiry. Both are real
       // gaps; blank is the truthful rendering until the columns exist.
       invitedByName: null,
-      createdAt: m.createdAt,
+      // The row reads "sent {createdAt}", so a relative time rather than the
+      // raw ISO string the API returns.
+      createdAt: ago(m.createdAt),
       expiresAt: "",
     }));
 }
@@ -926,4 +929,60 @@ export async function updateWorkspaceSettings(
   if (Object.keys(body).length === 0) return;
 
   await apiRequest("/tenants/current", { method: "PATCH", body });
+}
+
+/* ── acting on a membership — §6.3 ─────────────────────────────────────── */
+
+/**
+ * Change a member's role or suspend them.
+ *
+ * The admin boundary is not enforced here. `people.member.manage` is the
+ * floor the route checks; the service then refuses an Admin acting on an
+ * Owner by looking at the target row. The screen hides what it knows it
+ * cannot do, but hiding a control is not access control — the refusal that
+ * matters is the server's.
+ */
+export async function updateMember(
+  membershipId: string,
+  patch: { role?: MembershipRole; status?: "ACTIVE" | "SUSPENDED" }
+): Promise<void> {
+  await apiRequest(`/membership/members/${membershipId}`, {
+    method: "PATCH",
+    body: patch,
+  });
+}
+
+/** Remove someone from the workspace. The account survives; the membership does not. */
+export async function removeMember(membershipId: string): Promise<void> {
+  await apiRequest(`/membership/members/${membershipId}`, { method: "DELETE" });
+}
+
+/**
+ * Revoke a pending invitation.
+ *
+ * An invitation *is* a membership in INVITED status, so this addresses it by
+ * membership id — the same id the roster uses.
+ */
+export async function cancelInvitation(membershipId: string): Promise<void> {
+  await apiRequest(`/membership/invitations/${membershipId}`, { method: "DELETE" });
+}
+
+/* ── notifications ─────────────────────────────────────────────────────── */
+
+/** Mark one notification read. Returns nothing the screen needs; the list is refetched. */
+export async function markNotificationRead(notificationId: string): Promise<void> {
+  await apiRequest(`/notifications/${notificationId}/read`, { method: "PATCH" });
+}
+
+/* ── provider events ───────────────────────────────────────────────────── */
+
+/**
+ * Re-queue a dead-lettered provider event.
+ *
+ * Dead-lettering is what happens after the retry budget is spent, so this is
+ * the only way back: without it a transient provider failure is permanent,
+ * and the mail that event carried never lands.
+ */
+export async function replayDeadLetter(eventId: string): Promise<void> {
+  await apiRequest(`/connectors/dead-letter/${eventId}/replay`, { method: "POST" });
 }

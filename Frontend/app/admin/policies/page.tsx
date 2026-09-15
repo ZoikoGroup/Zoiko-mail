@@ -10,7 +10,6 @@ import {
   Notice,
   PageHeader,
   Pill,
-  StaticNote,
   ToggleRow,
 } from "@/components/admin/ui";
 
@@ -44,9 +43,10 @@ export default function AdminPoliciesPage() {
         subtitle="AI, sending, retention and access rules for this tenant"
       />
 
-      <StaticNote>
-        Versioned server-side — changing a policy supersedes rather than overwrites
-      </StaticNote>
+      <Notice tone="info">
+        Policies are versioned. Changing one supersedes the old version rather than
+        overwriting it, so what was in force at any past moment stays answerable.
+      </Notice>
 
       <Notice tone="warn">
         <b className="text-[var(--warn)]">Non-negotiable at launch.</b> No AI training on customer
