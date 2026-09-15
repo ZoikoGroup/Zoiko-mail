@@ -9,6 +9,7 @@ import {
   useConnectors,
   useCreateConnector,
   useDisconnectConnector,
+  useSyncConnector,
   useConnectorHealth,
   useDeadLetter,
   useReplayDeadLetter,
@@ -33,7 +34,9 @@ const PROVIDER_LABEL: Record<ConnectorProvider, string> = {
 const STATUS_TONE: Record<string, string> = {
   ACTIVE: "ok",
   PENDING: "warn",
+  DEGRADED: "warn",
   ERROR: "crit",
+  REAUTH_REQUIRED: "warn",
   DISCONNECTED: "nu",
 };
 
@@ -55,8 +58,14 @@ export function ConnectedAccounts() {
 
   const { data: accounts = [], isLoading, error } = useConnectors();
   const disconnect = useDisconnectConnector();
+  const syncAccount = useSyncConnector();
+  const googleAuth = useGoogleAuth();
+  const microsoftAuth = useMicrosoftAuth();
   const [showConnect, setShowConnect] = useState(false);
   const [toDisconnect, setToDisconnect] = useState<Connector | null>(null);
+  const [syncingId, setSyncingId] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [reconnectError, setReconnectError] = useState<string | null>(null);
 
   // Handle OAuth callback success
   const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
@@ -66,6 +75,33 @@ export function ConnectedAccounts() {
 
   const providerName = (p: string | null) =>
     p === "MICROSOFT_365" ? "Microsoft 365" : p === "GMAIL" ? "Gmail" : "account";
+
+  const handleSync = (a: Connector) => {
+    setSyncingId(a.id);
+    setSyncError(null);
+    syncAccount.mutate(a.id, {
+      onError: (err: any) => {
+        setSyncError(`${PROVIDER_LABEL[a.provider]} sync failed: ${err?.message ?? "try again later."}`);
+      },
+      onSettled: () => setSyncingId(null),
+    });
+  };
+
+  const handleReconnect = (a: Connector) => {
+    setReconnectError(null);
+    const auth = a.provider === "GMAIL" ? googleAuth : microsoftAuth;
+    auth.mutate(undefined, {
+      onSuccess: (data) => {
+        window.location.href = data.url;
+      },
+      onError: (err: any) => {
+        setReconnectError(`Couldn't start ${PROVIDER_LABEL[a.provider]} reauthorization: ${err?.message ?? "try again."}`);
+      },
+    });
+  };
+
+  const reconnectPendingFor = (a: Connector) =>
+    (a.provider === "GMAIL" ? googleAuth.isPending : microsoftAuth.isPending) || disconnect.isPending;
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
@@ -96,6 +132,18 @@ export function ConnectedAccounts() {
         </div>
       )}
 
+      {syncError && (
+        <div className="mt-4 flex items-center gap-2 rounded-lg border border-[var(--crit)]/30 bg-[var(--crit-soft)] p-4 text-sm text-[var(--crit)]">
+          <AlertCircle className="h-4 w-4" /> {syncError}
+        </div>
+      )}
+
+      {reconnectError && (
+        <div className="mt-4 flex items-center gap-2 rounded-lg border border-[var(--crit)]/30 bg-[var(--crit-soft)] p-4 text-sm text-[var(--crit)]">
+          <AlertCircle className="h-4 w-4" /> {reconnectError}
+        </div>
+      )}
+
       {showConnect && <ConnectPanel onDone={() => setShowConnect(false)} />}
 
       <div className="mt-4 space-y-2">
@@ -122,7 +170,11 @@ export function ConnectedAccounts() {
             key={a.id}
             account={a}
             onDisconnect={() => setToDisconnect(a)}
+            onSync={() => handleSync(a)}
+            onReconnect={() => handleReconnect(a)}
             busy={disconnect.isPending}
+            syncing={syncingId === a.id}
+            reconnectBusy={reconnectPendingFor(a)}
           />
         ))}
       </div>
@@ -146,8 +198,17 @@ export function ConnectedAccounts() {
 }
 
 function AccountCard({
-  account: a, onDisconnect, busy,
-}: { account: Connector; onDisconnect: () => void; busy: boolean }) {
+  account: a, onDisconnect, onSync, onReconnect, busy, syncing, reconnectBusy,
+}: {
+  account: Connector;
+  onDisconnect: () => void;
+  onSync: () => void;
+  onReconnect: () => void;
+  busy: boolean;
+  syncing: boolean;
+  reconnectBusy: boolean;
+}) {
+  const needsReauth = a.status === "REAUTH_REQUIRED";
   return (
     <div className="zoiko-card p-4">
       <div className="flex items-start gap-3">
@@ -162,6 +223,9 @@ function AccountCard({
           <div className="mt-0.5 truncate text-sm text-[var(--ink3)]">{a.email}</div>
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--ink3)]">
             <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" /> Last synced: {formatDate(a.lastSyncedAt)}</span>
+            {a.watchExpiresAt && (
+              <span className="inline-flex items-center gap-1"><Activity className="h-3 w-3" /> Watch expires: {formatDate(a.watchExpiresAt)}</span>
+            )}
             {a.lastErrorCode && (
               <span className="inline-flex items-center gap-1 text-[var(--crit)]"><ShieldAlert className="h-3 w-3" /> {a.lastErrorCode}</span>
             )}
@@ -169,11 +233,35 @@ function AccountCard({
           {a.status === "PENDING" && (
             <p className="mt-2 text-xs text-[var(--warn)]">Waiting for the provider to confirm — sync starts once active.</p>
           )}
+          {needsReauth && (
+            <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-[var(--warn)]/30 bg-[var(--warn-soft)] p-2.5">
+              <p className="flex items-center gap-1.5 text-xs text-[var(--warn)]">
+                <ShieldAlert className="h-3.5 w-3.5 shrink-0" /> Reauthorization needed — reconnect this account to resume syncing.
+              </p>
+              <button onClick={onReconnect} disabled={reconnectBusy} className="zoiko-btn pri sm shrink-0 disabled:opacity-50">
+                {reconnectBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />} Reconnect
+              </button>
+            </div>
+          )}
         </div>
-        <button onClick={onDisconnect} disabled={busy} className="zoiko-btn crit sm shrink-0 disabled:opacity-50">
-          <Trash2 className="h-3.5 w-3.5" /> Disconnect
-        </button>
+        <div className="flex shrink-0 flex-col gap-2">
+          <button
+            onClick={onSync}
+            disabled={busy || syncing || a.status === "DISCONNECTED" || a.status === "PENDING"}
+            title="Sync now"
+            className="zoiko-btn sm disabled:opacity-50"
+          >
+            {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            <span className="hidden sm:inline">Sync now</span>
+          </button>
+          <button onClick={onDisconnect} disabled={busy} className="zoiko-btn crit sm disabled:opacity-50">
+            <Trash2 className="h-3.5 w-3.5" /> Disconnect
+          </button>
+        </div>
       </div>
+      {syncing && (
+        <p className="mt-2 text-xs text-[var(--ink3)]">Syncing latest messages with {PROVIDER_LABEL[a.provider]}…</p>
+      )}
     </div>
   );
 }

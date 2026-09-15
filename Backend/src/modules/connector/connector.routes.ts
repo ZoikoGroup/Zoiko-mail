@@ -416,3 +416,12 @@ connectorRouter.delete("/:accountId", validate(connectedAccountIdSchema, "params
     requestId: req.requestId,
   }), req.requestId);
 }));
+
+connectorRouter.post("/:accountId/sync", validate(connectedAccountIdSchema, "params"), asyncHandler(async (req, res) => {
+  sendSuccess(res, 200, await connectorService.syncNow(String(req.params.accountId), {
+    tenantId: req.tenantContext!.tenantId,
+    membershipId: req.tenantContext!.membershipId,
+    userId: req.tenantContext!.userId,
+    requestId: req.requestId,
+  }), req.requestId);
+}));
