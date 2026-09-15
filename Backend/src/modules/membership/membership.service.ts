@@ -41,7 +41,21 @@ const memberSelect = {
   createdAt: true,
   updatedAt: true,
   user: {
-    select: { id: true, email: true, displayName: true, status: true },
+    select: {
+      id: true,
+      email: true,
+      displayName: true,
+      status: true,
+      // Whether this person holds a second factor — AC-002. The people screen
+      // has always had a column for it and has always shown "none", because
+      // there was nothing to read. There is now, and for an Owner or Admin it
+      // is the difference between a compliant account and an exposed one.
+      //
+      // The date rather than a boolean: a reader who wants to know *when*
+      // should not need a second request, and a client that only wants the
+      // fact can test it for null.
+      mfaEnrolledAt: true,
+    },
   },
 } satisfies Prisma.TenantMembershipSelect;
 

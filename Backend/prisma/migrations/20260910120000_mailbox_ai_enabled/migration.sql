@@ -1,0 +1,11 @@
+-- Per-mailbox AI enablement — Data Model §6.16, Security §9, AC-008.
+--
+-- AI eligibility was hardcoded true in the service layer, so "AI cannot
+-- process restricted mailboxes unless policy permits" had nothing to read.
+-- A mailbox with ai_enabled = false is what the security spec calls a
+-- restricted mailbox.
+--
+-- Defaults true: every existing mailbox was already AI-eligible, and
+-- defaulting false would silently disable AI across every workspace on
+-- deploy.
+ALTER TABLE "mailboxes" ADD COLUMN "ai_enabled" BOOLEAN NOT NULL DEFAULT true;

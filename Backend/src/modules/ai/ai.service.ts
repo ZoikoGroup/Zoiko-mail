@@ -26,7 +26,25 @@ export class AIService {
       ? await prisma.emailMessage.findFirst({ where: { id: input.messageId, tenantId: context.tenantId, mailboxItems: { some: { tenantId: context.tenantId, mailboxId: mailbox.id } } } })
       : await prisma.messageThread.findFirst({ where: { id: input.threadId, tenantId: context.tenantId, messages: { some: { tenantId: context.tenantId, mailboxItems: { some: { tenantId: context.tenantId, mailboxId: mailbox.id } } } } } }));
     if (!accessible) throw new AppError("AI source not found", 404, ErrorCodes.NOT_FOUND);
-    const decision = await policyService.evaluate({ type: "AI", context: { actionType: input.actionType, mailbox: { eligible: true } } }, context);
+
+    // AC-008: AI may not process a restricted mailbox. `mailbox.eligible` was
+    // hardcoded true here, so the criterion had nothing to read and the tenant
+    // policy could not gate on it even if it wanted to. It is the real column
+    // now, and a disabled mailbox is refused outright rather than left to a
+    // policy condition that a workspace may never have written.
+    if (!mailbox!.aiEnabled) {
+      throw new AppError(
+        "AI processing is disabled for this mailbox",
+        403,
+        ErrorCodes.FORBIDDEN,
+        { mailboxId: mailbox!.id, reason: "MAILBOX_AI_DISABLED" }
+      );
+    }
+
+    const decision = await policyService.evaluate(
+      { type: "AI", context: { actionType: input.actionType, mailbox: { eligible: mailbox!.aiEnabled } } },
+      context
+    );
     if (decision.effect === "DENY") throw new AppError(`AI processing denied by tenant policy (${decision.reason})`, 403, ErrorCodes.FORBIDDEN);
     const action = await prisma.aIAction.create({ data: { tenantId: context.tenantId, createdByUserId: context.userId, actionType: input.actionType, messageId: input.messageId, threadId: input.threadId, inputHash: inputHash(context.tenantId, input.actionType, input.messageId, input.threadId) } });
     await auditService.record({ tenantId: context.tenantId, actorUserId: context.userId, eventType: "AI_ACTION_REQUESTED", targetType: "AIAction", targetId: action.id });
@@ -102,7 +120,7 @@ export class AIService {
 
     const membership = await prisma.tenantMembership.findFirst({
       where: { tenantId, userId: actorUserId, status: "ACTIVE" },
-      select: { role: true },
+      select: { id: true, role: true },
     });
     if (!membership) throw new Error("AI extraction actor is not an active member");
 
@@ -112,8 +130,54 @@ export class AIService {
     });
     if (!message) throw new Error("AI extraction source message not found");
 
+    /**
+     * AC-008 on the path that matters — "AI cannot process restricted
+     * mailboxes unless policy permits".
+     *
+     * The gate in create() covers somebody asking for extraction through the
+     * API. This is the other entrance, and it is the busier one: a connector
+     * enqueues an AI_EXTRACTION job for every message it syncs, so this runs
+     * on ordinary incoming mail rather than on request. It checked only the
+     * global feature flag, which means a mailbox with AI switched off was
+     * still processed the moment a connector imported into it.
+     *
+     * Skipped rather than thrown, because throwing in a job hands it to the
+     * retry machinery and a mailbox that is off will still be off on the
+     * retry — that turns a setting into a stream of failures.
+     */
+    const mailbox = await prisma.mailbox.findFirst({
+      where: { tenantId, membershipId: membership.id },
+      select: { id: true, aiEnabled: true },
+    });
+    if (!mailbox) throw new Error("AI extraction actor has no mailbox");
+    if (!mailbox.aiEnabled) {
+      await auditService.record({
+        tenantId,
+        actorUserId,
+        eventType: "AI_EXTRACTION_SKIPPED",
+        targetType: "Mailbox",
+        targetId: mailbox.id,
+        metadata: { messageId: message.id, reason: "MAILBOX_AI_DISABLED" },
+      });
+      // Close the job as well. Returning early without this leaves the row
+      // RUNNING with `lockedAt` set, which the claim query never reclaims —
+      // a skipped mailbox would quietly accumulate stuck jobs forever.
+      await prisma.backgroundJob.update({
+        where: { id: jobId, tenantId },
+        data: {
+          status: "COMPLETED",
+          completedAt: new Date(),
+          lockedAt: null,
+          result: { skipped: true, reason: "MAILBOX_AI_DISABLED" },
+        },
+      });
+      return { skipped: true, reason: "MAILBOX_AI_DISABLED" };
+    }
+
     const decision = await policyService.evaluate(
-      { type: "AI", context: { actionType: "COMMITMENT_EXTRACTION", mailbox: { eligible: true } } },
+      // The real column, not a hardcoded true. A criterion the policy cannot
+      // read is a criterion that cannot deny anything.
+      { type: "AI", context: { actionType: "COMMITMENT_EXTRACTION", mailbox: { eligible: mailbox.aiEnabled } } },
       { tenantId, userId: actorUserId, role: membership.role }
     );
     if (decision.effect === "DENY") {

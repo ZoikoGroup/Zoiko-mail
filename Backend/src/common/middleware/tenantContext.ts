@@ -4,6 +4,7 @@ import { prisma } from "../../config/prisma.js";
 import { AppError } from "../errors/AppError.js";
 import { ErrorCodes } from "../errors/errorCodes.js";
 import { actingRole } from "../utils/workspaceScope.js";
+import { withCrossTenant, withTenant } from "../../config/tenantScope.js";
 
 export async function tenantContext(
   req: Request,
@@ -117,7 +118,32 @@ export async function tenantContext(
     user: membership.user,
   };
 
-  next();
+  // Bind the workspace to the async context, so every statement this request
+  // makes carries it into the row-level policies (AC-004). Everything below
+  // this point inherits it without knowing it exists — including code written
+  // before the policies did.
+  withTenant(membership.tenantId, async () => {
+    next();
+  }).catch(next);
+}
+
+/**
+ * Statements in this request are not restricted to one workspace.
+ *
+ * For the paths that legitimately span them: authentication, which resolves
+ * *which* workspace and has to be able to write an audit row for it before it
+ * knows, and the platform support console, whose whole purpose is to look
+ * across tenants. Named and mounted explicitly, so the set of paths that
+ * cross the boundary can be read off the routers.
+ */
+export function crossTenantScope(
+  _req: Request,
+  _res: Response,
+  next: NextFunction
+): void {
+  void withCrossTenant(async () => {
+    next();
+  });
 }
 
 export function requireRole(...allowedRoles: MembershipRole[]) {

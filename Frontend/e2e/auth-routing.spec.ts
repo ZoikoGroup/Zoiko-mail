@@ -395,3 +395,72 @@ test.describe("a server that does not report the workspace says so", () => {
     await expect(page.getByText(/did not say which workspace/i)).toBeVisible();
   });
 });
+
+/**
+ * The second factor — AC-002.
+ *
+ * A privileged sign-in returns a challenge instead of a session, and the
+ * client has to take the user somewhere they can answer it. Getting this wrong
+ * is invisible in unit tests and total in the browser: the sign-in succeeds,
+ * no session exists, and every shell bounces back to /login in a loop.
+ */
+test.describe("a privileged sign-in stops for a second factor", () => {
+  test("routes an MFA challenge to the verification screen", async ({ page }) => {
+    await stubLogin(page, {
+      success: true,
+      data: {
+        state: "MFA_REQUIRED",
+        user: { id: "u1", email: "owner@zoiko.test", displayName: "Owner" },
+        mfaToken: "stub-mfa-token",
+        expiresIn: "10m",
+        remainingRecoveryCodes: 10,
+      },
+    });
+
+    await page.goto("/login");
+    await signIn(page);
+
+    await expect(page).toHaveURL(/\/verify-mfa/);
+    await expect(page.getByText(/authenticator code/i)).toBeVisible();
+  });
+
+  test("walks an account with no authenticator through enrolment", async ({ page }) => {
+    await stubLogin(page, {
+      success: true,
+      data: {
+        state: "MFA_ENROLLMENT_REQUIRED",
+        user: { id: "u1", email: "owner@zoiko.test", displayName: "Owner" },
+        mfaToken: "stub-mfa-token",
+        expiresIn: "10m",
+        requiredBecause: "OWNER",
+      },
+    });
+    await page.route(`${API}/auth/mfa/challenge/enroll`, (route) =>
+      route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            secret: "JBSWY3DPEHPK3PXP",
+            uri: "otpauth://totp/Zoiko%20Mail:owner@zoiko.test?secret=JBSWY3DPEHPK3PXP",
+          },
+        }),
+      })
+    );
+
+    await page.goto("/login");
+    await signIn(page);
+
+    await expect(page).toHaveURL(/\/verify-mfa/);
+    // The key has to be on screen: an enrolment screen with nothing to scan
+    // is a dead end for the account it is protecting.
+    await expect(page.getByText("JBSWY3DPEHPK3PXP")).toBeVisible();
+    await expect(page.getByText(/required for owner accounts/i)).toBeVisible();
+  });
+
+  test("sends someone who lands there with no challenge back to sign in", async ({ page }) => {
+    await page.goto("/verify-mfa");
+    await expectSentToLogin(page);
+  });
+});

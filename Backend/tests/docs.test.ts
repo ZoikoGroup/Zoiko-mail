@@ -21,6 +21,14 @@ describe("API documentation", () => {
     expect(response.body.paths).toHaveProperty("/api/v1/policies/retention/preview");
     expect(response.body.paths).toHaveProperty("/api/v1/policies/retention/execute");
     expect(response.body.paths).toHaveProperty("/api/v1/mail/drafts");
+    expect(response.body.paths).toHaveProperty("/api/v1/mail/send-as");
+    expect(response.body.paths).toHaveProperty("/api/v1/lifecycle/sla");
+    expect(response.body.paths).toHaveProperty("/api/v1/auth/mfa");
+    expect(response.body.paths).toHaveProperty("/api/v1/participants");
+    expect(response.body.paths).toHaveProperty("/api/v1/participants/{participantId}");
+    expect(response.body.paths).toHaveProperty("/api/v1/threads/{threadId}/participants");
+    expect(response.body.paths).toHaveProperty("/api/v1/auth/mfa/challenge/verify");
+    expect(response.body.paths).toHaveProperty("/api/v1/lifecycle/{requestId}/block");
     expect(response.body.paths).toHaveProperty("/api/v1/mail/drafts/{messageId}");
     expect(response.body.paths).toHaveProperty("/api/v1/mail/trash");
     expect(response.body.paths).toHaveProperty("/api/v1/mail/bulk");
@@ -60,5 +68,42 @@ describe("API documentation", () => {
     const response = await request(app).get("/api/docs/").expect(200);
     expect(response.text).toContain("Zoiko Mail API Docs");
     expect(response.text).toContain('id="swagger-ui"');
+  });
+});
+
+describe("the idempotency contract is documented where it applies", () => {
+  it("marks tenant-scoped writes as requiring the header", async () => {
+    const response = await request(app).get("/api/docs.json").expect(200);
+    const send = response.body.paths["/api/v1/mail/drafts/{messageId}/send"].post;
+
+    // API §7 applies to every tenant-scoped write, so the document says so on
+    // the operations rather than only in prose.
+    expect(send.parameters).toContainEqual({
+      $ref: "#/components/parameters/IdempotencyKey",
+    });
+    expect(response.body.components.parameters["Idempotency-Key"] ?? response.body.components.parameters.IdempotencyKey).toMatchObject({
+      name: "Idempotency-Key",
+      in: "header",
+      required: true,
+    });
+  });
+
+  it("leaves reads and the exempt families alone", async () => {
+    const response = await request(app).get("/api/docs.json").expect(200);
+    const refs = (operation: { parameters?: Array<{ $ref?: string }> }) =>
+      (operation?.parameters ?? []).map((parameter) => parameter.$ref);
+
+    // A GET that demanded a key would make every list endpoint unusable.
+    expect(refs(response.body.paths["/api/v1/mail"].get)).not.toContain(
+      "#/components/parameters/IdempotencyKey"
+    );
+    // Signing in has no tenant to scope a record to, and a provider callback
+    // deduplicates on the provider's own event id.
+    expect(refs(response.body.paths["/api/v1/auth/login"].post)).not.toContain(
+      "#/components/parameters/IdempotencyKey"
+    );
+    expect(
+      refs(response.body.paths["/api/v1/connectors/callbacks/{provider}"].post)
+    ).not.toContain("#/components/parameters/IdempotencyKey");
   });
 });

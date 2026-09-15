@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
-import { authHeader, registerUser } from "./helpers.js";
+import { authHeader, registerUser, loginUser } from "./helpers.js";
 import { draftInvitationLetter } from "../src/modules/membership/invitation-letter.js";
 
 const app = createApp();
@@ -153,15 +153,8 @@ describe("the invitation letter", () => {
         .send({ email: adminEmail, role: "ADMIN" })
         .expect(201);
 
-      const asAdmin = await request(app)
-        .post("/api/v1/auth/login")
-        .send({
-          email: adminEmail,
-          password: admin.password,
-          tenantId: owner.tenantId,
-        })
-        .expect(200);
-      const session = asAdmin.body.data.session ?? asAdmin.body.data;
+      const asAdmin = await loginUser(app, adminEmail, admin.password, owner.tenantId);
+      const session = asAdmin;
 
       // Otherwise previewing becomes a way to probe the role ceiling: an
       // admin learning whether they may invite an owner without trying.

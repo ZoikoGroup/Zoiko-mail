@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   authenticate,
+  crossTenantScope,
   loginRateLimit,
   refreshRateLimit,
   registerRateLimit,
@@ -11,6 +12,8 @@ import {
 import {
   loginSchema,
   changePasswordSchema,
+  mfaCodeSchema,
+  stepUpSchema,
   createWorkspaceSchema,
   joinWorkspaceSchema,
   logoutSchema,
@@ -26,6 +29,16 @@ import { verifyOtpSchema } from "./otp.schema.js";
 import { requireFlag } from "../../common/flags/index.js";
 
 const authRouter = Router();
+
+/**
+ * Signing in is not a tenant-scoped operation: it is what decides which
+ * workspace you are in. It still writes audit rows — a failed sign-in, an MFA
+ * challenge — and those rows name a tenant the request has not been bound to
+ * yet, so the row-level policies need to be told this path crosses the
+ * boundary (AC-004). Routes further down that do establish a tenant context
+ * narrow it again themselves.
+ */
+authRouter.use(crossTenantScope);
 
 authRouter.post(
   "/register",
@@ -128,11 +141,69 @@ authRouter.post(
   authController.changePassword
 );
 
+// Rate-limited like a login, because it is one: an unlimited step-up
+// endpoint is a password oracle behind an authenticated session.
+authRouter.post(
+  "/step-up",
+  loginRateLimit,
+  authenticate,
+  tenantContext,
+  validate(stepUpSchema),
+  authController.stepUp
+);
+
 authRouter.post(
   "/logout-all",
   authenticate,
   tenantContext,
   authController.logoutAll
+);
+
+/* ── multi-factor authentication — AC-002 ──────────────────────────────── */
+
+/**
+ * Answering a challenge is a sign-in, so it is rate-limited like one: six
+ * digits is a small space, and the challenge is already reachable with only a
+ * password.
+ */
+authRouter.post(
+  "/mfa/challenge/verify",
+  loginRateLimit,
+  validate(mfaCodeSchema),
+  authController.mfaChallengeVerify
+);
+authRouter.post("/mfa/challenge/enroll", loginRateLimit, authController.mfaChallengeEnrol);
+authRouter.post(
+  "/mfa/challenge/confirm",
+  loginRateLimit,
+  validate(mfaCodeSchema),
+  authController.mfaChallengeConfirm
+);
+
+authRouter.get("/mfa", authenticate, tenantContext, authController.mfaStatus);
+authRouter.post("/mfa/enroll", authenticate, tenantContext, authController.mfaEnrol);
+authRouter.post(
+  "/mfa/confirm",
+  authenticate,
+  tenantContext,
+  validate(mfaCodeSchema),
+  authController.mfaConfirm
+);
+authRouter.post(
+  "/mfa/disable",
+  loginRateLimit,
+  authenticate,
+  tenantContext,
+  validate(mfaCodeSchema),
+  authController.mfaDisable
+);
+authRouter.post(
+  "/mfa/recovery-codes",
+  loginRateLimit,
+  authenticate,
+  tenantContext,
+  validate(mfaCodeSchema),
+  authController.mfaRegenerateRecoveryCodes
 );
 
 export { authRouter };

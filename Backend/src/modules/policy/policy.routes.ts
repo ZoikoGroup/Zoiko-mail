@@ -1,10 +1,10 @@
 import { Router } from "express";
-import { authenticate, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
+import { authenticate, idempotency, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./policy.controller.js";
 import { createPolicySchema, evaluatePolicySchema, listPoliciesSchema, policyIdParamsSchema, retentionExecuteSchema, retentionPreviewSchema } from "./policy.schema.js";
 
 const policyRouter = Router();
-policyRouter.use(authenticate, tenantContext);
+policyRouter.use(authenticate, tenantContext, idempotency);
 policyRouter.post("/evaluate", requireRole("OWNER", "ADMIN", "MEMBER"), validate(evaluatePolicySchema), controller.evaluate);
 policyRouter.post("/retention/preview", requireRole("OWNER"), validate(retentionPreviewSchema), controller.previewRetention);
 policyRouter.post("/retention/execute", requireRole("OWNER"), validate(retentionExecuteSchema), controller.executeRetention);

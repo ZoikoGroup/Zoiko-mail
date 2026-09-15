@@ -22,6 +22,8 @@ import {
   replyAll as replyAllApi,
   forward as forwardApi,
   fetchUnreadCounts,
+  listSendableMailboxes,
+  type SendableMailbox,
   type ListMailParams,
   type ListMailResponse,
   type MailItem,
@@ -189,6 +191,23 @@ export interface ComposerPayload {
   textBody: string;
   action: "send" | "draft" | "schedule";
   scheduledAt?: string; // ISO, required when action === "schedule"
+  /** Compose as a shared mailbox; omitted means the caller's own address. */
+  sendAsMailboxId?: string;
+}
+
+/**
+ * The From options for the composer.
+ *
+ * Long staleTime: an assignment changing mid-composition is rare, and the
+ * server re-checks send permission on both the draft and the send, so a stale
+ * list cannot turn into an unauthorised send — only into a refusal.
+ */
+export function useSendableMailboxes() {
+  return useQuery<{ mailboxes: SendableMailbox[] }>({
+    queryKey: ["mail", "send-as"],
+    queryFn: listSendableMailboxes,
+    staleTime: 5 * 60 * 1000,
+  });
 }
 
 export interface ComposerResult {
@@ -213,15 +232,23 @@ export function useComposerSubmit() {
           subject: p.subject ?? "",
           textBody: p.textBody,
           recipients: p.recipients ?? { to: [], cc: [], bcc: [] },
+          sendAsMailboxId: p.sendAsMailboxId,
         });
       } else if (p.mode === "reply") {
-        draft = await replyApi(p.sourceId as string, { textBody: p.textBody });
+        draft = await replyApi(p.sourceId as string, {
+          textBody: p.textBody,
+          sendAsMailboxId: p.sendAsMailboxId,
+        });
       } else if (p.mode === "replyAll") {
-        draft = await replyAllApi(p.sourceId as string, { textBody: p.textBody });
+        draft = await replyAllApi(p.sourceId as string, {
+          textBody: p.textBody,
+          sendAsMailboxId: p.sendAsMailboxId,
+        });
       } else {
         draft = await forwardApi(p.sourceId as string, {
           recipients: p.recipients as Recipients,
           textBody: p.textBody,
+          sendAsMailboxId: p.sendAsMailboxId,
         });
       }
 

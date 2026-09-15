@@ -45,6 +45,29 @@ export type AuthState =
   | { state: "MEMBERSHIP_SUSPENDED"; user: PublicUser; workspace: WorkspaceOption }
   | { state: "WORKSPACE_SUSPENDED"; user: PublicUser; workspace: WorkspaceOption }
   | { state: "WORKSPACE_DELETING"; user: PublicUser; workspace: WorkspaceOption }
+  /**
+   * The password was right and the account is privileged, so AC-002 wants a
+   * second factor before any session exists. Two states rather than one:
+   * MFA_REQUIRED asks for a code, MFA_ENROLLMENT_REQUIRED asks the account to
+   * set an authenticator up first, and they are different screens.
+   */
+  | {
+    state: "MFA_REQUIRED";
+    user: PublicUser;
+    workspace?: WorkspaceOption;
+    mfaToken: string;
+    expiresIn: string;
+    remainingRecoveryCodes: number;
+  }
+  | {
+    state: "MFA_ENROLLMENT_REQUIRED";
+    user: PublicUser;
+    workspace?: WorkspaceOption;
+    mfaToken: string;
+    expiresIn: string;
+    /** Why the account cannot decline: the role that requires it. */
+    requiredBecause: string;
+  }
   | {
     state: "STAFF_CONSOLE";
     user: PublicUser;

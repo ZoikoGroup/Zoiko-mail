@@ -2,6 +2,8 @@ import type { Request, Response } from "express";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
 import { mailService } from "./mail.service.js";
+import { sharedMailboxService } from "./shared-mailbox.service.js";
+import { aliasService } from "./alias.service.js";
 
 function context(req: Request) {
   const tenant = req.tenantContext!;
@@ -42,7 +44,13 @@ export const unreadCounts = asyncHandler(async (req: Request, res: Response) => 
   sendSuccess(res, 200, await mailService.unreadCounts(context(req)), req.requestId);
 });
 export const get = asyncHandler(async (req: Request, res: Response) => {
-  sendSuccess(res, 200, await mailService.get(String(req.params.messageId), context(req)), req.requestId);
+  const mailboxId = req.query.mailboxId ? String(req.query.mailboxId) : undefined;
+  sendSuccess(
+    res,
+    200,
+    await mailService.get(String(req.params.messageId), context(req), mailboxId),
+    req.requestId
+  );
 });
 export const updateMailboxItem = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await mailService.updateMailboxItem(String(req.params.messageId), req.body, context(req)), req.requestId);
@@ -124,6 +132,114 @@ export const adminListDeliveryEvents = asyncHandler(async (req: Request, res: Re
     req.requestId
   );
 });
+export const adminDeliveryFailureSummary = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(
+    res,
+    200,
+    await mailService.adminDeliveryFailureSummary(
+      req.query as unknown as { windowHours: number },
+      context(req)
+    ),
+    req.requestId
+  );
+});
+export const listSendableMailboxes = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailService.listSendableMailboxes(context(req)), req.requestId);
+});
+
+/* ── aliases and forwarding — Data Model §6.17, §6.18 ────────────────── */
+
+export const listMailboxRouting = asyncHandler(async (req: Request, res: Response) => {
+  const ctx = context(req);
+  sendSuccess(res, 200, await aliasService.list(ctx.tenantId, String(req.params.mailboxId)), req.requestId);
+});
+
+export const createAlias = asyncHandler(async (req: Request, res: Response) => {
+  const ctx = context(req);
+  sendSuccess(
+    res,
+    201,
+    await aliasService.createAlias(ctx.tenantId, String(req.params.mailboxId), req.body.address, ctx),
+    req.requestId
+  );
+});
+
+export const deleteAlias = asyncHandler(async (req: Request, res: Response) => {
+  const ctx = context(req);
+  sendSuccess(
+    res,
+    200,
+    await aliasService.deleteAlias(ctx.tenantId, String(req.params.mailboxId), String(req.params.aliasId), ctx),
+    req.requestId
+  );
+});
+
+export const createForwarding = asyncHandler(async (req: Request, res: Response) => {
+  const ctx = context(req);
+  sendSuccess(
+    res,
+    201,
+    await aliasService.createForwarding(ctx.tenantId, String(req.params.mailboxId), req.body, ctx),
+    req.requestId
+  );
+});
+
+export const deleteForwarding = asyncHandler(async (req: Request, res: Response) => {
+  const ctx = context(req);
+  sendSuccess(
+    res,
+    200,
+    await aliasService.deleteForwarding(ctx.tenantId, String(req.params.mailboxId), String(req.params.ruleId), ctx),
+    req.requestId
+  );
+});
+
+/* ── shared mailboxes — Security §10 ─────────────────────────────────── */
+
+export const listSharedMailboxes = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, { groups: await sharedMailboxService.list(context(req).tenantId) }, req.requestId);
+});
+
+export const createSharedMailbox = asyncHandler(async (req: Request, res: Response) => {
+  const ctx = context(req);
+  sendSuccess(res, 201, await sharedMailboxService.create(ctx.tenantId, req.body, ctx), req.requestId);
+});
+
+export const listMailboxAssignees = asyncHandler(async (req: Request, res: Response) => {
+  const ctx = context(req);
+  sendSuccess(
+    res,
+    200,
+    { assignees: await sharedMailboxService.assignees(ctx.tenantId, String(req.params.mailboxId)) },
+    req.requestId
+  );
+});
+
+export const assignMailbox = asyncHandler(async (req: Request, res: Response) => {
+  const ctx = context(req);
+  sendSuccess(
+    res,
+    200,
+    await sharedMailboxService.assign(ctx.tenantId, String(req.params.mailboxId), req.body, ctx),
+    req.requestId
+  );
+});
+
+export const unassignMailbox = asyncHandler(async (req: Request, res: Response) => {
+  const ctx = context(req);
+  sendSuccess(
+    res,
+    200,
+    await sharedMailboxService.unassign(
+      ctx.tenantId,
+      String(req.params.mailboxId),
+      String(req.params.membershipId),
+      ctx
+    ),
+    req.requestId
+  );
+});
+
 export const updateSendingStatus = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(
     res,

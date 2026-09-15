@@ -487,7 +487,13 @@ function DraftStatus({ action: a }: { action: AIAction }) {
             <CheckCircle2 className="h-4 w-4" /> Draft ready
           </p>
           <p className="mt-1 truncate text-sm text-[var(--ink)]">{d.subject}</p>
-          <p className="mt-0.5 line-clamp-2 whitespace-pre-wrap text-xs text-[var(--ink2)]">{d.textBody}</p>
+          {/*
+            The snippet, not the body. This is a list row, and list endpoints
+            stopped returning bodies (API §9 / AC-011) — `snippet` is the field
+            that replaced them, server-trimmed for exactly this two-line
+            preview. Opening the draft is a detail read, which does carry it.
+          */}
+          <p className="mt-0.5 line-clamp-2 whitespace-pre-wrap text-xs text-[var(--ink2)]">{d.snippet}</p>
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <Link href="/mail" className="zoiko-btn pri sm">
               <PenLine className="h-3.5 w-3.5" /> Open in Webmail

@@ -198,8 +198,11 @@ test.beforeEach(async ({ page }) => {
           message: {
             id: "draft-1",
             subject: "Re: Demo time",
-            textBody: "Hi Alex, yes \u2014 Thursday 2pm works for us.",
-            htmlBody: null,
+            // A list row, so a snippet rather than a body: list endpoints
+            // stopped shipping bodies (API section 9 / AC-011) and the draft
+            // preview reads `snippet`. A fixture carrying textBody would be
+            // mocking a response the server no longer sends.
+            snippet: "Hi Alex, yes \u2014 Thursday 2pm works for us.",
             status: "DRAFT",
             sentAt: null,
             scheduledAt: null,
