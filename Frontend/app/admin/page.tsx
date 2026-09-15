@@ -45,14 +45,22 @@ export default function AdminDashboardPage() {
   const pct = (used: number, total: number) => (total > 0 ? (used / total) * 100 : 0);
 
   /**
-   * Only warn about MFA when MFA exists.
+   * Warn only about the people AC-002 actually compels.
    *
-   * The banner used to fire on every load of every workspace, because
-   * coverage is zero and always will be until AC-002 ships. A permanent alarm
-   * with no action behind it trains people to ignore the banner region, which
-   * costs us the next warning that does matter.
+   * Two earlier versions of this line were wrong in opposite directions. The
+   * first fired on every load of every workspace, when no second factor
+   * existed to enrol in. The second counted everybody without one — which on
+   * a workspace of fifteen with three privileged accounts reads as "fourteen
+   * people are a risk", and sends an Admin chasing members the specification
+   * deliberately leaves alone.
+   *
+   * The number that means compliance is the privileged one, and enforcement
+   * is at sign-in, so a shortfall here means somebody was promoted and has
+   * not signed in since.
    */
-  const mfaGap = data.mfa.supported ? data.mfa.total - data.mfa.covered : 0;
+  const mfaGap = data.mfa.supported
+    ? Math.max(0, data.mfa.requiredTotal - data.mfa.requiredCovered)
+    : 0;
 
   const failures = data.deliveryFailures;
   /**
@@ -117,10 +125,13 @@ export default function AdminDashboardPage() {
       {mfaGap > 0 && (
         <Notice tone="warn">
           <b className="text-[var(--warn)]">
-            {mfaGap === 1 ? "One person has" : `${mfaGap} people have`} no second factor.
+            {mfaGap === 1
+              ? "One privileged account has"
+              : `${mfaGap} privileged accounts have`}{" "}
+            no second factor.
           </b>{" "}
-          They can still sign in, which makes them the weakest point in the workspace. An Owner can
-          require MFA for everyone — an Admin cannot set the security policy.
+          Owners, Admins and Support must hold one, and they will be asked to enrol the next time
+          they sign in — until then their sessions predate the requirement.
         </Notice>
       )}
 
@@ -153,20 +164,29 @@ export default function AdminDashboardPage() {
           tone="ok"
         />
         {/*
-          Unsupported and zero-coverage are different claims. Until AC-002
-          ships there is no second factor to count, so the tile says so rather
-          than showing 0/14 in warning amber — which reads as a workspace that
-          neglected to enrol, and points the admin at a control that does not
-          exist.
+          The headline counts the accounts AC-002 compels, not the whole
+          workspace: this is a compliance figure, and it should read n of n on
+          a healthy workspace however many members have declined. The wider
+          number stays visible underneath, because "how much of the company
+          uses MFA" is a fair question — it is just a different one.
+
+          Amber only when the required number falls short. A green tile beside
+          an unenrolled Admin would be the same lie in a quieter voice.
         */}
         <StatTile
           label="MFA coverage"
-          value={data.mfa.supported ? data.mfa.covered : "—"}
-          suffix={data.mfa.supported ? `/${data.mfa.total}` : undefined}
-          sub={data.mfa.supported ? undefined : "not available yet"}
-          tone={data.mfa.supported ? "warn" : undefined}
+          value={data.mfa.supported ? data.mfa.requiredCovered : "—"}
+          suffix={data.mfa.supported ? `/${data.mfa.requiredTotal}` : undefined}
+          sub={
+            data.mfa.supported
+              ? `required · ${data.mfa.covered}/${data.mfa.total} workspace-wide`
+              : "not available yet"
+          }
+          tone={data.mfa.supported ? (mfaGap > 0 ? "warn" : "ok") : undefined}
           meter={
-            data.mfa.supported ? pct(data.mfa.covered, data.mfa.total) : undefined
+            data.mfa.supported
+              ? pct(data.mfa.requiredCovered, data.mfa.requiredTotal)
+              : undefined
           }
         />
         {/*

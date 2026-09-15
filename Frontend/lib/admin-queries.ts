@@ -68,7 +68,12 @@ interface ApiMembership {
   status: MemberDto["status"];
   createdAt: string;
   updatedAt: string;
-  user: { id: string; email: string; displayName: string | null };
+  user: {
+    id: string;
+    email: string;
+    displayName: string | null;
+    mfaEnrolledAt?: string | null;
+  };
 }
 
 export async function fetchMembers(): Promise<MemberDto[]> {
@@ -77,9 +82,15 @@ export async function fetchMembers(): Promise<MemberDto[]> {
     id: m.id,
     role: m.role,
     status: m.status,
-    // MFA does not exist in the backend yet (Security AC-002 is unimplemented),
-    // so every row is honestly NONE rather than a guessed method.
-    mfaMethod: "NONE",
+    // Read from the account now that a second factor exists (AC-002). This
+    // column reported NONE for everybody while there was nothing to read, and
+    // kept reporting it after there was — which is worse than blank, because
+    // an enrolled Owner appeared exposed.
+    //
+    // TOTP is the only method the product offers, so an enrolment date is
+    // enough to name it. An older server that does not send the field leaves
+    // this NONE rather than guessing.
+    mfaMethod: m.user.mfaEnrolledAt ? "TOTP" : "NONE",
     // No last-seen column exists on the membership; null renders as "—".
     lastActiveAt: null,
     user: {
@@ -450,7 +461,16 @@ export async function fetchDashboard(windowHours = 24): Promise<DashboardDto> {
         status: res.tenant.status?.toLowerCase() ?? "unknown",
       },
       counts: res.counts,
-      mfa: res.mfa,
+      // The two "required" figures arrived with AC-002. A server built before
+      // that answers without them, and defaulting to zero keeps the compliance
+      // banner quiet rather than firing it on an unknown — a warning derived
+      // from a missing field is a false alarm, and this page has exactly one
+      // banner region to spend.
+      mfa: {
+        ...res.mfa,
+        requiredCovered: res.mfa.requiredCovered ?? 0,
+        requiredTotal: res.mfa.requiredTotal ?? 0,
+      },
       deliveryFailures: asFailureSummary(res.deliveryFailures),
       recentAudit: (res.recentAudit ?? []).map(toAuditEvent),
       providerSync: (res.providerSync ?? []).map(toConnector),
@@ -528,11 +548,16 @@ async function composeDashboard(windowHours: number): Promise<DashboardDto> {
       storageUsedGb: boxes.reduce((sum, m) => sum + m.storageUsedGb, 0),
       storageLimitGb: boxes.reduce((sum, m) => sum + m.storageLimitGb, 0),
     },
-    // The old path had no way to know either; unsupported is still the truth.
+    // The fallback composes the dashboard from individual reads, and none of
+    // them counts enrolment. Unsupported is still the honest answer here —
+    // it says "this page could not tell", which is different from "nobody
+    // has enrolled".
     mfa: {
       supported: false,
       covered: 0,
       total: people.filter((m) => m.status === "ACTIVE").length,
+      requiredCovered: 0,
+      requiredTotal: 0,
     },
     deliveryFailures,
     recentAudit: events.slice(0, 6),

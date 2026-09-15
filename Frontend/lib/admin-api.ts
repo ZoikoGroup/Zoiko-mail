@@ -119,12 +119,24 @@ export interface DashboardDto {
   /**
    * MFA state, reported rather than inferred.
    *
-   * `supported: false` says the platform does not offer MFA yet (Security
-   * AC-002 is unimplemented and `AppUser.mfaEnabled` does not exist). That is
-   * a different claim from `covered: 0`, which would read as a workspace that
-   * has neglected to enrol and invite an admin to fix something they cannot.
+   * Counted two ways, because they answer different questions. `covered` of
+   * `total` is how much of the workspace holds a second factor; `requiredCovered`
+   * of `requiredTotal` is the only one that means compliance, since AC-002
+   * compels Owners, Admins and Support and leaves members free to decline.
+   * A workspace can be fully compliant with most of its people unenrolled,
+   * and warning on the wider number tells an Admin to chase a problem that
+   * does not exist.
+   *
+   * `supported: false` is now only produced by the fallback path, which
+   * composes the dashboard from individual reads and has no way to count.
    */
-  mfa: { supported: boolean; covered: number; total: number };
+  mfa: {
+    supported: boolean;
+    covered: number;
+    total: number;
+    requiredCovered: number;
+    requiredTotal: number;
+  };
   /** Null while the read is in flight or refused; the tile then shows "—". */
   deliveryFailures: DeliveryFailureSummaryDto | null;
   recentAudit: AuditEventDto[];

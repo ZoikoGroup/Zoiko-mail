@@ -468,3 +468,69 @@ describe("the audit trail", () => {
     expect(types).toContain("MFA_CHALLENGE_SUCCEEDED");
   });
 });
+
+describe("what the workspace can see about enrolment", () => {
+  it("reports each person's enrolment on the people list", async () => {
+    const suffix = String(Date.now());
+    const owner = await registerUser(app, { email: `mfa-people-${suffix}@zoiko.test` });
+    const memberEmail = `mfa-people-member-${suffix}@zoiko.test`;
+    const member = await registerUser(app, { email: memberEmail });
+    await request(app)
+      .post("/api/v1/membership/members")
+      .set(authHeader(owner.accessToken))
+      .send({ email: memberEmail, role: "MEMBER" })
+      .expect(201);
+    // A member is not compelled, so model one who has not enrolled.
+    await prisma.appUser.update({
+      where: { id: member.userId },
+      data: { mfaSecret: null, mfaEnrolledAt: null },
+    });
+
+    const people = await request(app)
+      .get("/api/v1/membership/members")
+      .set(authHeader(owner.accessToken))
+      .expect(200);
+
+    const rows = people.body.data.members as Array<{
+      user: { email: string; mfaEnrolledAt: string | null };
+    }>;
+    const ownerRow = rows.find((row) => row.user.email === owner.email);
+    const memberRow = rows.find((row) => row.user.email === memberEmail);
+
+    // The people screen has always had a column for this and always showed
+    // "none", because there was nothing to read. An enrolled Owner appearing
+    // exposed is worse than a blank column.
+    expect(ownerRow?.user.mfaEnrolledAt).toBeTruthy();
+    expect(memberRow?.user.mfaEnrolledAt).toBeNull();
+  });
+
+  it("counts the compelled accounts separately from everybody else", async () => {
+    const suffix = String(Date.now());
+    const owner = await registerUser(app, { email: `mfa-count-${suffix}@zoiko.test` });
+    const memberEmail = `mfa-count-member-${suffix}@zoiko.test`;
+    const member = await registerUser(app, { email: memberEmail });
+    await request(app)
+      .post("/api/v1/membership/members")
+      .set(authHeader(owner.accessToken))
+      .send({ email: memberEmail, role: "MEMBER" })
+      .expect(201);
+    await prisma.appUser.update({
+      where: { id: member.userId },
+      data: { mfaSecret: null, mfaEnrolledAt: null },
+    });
+
+    const dashboard = await request(app)
+      .get("/api/v1/admin/dashboard")
+      .set(authHeader(owner.accessToken))
+      .expect(200);
+
+    const mfa = dashboard.body.data.mfa;
+    // Two people, one enrolled — and fully compliant, because AC-002 names
+    // Owners, Admins and Support and not members. A dashboard that warned
+    // here would send an Admin chasing somebody doing nothing wrong.
+    expect(mfa.total).toBe(2);
+    expect(mfa.covered).toBe(1);
+    expect(mfa.requiredTotal).toBe(1);
+    expect(mfa.requiredCovered).toBe(1);
+  });
+});

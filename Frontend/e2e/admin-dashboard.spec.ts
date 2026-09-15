@@ -52,7 +52,14 @@ interface Aggregate {
     storageUsedGb: number;
     storageLimitGb: number;
   };
-  mfa: { supported: boolean; covered: number; total: number };
+  mfa: {
+    supported: boolean;
+    covered: number;
+    total: number;
+    /** The AC-002 population: Owners, Admins and Support. */
+    requiredCovered: number;
+    requiredTotal: number;
+  };
   deliveryFailures:
     | { windowHours: number; failed: number; byType: Record<string, number> }
     | null;
@@ -83,7 +90,7 @@ function aggregate(overrides: Partial<Aggregate> = {}): Aggregate {
       storageUsedGb: 1,
       storageLimitGb: 10,
     },
-    mfa: { supported: false, covered: 0, total: 2 },
+    mfa: { supported: false, covered: 0, total: 2, requiredCovered: 0, requiredTotal: 0 },
     deliveryFailures: { windowHours: 24, failed: 0, byType: {} },
     recentAudit: [],
     providerSync: [],
@@ -315,34 +322,74 @@ test.describe("admin dashboard tiles", () => {
   });
 });
 
-test.describe("MFA is reported as unavailable, not as a coverage failure", () => {
-  test("says not available instead of firing a warning nobody can act on", async ({
-    page,
-  }) => {
-    await openDashboard(page, aggregate({ mfa: { supported: false, covered: 0, total: 9 } }));
+/**
+ * MFA coverage counts the accounts AC-002 compels.
+ *
+ * The specification requires a second factor of Owners, Admins and Support,
+ * and deliberately leaves members free to decline. So a workspace of fifteen
+ * with three privileged accounts, all enrolled, is fully compliant — and a
+ * tile that reported 3/15 in amber would send an Admin chasing twelve people
+ * who are doing nothing wrong.
+ */
+test.describe("MFA coverage counts the accounts that must hold one", () => {
+  test("says not available when the server could not count", async ({ page }) => {
+    await openDashboard(
+      page,
+      aggregate({
+        mfa: { supported: false, covered: 0, total: 9, requiredCovered: 0, requiredTotal: 0 },
+      })
+    );
 
     const mfa = tile(page, "MFA coverage");
     await expect(mfa).toContainText("—", { timeout: 60_000 });
     await expect(mfa).toContainText("not available yet");
-    // The banner used to fire on every load of every workspace. An alarm with
-    // no action behind it teaches people to ignore the banner region.
+    // An alarm with no action behind it teaches people to ignore the banner
+    // region, which costs the next warning that does matter.
     await expect(page.getByText(/no second factor/i)).toHaveCount(0);
   });
 
-  test("warns once MFA exists and someone has not enrolled", async ({ page }) => {
-    await openDashboard(page, aggregate({ mfa: { supported: true, covered: 7, total: 9 } }));
+  test("warns only about the privileged accounts that have not enrolled", async ({ page }) => {
+    await openDashboard(
+      page,
+      aggregate({
+        mfa: { supported: true, covered: 7, total: 15, requiredCovered: 1, requiredTotal: 3 },
+      })
+    );
 
     const mfa = tile(page, "MFA coverage");
-    await expect(mfa).toContainText("7", { timeout: 60_000 });
-    await expect(mfa).toContainText("/9");
-    await expect(page.getByText(/2 people have/i)).toBeVisible();
+    // The headline is the compliance figure, not the workspace-wide one.
+    await expect(mfa).toContainText("1", { timeout: 60_000 });
+    await expect(mfa).toContainText("/3");
+    // …and the wider number is still on offer, because it is a fair question.
+    await expect(mfa).toContainText("7/15");
+    await expect(page.getByText(/2 privileged accounts have/i)).toBeVisible();
   });
 
-  test("stays quiet when everyone has enrolled", async ({ page }) => {
-    await openDashboard(page, aggregate({ mfa: { supported: true, covered: 4, total: 4 } }));
+  test("stays quiet when every required account has enrolled, however many members have not", async ({
+    page,
+  }) => {
+    await openDashboard(
+      page,
+      aggregate({
+        mfa: { supported: true, covered: 3, total: 15, requiredCovered: 3, requiredTotal: 3 },
+      })
+    );
 
-    await expect(tile(page, "MFA coverage")).toContainText("4", { timeout: 60_000 });
+    await expect(tile(page, "MFA coverage")).toContainText("3", { timeout: 60_000 });
+    // Twelve members without a second factor is not a finding: the
+    // specification names three roles and not a fourth.
     await expect(page.getByText(/no second factor/i)).toHaveCount(0);
+  });
+
+  test("names one account in the singular", async ({ page }) => {
+    await openDashboard(
+      page,
+      aggregate({
+        mfa: { supported: true, covered: 5, total: 9, requiredCovered: 2, requiredTotal: 3 },
+      })
+    );
+
+    await expect(page.getByText(/one privileged account has/i)).toBeVisible();
   });
 });
 
