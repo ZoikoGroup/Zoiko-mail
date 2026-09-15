@@ -168,10 +168,17 @@ export async function fetchMailboxes(): Promise<MailboxDto[]> {
  * intent. Audited server-side with the old and new value, because §14.1
  * requires mailbox-level AI enablement to leave evidence.
  */
-export async function setMailboxAi(mailboxId: string, aiEnabled: boolean): Promise<void> {
+export async function setMailboxAi(
+  mailboxId: string,
+  aiEnabled: boolean,
+  stepUpToken?: string
+): Promise<void> {
   await apiRequest(`/mail/admin/mailboxes/${mailboxId}`, {
     method: "PATCH",
     body: { aiEnabled },
+    // Only enabling is step-up (RBAC §2). Restricting a mailbox is the safe
+    // direction and stays one click.
+    stepUpToken,
   });
 }
 
@@ -736,10 +743,14 @@ export async function fetchPolicies(): Promise<PolicyDto[]> {
  */
 export async function savePolicyRules(
   policy: PolicyDto,
-  rules: { defaultEffect: PolicyDto["defaultEffect"]; conditions: PolicyConditionDto[] }
+  rules: { defaultEffect: PolicyDto["defaultEffect"]; conditions: PolicyConditionDto[] },
+  stepUpToken?: string
 ): Promise<void> {
   const created = await apiRequest<{ id: string }>("/policies", {
     method: "POST",
+    // An AI policy write is step-up (RBAC §2); the other types are not, and
+    // the server decides which by reading the type off this body.
+    stepUpToken,
     body: {
       type: policy.type,
       name: policy.name,
@@ -1182,8 +1193,11 @@ export async function activateDomain(domainId: string): Promise<void> {
 }
 
 /** Remove a domain. Refused by the server while it is active for sending. */
-export async function removeDomain(domainId: string): Promise<void> {
-  await apiRequest(`/domains/${domainId}`, { method: "DELETE" });
+export async function removeDomain(
+  domainId: string,
+  stepUpToken?: string
+): Promise<void> {
+  await apiRequest(`/domains/${domainId}`, { method: "DELETE", stepUpToken });
 }
 
 /**

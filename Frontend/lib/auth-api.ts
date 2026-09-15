@@ -470,3 +470,21 @@ export async function resetPassword(
     auth: false,
   });
 }
+
+/**
+ * Re-enter your password to authorise one high-risk action — AC-003.
+ *
+ * Deliberately not stored anywhere. The point of step-up is freshness: an
+ * access token proves who you are for hours, and RBAC §2 wants evidence that
+ * the person at the keyboard is still the account holder *at action time*.
+ * Keeping the result would turn it into a second long-lived credential and
+ * undo the control.
+ */
+export async function requestStepUp(password: string): Promise<string> {
+  const data = await apiRequest<{ stepUpToken: string; expiresIn: string }>(
+    "/auth/step-up",
+    { method: "POST", body: { password } }
+  );
+  if (!data?.stepUpToken) throw new Error("The server did not return a step-up token.");
+  return data.stepUpToken;
+}

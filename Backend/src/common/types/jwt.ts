@@ -56,6 +56,20 @@ export interface AccessTokenPayload {
    * sign in once more and are then unaffected.
    */
   workspace?: WorkspaceScope;
+  /**
+   * The session this token belongs to — AC-001, which requires every
+   * authenticated request to resolve user_id, tenant_id, session_id and role.
+   *
+   * It is the refresh token's `jti`, so "session" means the same thing on
+   * both halves of the pair and survives a rotation: refreshing carries the
+   * id forward rather than minting a new one, because the person did not
+   * start a new session by staying signed in.
+   *
+   * Optional only for tokens minted before this existed. Those resolve to a
+   * null session id rather than being refused, since refusing them would sign
+   * every active user out to add a field to an audit row.
+   */
+  sid?: string;
   type: "access";
 }
 
@@ -70,6 +84,16 @@ export interface RefreshTokenPayload {
    * Google session into the owner console.
    */
   workspace?: WorkspaceScope;
+  /**
+   * The session, as distinct from this particular token.
+   *
+   * `jti` rotates on every refresh — that is what makes reuse detectable —
+   * so it cannot be the session id: a user who stays signed in all day would
+   * produce a new "session" every few hours and the audit trail could not be
+   * followed across them. `sid` is seeded from the first token's jti and
+   * carried forward through every rotation.
+   */
+  sid?: string;
   type: "refresh";
   jti: string;
 }
@@ -159,6 +183,8 @@ export interface AuthContext {
   platformRole: PlatformRole;
   /** The console this session is bound to; see WorkspaceScope. */
   workspace: WorkspaceScope;
+  /** AC-001. Null for a token minted before session ids were carried. */
+  sessionId: string | null;
   type: "access";
 }
 
@@ -197,6 +223,12 @@ export interface TenantContextData {
   membershipRole: MembershipRole;
   /** The console this session is bound to. */
   workspace: WorkspaceScope;
+  /**
+   * AC-001. Carried through to audit so an event can be attributed to one
+   * sign-in rather than only to a person — which is what makes "this was me,
+   * but not from that laptop" answerable.
+   */
+  sessionId: string | null;
   tenant: {
     id: string;
     name: string;

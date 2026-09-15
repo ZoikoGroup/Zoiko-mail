@@ -5,6 +5,7 @@ import { Trash2 } from "lucide-react";
 
 import { usePolicies, useSavePolicyRules } from "@/lib/admin-hooks";
 import { useCan } from "@/lib/admin-capabilities";
+import { StepUpDialog, useStepUp } from "@/components/admin/StepUpDialog";
 import type { PolicyConditionDto, PolicyDto } from "@/lib/admin-api";
 import {
   Card,
@@ -102,6 +103,9 @@ export default function AdminPoliciesPage() {
 
 function PolicyCard({ policy, canWrite }: { policy: PolicyDto; canWrite: boolean }) {
   const save = useSavePolicyRules();
+  // Changing AI policy is step-up (RBAC §2). The other policy types are not,
+  // and the server decides which by reading the type off the body.
+  const stepUp = useStepUp();
   const [editing, setEditing] = useState(false);
   const [defaultEffect, setDefaultEffect] = useState(policy.defaultEffect);
   const [conditions, setConditions] = useState<PolicyConditionDto[]>(policy.conditions);
@@ -135,10 +139,18 @@ function PolicyCard({ policy, canWrite }: { policy: PolicyDto; canWrite: boolean
       setInvalid("Every condition needs a value.");
       return;
     }
-    save.mutate(
-      { policy, rules: { defaultEffect, conditions } },
-      { onSuccess: () => setEditing(false) }
-    );
+    void stepUp
+      .attempt(`Changing the ${policy.type} policy`, (stepUpToken) =>
+        save.mutateAsync({
+          policy,
+          rules: { defaultEffect, conditions },
+          stepUpToken,
+        })
+      )
+      .then(() => setEditing(false))
+      .catch(() => {
+        /* The mutation's own error is already rendered. */
+      });
   };
 
   return (
@@ -184,6 +196,8 @@ function PolicyCard({ policy, canWrite }: { policy: PolicyDto; canWrite: boolean
       {policy.description && (
         <Row title="About" detail={policy.description} right={<Pill tone="nu">{policy.type}</Pill>} />
       )}
+
+      <StepUpDialog {...stepUp.dialog} />
 
       {(invalid || save.error) && (
         <Notice tone="warn">{invalid ?? save.error?.message}</Notice>

@@ -12,13 +12,35 @@ import {
 //   error   -> { success: false, error: { code, message }, requestId }
 // This client unwraps `data` on success and throws a typed error otherwise.
 
+/**
+ * What a capability refusal tells the caller, from the server's
+ * `error.details`. A bare boolean makes every denial look the same, so the UI
+ * can only grey a control out; these turn "refused" into a next step.
+ */
+export interface CapabilityDenial {
+    capability?: string;
+    reason?: string;
+    heldBy?: string[];
+    requiresStepUp?: boolean;
+    requiresSecondApprover?: boolean;
+    requiresSupportGrant?: boolean;
+}
+
 export class ApiError extends Error {
     status: number;
     code?: string;
-    constructor(status: number, message: string, code?: string) {
+    /** Present on a 403 from requireCapability; absent otherwise. */
+    details?: CapabilityDenial;
+    constructor(status: number, message: string, code?: string, details?: CapabilityDenial) {
         super(message);
         this.status = status;
         this.code = code;
+        this.details = details;
+    }
+
+    /** True when re-authenticating would turn this refusal into a success. */
+    get needsStepUp(): boolean {
+        return this.status === 403 && this.details?.requiresStepUp === true;
     }
 }
 
@@ -44,6 +66,8 @@ interface RequestOptions {
     _retried?: boolean;
     tenantId?: string | null;
     accessToken?: string | null;
+    /** A fresh step-up token, for the actions RBAC §2 marks Step-up. */
+    stepUpToken?: string | null;
 }
 
 // Single-flight refresh: if many calls 401 at once, we refresh only once.
@@ -91,6 +115,7 @@ export async function apiRequest<T = unknown>(
         _retried = false,
         tenantId,
         accessToken,
+        stepUpToken,
     } = opts;
 
     const headers: Record<string, string> = {
@@ -112,6 +137,10 @@ export async function apiRequest<T = unknown>(
         if (token) headers["Authorization"] = `Bearer ${token}`;
     }
     if (tenantId) headers["X-Zoiko-Tenant-ID"] = tenantId;
+    // Proof the caller re-entered their password just now (AC-003). Passed per
+    // call rather than stored: the point is freshness, so it must not become a
+    // second, longer-lived credential sitting in the client.
+    if (stepUpToken) headers["x-step-up-token"] = stepUpToken;
 
     let res: Response;
     try {
@@ -173,7 +202,7 @@ export async function apiRequest<T = unknown>(
 
     if (!res.ok) {
         const message = json?.error?.message ?? `Request failed (${res.status})`;
-        throw new ApiError(res.status, message, json?.error?.code);
+        throw new ApiError(res.status, message, json?.error?.code, json?.error?.details);
     }
     // unwrap { success, data } -> data
     return (json?.data ?? json) as T;

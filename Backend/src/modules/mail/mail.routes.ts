@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authenticate, idempotency, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
+import { requireCapabilityWhen, authenticate, idempotency, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./mail.controller.js";
 import { attachmentUpload } from "./attachment.middleware.js";
 import { adminDeliveryEventsQuerySchema, adminDeliverySummaryQuerySchema, adminUpdateMailboxSchema, assignMailboxSchema, createSharedMailboxSchema, mailboxAssigneeParamsSchema, createAliasSchema, createForwardingSchema, aliasParamsSchema, forwardingParamsSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, mailboxScopeSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
@@ -119,12 +119,15 @@ mailRouter.delete(
 );
 mailRouter.get("/admin/mailboxes", requireCapability("workspace.mailboxes.manage"), controller.listAllMailboxes);
 mailRouter.post("/admin/mailboxes", requireCapability("workspace.mailboxes.manage"), controller.adminCreateMailbox);
-mailRouter.delete("/admin/mailboxes/:mailboxId", requireCapability("workspace.mailboxes.manage"), validate(mailboxIdParamsSchema, "params"), controller.adminDeleteMailbox);
+// Destructive, and step-up per RBAC §2. The mailbox is expected to be
+// suspended first and an export offered; that sequencing is the console's,
+// but the fresh authentication is enforced here.
+mailRouter.delete("/admin/mailboxes/:mailboxId", requireCapability("workspace.mailboxes.delete"), validate(mailboxIdParamsSchema, "params"), controller.adminDeleteMailbox);
 // Declared before the ":mailboxId" patch so "sending" is not read as an update
 // field set on the mailbox itself.
 mailRouter.patch(
   "/admin/mailboxes/:mailboxId/sending",
-  requireCapability("workspace.mailboxes.manage"),
+  requireCapability("workspace.mailboxes.sending"),
   validate(mailboxIdParamsSchema, "params"),
   validate(updateSendingStatusSchema),
   controller.updateSendingStatus
@@ -134,6 +137,13 @@ mailRouter.patch(
   requireCapability("workspace.mailboxes.manage"),
   validate(mailboxIdParamsSchema, "params"),
   validate(adminUpdateMailboxSchema),
+  // RBAC §2 "Enable AI on restricted mailbox": Owner/Admin explicit, step-up.
+  // Only on the way in. Restricting a mailbox is the safe direction and must
+  // stay one click, or the control that protects a mailbox is harder to reach
+  // than the one that exposes it.
+  requireCapabilityWhen((req) =>
+    req.body?.aiEnabled === true ? "mailbox.ai.enable" : null
+  ),
   controller.adminUpdateMailbox
 );
 

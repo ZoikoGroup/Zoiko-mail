@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { authenticate, idempotency, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
+import { authenticate, idempotency, requireCapability,
+  requireCapabilityWhen, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./policy.controller.js";
 import { createPolicySchema, evaluatePolicySchema, listPoliciesSchema, policyIdParamsSchema, retentionExecuteSchema, retentionPreviewSchema } from "./policy.schema.js";
 
@@ -9,7 +10,17 @@ policyRouter.post("/evaluate", requireRole("OWNER", "ADMIN", "MEMBER"), validate
 policyRouter.post("/retention/preview", requireRole("OWNER"), validate(retentionPreviewSchema), controller.previewRetention);
 policyRouter.post("/retention/execute", requireRole("OWNER"), validate(retentionExecuteSchema), controller.executeRetention);
 policyRouter.get("/", requireCapability("policy.write"), validate(listPoliciesSchema, "query"), controller.list);
-policyRouter.post("/", requireCapability("policy.write"), validate(createPolicySchema), controller.create);
+// RBAC §2 "Change AI policy": Step-up. Applied to the AI type only — the
+// same endpoint writes retention and deletion policy, and demanding a
+// fresh password for those would teach people to re-authenticate without
+// reading why.
+policyRouter.post(
+  "/",
+  requireCapability("policy.write"),
+  validate(createPolicySchema),
+  requireCapabilityWhen((req) => (req.body?.type === "AI" ? "policy.ai.write" : null)),
+  controller.create
+);
 policyRouter.get("/:policyId", requireCapability("policy.write"), validate(policyIdParamsSchema, "params"), controller.get);
 policyRouter.post("/:policyId/activate", requireCapability("policy.write"), validate(policyIdParamsSchema, "params"), controller.activate);
 

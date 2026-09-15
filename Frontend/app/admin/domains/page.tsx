@@ -11,6 +11,7 @@ import {
 } from "@/lib/admin-hooks";
 import { useCan } from "@/lib/admin-capabilities";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { StepUpDialog, useStepUp } from "@/components/admin/StepUpDialog";
 import type { DnsRecordDto, DomainCheckDto, DomainDto } from "@/lib/admin-api";
 import {
   Card,
@@ -151,6 +152,9 @@ function DomainBlock({ domain, canManage }: { domain: DomainDto; canManage: bool
   const remove = useRemoveDomain();
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  // Removing a domain is step-up (RBAC §2). The server refuses without a
+  // fresh token and says so; this turns that into a prompt.
+  const stepUp = useStepUp();
 
   const status = (value: DnsRecordDto["status"]) =>
     value === "VALID" ? "Pass" : value === "PENDING" ? "Pending" : "Fail";
@@ -308,12 +312,17 @@ function DomainBlock({ domain, canManage }: { domain: DomainDto; canManage: bool
         </Notice>
       )}
 
+      <StepUpDialog {...stepUp.dialog} />
+
       <ConfirmDialog
         open={confirmRemove}
         onClose={() => setConfirmRemove(false)}
-        onConfirm={() =>
-          remove.mutate(domain.id, { onSuccess: () => setConfirmRemove(false) })
-        }
+        onConfirm={() => {
+          setConfirmRemove(false);
+          void stepUp.attempt(`Removing ${domain.domainName}`, (stepUpToken) =>
+            remove.mutateAsync({ domainId: domain.id, stepUpToken })
+          );
+        }}
         title={`Remove ${domain.domainName}?`}
         message="The domain and its check history are deleted. Mailboxes on this domain stop resolving, and adding it back issues a new ownership token that has to be published again."
         confirmLabel="Remove domain"

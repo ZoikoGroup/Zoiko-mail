@@ -77,6 +77,7 @@ export function authenticateStaff(
         platformRole: decoded.platformRole ?? "NONE",
         // Guaranteed by isAccessTokenPayload, which now requires a console.
         workspace: decoded.workspace!,
+        sessionId: decoded.sid ?? null,
         type: "access",
       };
       next();

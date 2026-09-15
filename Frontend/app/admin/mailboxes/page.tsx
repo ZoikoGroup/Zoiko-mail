@@ -12,6 +12,7 @@ import {
   useSetMailboxAi,
 } from "@/lib/admin-hooks";
 import { useCan } from "@/lib/admin-capabilities";
+import { StepUpDialog, useStepUp } from "@/components/admin/StepUpDialog";
 import {
   Card,
   InlineEmpty,
@@ -30,12 +31,17 @@ export default function AdminMailboxesPage() {
   const can = useCan();
   const { data: mailboxes, isLoading, error } = useMailboxes();
   const setAi = useSetMailboxAi();
+  // Enabling AI on a mailbox is step-up (RBAC §2); restricting it is not, so
+  // the safe direction stays one click.
+  const stepUp = useStepUp();
   const canManage = can("workspace.mailboxes.manage");
   const [openId, setOpenId] = useState<string | null>(null);
   const suspended = mailboxes?.filter((m) => m.status === "SUSPENDED") ?? [];
 
   return (
     <>
+      <StepUpDialog {...stepUp.dialog} />
+
       <PageHeader
         title="Mailboxes"
         subtitle="Provider-backed hosted mailboxes under acme.test and zoikomail.com"
@@ -117,10 +123,15 @@ export default function AdminMailboxesPage() {
                             : "Requires workspace.mailboxes.manage"
                         }
                         onClick={() =>
-                          setAi.mutate({
-                            mailboxId: mailbox.id,
-                            aiEnabled: !mailbox.aiEnabled,
-                          })
+                          void stepUp.attempt(
+                            `Allowing AI to process ${mailbox.address}`,
+                            (stepUpToken) =>
+                              setAi.mutateAsync({
+                                mailboxId: mailbox.id,
+                                aiEnabled: !mailbox.aiEnabled,
+                                stepUpToken,
+                              })
+                          )
                         }
                         className="cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
                       >

@@ -146,8 +146,15 @@ export function useMailboxes(): QueryLike<MailboxDto[]> {
 export function useSetMailboxAi() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ mailboxId, aiEnabled }: { mailboxId: string; aiEnabled: boolean }) =>
-      setMailboxAi(mailboxId, aiEnabled),
+    mutationFn: ({
+      mailboxId,
+      aiEnabled,
+      stepUpToken,
+    }: {
+      mailboxId: string;
+      aiEnabled: boolean;
+      stepUpToken?: string;
+    }) => setMailboxAi(mailboxId, aiEnabled, stepUpToken),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["mailboxes"] }),
   });
 }
@@ -606,7 +613,10 @@ export function useActivateDomain() {
 }
 
 export function useRemoveDomain() {
-  return useDomainMutation((domainId: string) => removeDomain(domainId));
+  return useDomainMutation(
+    ({ domainId, stepUpToken }: { domainId: string; stepUpToken?: string }) =>
+      removeDomain(domainId, stepUpToken)
+  );
 }
 
 /* ── policies ──────────────────────────────────────────────────────────── */
@@ -624,13 +634,15 @@ export function useSavePolicyRules() {
     mutationFn: ({
       policy,
       rules,
+      stepUpToken,
     }: {
       policy: PolicyDto;
       rules: {
         defaultEffect: PolicyDto["defaultEffect"];
         conditions: PolicyConditionDto[];
       };
-    }) => savePolicyRules(policy, rules),
+      stepUpToken?: string;
+    }) => savePolicyRules(policy, rules, stepUpToken),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["policies"] }),
   });
 }
