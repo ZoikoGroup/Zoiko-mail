@@ -82,6 +82,11 @@ export interface ListMailParams {
   unreadOnly?: boolean;
   labelId?: string;
   q?: string;
+  from?: string;
+  to?: string;
+  hasAttachment?: boolean;
+  dateAfter?: string;
+  dateBefore?: string;
   page?: number;
   limit?: number;
 }
@@ -110,6 +115,11 @@ export async function listMail(params: ListMailParams = {}): Promise<ListMailRes
   if (params.unreadOnly) q.set("unreadOnly", "true");
   if (params.labelId) q.set("labelId", params.labelId);
   if (params.q) q.set("q", params.q);
+  if (params.from) q.set("from", params.from);
+  if (params.to) q.set("to", params.to);
+  if (params.hasAttachment) q.set("hasAttachment", "true");
+  if (params.dateAfter) q.set("dateAfter", params.dateAfter);
+  if (params.dateBefore) q.set("dateBefore", params.dateBefore);
   q.set("page", String(params.page ?? 1));
   q.set("limit", String(params.limit ?? 25));
   return apiRequest<ListMailResponse>(`/mail?${q.toString()}`);
@@ -231,6 +241,35 @@ export async function downloadAttachment(
   URL.revokeObjectURL(url);
 }
 
+export async function uploadAttachment(
+  messageId: string,
+  file: File
+): Promise<MailAttachment> {
+  const token = getAccessToken();
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE}/mail/drafts/${messageId}/attachments`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, body.error?.message || "Upload failed");
+  }
+  const json = await res.json();
+  return json.data;
+}
+
+export async function deleteAttachment(
+  messageId: string,
+  attachmentId: string
+): Promise<void> {
+  await apiRequest(`/mail/drafts/${messageId}/attachments/${attachmentId}`, {
+    method: "DELETE",
+  });
+}
+
 // ---- Threads --------------------------------------------------------------
 // The backend groups related messages into threads (subject + participants).
 // The list view returns one thread per row with only the most recent message
@@ -277,3 +316,17 @@ export async function listThreads(params: ListThreadsParams = {}): Promise<ListT
 export async function getThread(threadId: string): Promise<MessageThread> {
   return apiRequest<MessageThread>(`/threads/${threadId}`);
 }
+
+// ---- Signature --------------------------------------------------------------
+ 
+export async function getSignature(): Promise<{ signature: string | null }> {
+  return apiRequest<{ signature: string | null }>("/mail/signature");
+}
+ 
+export async function updateSignature(signature: string | null): Promise<{ signature: string | null }> {
+  return apiRequest<{ signature: string | null }>("/mail/signature", {
+    method: "PATCH",
+    body: { signature },
+  });
+}
+ 

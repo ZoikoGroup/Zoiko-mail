@@ -22,6 +22,7 @@ import {
   replyAll as replyAllApi,
   forward as forwardApi,
   fetchUnreadCounts,
+  uploadAttachment,
   type ListMailParams,
   type ListMailResponse,
   type MailItem,
@@ -30,6 +31,8 @@ import {
   listThreads,
   getThread,
   type ListThreadsParams,
+  getSignature,
+  updateSignature,
 } from "./mail-api";
 
 const listKey = (params: ListMailParams) =>
@@ -189,6 +192,7 @@ export interface ComposerPayload {
   textBody: string;
   action: "send" | "draft" | "schedule";
   scheduledAt?: string; // ISO, required when action === "schedule"
+  files?: File[]; // attachments to upload after draft creation
 }
 
 export interface ComposerResult {
@@ -226,6 +230,13 @@ export function useComposerSubmit() {
       }
 
       const draftId = draft.messageId ?? draft.id;
+
+      // 1.5) upload attachments if any
+      if (p.files && p.files.length > 0) {
+        for (const file of p.files) {
+          await uploadAttachment(draftId, file);
+        }
+      }
 
       // 2) act on it
       if (p.action === "draft") {
@@ -283,3 +294,20 @@ export function useThread(threadId: string | null) {
     staleTime: 15_000,
   });
 }
+
+export function useSignature() {
+  return useQuery({
+    queryKey: ["mail", "signature"],
+    queryFn: getSignature,
+    staleTime: 5 * 60 * 1000, // 5 min — signature doesn't change often
+  });
+}
+ 
+export function useUpdateSignature() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (signature: string | null) => updateSignature(signature),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["mail", "signature"] }),
+  });
+}
+ 

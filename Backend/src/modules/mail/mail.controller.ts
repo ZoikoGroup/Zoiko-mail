@@ -165,3 +165,18 @@ export const adminUpdateMailbox = asyncHandler(async (req: Request, res: Respons
 export const adminDeleteMailbox = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await mailService.adminDeleteMailbox(req.tenantContext!.tenantId, String(req.params.mailboxId), context(req)), req.requestId);
 });
+
+// ─── Add these to mail.controller.ts ─────────────────────────────────────────
+
+export const getSignature = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailService.getSignature(context(req)), req.requestId);
+});
+
+export const updateSignature = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(
+    res,
+    200,
+    await mailService.updateSignature(req.body.signature, context(req)),
+    req.requestId
+  );
+});

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { X, Send, Save, Clock, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
-import { useComposerSubmit, type ComposerMode } from "@/lib/mail-hooks";
+import { useEffect, useRef, useState } from "react";
+import { X, Send, Save, Clock, Loader2, AlertCircle, CheckCircle2, Paperclip } from "lucide-react";
+import { useComposerSubmit, type ComposerMode, useSignature } from "@/lib/mail-hooks";
 import type { MailItem, Recipients } from "@/lib/mail-api";
 
 function parseEmails(raw: string): string[] {
@@ -11,6 +11,28 @@ function parseEmails(raw: string): string[] {
     .map((s) => s.trim())
     .filter(Boolean);
 }
+
+function bytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+const ALLOWED_TYPES = [
+  "application/pdf",
+  "application/zip",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "text/csv",
+  "text/plain",
+];
+
+const ACCEPT = ALLOWED_TYPES.join(",");
 
 const MODE_TITLE: Record<ComposerMode, string> = {
   new: "New message",
@@ -31,21 +53,27 @@ export function ComposeModal({
   onClose: () => void;
 }) {
   const submit = useComposerSubmit();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [to, setTo] = useState("");
   const [cc, setCc] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
   const [showSchedule, setShowSchedule] = useState(false);
   const [scheduledAt, setScheduledAt] = useState("");
   const [notice, setNotice] = useState<{ kind: "gate" | "ok" | "err"; text: string } | null>(null);
+  const { data: sigData } = useSignature();
 
   // Reset the form whenever the composer opens for a new context.
   useEffect(() => {
     if (!open) return;
     setTo("");
     setCc("");
-    setBody("");
+    // setBody("");
+    const sig = sigData?.signature;
+    setBody(sig ? `\n\n--\n${sig}` : "");
+    setFiles([]);
     setShowSchedule(false);
     setScheduledAt("");
     setNotice(null);
@@ -57,6 +85,21 @@ export function ComposeModal({
 
   const needsRecipients = mode === "new" || mode === "forward";
   const srcMsg = source?.message;
+
+  const addFiles = (incoming: FileList | null) => {
+    if (!incoming) return;
+    const arr = Array.from(incoming);
+    // Deduplicate by name+size
+    const existing = new Set(files.map((f) => `${f.name}:${f.size}`));
+    const fresh = arr.filter((f) => !existing.has(`${f.name}:${f.size}`));
+    setFiles((prev) => [...prev, ...fresh]);
+  };
+
+  const removeFile = (index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const totalSize = files.reduce((sum, f) => sum + f.size, 0);
 
   const run = (action: "send" | "draft" | "schedule") => {
     setNotice(null);
@@ -85,6 +128,7 @@ export function ComposeModal({
         textBody: body,
         action,
         scheduledAt: action === "schedule" ? new Date(scheduledAt).toISOString() : undefined,
+        files: files.length > 0 ? files : undefined,
       },
       {
         onSuccess: (res) => {
@@ -147,6 +191,32 @@ export function ComposeModal({
             onChange={(e) => setBody(e.target.value)}
           />
 
+          {/* Attached files list */}
+          {files.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
+                {files.length} file{files.length > 1 ? "s" : ""} · {bytes(totalSize)}
+              </div>
+              {files.map((file, i) => (
+                <div
+                  key={`${file.name}-${file.size}-${i}`}
+                  className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--s2)] px-3 py-1.5"
+                >
+                  <Paperclip className="h-3.5 w-3.5 shrink-0 text-[var(--ink3)]" />
+                  <span className="min-w-0 flex-1 truncate text-sm text-[var(--ink)]">{file.name}</span>
+                  <span className="shrink-0 text-[11px] text-[var(--ink3)]">{bytes(file.size)}</span>
+                  <button
+                    onClick={() => removeFile(i)}
+                    className="shrink-0 rounded p-0.5 text-[var(--ink3)] hover:bg-[var(--s2)] hover:text-[var(--crit)]"
+                    title="Remove"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {showSchedule && (
             <div className="flex items-center gap-2">
               <Clock className="h-4 w-4 text-[var(--ink3)]" />
@@ -161,13 +231,12 @@ export function ComposeModal({
 
           {notice && (
             <div
-              className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${
-                notice.kind === "err"
+              className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${notice.kind === "err"
                   ? "border-[var(--crit)]/30 bg-[var(--crit-soft)] text-[var(--crit)]"
                   : notice.kind === "gate"
-                  ? "border-[var(--warn)]/30 bg-[var(--warn-soft)] text-[var(--warn)]"
-                  : "border-[var(--ok)]/30 bg-[var(--ok-soft)] text-[var(--ok)]"
-              }`}
+                    ? "border-[var(--warn)]/30 bg-[var(--warn-soft)] text-[var(--warn)]"
+                    : "border-[var(--ok)]/30 bg-[var(--ok-soft)] text-[var(--ok)]"
+                }`}
             >
               {notice.kind === "err" ? (
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -196,6 +265,28 @@ export function ComposeModal({
 
           <button onClick={() => run("draft")} disabled={submit.isPending} className="zoiko-btn disabled:opacity-50">
             <Save className="h-4 w-4" /> Save draft
+          </button>
+
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={ACCEPT}
+            className="hidden"
+            onChange={(e) => {
+              addFiles(e.target.files);
+              e.target.value = ""; // allow re-selecting same file
+            }}
+          />
+
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="zoiko-btn sm"
+            title="Attach files"
+          >
+            <Paperclip className="h-4 w-4" />
+            <span className="hidden sm:inline">Attach</span>
           </button>
 
           <button

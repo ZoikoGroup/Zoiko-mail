@@ -70,6 +70,11 @@ export const listMailSchema = z.object({
   unreadOnly: z.coerce.boolean().default(false),
   labelId: z.string().uuid().optional(),
   q: z.string().trim().min(1).max(200).optional(),
+  from: z.string().trim().min(1).max(200).optional(),
+  to: z.string().trim().min(1).max(200).optional(),
+  hasAttachment: z.coerce.boolean().optional(),
+  dateAfter: z.coerce.date().optional(),
+  dateBefore: z.coerce.date().optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(25),
 });
@@ -113,6 +118,11 @@ export const forwardSchema = replySchema.extend({
   recipients: recipientsSchema,
 });
 
+export const updateSignatureSchema = z.object({
+  signature: z.string().max(5000).nullable(),
+});
+
+export type UpdateSignatureInput = z.infer<typeof updateSignatureSchema>;
 export type CreateDraftInput = z.infer<typeof createDraftSchema>;
 export type UpdateDraftInput = z.infer<typeof updateDraftSchema>;
 export type ListMailInput = z.infer<typeof listMailSchema>;

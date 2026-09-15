@@ -18,6 +18,9 @@ import { supportPlatformRouter, supportRouter } from "../modules/support/support
 import { connectorRouter } from "../modules/connector/connector.routes.js";
 import { deliveryProtectionRouter } from "../modules/delivery-protection/delivery-protection.routes.js";
 import { billingRouter } from "../modules/billing/billing.routes.js";
+import { contactRouter } from "../modules/contact/contact.routes.js";
+import { authenticate } from "../common/middleware/authenticate.js";
+import { tenantContext } from "../common/middleware/tenantContext.js";
 
 const apiRouter = Router();
 
@@ -43,6 +46,7 @@ apiRouter.use("/lifecycle", lifecycleRouter);
 apiRouter.use("/support/platform", supportPlatformRouter);
 apiRouter.use("/support", supportRouter);
 apiRouter.use("/connectors", connectorRouter);
+apiRouter.use("/contacts", authenticate, tenantContext, contactRouter);
 apiRouter.use("/delivery-protection", deliveryProtectionRouter);
 apiRouter.use("/billing", billingRouter);
 

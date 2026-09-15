@@ -2,7 +2,7 @@ import { Router } from "express";
 import { authenticate, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./mail.controller.js";
 import { attachmentUpload } from "./attachment.middleware.js";
-import { adminDeliveryEventsQuerySchema, adminUpdateMailboxSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
+import { adminDeliveryEventsQuerySchema, adminUpdateMailboxSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema, updateSignatureSchema } from "./mail.schema.js";
 
 const mailRouter = Router();
 mailRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBER"));
@@ -27,6 +27,10 @@ mailRouter.delete("/trash", controller.emptyTrash);
 mailRouter.post("/drafts/:messageId/attachments", validate(messageIdParamsSchema, "params"), attachmentUpload, controller.addAttachment);
 mailRouter.get("/:messageId/attachments/:attachmentId", validate(attachmentParamsSchema, "params"), controller.downloadAttachment);
 mailRouter.delete("/drafts/:messageId/attachments/:attachmentId", validate(attachmentParamsSchema, "params"), controller.deleteAttachment);
+
+mailRouter.get("/signature", controller.getSignature);
+mailRouter.patch("/signature", validate(updateSignatureSchema), controller.updateSignature);
+
 mailRouter.get("/:messageId/delivery-events", validate(messageIdParamsSchema, "params"), controller.listDeliveryEvents);
 mailRouter.post("/:messageId/reply", validate(messageIdParamsSchema, "params"), validate(replySchema), controller.reply);
 mailRouter.post("/:messageId/reply-all", validate(messageIdParamsSchema, "params"), validate(replySchema), controller.replyAll);
