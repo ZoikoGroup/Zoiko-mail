@@ -9,10 +9,12 @@ import {
   useConnectors,
   useCreateConnector,
   useDisconnectConnector,
+  useSyncConnector,
   useConnectorHealth,
   useDeadLetter,
   useReplayDeadLetter,
   useGoogleAuth,
+  useMicrosoftAuth,
 } from "@/lib/connectors-hooks";
 import {
   READONLY_SCOPES,
@@ -22,6 +24,7 @@ import {
 } from "@/lib/connectors-api";
 import { useMe } from "@/lib/auth-hooks";
 import type { MeResponse } from "@/lib/auth-api";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 const PROVIDER_LABEL: Record<ConnectorProvider, string> = {
   GMAIL: "Gmail",
@@ -31,7 +34,9 @@ const PROVIDER_LABEL: Record<ConnectorProvider, string> = {
 const STATUS_TONE: Record<string, string> = {
   ACTIVE: "ok",
   PENDING: "warn",
+  DEGRADED: "warn",
   ERROR: "crit",
+  REAUTH_REQUIRED: "warn",
   DISCONNECTED: "nu",
 };
 
@@ -53,12 +58,50 @@ export function ConnectedAccounts() {
 
   const { data: accounts = [], isLoading, error } = useConnectors();
   const disconnect = useDisconnectConnector();
+  const syncAccount = useSyncConnector();
+  const googleAuth = useGoogleAuth();
+  const microsoftAuth = useMicrosoftAuth();
   const [showConnect, setShowConnect] = useState(false);
+  const [toDisconnect, setToDisconnect] = useState<Connector | null>(null);
+  const [syncingId, setSyncingId] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [reconnectError, setReconnectError] = useState<string | null>(null);
 
   // Handle OAuth callback success
   const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   const connected = searchParams?.get("connected");
+  const connectedProvider = searchParams?.get("provider");
   const oauthError = searchParams?.get("error");
+
+  const providerName = (p: string | null) =>
+    p === "MICROSOFT_365" ? "Microsoft 365" : p === "GMAIL" ? "Gmail" : "account";
+
+  const handleSync = (a: Connector) => {
+    setSyncingId(a.id);
+    setSyncError(null);
+    syncAccount.mutate(a.id, {
+      onError: (err: any) => {
+        setSyncError(`${PROVIDER_LABEL[a.provider]} sync failed: ${err?.message ?? "try again later."}`);
+      },
+      onSettled: () => setSyncingId(null),
+    });
+  };
+
+  const handleReconnect = (a: Connector) => {
+    setReconnectError(null);
+    const auth = a.provider === "GMAIL" ? googleAuth : microsoftAuth;
+    auth.mutate(undefined, {
+      onSuccess: (data) => {
+        window.location.href = data.url;
+      },
+      onError: (err: any) => {
+        setReconnectError(`Couldn't start ${PROVIDER_LABEL[a.provider]} reauthorization: ${err?.message ?? "try again."}`);
+      },
+    });
+  };
+
+  const reconnectPendingFor = (a: Connector) =>
+    (a.provider === "GMAIL" ? googleAuth.isPending : microsoftAuth.isPending) || disconnect.isPending;
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
@@ -79,13 +122,25 @@ export function ConnectedAccounts() {
 
       {connected === "true" && (
         <div className="mt-4 flex items-center gap-2 rounded-lg border border-[var(--ok)]/30 bg-[var(--ok-soft)] p-4 text-sm text-[var(--ok)]">
-          <CheckCircle2 className="h-4 w-4" /> Account connected successfully!
+          <CheckCircle2 className="h-4 w-4" /> {providerName(connectedProvider ?? null)} connected successfully!
         </div>
       )}
 
       {oauthError && (
         <div className="mt-4 flex items-center gap-2 rounded-lg border border-[var(--crit)]/30 bg-[var(--crit-soft)] p-4 text-sm text-[var(--crit)]">
           <AlertCircle className="h-4 w-4" /> Connection failed: {oauthError}
+        </div>
+      )}
+
+      {syncError && (
+        <div className="mt-4 flex items-center gap-2 rounded-lg border border-[var(--crit)]/30 bg-[var(--crit-soft)] p-4 text-sm text-[var(--crit)]">
+          <AlertCircle className="h-4 w-4" /> {syncError}
+        </div>
+      )}
+
+      {reconnectError && (
+        <div className="mt-4 flex items-center gap-2 rounded-lg border border-[var(--crit)]/30 bg-[var(--crit-soft)] p-4 text-sm text-[var(--crit)]">
+          <AlertCircle className="h-4 w-4" /> {reconnectError}
         </div>
       )}
 
@@ -114,11 +169,28 @@ export function ConnectedAccounts() {
           <AccountCard
             key={a.id}
             account={a}
-            onDisconnect={() => disconnect.mutate(a.id)}
+            onDisconnect={() => setToDisconnect(a)}
+            onSync={() => handleSync(a)}
+            onReconnect={() => handleReconnect(a)}
             busy={disconnect.isPending}
+            syncing={syncingId === a.id}
+            reconnectBusy={reconnectPendingFor(a)}
           />
         ))}
       </div>
+
+      <ConfirmDialog
+        open={!!toDisconnect}
+        onClose={() => setToDisconnect(null)}
+        onConfirm={() => {
+          if (toDisconnect) disconnect.mutate(toDisconnect.id);
+          setToDisconnect(null);
+        }}
+        title="Disconnect account"
+        message={`Disconnect ${toDisconnect?.email ?? "this account"}? Syncing will stop and extracted actions will no longer update from it. You can reconnect any time.`}
+        confirmLabel="Disconnect"
+        loading={disconnect.isPending}
+      />
 
       {isAdmin && <AdminPanel />}
     </div>
@@ -126,8 +198,17 @@ export function ConnectedAccounts() {
 }
 
 function AccountCard({
-  account: a, onDisconnect, busy,
-}: { account: Connector; onDisconnect: () => void; busy: boolean }) {
+  account: a, onDisconnect, onSync, onReconnect, busy, syncing, reconnectBusy,
+}: {
+  account: Connector;
+  onDisconnect: () => void;
+  onSync: () => void;
+  onReconnect: () => void;
+  busy: boolean;
+  syncing: boolean;
+  reconnectBusy: boolean;
+}) {
+  const needsReauth = a.status === "REAUTH_REQUIRED";
   return (
     <div className="zoiko-card p-4">
       <div className="flex items-start gap-3">
@@ -142,6 +223,9 @@ function AccountCard({
           <div className="mt-0.5 truncate text-sm text-[var(--ink3)]">{a.email}</div>
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--ink3)]">
             <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" /> Last synced: {formatDate(a.lastSyncedAt)}</span>
+            {a.watchExpiresAt && (
+              <span className="inline-flex items-center gap-1"><Activity className="h-3 w-3" /> Watch expires: {formatDate(a.watchExpiresAt)}</span>
+            )}
             {a.lastErrorCode && (
               <span className="inline-flex items-center gap-1 text-[var(--crit)]"><ShieldAlert className="h-3 w-3" /> {a.lastErrorCode}</span>
             )}
@@ -149,23 +233,49 @@ function AccountCard({
           {a.status === "PENDING" && (
             <p className="mt-2 text-xs text-[var(--warn)]">Waiting for the provider to confirm — sync starts once active.</p>
           )}
+          {needsReauth && (
+            <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-[var(--warn)]/30 bg-[var(--warn-soft)] p-2.5">
+              <p className="flex items-center gap-1.5 text-xs text-[var(--warn)]">
+                <ShieldAlert className="h-3.5 w-3.5 shrink-0" /> Reauthorization needed — reconnect this account to resume syncing.
+              </p>
+              <button onClick={onReconnect} disabled={reconnectBusy} className="zoiko-btn pri sm shrink-0 disabled:opacity-50">
+                {reconnectBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />} Reconnect
+              </button>
+            </div>
+          )}
         </div>
-        <button onClick={onDisconnect} disabled={busy} className="zoiko-btn crit sm shrink-0 disabled:opacity-50">
-          <Trash2 className="h-3.5 w-3.5" /> Disconnect
-        </button>
+        <div className="flex shrink-0 flex-col gap-2">
+          <button
+            onClick={onSync}
+            disabled={busy || syncing || a.status === "DISCONNECTED" || a.status === "PENDING"}
+            title="Sync now"
+            className="zoiko-btn sm disabled:opacity-50"
+          >
+            {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            <span className="hidden sm:inline">Sync now</span>
+          </button>
+          <button onClick={onDisconnect} disabled={busy} className="zoiko-btn crit sm disabled:opacity-50">
+            <Trash2 className="h-3.5 w-3.5" /> Disconnect
+          </button>
+        </div>
       </div>
+      {syncing && (
+        <p className="mt-2 text-xs text-[var(--ink3)]">Syncing latest messages with {PROVIDER_LABEL[a.provider]}…</p>
+      )}
     </div>
   );
 }
 
 function ConnectPanel({ onDone }: { onDone: () => void }) {
   const googleAuth = useGoogleAuth();
+  const microsoftAuth = useMicrosoftAuth();
   const create = useCreateConnector();
   const [showManual, setShowManual] = useState(false);
   const [provider, setProvider] = useState<ConnectorProvider>("GMAIL");
   const [email, setEmail] = useState("");
   const [providerAccountId, setProviderAccountId] = useState("");
   const [googleError, setGoogleError] = useState<string | null>(null);
+  const [microsoftError, setMicrosoftError] = useState<string | null>(null);
 
   const handleGoogleConnect = () => {
     setGoogleError(null);
@@ -176,6 +286,19 @@ function ConnectPanel({ onDone }: { onDone: () => void }) {
       onError: (err: any) => {
         const msg = err?.message || "Failed to start Google OAuth. Make sure GOOGLE_CLIENT_ID is configured in the backend .env.";
         setGoogleError(msg);
+      },
+    });
+  };
+
+  const handleMicrosoftConnect = () => {
+    setMicrosoftError(null);
+    microsoftAuth.mutate(undefined, {
+      onSuccess: (data) => {
+        window.location.href = data.url;
+      },
+      onError: (err: any) => {
+        const msg = err?.message || "Failed to start Microsoft OAuth. Make sure MICROSOFT_* credentials are configured in the backend .env.";
+        setMicrosoftError(msg);
       },
     });
   };
@@ -207,7 +330,7 @@ function ConnectPanel({ onDone }: { onDone: () => void }) {
       <div className="space-y-2">
         <button
           onClick={handleGoogleConnect}
-          disabled={googleAuth.isPending}
+          disabled={googleAuth.isPending || microsoftAuth.isPending}
           className="flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-sm font-medium text-[var(--ink)] transition hover:border-[var(--accent)] hover:shadow-[var(--sh2)] disabled:opacity-50"
         >
           {googleAuth.isPending ? (
@@ -224,6 +347,33 @@ function ConnectPanel({ onDone }: { onDone: () => void }) {
         </button>
         {googleError && (
           <p className="mt-2 text-xs text-[var(--crit)]">{googleError}</p>
+        )}
+
+        <div className="flex items-center gap-2">
+          <span className="h-px flex-1 bg-[var(--border)]" />
+          <span className="text-[10px] font-mono-num uppercase tracking-wider text-[var(--ink3)]">or</span>
+          <span className="h-px flex-1 bg-[var(--border)]" />
+        </div>
+
+        <button
+          onClick={handleMicrosoftConnect}
+          disabled={googleAuth.isPending || microsoftAuth.isPending}
+          className="flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-sm font-medium text-[var(--ink)] transition hover:border-[var(--accent)] hover:shadow-[var(--sh2)] disabled:opacity-50"
+        >
+          {microsoftAuth.isPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <svg className="h-5 w-5" viewBox="0 0 21 21">
+              <rect x="1" y="1" width="9" height="9" fill="#F25022" />
+              <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
+              <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
+              <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
+            </svg>
+          )}
+          Continue with Microsoft 365
+        </button>
+        {microsoftError && (
+          <p className="mt-2 text-xs text-[var(--crit)]">{microsoftError}</p>
         )}
       </div>
 

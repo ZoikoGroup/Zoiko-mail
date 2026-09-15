@@ -3,6 +3,7 @@ import request from "supertest";
 import { createApp } from "../src/app.js";
 import { authHeader, registerUser } from "./helpers.js";
 import { prisma } from "../src/config/prisma.js";
+import { aiService } from "../src/modules/ai/ai.service.js";
 
 const app = createApp();
 
@@ -172,5 +173,123 @@ describe("per-mailbox AI enablement", () => {
 
     const untouched = await prisma.mailbox.findUniqueOrThrow({ where: { id: mailboxId } });
     expect(untouched.aiEnabled).toBe(true);
+  });
+});
+
+describe("the background path is gated too, which is where mail actually arrives", () => {
+  /**
+   * AC-008 has two entrances and only one of them is a request.
+   *
+   * A connector enqueues an AI_EXTRACTION job for every message it syncs, so
+   * extraction runs on ordinary incoming mail without anybody asking for it.
+   * That path checked only the global feature flag, which meant a mailbox with
+   * AI switched off was still processed the moment a connector imported into
+   * it - the setting held for the API and not for the traffic.
+   */
+  async function ownerWithRestrictedMailbox(email: string, aiEnabled: boolean) {
+    const owner = await registerUser(app, { email });
+    const mailboxId = await mailboxFor(owner);
+    const messageId = await threadFor(owner);
+    if (!aiEnabled) {
+      await request(app)
+        .patch(`/api/v1/mail/admin/mailboxes/${mailboxId}`)
+        .set(authHeader(owner.accessToken))
+        .send({ aiEnabled: false })
+        .expect(200);
+    }
+    return { owner, mailboxId, messageId };
+  }
+
+  /**
+   * A real queued job, because the handler closes the row it was given. A
+   * synthetic id would make the skip path look like it worked while hiding
+   * whether the job was ever finished.
+   */
+  async function queuedExtraction(
+    owner: { tenantId: string; userId: string },
+    messageId: string
+  ) {
+    const job = await prisma.backgroundJob.create({
+      data: {
+        tenantId: owner.tenantId,
+        createdByUserId: owner.userId,
+        type: "AI_EXTRACTION",
+        payload: { messageId },
+        idempotencyKey: `ai-extract-${messageId}-${Date.now()}`,
+        status: "RUNNING",
+        lockedAt: new Date(),
+      },
+      select: { id: true },
+    });
+    return job.id;
+  }
+
+  it("skips extraction for a mailbox an admin has restricted", async () => {
+    const { owner, messageId } = await ownerWithRestrictedMailbox(
+      `ai-job-off-${Date.now()}@zoiko.test`,
+      false
+    );
+    const jobId = await queuedExtraction(owner, messageId);
+
+    const result = await aiService.processExtraction(
+      jobId,
+      owner.tenantId,
+      owner.userId,
+      { messageId }
+    );
+
+    expect(result).toMatchObject({ skipped: true, reason: "MAILBOX_AI_DISABLED" });
+    // Nothing produced, not even a pending action for somebody to review later.
+    expect(await prisma.aIAction.count({ where: { tenantId: owner.tenantId } })).toBe(0);
+  });
+
+  it("finishes the job it skipped, rather than leaving it locked forever", async () => {
+    const { owner, messageId } = await ownerWithRestrictedMailbox(
+      `ai-job-close-${Date.now()}@zoiko.test`,
+      false
+    );
+    const jobId = await queuedExtraction(owner, messageId);
+
+    await aiService.processExtraction(jobId, owner.tenantId, owner.userId, { messageId });
+
+    const job = await prisma.backgroundJob.findFirst({ where: { id: jobId } });
+    // RUNNING with a lock is the failure this guards: the claim query only
+    // takes PENDING and RETRY, so such a row is never picked up again and
+    // never reported as failed either - it just sits there.
+    expect(job?.status).toBe("COMPLETED");
+    expect(job?.lockedAt).toBeNull();
+    expect(job?.completedAt).not.toBeNull();
+    expect(job?.result).toMatchObject({ skipped: true, reason: "MAILBOX_AI_DISABLED" });
+  });
+
+  it("records the refusal, so a restricted mailbox leaves evidence", async () => {
+    const { owner, messageId } = await ownerWithRestrictedMailbox(
+      `ai-job-audit-${Date.now()}@zoiko.test`,
+      false
+    );
+    const jobId = await queuedExtraction(owner, messageId);
+
+    await aiService.processExtraction(jobId, owner.tenantId, owner.userId, { messageId });
+
+    const event = await prisma.auditEvent.findFirst({
+      where: { tenantId: owner.tenantId, eventType: "AI_EXTRACTION_SKIPPED" },
+    });
+    expect(event).not.toBeNull();
+    expect((event?.metadata as { reason?: string })?.reason).toBe("MAILBOX_AI_DISABLED");
+  });
+
+  it("does not refuse an enabled mailbox, so the gate is not a blanket block", async () => {
+    const { owner, messageId } = await ownerWithRestrictedMailbox(
+      `ai-job-on-${Date.now()}@zoiko.test`,
+      true
+    );
+    const jobId = await queuedExtraction(owner, messageId);
+
+    const result = await aiService
+      .processExtraction(jobId, owner.tenantId, owner.userId, { messageId })
+      .catch((error: unknown) => ({ threw: String(error) }));
+
+    // Whatever the provider then decides, it was not refused for the mailbox.
+    expect(JSON.stringify(result)).not.toContain("MAILBOX_AI_DISABLED");
   });
 });

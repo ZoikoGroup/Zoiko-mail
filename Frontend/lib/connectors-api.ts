@@ -4,7 +4,9 @@ export type ConnectorProvider = "GMAIL" | "MICROSOFT_365";
 export type ConnectorStatus =
   | "PENDING"
   | "ACTIVE"
+  | "DEGRADED"
   | "ERROR"
+  | "REAUTH_REQUIRED"
   | "DISCONNECTED"
   | string;
 
@@ -50,9 +52,20 @@ export async function disconnectConnector(accountId: string): Promise<void> {
   await apiRequest(`/connectors/${accountId}`, { method: "DELETE" });
 }
 
+export async function syncConnector(accountId: string): Promise<{ synced: boolean }> {
+  const data = await apiRequest<{ synced: boolean }>(`/connectors/${accountId}/sync`, {
+    method: "POST",
+  });
+  return data;
+}
+
 // ---- OAuth endpoints -------------------------------------------------------
 export async function getGoogleAuthUrl(): Promise<{ url: string }> {
   return apiRequest<{ url: string }>("/connectors/auth/google");
+}
+
+export async function getMicrosoftAuthUrl(): Promise<{ url: string }> {
+  return apiRequest<{ url: string }>("/connectors/auth/microsoft");
 }
 
 // ---- admin endpoints (OWNER/ADMIN) ----------------------------------------

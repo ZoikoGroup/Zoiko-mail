@@ -11,3 +11,6 @@ export const completeAiActionSchema = z.object({
   sourceExcerpt: z.string().trim().min(1).max(2000),
 });
 export const reviewAiActionSchema = z.object({ status: z.enum(["CONFIRMED", "DISMISSED"]) });
+export const listAiActionsQuerySchema = z.object({
+  status: z.enum(["PENDING", "COMPLETED", "CONFIRMED", "DISMISSED", "FAILED"]).optional(),
+});

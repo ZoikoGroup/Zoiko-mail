@@ -194,6 +194,7 @@ function ActionCard({
       <div className="flex flex-wrap items-center gap-2">
         <Pill text={a.priority} tone={PRIORITY_TONE[a.priority]} />
         <Pill text={STATUS_LABEL[a.status]} tone={STATUS_TONE[a.status]} />
+        {a.sourceAiActionId && <Pill text="From AI" tone="ai" />}
         <span
           className={`ml-auto inline-flex items-center gap-1 text-xs ${
             due.overdue && !terminal ? "font-medium text-[var(--warn)]" : "text-[var(--ink3)]"

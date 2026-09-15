@@ -42,6 +42,7 @@ export interface EmailMessage {
   fromAddress: string | null;
   fromName: string | null;
   createdAt: string;
+  sourceAiActionId?: string | null;
   recipients: MailRecipient[];
   attachments: MailAttachment[];
   author: { id: string; email: string; displayName: string };
@@ -73,6 +74,15 @@ export interface EmailMessageSummary {
   hasAttachments: boolean;
   attachmentCount: number;
   author: { id: string; email: string; displayName: string };
+  /**
+   * The AI action that produced this draft, when one did.
+   *
+   * On the summary as well as the detail because that is where it is used:
+   * the draft-generation poll lists DRAFTS and looks for the message its
+   * action produced. An id is metadata, so carrying it here is consistent
+   * with AC-011 — what the list must not carry is the body.
+   */
+  sourceAiActionId?: string | null;
 }
 
 interface MailItemBase {

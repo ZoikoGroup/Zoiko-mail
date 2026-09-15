@@ -61,6 +61,11 @@ export const messageListSelect = {
   quarantinedAt: true,
   quarantineReason: true,
   securityFlags: true,
+  // The AI action that produced this draft, when one did (ZM-BE-009). The
+  // draft-generation poll lists DRAFTS and looks for the message its action
+  // produced, so the id has to be on the row. An id is metadata; what §9 and
+  // AC-011 keep out of a list is the body.
+  sourceAiActionId: true,
   // Stripped by the mapper; present only so a snippet can be cut.
   textBody: true,
   htmlBody: true,
