@@ -62,6 +62,25 @@ export interface DomainDto {
   records: DnsRecordDto[];
 }
 
+/**
+ * One past DNS check for a domain.
+ *
+ * The domain row carries only the latest result, so it answers "is it failing"
+ * and not "since when" — which is the question an admin actually has after a
+ * re-check comes back red. `errors` names the resolver failures the check
+ * recorded, rather than leaving a red pill to be interpreted.
+ */
+export interface DomainCheckDto {
+  id: string;
+  checkedAt: string;
+  verificationStatus: "VERIFIED" | "PENDING" | "FAILED";
+  mxStatus: "VALID" | "INVALID" | "PENDING";
+  spfStatus: "VALID" | "INVALID" | "PENDING";
+  dkimStatus: "VALID" | "INVALID" | "PENDING";
+  dmarcStatus: "VALID" | "INVALID" | "PENDING";
+  errors: string[];
+}
+
 export interface GroupDto {
   id: string;
   address: string;
@@ -283,23 +302,36 @@ export const GUARDRAILS: GuardrailDto[] = [
 
 /* ── Policies ──────────────────────────────────────────────────────────── */
 
-export interface PolicyToggleDto {
-  key: string;
-  label: string;
-  detail: string;
-  enabled: boolean;
-  /** Locked toggles are non-negotiable or Owner-only; refused server-side too. */
-  locked: boolean;
+/**
+ * A policy as the API actually models it.
+ *
+ * The screen used to render a list of boolean toggles built by filtering the
+ * rules object for boolean values. `policyRulesSchema` is
+ * `{ defaultEffect, conditions[] }` — no rule is ever a boolean — so that list
+ * was empty in every workspace and always had been. This is the real shape.
+ */
+export type PolicyType = "AI" | "SENDING" | "RETENTION" | "DELETION" | "ABUSE";
+export type PolicyEffect = "ALLOW" | "DENY";
+
+export interface PolicyConditionDto {
+  field: string;
+  operator: string;
+  /** Already rendered for display; a value may be a scalar or a list. */
+  value: string;
+  effect: PolicyEffect;
 }
 
-export interface PolicyGroupDto {
-  group: string;
-  /** Set when the whole group sits outside this role's authority. */
-  restriction: string | null;
-  toggles: PolicyToggleDto[];
+export interface PolicyDto {
+  id: string;
+  type: PolicyType;
+  name: string;
+  description: string | null;
+  version: number;
+  status: "DRAFT" | "ACTIVE" | "ARCHIVED";
+  /** What applies when no condition matches — the one rule worth editing here. */
+  defaultEffect: PolicyEffect;
+  conditions: PolicyConditionDto[];
 }
-
-/* ── Provider sync ─────────────────────────────────────────────────────── */
 
 export interface SyncErrorDto {
   id: string;

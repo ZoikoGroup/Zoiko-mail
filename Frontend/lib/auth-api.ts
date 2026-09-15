@@ -370,6 +370,21 @@ export async function confirmMfaEnrolment(code: string): Promise<{ recoveryCodes
   });
 }
 
+/**
+ * Turn the second factor off.
+ *
+ * Requires a current code, because someone who has walked up to an unlocked
+ * screen must not be able to remove the control that would have stopped them.
+ * The server refuses outright for an account whose role requires MFA (AC-002),
+ * which is why the settings screen does not offer this to a privileged user.
+ */
+export async function disableMfa(code: string): Promise<{ disabled: boolean }> {
+  return apiRequest<{ disabled: boolean }>("/auth/mfa/disable", {
+    method: "POST",
+    body: { code },
+  });
+}
+
 export async function regenerateMfaRecoveryCodes(
   code: string
 ): Promise<{ recoveryCodes: string[] }> {

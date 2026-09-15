@@ -22,6 +22,11 @@ import {
   fetchConnectors,
   fetchDashboard,
   fetchDomains,
+  fetchDomainChecks,
+  addDomain,
+  recheckDomain,
+  activateDomain,
+  removeDomain,
   fetchGroups,
   fetchGroupAssignees,
   createGroup,
@@ -34,7 +39,8 @@ import {
   fetchMailboxes,
   fetchMembers,
   fetchNotifications,
-  fetchPolicyGroups,
+  fetchPolicies,
+  savePolicyRules,
   fetchSettings,
   fetchSyncErrors,
   setMailboxAi,
@@ -66,6 +72,7 @@ import type {
   ConnectorDto,
   DashboardDto,
   DomainDto,
+  DomainCheckDto,
   GroupDto,
   GuardrailDto,
   InvitationDto,
@@ -73,7 +80,8 @@ import type {
   MemberDto,
   MembershipRole,
   NotificationDto,
-  PolicyGroupDto,
+  PolicyDto,
+  PolicyConditionDto,
   SettingsDto,
   SupportGrantDto,
   SyncErrorDto,
@@ -298,8 +306,8 @@ export function useSyncErrors(): QueryLike<SyncErrorDto[]> {
   );
 }
 
-export function usePolicyGroups(): QueryLike<PolicyGroupDto[]> {
-  return shape(useQuery({ queryKey: ["policies"], queryFn: fetchPolicyGroups, ...LIVE }));
+export function usePolicies(): QueryLike<PolicyDto[]> {
+  return shape(useQuery({ queryKey: ["policies"], queryFn: fetchPolicies, ...LIVE }));
 }
 
 export function useNotifications(): QueryLike<NotificationDto[]> {
@@ -564,4 +572,83 @@ export function useReplayDeadLetter() {
       ]);
     },
   });
+}
+
+/* ── domains ───────────────────────────────────────────────────────────── */
+
+/**
+ * Every domain write moves the same two things: the domain list, and the
+ * dashboard tile that counts verified domains off it.
+ */
+function useDomainMutation<TInput>(fn: (input: TInput) => Promise<void>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["domains"] }),
+        qc.invalidateQueries({ queryKey: ["admin-dashboard"] }),
+      ]);
+    },
+  });
+}
+
+export function useAddDomain() {
+  return useDomainMutation((domainName: string) => addDomain(domainName));
+}
+
+export function useRecheckDomain() {
+  return useDomainMutation((domainId: string) => recheckDomain(domainId));
+}
+
+export function useActivateDomain() {
+  return useDomainMutation((domainId: string) => activateDomain(domainId));
+}
+
+export function useRemoveDomain() {
+  return useDomainMutation((domainId: string) => removeDomain(domainId));
+}
+
+/* ── policies ──────────────────────────────────────────────────────────── */
+
+/**
+ * Save a policy's rules.
+ *
+ * Supersedes rather than edits, which is what the model does: a new version is
+ * created and activated, and the previous one is archived. The screen reflects
+ * that by refetching rather than by assuming the change landed.
+ */
+export function useSavePolicyRules() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      policy,
+      rules,
+    }: {
+      policy: PolicyDto;
+      rules: {
+        defaultEffect: PolicyDto["defaultEffect"];
+        conditions: PolicyConditionDto[];
+      };
+    }) => savePolicyRules(policy, rules),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["policies"] }),
+  });
+}
+
+/**
+ * Past DNS checks for one domain, fetched only when the history is opened.
+ *
+ * `enabled` keeps a workspace with a dozen domains from issuing a dozen reads
+ * nobody asked for; the history is a detail somebody expands, not part of the
+ * list.
+ */
+export function useDomainChecks(domainId: string | null): QueryLike<DomainCheckDto[]> {
+  return shape(
+    useQuery({
+      queryKey: ["domain-checks", domainId],
+      queryFn: () => fetchDomainChecks(domainId as string),
+      enabled: Boolean(domainId),
+      ...LIVE,
+    })
+  );
 }

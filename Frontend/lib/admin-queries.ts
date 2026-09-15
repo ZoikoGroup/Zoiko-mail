@@ -23,13 +23,15 @@ import type {
   DashboardDto,
   DeliveryFailureSummaryDto,
   DomainDto,
+  DomainCheckDto,
   GroupDto,
   InvitationDto,
   MailboxDto,
   MemberDto,
   MembershipRole,
   NotificationDto,
-  PolicyGroupDto,
+  PolicyDto,
+  PolicyConditionDto,
   SettingsDto,
   SupportGrantDto,
   SyncErrorDto,
@@ -256,7 +258,7 @@ export async function fetchDomains(): Promise<DomainDto[]> {
     spfStatus: d.spfStatus,
     dkimStatus: d.dkimStatus,
     dmarcStatus: d.dmarcStatus,
-    lastCheckedAt: ago(d.lastCheckedAt),
+    lastCheckedAt: d.lastCheckedAt ? ago(d.lastCheckedAt) : "never",
     sendingEnabled: d.sendingEnabled,
     warmupNote: null,
     // The API returns aggregate per-record *statuses* but not the record
@@ -274,6 +276,17 @@ export async function fetchDomains(): Promise<DomainDto[]> {
         ]
       : [],
   }));
+}
+
+interface ApiDomainCheck {
+  id: string;
+  checkedAt: string;
+  verificationStatus: DomainCheckDto["verificationStatus"];
+  mxStatus: DomainCheckDto["mxStatus"];
+  spfStatus: DomainCheckDto["spfStatus"];
+  dkimStatus: DomainCheckDto["dkimStatus"];
+  dmarcStatus: DomainCheckDto["dmarcStatus"];
+  errorDetails: Record<string, unknown> | null;
 }
 
 /* ── audit ─────────────────────────────────────────────────────────────── */
@@ -652,42 +665,119 @@ interface ApiPolicy {
   rules: Record<string, unknown> | null;
 }
 
-export async function fetchPolicyGroups(): Promise<PolicyGroupDto[]> {
+/** Render a condition value, which may be a scalar or a list. */
+function conditionValue(value: unknown): string {
+  if (Array.isArray(value)) return value.map((entry) => String(entry)).join(", ");
+  return String(value);
+}
+
+/**
+ * The policy in force for each type.
+ *
+ * One ACTIVE version per type is the contract; the newest is the fallback so a
+ * tenant whose policies are all still DRAFT shows something truthful rather
+ * than an empty screen.
+ */
+export async function fetchPolicies(): Promise<PolicyDto[]> {
   const res = await apiRequest<{ policies: ApiPolicy[] }>("/policies");
+
   const byType: Record<string, ApiPolicy[]> = {};
-  for (const p of res.policies ?? []) {
-    byType[p.type] = [...(byType[p.type] ?? []), p];
+  for (const policy of res.policies ?? []) {
+    byType[policy.type] = [...(byType[policy.type] ?? []), policy];
   }
 
-  return Object.entries(byType).map(([type, policies]) => {
-    // One active version per type is the contract; fall back to the newest.
-    const active =
-      policies.find((p: ApiPolicy) => p.status === "ACTIVE") ??
-      [...policies].sort((a: ApiPolicy, b: ApiPolicy) => b.version - a.version)[0];
-    const rules = (active?.rules ?? {}) as Record<string, unknown>;
+  return Object.values(byType)
+    .map((policies) => {
+      const current =
+        policies.find((policy) => policy.status === "ACTIVE") ??
+        [...policies].sort((a, b) => b.version - a.version)[0]!;
+      const rules = (current.rules ?? {}) as {
+        defaultEffect?: string;
+        conditions?: Array<{
+          field: string;
+          operator: string;
+          value: unknown;
+          effect: string;
+        }>;
+      };
 
-    const group: PolicyGroupDto = {
-      group: active?.name ?? type,
-      // SECURITY policy is Owner-only: the matrix withholds
-      // `policy.security.write` from an Admin, so the group is shown but
-      // marked out of reach rather than hidden.
-      restriction:
-        type === "SECURITY" ? "Owner only — requires policy.security.write" : null,
-      toggles: Object.entries(rules)
-        .filter(([, value]) => typeof value === "boolean")
-        .map(([key, value]) => ({
-          key,
-          // Turn camelCase rule keys into readable labels.
-          label: key.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase()),
-          detail: `${type} policy · version ${active?.version ?? 1}`,
-          enabled: value as boolean,
-          // Whether an Admin may flip a given rule is evaluation step 8, which
-          // is not wired yet. Shown as editable; the server refuses if not.
-          locked: type === "SECURITY",
+      return {
+        id: current.id,
+        type: current.type as PolicyDto["type"],
+        name: current.name,
+        description: current.description,
+        version: current.version,
+        status: current.status as PolicyDto["status"],
+        // DENY is the safe reading of a policy that does not say: the engine
+        // fails closed, so the screen must not imply otherwise.
+        defaultEffect: (rules.defaultEffect === "ALLOW" ? "ALLOW" : "DENY") as PolicyDto["defaultEffect"],
+        conditions: (rules.conditions ?? []).map((condition) => ({
+          field: condition.field,
+          operator: condition.operator,
+          value: conditionValue(condition.value),
+          effect: condition.effect === "ALLOW" ? ("ALLOW" as const) : ("DENY" as const),
         })),
-    };
-    return group;
+      };
+    })
+    .sort((a, b) => a.type.localeCompare(b.type));
+}
+
+/**
+ * Save a policy's rules as a new, active version.
+ *
+ * Two calls, because a policy is versioned rather than edited: creating
+ * supersedes, activating retires the previous version. Doing both here means
+ * the screen cannot leave a new version sitting in DRAFT while showing it as
+ * in force.
+ *
+ * The whole rule set is sent every time. Sending only what changed would drop
+ * the conditions, which is the difference between narrowing a policy and
+ * removing it.
+ */
+export async function savePolicyRules(
+  policy: PolicyDto,
+  rules: { defaultEffect: PolicyDto["defaultEffect"]; conditions: PolicyConditionDto[] }
+): Promise<void> {
+  const created = await apiRequest<{ id: string }>("/policies", {
+    method: "POST",
+    body: {
+      type: policy.type,
+      name: policy.name,
+      description: policy.description,
+      rules: {
+        defaultEffect: rules.defaultEffect,
+        conditions: rules.conditions.map((condition) => ({
+          field: condition.field,
+          operator: condition.operator,
+          // A list operator takes a list; everything else takes one value.
+          // Sending a comma-joined string to IN would make one condition that
+          // matches a literal containing commas, which silently never fires.
+          value:
+            condition.operator === "IN"
+              ? condition.value.split(",").map((entry) => entry.trim()).filter(Boolean)
+              : coerceScalar(condition.value),
+          effect: condition.effect,
+        })),
+      },
+    },
   });
+  if (!created?.id) throw new Error("The server did not return the new policy version.");
+  await apiRequest(`/policies/${created.id}/activate`, { method: "POST" });
+}
+
+/**
+ * Turn a typed value back into the scalar the rule schema accepts.
+ *
+ * Conditions are compared against real context values, so "true" typed into a
+ * text box has to reach the server as a boolean or `mailbox.eligible EQUALS
+ * true` never matches anything.
+ */
+function coerceScalar(value: string): string | number | boolean {
+  const trimmed = value.trim();
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+  if (trimmed !== "" && Number.isFinite(Number(trimmed))) return Number(trimmed);
+  return trimmed;
 }
 
 /* ── notifications ─────────────────────────────────────────────────────── */
@@ -1055,4 +1145,70 @@ export async function markNotificationRead(notificationId: string): Promise<void
  */
 export async function replayDeadLetter(eventId: string): Promise<void> {
   await apiRequest(`/connectors/dead-letter/${eventId}/replay`, { method: "POST" });
+}
+
+/* ── domains — §6.11 ───────────────────────────────────────────────────── */
+
+/**
+ * Add a custom domain.
+ *
+ * Returns nothing the caller needs: the list is refetched, and the
+ * verification token the server generates arrives with it.
+ */
+export async function addDomain(domainName: string): Promise<void> {
+  await apiRequest("/domains", { method: "POST", body: { domainName } });
+}
+
+/**
+ * Re-run the DNS checks now.
+ *
+ * The server resolves TXT, MX, DKIM and DMARC live and records the result as a
+ * check row, so this is a write rather than a read — it is what "Re-check now"
+ * has always meant, and the button that said it was wired to nothing.
+ */
+export async function recheckDomain(domainId: string): Promise<void> {
+  await apiRequest(`/domains/${domainId}/diagnostics`, { method: "POST" });
+}
+
+/**
+ * Turn on sending for a verified domain.
+ *
+ * The server refuses with a 409 naming the failing checks unless ownership,
+ * SPF, DKIM and DMARC all pass, so the screen does not need to decide
+ * eligibility — it shows the refusal.
+ */
+export async function activateDomain(domainId: string): Promise<void> {
+  await apiRequest(`/domains/${domainId}/activate`, { method: "POST" });
+}
+
+/** Remove a domain. Refused by the server while it is active for sending. */
+export async function removeDomain(domainId: string): Promise<void> {
+  await apiRequest(`/domains/${domainId}`, { method: "DELETE" });
+}
+
+/**
+ * The check history for one domain.
+ *
+ * The domain row holds only the most recent result, so it cannot say whether a
+ * failure is minutes or weeks old — which is the difference between "DNS has
+ * not propagated yet" and "this was never published".
+ */
+export async function fetchDomainChecks(domainId: string): Promise<DomainCheckDto[]> {
+  const res = await apiRequest<{ checks: ApiDomainCheck[] }>(
+    `/domains/${domainId}/checks`
+  );
+  return (res.checks ?? []).map((check) => ({
+    id: check.id,
+    checkedAt: ago(check.checkedAt),
+    verificationStatus: check.verificationStatus,
+    mxStatus: check.mxStatus,
+    spfStatus: check.spfStatus,
+    dkimStatus: check.dkimStatus,
+    dmarcStatus: check.dmarcStatus,
+    // errorDetails is keyed by record type — { dkim: "NXDOMAIN" } — so the
+    // resolver's own message is shown rather than restated as a red pill.
+    errors: Object.entries(check.errorDetails ?? {}).map(
+      ([record, message]) => `${record.toUpperCase()}: ${String(message)}`
+    ),
+  }));
 }
