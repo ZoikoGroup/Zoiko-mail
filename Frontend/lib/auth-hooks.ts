@@ -17,6 +17,9 @@ import {
   joinWorkspace,
   forgotPassword,
   resetPassword,
+  getSessions,
+  revokeSession,
+  getPasswordPolicy,
 
   type LoginInput,
   type RegisterInput,
@@ -270,6 +273,36 @@ export function useChangePassword() {
         queryKey: ["me"],
       });
     },
+  });
+}
+
+// Phase 3 session management: "where am I signed in" for the account page.
+export function useSessions() {
+  return useQuery({
+    queryKey: ["sessions"],
+    queryFn: getSessions,
+    enabled: isLoggedIn() && !getPlatformToken(),
+    staleTime: 30_000,
+  });
+}
+
+export function useRevokeSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (sessionId: string) => revokeSession(sessionId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+}
+
+// The password ruleset, cached app-wide so the register, reset and change
+// forms all render the same requirements without refetching per keystroke.
+export function usePasswordPolicy() {
+  return useQuery({
+    queryKey: ["password-policy"],
+    queryFn: getPasswordPolicy,
+    staleTime: Infinity,
   });
 }
 

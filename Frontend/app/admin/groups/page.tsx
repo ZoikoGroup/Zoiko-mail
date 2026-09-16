@@ -10,7 +10,6 @@ import {
   PageHeader,
   Pill,
   Row,
-  StaticNote,
 } from "@/components/admin/ui";
 
 export default function AdminGroupsPage() {
@@ -30,10 +29,6 @@ export default function AdminGroupsPage() {
           ) : undefined
         }
       />
-
-      <StaticNote>
-        No MailGroup model exists yet — this screen is furthest from real data
-      </StaticNote>
 
       <Card
         title={groups ? `${groups.length} groups` : "Groups"}

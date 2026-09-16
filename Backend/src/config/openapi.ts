@@ -10,7 +10,7 @@ export const openApiDocument = {
     description: "Multi-tenant Zoiko Mail API. Tenant context is always derived from the verified access token.",
   },
   servers: [{ url: "http://localhost:5000", description: "Local development" }],
-  tags: ["System", "Authentication", "Users", "Tenants", "Memberships", "Policies", "Mail", "Messages", "Threads", "Domains", "AI", "Actions", "Notifications", "Integrations", "Connectors", "Delivery Protection", "Lifecycle", "Support", "Audit", "Billing"].map((name) => ({ name })),
+  tags: ["System", "Authentication", "Users", "Tenants", "Memberships", "Policies", "Mail", "Messages", "Threads", "Domains", "AI", "Actions", "Notifications", "Integrations", "Connectors", "Delivery Protection", "Lifecycle", "Support", "Audit", "Billing", "Security Alerts"].map((name) => ({ name })),
   paths: {
     "/api/health": {
       get: { tags: ["System"], summary: "Health check", responses: { "200": ok("API is healthy") } },
@@ -165,6 +165,68 @@ export const openApiDocument = {
     },
     "/api/v1/auth/logout-all": {
       post: { tags: ["Authentication"], summary: "Revoke all refresh sessions in this tenant", security: bearer, responses: { "200": ok("Sessions revoked") } },
+    },
+    "/api/v1/auth/password-policy": {
+      get: {
+        tags: ["Authentication"], summary: "Get the enforced password policy (public — renders signup/reset forms)",
+        responses: {
+          "200": ok("The password policy object"),
+          "400": { $ref: "#/components/responses/ValidationError" },
+        },
+      },
+    },
+    "/api/v1/auth/sessions": {
+      get: {
+        tags: ["Authentication"], summary: "List live sessions for the current workspace", security: bearer,
+        responses: { "200": ok("Sessions returned") },
+      },
+    },
+    "/api/v1/auth/sessions/{sessionId}/revoke": {
+      post: {
+        tags: ["Authentication"], summary: "Revoke one session", security: bearer,
+        parameters: [
+          { name: "sessionId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+        ],
+        responses: { "200": ok("Session revoked"), "404": ok("Session not found or already revoked") },
+      },
+    },
+    "/api/v1/security-alerts": {
+      get: {
+        tags: ["Security Alerts"], summary: "List security alerts for the workspace (OWNER/ADMIN)", security: bearer,
+        description: "Open alerts are returned newest-first, with optional pagination and status filtering.",
+        parameters: [
+          { name: "status", in: "query", schema: { type: "string", enum: ["OPEN", "ACKNOWLEDGED", "RESOLVED", "DISMISSED"] } },
+          { name: "page", in: "query", schema: { type: "integer", minimum: 1, default: 1 } },
+          { name: "pageSize", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 20 } },
+        ],
+        responses: { "200": ok("Alerts returned"), "403": { $ref: "#/components/responses/Forbidden" } },
+      },
+    },
+    "/api/v1/security-alerts/{alertId}": {
+      get: {
+        tags: ["Security Alerts"], summary: "Get one security alert (OWNER/ADMIN)", security: bearer,
+        parameters: [
+          { name: "alertId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+        ],
+        responses: { "200": ok("Alert returned"), "403": { $ref: "#/components/responses/Forbidden" }, "404": ok("Alert not found in this workspace") },
+      },
+    },
+    "/api/v1/security-alerts/{alertId}/review": {
+      post: {
+        tags: ["Security Alerts"], summary: "Acknowledge, resolve or dismiss a security alert (OWNER/ADMIN)", security: bearer,
+        parameters: [
+          { name: "alertId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+        ],
+        requestBody: jsonBody({
+          type: "object",
+          required: ["action"],
+          properties: {
+            action: { type: "string", enum: ["ACKNOWLEDGE", "RESOLVE", "DISMISS"] },
+            note: { type: "string", maxLength: 1000, description: "Optional decision note, recorded in the audit log" },
+          },
+        }),
+        responses: { "200": ok("Alert status updated and audit event recorded"), "403": { $ref: "#/components/responses/Forbidden" }, "404": ok("Alert not found in this workspace") },
+      },
     },
     "/api/v1/users/me": {
       get: { tags: ["Users"], summary: "Get own profile", security: bearer, responses: { "200": ok("Profile returned") } },

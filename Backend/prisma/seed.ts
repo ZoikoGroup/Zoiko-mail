@@ -89,6 +89,19 @@ const CONNECTORS: Array<{ local: string; provider: "GMAIL" | "MICROSOFT_365"; st
   { local: "leo", provider: "MICROSOFT_365", status: "ACTIVE" },
 ];
 
+/** 4 mail groups: 2 shared mailboxes, 2 distribution lists. */
+const GROUPS: Array<{
+  local: string;
+  kind: "SHARED" | "DISTRIBUTION";
+  name: string;
+  members: string[];
+}> = [
+  { local: "billing", kind: "SHARED", name: "Billing Team", members: ["alex", "helena", "priya"] },
+  { local: "support", kind: "SHARED", name: "Customer Support", members: ["devon", "mia", "noah", "ruby"] },
+  { local: "engineering", kind: "DISTRIBUTION", name: "Engineering", members: ["sam", "ivy", "leo", "zara", "felix"] },
+  { local: "all-staff", kind: "DISTRIBUTION", name: "All Staff", members: PEOPLE.map((p) => p.local) },
+];
+
 async function resetAcmeFixture(): Promise<void> {
   // audit_events is fully append-only (DELETE, UPDATE, TRUNCATE triggers).
   // Temporarily disable all three, re-seed, then re-enable.
@@ -330,6 +343,26 @@ async function main(): Promise<void> {
       createdAt: ago(1 * HOUR + 13 * MINUTE),
     },
   });
+
+  // ── Mail groups: shared mailboxes and distribution lists ─────────────
+  for (const [index, group] of GROUPS.entries()) {
+    const groupId = fixtureId("group", index);
+    await prisma.mailGroup.create({
+      data: {
+        id: groupId,
+        tenantId: tenant.id,
+        name: group.name,
+        address: `${group.local}@zoikomail.test`,
+        kind: group.kind,
+        status: group.local === "engineering" ? "SUSPENDED" : "ACTIVE",
+        members: {
+          create: group.members.map((local) => ({
+            membershipId: membershipByLocal.get(local)!,
+          })),
+        },
+      },
+    });
+  }
 
   // ── Policies ──────────────────────────────────────────────────────────
   const policyCommon = { tenantId: tenant.id, createdByUserId: userByLocal.get("alex")! };
@@ -606,7 +639,7 @@ async function main(): Promise<void> {
   }
 
   // ── Report ────────────────────────────────────────────────────────────
-  const [people, invited, mailboxes, domains, connectors, audits, notes, policies] = await Promise.all([
+  const [people, invited, mailboxes, domains, connectors, audits, notes, policies, groups] = await Promise.all([
     prisma.tenantMembership.count({ where: { tenantId: tenant.id, status: "ACTIVE", role: { not: "SUPPORT" } } }),
     prisma.tenantMembership.count({ where: { tenantId: tenant.id, status: "INVITED" } }),
     prisma.mailbox.count({ where: { tenantId: tenant.id } }),
@@ -615,6 +648,7 @@ async function main(): Promise<void> {
     prisma.auditEvent.count({ where: { tenantId: tenant.id } }),
     prisma.notification.count({ where: { tenantId: tenant.id } }),
     prisma.tenantPolicy.count({ where: { tenantId: tenant.id, status: "ACTIVE" } }),
+    prisma.mailGroup.count({ where: { tenantId: tenant.id } }),
   ]);
 
   console.log(`\nSeed completed — ${tenant.name} (${tenant.id})\n`);
@@ -627,6 +661,7 @@ async function main(): Promise<void> {
   console.log(`  notifications          ${notes}/4`);
   console.log(`  active support grants  1  expires in ~2h47m`);
   console.log(`  active policies        ${policies}  (AI, SENDING, RETENTION, ABUSE)`);
+  console.log(`  groups                 ${groups}/4  (2 shared, 1 distribution, 1 suspended)`);
   console.log("\n  Logins — password for every seeded user: Password123!");
   console.log("    owner   alex@acme.test");
   console.log("    owner   helena@acme.test");
@@ -636,7 +671,6 @@ async function main(): Promise<void> {
   console.log("  Not seeded — the schema cannot express it yet:");
   console.log("    MFA coverage (12/14)   needs AppUser.mfaEnabled       roadmap item 16");
   console.log("    shared mailboxes       Mailbox.membershipId is unique  item 78");
-  console.log("    groups (4)             no MailGroup model              item 86");
   console.log("    failed sends (3)       needs an EmailMessage graph     item 80\n");
 }
 

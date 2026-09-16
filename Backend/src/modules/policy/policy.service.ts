@@ -89,6 +89,72 @@ export class PolicyService {
     });
   }
 
+  /**
+   * Updating a policy supersedes rather than overwrites: a new DRAFT version
+   * is created from the target's contents plus the changes, so the audit trail
+   * preserves what every earlier version said. Activate the new version to make
+   * it live.
+   */
+  async update(policyId: string, input: { name?: string; description?: string | null; rules?: PolicyRules }, context: Context) {
+    return prisma.$transaction(async (tx) => {
+      const target = await tx.tenantPolicy.findFirst({
+        where: { id: policyId, tenantId: context.tenantId },
+      });
+      if (!target) throw new AppError("Policy not found", 404, ErrorCodes.NOT_FOUND);
+      const latest = await tx.tenantPolicy.aggregate({
+        where: { tenantId: context.tenantId, type: target.type },
+        _max: { version: true },
+      });
+      const policy = await tx.tenantPolicy.create({
+        data: {
+          tenantId: context.tenantId,
+          type: target.type,
+          name: input.name ?? target.name,
+          description: input.description !== undefined ? input.description : target.description,
+          version: (latest._max.version ?? 0) + 1,
+          rules: (input.rules ?? target.rules) as Prisma.InputJsonValue,
+          createdByUserId: context.userId,
+        },
+      });
+      await this.audit(tx, context, "POLICY_UPDATED", policy.id, { type: policy.type, version: policy.version, basedOn: target.version });
+      return policy;
+    });
+  }
+
+  async deactivate(policyId: string, context: Context) {
+    return prisma.$transaction(async (tx) => {
+      const target = await tx.tenantPolicy.findFirst({
+        where: { id: policyId, tenantId: context.tenantId },
+      });
+      if (!target) throw new AppError("Policy not found", 404, ErrorCodes.NOT_FOUND);
+      if (target.status === "DRAFT") {
+        throw new AppError("A draft policy has never been activated", 409, ErrorCodes.CONFLICT);
+      }
+      if (target.status === "ARCHIVED") return target;
+      const policy = await tx.tenantPolicy.update({
+        where: { id: target.id },
+        data: { status: "ARCHIVED" },
+      });
+      await this.audit(tx, context, "POLICY_DEACTIVATED", policy.id, { type: policy.type, version: policy.version });
+      return policy;
+    });
+  }
+
+  async remove(policyId: string, context: Context) {
+    return prisma.$transaction(async (tx) => {
+      const target = await tx.tenantPolicy.findFirst({
+        where: { id: policyId, tenantId: context.tenantId },
+      });
+      if (!target) throw new AppError("Policy not found", 404, ErrorCodes.NOT_FOUND);
+      if (target.status === "ACTIVE") {
+        throw new AppError("Deactivate the active policy before deleting it", 409, ErrorCodes.CONFLICT);
+      }
+      const removed = await tx.tenantPolicy.delete({ where: { id: target.id } });
+      await this.audit(tx, context, "POLICY_DELETED", target.id, { type: target.type, version: target.version });
+      return removed;
+    });
+  }
+
   async evaluate(input: EvaluatePolicyInput, context: Context) {
     const policy = await prisma.tenantPolicy.findFirst({
       where: { tenantId: context.tenantId, type: input.type, status: "ACTIVE" },

@@ -1,7 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { useNotifications } from "@/lib/admin-hooks";
+import {
+  useMarkAllNotificationsRead,
+  useMarkNotificationRead,
+  useNotifications,
+} from "@/lib/admin-hooks";
 import type { NotificationDto } from "@/lib/admin-api";
 import {
   Card,
@@ -11,7 +14,6 @@ import {
   PageHeader,
   Pill,
   Row,
-  StaticNote,
   type Tone,
 } from "@/components/admin/ui";
 
@@ -24,12 +26,10 @@ const SEVERITY: Record<NotificationDto["severity"], { label: string; tone: Tone 
 
 export default function AdminNotificationsPage() {
   const { data: notifications, isLoading, error } = useNotifications();
+  const markOne = useMarkNotificationRead();
+  const markAll = useMarkAllNotificationsRead();
 
-  // Local read state so the screen behaves before PATCH /notifications/:id/read.
-  const [readIds, setReadIds] = useState<Set<string>>(new Set());
-  const markRead = (id: string) => setReadIds((prev) => new Set(prev).add(id));
-
-  const unread = notifications?.filter((n) => !n.readAt && !readIds.has(n.id)).length ?? 0;
+  const unread = notifications?.filter((n) => !n.readAt).length ?? 0;
 
   return (
     <>
@@ -41,15 +41,14 @@ export default function AdminNotificationsPage() {
             <button
               type="button"
               className="zoiko-btn sm"
-              onClick={() => setReadIds(new Set(notifications?.map((n) => n.id) ?? []))}
+              disabled={markAll.isPending}
+              onClick={() => markAll.mutate()}
             >
-              Mark all read
+              {markAll.isPending ? "Marking…" : "Mark all read"}
             </button>
           ) : undefined
         }
       />
-
-      <StaticNote>Backend is complete — GET /notifications and mark-read</StaticNote>
 
       <Card
         title="Recent"
@@ -64,7 +63,7 @@ export default function AdminNotificationsPage() {
         ) : (
           notifications.map((notification) => {
             const severity = SEVERITY[notification.severity];
-            const isRead = Boolean(notification.readAt) || readIds.has(notification.id);
+            const isRead = Boolean(notification.readAt);
             return (
               <Row
                 key={notification.id}
@@ -84,9 +83,10 @@ export default function AdminNotificationsPage() {
                       <button
                         type="button"
                         className="zoiko-btn sm"
-                        onClick={() => markRead(notification.id)}
+                        disabled={markOne.isPending}
+                        onClick={() => markOne.mutate(notification.id)}
                       >
-                        Mark read
+                        {markOne.isPending ? "…" : "Mark read"}
                       </button>
                     )}
                   </>

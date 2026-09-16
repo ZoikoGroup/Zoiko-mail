@@ -45,63 +45,73 @@ model Tenant {
   domainDnsChecks     DomainDnsCheck[]
   subscriptions       Subscription[]
   invoices            Invoice[]
+  groups              MailGroup[]
+  ownershipTransfers  OwnershipTransfer[]
+  tickets             SupportTicket[]
+  securityAlerts      SecurityAlert[]
 
   @@map("tenants")
 }
 
 model AppUser {
-  id                      String                 @id @default(uuid()) @db.Uuid
-  email                   String                 @unique
-  googleId                String?                @unique @map("google_id")
-  passwordHash            String?                @map("password_hash")
-  displayName             String                 @map("display_name")
-  avatarUrl               String?                @map("avatar_url")
-  phoneNumber             String?                @map("phone_number")
-  timezone                String?                @default("UTC")
-  language                String?                @default("en")
-  status                  AppUserStatus          @default(ACTIVE)
-  platformRole            PlatformRole           @default(NONE) @map("platform_role")
-  emailVerifiedAt         DateTime?              @map("email_verified_at")
+  id                          String                 @id @default(uuid()) @db.Uuid
+  email                       String                 @unique
+  googleId                    String?                @unique @map("google_id")
+  passwordHash                String?                @map("password_hash")
+  displayName                 String                 @map("display_name")
+  avatarUrl                   String?                @map("avatar_url")
+  phoneNumber                 String?                @map("phone_number")
+  timezone                    String?                @default("UTC")
+  language                    String?                @default("en")
+  status                      AppUserStatus          @default(ACTIVE)
+  platformRole                PlatformRole           @default(NONE) @map("platform_role")
+  emailVerifiedAt             DateTime?              @map("email_verified_at")
   // The one workspace this account may currently act in. Signing into a
   // workspace claims it here and ends every session for the previous one, so
   // a user with two memberships holds one live session, not two. Deliberately
   // not an FK: it is a pointer to whichever tenant won the last sign-in, and
   // a deleted tenant should leave it dangling rather than cascade a delete
   // onto the user row.
-  activeTenantId          String?                @map("active_tenant_id") @db.Uuid
-  lastLoginAt             DateTime?              @map("last_login_at")
-  failedLoginAttempts     Int                    @default(0) @map("failed_login_attempts")
-  lockedUntil             DateTime?              @map("locked_until")
-  createdAt               DateTime               @default(now()) @map("created_at")
-  updatedAt               DateTime               @updatedAt @map("updated_at")
-  auditEvents             AuditEvent[]           @relation("AuditActor")
-  refreshTokens           RefreshToken[]
-  emailOtps               EmailOtp[]
-  memberships             TenantMembership[]
-  createdPolicies         TenantPolicy[]         @relation("PolicyCreator")
-  authoredMessages        EmailMessage[]         @relation("MessageAuthor")
-  createdAiActions        AIAction[]             @relation("AICreator")
-  ownedCommitments        Commitment[]           @relation("CommitmentOwner")
-  createdCommitments      Commitment[]           @relation("CommitmentCreator")
-  notifications           Notification[]
-  createdIntegrationLinks IntegrationLink[]      @relation("IntegrationCreator")
-  createdJobs             BackgroundJob[]        @relation("JobCreator")
-  lifecycleRequests       DataLifecycleRequest[] @relation("LifecycleRequester")
-  approvedSupportGrants   SupportAccessGrant[]   @relation("SupportApprover")
-  connectedAccounts       ConnectedAccount[]
-  identities              UserIdentity[]
-  usedSelectionTokens     UsedSelectionToken[]
+  activeTenantId              String?                @map("active_tenant_id") @db.Uuid
+  lastLoginAt                 DateTime?              @map("last_login_at")
+  failedLoginAttempts         Int                    @default(0) @map("failed_login_attempts")
+  lockedUntil                 DateTime?              @map("locked_until")
+  createdAt                   DateTime               @default(now()) @map("created_at")
+  updatedAt                   DateTime               @updatedAt @map("updated_at")
+  auditEvents                 AuditEvent[]           @relation("AuditActor")
+  refreshTokens               RefreshToken[]
+  emailOtps                   EmailOtp[]
+  memberships                 TenantMembership[]
+  createdPolicies             TenantPolicy[]         @relation("PolicyCreator")
+  authoredMessages            EmailMessage[]         @relation("MessageAuthor")
+  createdAiActions            AIAction[]             @relation("AICreator")
+  ownedCommitments            Commitment[]           @relation("CommitmentOwner")
+  createdCommitments          Commitment[]           @relation("CommitmentCreator")
+  notifications               Notification[]
+  createdIntegrationLinks     IntegrationLink[]      @relation("IntegrationCreator")
+  createdJobs                 BackgroundJob[]        @relation("JobCreator")
+  lifecycleRequests           DataLifecycleRequest[] @relation("LifecycleRequester")
+  approvedSupportGrants       SupportAccessGrant[]   @relation("SupportApprover")
+  connectedAccounts           ConnectedAccount[]
+  identities                  UserIdentity[]
+  usedSelectionTokens         UsedSelectionToken[]
+  initiatedOwnershipTransfers OwnershipTransfer[]    @relation("OwnershipTransferInitiator")
+  approvedOwnershipTransfers  OwnershipTransfer[]    @relation("OwnershipTransferApprover")
+  openedTickets               SupportTicket[]        @relation("TicketOpenedBy")
+  assignedTickets             SupportTicket[]        @relation("TicketAssignedStaff")
+  ticketComments              SupportTicketComment[]
+  securityAlertsActor         SecurityAlert[]        @relation("SecurityAlertActor")
+  securityAlertsResolved      SecurityAlert[]        @relation("SecurityAlertResolver")
+
   @@map("app_users")
 }
 
 /**
  * Selection tokens that have already been exchanged for a session.
- *
  * The token itself is a stateless JWT, so nothing about it changes when it is
  * used. Without this record a single sign-in could be replayed for the whole
  * 15-minute window to open a session in each workspace the user belongs to,
  * which is exactly what "switching workspace needs a fresh login" forbids.
- *
  * Keyed by the token's jti so a replay collides on the primary key. Rows are
  * disposable once expiresAt has passed — the token cannot be verified after
  * that regardless.
@@ -163,6 +173,8 @@ model TenantMembership {
   receivedMessages    MessageRecipient[]
   supportAccessGrants SupportAccessGrant[]
   connectedAccounts   ConnectedAccount[]
+  groupMemberships    MailGroupMember[]
+  ownershipTransfers  OwnershipTransfer[]  @relation("OwnershipTransferTargetMembership")
 
   @@unique([tenantId, userId])
   @@index([userId])
@@ -171,15 +183,23 @@ model TenantMembership {
 }
 
 model RefreshToken {
-  id        String    @id @default(uuid()) @db.Uuid
-  userId    String    @map("user_id") @db.Uuid
-  tenantId  String    @map("tenant_id") @db.Uuid
-  tokenHash String    @unique @map("token_hash")
-  expiresAt DateTime  @map("expires_at")
-  revokedAt DateTime? @map("revoked_at")
-  createdAt DateTime  @default(now()) @map("created_at")
-  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user      AppUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  tokenHash   String    @unique @map("token_hash")
+  expiresAt   DateTime  @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  // Session device metadata (Phase 3): lets a user see "where am I signed in"
+  // and revoke one worn-out device instead of everything. The access token is
+  // stateless, so `lastUsedAt` is stamped when the *refresh* token is spent —
+  // a session that never comes back to refresh still shows its issue time.
+  deviceLabel String?   @map("device_label")
+  ipAddress   String?   @map("ip_address")
+  userAgent   String?   @map("user_agent")
+  lastUsedAt  DateTime? @map("last_used_at")
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user        AppUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, tenantId])
   @@map("refresh_tokens")
@@ -257,6 +277,35 @@ model Mailbox {
   @@map("mailboxes")
 }
 
+model MailGroup {
+  id        String            @id @default(uuid()) @db.Uuid
+  tenantId  String            @map("tenant_id") @db.Uuid
+  name      String
+  address   String
+  kind      MailGroupKind     @default(DISTRIBUTION)
+  status    MailGroupStatus   @default(ACTIVE)
+  createdAt DateTime          @default(now()) @map("created_at")
+  updatedAt DateTime          @updatedAt @map("updated_at")
+  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  members   MailGroupMember[]
+
+  @@unique([tenantId, address])
+  @@index([tenantId, status])
+  @@map("mail_groups")
+}
+
+model MailGroupMember {
+  groupId      String           @map("group_id") @db.Uuid
+  membershipId String           @map("membership_id") @db.Uuid
+  createdAt    DateTime         @default(now()) @map("created_at")
+  group        MailGroup        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  membership   TenantMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, membershipId])
+  @@index([membershipId])
+  @@map("mail_group_members")
+}
+
 model EmailMessage {
   id                String              @id @default(uuid()) @db.Uuid
   tenantId          String              @map("tenant_id") @db.Uuid
@@ -295,10 +344,10 @@ model EmailMessage {
   sourceAiActionId  String?             @map("source_ai_action_id") @db.Uuid
   sourceAiAction    AIAction?           @relation(fields: [sourceAiActionId], references: [id], onDelete: SetNull)
 
-  @@index([tenantId, authorUserId, createdAt])
-  @@index([tenantId, threadId, createdAt])
   @@unique([tenantId, providerType, providerMessageId])
   @@unique([tenantId, sourceAiActionId])
+  @@index([tenantId, authorUserId, createdAt])
+  @@index([tenantId, threadId, createdAt])
   @@map("email_messages")
 }
 
@@ -506,22 +555,22 @@ model AIAction {
 }
 
 model Commitment {
-  id              String           @id @default(uuid()) @db.Uuid
-  tenantId        String           @map("tenant_id") @db.Uuid
-  messageId       String?          @map("message_id") @db.Uuid
-  threadId        String?          @map("thread_id") @db.Uuid
-  ownerUserId     String           @map("owner_user_id") @db.Uuid
-  createdByUserId String           @map("created_by_user_id") @db.Uuid
-  text            String
-  dueAt           DateTime?        @map("due_at")
-  priority        ActionPriority   @default(MEDIUM)
-  status          CommitmentStatus @default(OPEN)
-  snoozedUntil    DateTime?        @map("snoozed_until")
-  createdAt       DateTime         @default(now()) @map("created_at")
-  updatedAt       DateTime         @updatedAt @map("updated_at")
+  id               String           @id @default(uuid()) @db.Uuid
+  tenantId         String           @map("tenant_id") @db.Uuid
+  messageId        String?          @map("message_id") @db.Uuid
+  threadId         String?          @map("thread_id") @db.Uuid
+  ownerUserId      String           @map("owner_user_id") @db.Uuid
+  createdByUserId  String           @map("created_by_user_id") @db.Uuid
+  text             String
+  dueAt            DateTime?        @map("due_at")
+  priority         ActionPriority   @default(MEDIUM)
+  status           CommitmentStatus @default(OPEN)
+  snoozedUntil     DateTime?        @map("snoozed_until")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
   // Track the AIAction that produced this commitment so a confirmed extraction
   // is never duplicated and can be traced back to its source action (ZM-BE-008).
-  sourceAiActionId String?         @map("source_ai_action_id") @db.Uuid
+  sourceAiActionId String?          @map("source_ai_action_id") @db.Uuid
   tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   owner            AppUser          @relation("CommitmentOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
   createdBy        AppUser          @relation("CommitmentCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
@@ -570,36 +619,36 @@ model IntegrationLink {
 }
 
 model ConnectedAccount {
-  id                String                 @id @default(uuid()) @db.Uuid
-  tenantId          String                 @map("tenant_id") @db.Uuid
-  membershipId      String                 @map("membership_id") @db.Uuid
-  userId            String                 @map("user_id") @db.Uuid
-  provider          ConnectorProvider
-  providerAccountId String                 @map("provider_account_id")
-  email             String
-  scopes            String[]
-  status            ConnectedAccountStatus @default(PENDING)
+  id                      String                 @id @default(uuid()) @db.Uuid
+  tenantId                String                 @map("tenant_id") @db.Uuid
+  membershipId            String                 @map("membership_id") @db.Uuid
+  userId                  String                 @map("user_id") @db.Uuid
+  provider                ConnectorProvider
+  providerAccountId       String                 @map("provider_account_id")
+  email                   String
+  scopes                  String[]
+  status                  ConnectedAccountStatus @default(PENDING)
   // Ref into the Secret Manager (or local-equivalent store) holding the
   // provider's OAuth access + refresh tokens. Tokens never live in this table
   // (Security §15): only the lookup key does. The ref is deterministic from
   // (provider, providerAccountId) so reconnect is idempotent without a lookup.
-  tokenSecretRef     String?                @map("token_secret_ref")
-  tokenExpiresAt     DateTime?              @map("token_expires_at")
-  watchExpiresAt     DateTime?              @map("watch_expires_at")
-  lastSyncedAt       DateTime?              @map("last_synced_at")
-  lastErrorCode      String?                @map("last_error_code")
-  disconnectedAt     DateTime?              @map("disconnected_at")
+  tokenSecretRef          String?                @map("token_secret_ref")
+  tokenExpiresAt          DateTime?              @map("token_expires_at")
+  watchExpiresAt          DateTime?              @map("watch_expires_at")
+  lastSyncedAt            DateTime?              @map("last_synced_at")
+  lastErrorCode           String?                @map("last_error_code")
+  disconnectedAt          DateTime?              @map("disconnected_at")
   // Microsoft 365 (ZM-BE-006): Graph change-notification subscription id and
   // the delta link used to resume incremental sync without refetching the whole
   // inbox. Delta links are opaque URLs — they are not secrets.
-  microsoftSubscriptionId String?           @map("microsoft_subscription_id")
-  microsoftDeltaLink      String?           @map("microsoft_delta_link")
-  createdAt          DateTime               @default(now()) @map("created_at")
-  updatedAt          DateTime               @updatedAt @map("updated_at")
-  tenant             Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  membership         TenantMembership       @relation(fields: [membershipId], references: [id], onDelete: Cascade)
-  user               AppUser                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  providerEvents     ProviderEvent[]
+  microsoftSubscriptionId String?                @map("microsoft_subscription_id")
+  microsoftDeltaLink      String?                @map("microsoft_delta_link")
+  createdAt               DateTime               @default(now()) @map("created_at")
+  updatedAt               DateTime               @updatedAt @map("updated_at")
+  tenant                  Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  membership              TenantMembership       @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  user                    AppUser                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  providerEvents          ProviderEvent[]
 
   @@unique([provider, providerAccountId])
   @@index([tenantId, membershipId, status])
@@ -715,6 +764,178 @@ model TenantDeletionReceipt {
   @@map("tenant_deletion_receipts")
 }
 
+/**
+ * A two-person ownership transfer.
+ * Ownership is the single most destructive role a membership can hold, so it
+ * never changes hands on one person's say-so. An Owner initiates the transfer
+ * (PENDING) and a *different* Owner must approve it, which both executes the
+ * role swap and marks the transfer COMPLETED. The initiator may cancel while
+ * it is still PENDING. The target is a membership, not a user, so the invite /
+ * re-invite lifecycle stays in the membership module.
+ */
+model OwnershipTransfer {
+  id                 String                  @id @default(uuid()) @db.Uuid
+  tenantId           String                  @map("tenant_id") @db.Uuid
+  initiatorUserId    String                  @map("initiator_user_id") @db.Uuid
+  targetMembershipId String                  @map("target_membership_id") @db.Uuid
+  status             OwnershipTransferStatus @default(PENDING)
+  approvedByUserId   String?                 @map("approved_by_user_id") @db.Uuid
+  completedAt        DateTime?               @map("completed_at")
+  createdAt          DateTime                @default(now()) @map("created_at")
+  updatedAt          DateTime                @updatedAt @map("updated_at")
+  tenant             Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  initiator          AppUser                 @relation("OwnershipTransferInitiator", fields: [initiatorUserId], references: [id], onDelete: Cascade)
+  targetMembership   TenantMembership        @relation("OwnershipTransferTargetMembership", fields: [targetMembershipId], references: [id], onDelete: Cascade)
+  approvedBy         AppUser?                @relation("OwnershipTransferApprover", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status])
+  @@index([targetMembershipId])
+  @@map("ownership_transfers")
+}
+
+enum OwnershipTransferStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+/**
+ * A support ticket / case.
+ * Tenants open tickets from the app (openedByType TENANT) and Zoiko support
+ * staff can open them on a tenant's behalf from the platform console
+ * (openedByType STAFF). Ticket comments are the two-way conversation; staff
+ * may mark a comment internal so only staff see it. Assignment tracks which
+ * staff member owns the case.
+ */
+model SupportTicket {
+  id              String         @id @default(uuid()) @db.Uuid
+  tenantId        String         @map("tenant_id") @db.Uuid
+  ticketNumber    Int            @default(autoincrement()) @map("ticket_number")
+  subject         String
+  description     String
+  category        TicketCategory @default(OTHER)
+  severity        TicketSeverity @default(MEDIUM)
+  status          TicketStatus   @default(OPEN)
+  assignedStaffId String?        @map("assigned_staff_id") @db.Uuid
+  openedByUserId  String         @map("opened_by_user_id") @db.Uuid
+  openedByType    String         @map("opened_by_type")
+  slaDueAt        DateTime?      @map("sla_due_at")
+  resolvedAt      DateTime?      @map("resolved_at")
+  closedAt        DateTime?      @map("closed_at")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  openedBy      AppUser                @relation("TicketOpenedBy", fields: [openedByUserId], references: [id], onDelete: Cascade)
+  assignedStaff AppUser?               @relation("TicketAssignedStaff", fields: [assignedStaffId], references: [id], onDelete: SetNull)
+  comments      SupportTicketComment[]
+
+  @@index([tenantId, status, updatedAt])
+  @@index([assignedStaffId])
+  @@map("support_tickets")
+}
+
+model SupportTicketComment {
+  id           String   @id @default(uuid()) @db.Uuid
+  ticketId     String   @map("ticket_id") @db.Uuid
+  authorUserId String   @map("author_user_id") @db.Uuid
+  authorType   String   @map("author_type")
+  body         String
+  internal     Boolean  @default(false)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author AppUser       @relation(fields: [authorUserId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt])
+  @@map("support_ticket_comments")
+}
+
+enum TicketCategory {
+  DELIVERY
+  DOMAIN
+  BILLING
+  ACCOUNT
+  SECURITY
+  OTHER
+}
+
+/**
+ * A security alert for a tenant — Phase 4.
+ * Generated as the account-security surface scans the auth pipeline (new-device
+ * sign-ins, repeated failed sign-ins, refresh-token reuse, password changes),
+ * so the owner can see *what the account is doing* without mining the raw audit
+ * log. OPEN alerts are the review inbox; an owner or admin acknowledges,
+ * resolves, or dismisses each one and leaves a note, so the decision is a
+ * first-class audit record rather than a silent row flip.
+ * Deliberately write-only by generation: alerts react to events that already
+ * happened, so holding one never grants anything. Route gating is capability-
+ * based (security-alert.read / security-alert.review).
+ */
+model SecurityAlert {
+  id             String              @id @default(uuid()) @db.Uuid
+  tenantId       String              @map("tenant_id") @db.Uuid
+  type           SecurityAlertType   @default(NEW_DEVICE_LOGIN)
+  severity       AlertSeverity       @default(MEDIUM)
+  status         SecurityAlertStatus @default(OPEN)
+  title          String
+  message        String
+  actorUserId    String?             @map("actor_user_id") @db.Uuid
+  actorEmail     String?             @map("actor_email")
+  ipAddress      String?             @map("ip_address")
+  userAgent      String?             @map("user_agent")
+  deviceLabel    String?             @map("device_label")
+  metadata       Json?
+  resolutionNote String?             @map("resolution_note")
+  resolvedById   String?             @map("resolved_by_id") @db.Uuid
+  resolvedAt     DateTime?           @map("resolved_at")
+  createdAt      DateTime            @default(now()) @map("created_at")
+  tenant         Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actor          AppUser?            @relation("SecurityAlertActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  resolvedBy     AppUser?            @relation("SecurityAlertResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status, createdAt])
+  @@map("security_alerts")
+}
+
+enum SecurityAlertType {
+  NEW_DEVICE_LOGIN
+  FAILED_LOGIN_BURST
+  REFRESH_TOKEN_REUSE
+  PASSWORD_CHANGED
+  PASSWORD_RESET
+}
+
+enum AlertSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum SecurityAlertStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+  DISMISSED
+}
+
+enum TicketSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_TENANT
+  RESOLVED
+  CLOSED
+}
+
 enum PlatformRole {
   NONE
   SUPPORT
@@ -802,6 +1023,16 @@ enum MailFolder {
   SENT
   TRASH
   QUARANTINE
+}
+
+enum MailGroupKind {
+  SHARED
+  DISTRIBUTION
+}
+
+enum MailGroupStatus {
+  ACTIVE
+  SUSPENDED
 }
 
 enum DeliveryEventType {
@@ -988,38 +1219,38 @@ enum ProviderEventStatus {
 }
 
 model Plan {
-  id            String         @id @default(uuid()) @db.Uuid
-  code          String         @unique
-  name          String
-  priceMonthly  Int
-  userLimit     Int
-  mailboxLimit  Int
+  id             String         @id @default(uuid()) @db.Uuid
+  code           String         @unique
+  name           String
+  priceMonthly   Int
+  userLimit      Int
+  mailboxLimit   Int
   storageLimitGb Int
-  stripePriceId String?        @map("stripe_price_id")
-  active        Boolean        @default(true)
-  createdAt     DateTime       @default(now()) @map("created_at")
-  updatedAt     DateTime       @updatedAt @map("updated_at")
-  subscriptions Subscription[]
+  stripePriceId  String?        @map("stripe_price_id")
+  active         Boolean        @default(true)
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  subscriptions  Subscription[]
 
   @@index([active])
   @@map("plans")
 }
 
 model Subscription {
-  id                    String       @id @default(uuid()) @db.Uuid
-  tenantId              String       @map("tenant_id") @db.Uuid
-  planId                String       @map("plan_id") @db.Uuid
-  stripeCustomerId      String?      @map("stripe_customer_id")
-  stripeSubscriptionId  String?      @unique @map("stripe_subscription_id")
-  status                String
-  currentPeriodEnd      DateTime?    @map("current_period_end")
-  trialEnd              DateTime?    @map("trial_end")
-  cancelAtPeriodEnd     Boolean      @default(false) @map("cancel_at_period_end")
-  createdAt             DateTime     @default(now()) @map("created_at")
-  updatedAt             DateTime     @updatedAt @map("updated_at")
-  tenant                Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  plan                  Plan         @relation(fields: [planId], references: [id])
-  invoices              Invoice[]
+  id                   String    @id @default(uuid()) @db.Uuid
+  tenantId             String    @map("tenant_id") @db.Uuid
+  planId               String    @map("plan_id") @db.Uuid
+  stripeCustomerId     String?   @map("stripe_customer_id")
+  stripeSubscriptionId String?   @unique @map("stripe_subscription_id")
+  status               String
+  currentPeriodEnd     DateTime? @map("current_period_end")
+  trialEnd             DateTime? @map("trial_end")
+  cancelAtPeriodEnd    Boolean   @default(false) @map("cancel_at_period_end")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+  tenant               Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan                 Plan      @relation(fields: [planId], references: [id])
+  invoices             Invoice[]
 
   @@index([tenantId])
   @@index([status])
@@ -1027,21 +1258,21 @@ model Subscription {
 }
 
 model Invoice {
-  id               String           @id @default(uuid()) @db.Uuid
-  tenantId         String           @map("tenant_id") @db.Uuid
-  subscriptionId   String?          @map("subscription_id") @db.Uuid
-  stripeInvoiceId  String?          @unique @map("stripe_invoice_id")
+  id               String        @id @default(uuid()) @db.Uuid
+  tenantId         String        @map("tenant_id") @db.Uuid
+  subscriptionId   String?       @map("subscription_id") @db.Uuid
+  stripeInvoiceId  String?       @unique @map("stripe_invoice_id")
   number           String?
-  amountDue        Int              @map("amount_due")
-  currency         String           @default("usd")
+  amountDue        Int           @map("amount_due")
+  currency         String        @default("usd")
   status           String
-  periodStart      DateTime?        @map("period_start")
-  periodEnd        DateTime?        @map("period_end")
-  hostedInvoiceUrl String?          @map("hosted_invoice_url")
-  invoicePdfUrl    String?          @map("invoice_pdf_url")
-  createdAt        DateTime         @default(now()) @map("created_at")
-  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  subscription     Subscription?    @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  periodStart      DateTime?     @map("period_start")
+  periodEnd        DateTime?     @map("period_end")
+  hostedInvoiceUrl String?       @map("hosted_invoice_url")
+  invoicePdfUrl    String?       @map("invoice_pdf_url")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  tenant           Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subscription     Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
 
   @@index([tenantId])
   @@index([status])
@@ -1049,11 +1280,11 @@ model Invoice {
 }
 
 model StripeWebhookEvent {
-  id            String    @id @default(uuid()) @db.Uuid
-  stripeEventId String    @unique @map("stripe_event_id")
-  eventType     String    @map("event_type")
-  processedAt   DateTime  @default(now()) @map("processed_at")
-  createdAt     DateTime  @default(now()) @map("created_at")
+  id            String   @id @default(uuid()) @db.Uuid
+  stripeEventId String   @unique @map("stripe_event_id")
+  eventType     String   @map("event_type")
+  processedAt   DateTime @default(now()) @map("processed_at")
+  createdAt     DateTime @default(now()) @map("created_at")
 
   @@map("stripe_webhook_events")
 }

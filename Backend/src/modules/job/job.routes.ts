@@ -8,3 +8,5 @@ export const jobRouter = Router();
 jobRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN"));
 jobRouter.get("/", asyncHandler(async (req, res) => { sendSuccess(res, 200, { jobs: await jobService.list(req.tenantContext!.tenantId) }, req.requestId); }));
 jobRouter.get("/:jobId", validate(z.object({ jobId: z.string().uuid() }), "params"), asyncHandler(async (req, res) => { sendSuccess(res, 200, await jobService.get(String(req.params.jobId), req.tenantContext!.tenantId), req.requestId); }));
+jobRouter.post("/:jobId/cancel", validate(z.object({ jobId: z.string().uuid() }), "params"), asyncHandler(async (req, res) => { sendSuccess(res, 200, await jobService.cancel(String(req.params.jobId), req.tenantContext!.tenantId, req.tenantContext!.userId), req.requestId); }));
+jobRouter.post("/:jobId/retry", validate(z.object({ jobId: z.string().uuid() }), "params"), asyncHandler(async (req, res) => { sendSuccess(res, 200, await jobService.retry(String(req.params.jobId), req.tenantContext!.tenantId, req.tenantContext!.userId), req.requestId); }));

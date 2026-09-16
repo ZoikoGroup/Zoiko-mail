@@ -35,6 +35,11 @@ export const CAPABILITIES = [
   "policy.write",
   "policy.security.write",
   "audit.read",
+  // Security alerts — Phase 4. `review` mutates the alert's lifecycle
+  // (acknowledge / resolve / dismiss), which is why it is separate from
+  // simply seeing the inbox.
+  "security-alert.read",
+  "security-alert.review",
   // Money and liability.
   "billing.read",
   "billing.plan.write",

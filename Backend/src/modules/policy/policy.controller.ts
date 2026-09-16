@@ -21,6 +21,15 @@ export const create = asyncHandler(async (req: Request, res: Response) => {
 export const activate = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await policyService.activate(String(req.params.policyId), context(req)), req.requestId);
 });
+export const update = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await policyService.update(String(req.params.policyId), req.body, context(req)), req.requestId);
+});
+export const deactivate = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await policyService.deactivate(String(req.params.policyId), context(req)), req.requestId);
+});
+export const remove = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await policyService.remove(String(req.params.policyId), context(req)), req.requestId);
+});
 export const evaluate = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await policyService.evaluate(req.body, context(req)), req.requestId);
 });

@@ -7,6 +7,8 @@ import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { hashPassword, verifyPassword } from "../../common/utils/password.js";
+import { enforcePasswordPolicy } from "../../common/utils/passwordPolicy.js";
+import { securityAlertService } from "../security-alert/security-alert.service.js";
 import { hashToken } from "../../common/utils/tokenHash.js";
 import { actingRole } from "../../common/utils/workspaceScope.js";
 import type {
@@ -52,6 +54,61 @@ interface RequestContext {
   requestId?: string;
   ipAddress?: string | null;
   userAgent?: string | null;
+}
+
+/** What a session "is" in the Where-am-I-signed-in list. */
+export interface SessionDeviceMetadata {
+  deviceLabel?: string | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}
+
+/** A session as it appears to its owner. */
+export interface SessionInfo {
+  id: string;
+  deviceLabel: string;
+  ipAddress: string | null;
+  createdAt: Date;
+  lastUsedAt: Date | null;
+  /** The session that issued this user's current access token. */
+  isCurrent: boolean;
+}
+
+/**
+ * Turns a raw User-Agent into something a human recognises: platform first
+ * ("Windows", "macOS", "iPhone"), then browser family. Unknown agents come
+ * back as "Unknown device" — never a blank row in the list.
+ */
+function labelForUserAgent(userAgent?: string | null): string {
+  const ua = (userAgent ?? "").toLowerCase();
+  const platform =
+    ua.includes("iphone") || ua.includes("ipad")
+      ? "iOS"
+      : ua.includes("android")
+        ? "Android"
+        : ua.includes("windows") || ua.includes("win32")
+          ? "Windows"
+          : ua.includes("mac os")
+            ? "macOS"
+            : ua.includes("linux")
+              ? "Linux"
+              : "";
+  const browser =
+    ua.includes("edg/")
+      ? "Edge"
+      : ua.includes("opr/") || ua.includes("opera")
+        ? "Opera"
+        : ua.includes("firefox")
+          ? "Firefox"
+          : ua.includes("chrome")
+            ? "Chrome"
+            : ua.includes("safari")
+              ? "Safari"
+              : "";
+  if (platform && browser) return `${platform} · ${browser}`;
+  if (platform) return platform;
+  if (browser) return browser;
+  return "Unknown device";
 }
 
 const membershipRoles = new Set<MembershipRole>([
@@ -273,7 +330,8 @@ async function persistRefreshToken(
   membership: MembershipWithRelations,
   refreshToken: string,
   expiresAt: Date,
-  tx: Prisma.TransactionClient | typeof prisma = prisma
+  tx: Prisma.TransactionClient | typeof prisma = prisma,
+  device?: SessionDeviceMetadata
 ): Promise<void> {
   await tx.refreshToken.create({
     data: {
@@ -281,6 +339,9 @@ async function persistRefreshToken(
       tenantId: membership.tenantId,
       tokenHash: hashToken(refreshToken),
       expiresAt,
+      deviceLabel: device?.deviceLabel ?? null,
+      ipAddress: device?.ipAddress ?? null,
+      userAgent: device?.userAgent ?? null,
     },
   });
 }
@@ -343,12 +404,13 @@ async function releaseActiveWorkspace(
 async function issueSession(
   membership: MembershipWithRelations,
   workspace: WorkspaceScope,
-  tx: Prisma.TransactionClient | typeof prisma = prisma
+  tx: Prisma.TransactionClient | typeof prisma = prisma,
+  device?: SessionDeviceMetadata
 ): Promise<AuthSessionResponse> {
   const accessToken = buildAccessToken(membership, workspace);
   const refresh = buildRefreshToken(membership, workspace);
 
-  await persistRefreshToken(membership, refresh.token, refresh.expiresAt, tx);
+  await persistRefreshToken(membership, refresh.token, refresh.expiresAt, tx, device);
   // After the new token is stored, so a failure here cannot leave the account
   // pointing at a workspace it holds no session for.
   await claimActiveWorkspace(membership, tx);
@@ -422,6 +484,8 @@ export class AuthService {
         ErrorCodes.CONFLICT
       );
     }
+
+    enforcePasswordPolicy(input.password, { email: input.email });
 
     const passwordHash = await hashPassword(input.password);
 
@@ -572,7 +636,13 @@ export class AuthService {
 
     return issueSession(
       membershipWithRelations,
-      workspaceScopeForRole(membershipWithRelations.role)
+      workspaceScopeForRole(membershipWithRelations.role),
+      undefined,
+      {
+        deviceLabel: labelForUserAgent(context.userAgent),
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+      }
     );
   }
 
@@ -667,7 +737,12 @@ export class AuthService {
       return issueSession(
         membershipWithRelations,
         workspaceScopeForRole(membershipWithRelations.role),
-        tx
+        tx,
+        {
+          deviceLabel: labelForUserAgent(context.userAgent),
+          ipAddress: context.ipAddress,
+          userAgent: context.userAgent,
+        }
       );
     });
 
@@ -795,6 +870,7 @@ export class AuthService {
     if (await verifyPassword(input.newPassword, user.passwordHash)) {
       throw new AppError("New password must be different from your current password", 409, ErrorCodes.CONFLICT);
     }
+    enforcePasswordPolicy(input.newPassword, { email: input.email });
     const passwordHash = await hashPassword(input.newPassword);
     await ensureSystemTenant();
     await prisma.$transaction(async (tx) => {
@@ -810,6 +886,16 @@ export class AuthService {
         requestId: context.requestId, ipAddress: context.ipAddress, userAgent: context.userAgent,
       }, tx);
     });
+    await securityAlertService.recordPasswordReset(
+      (await this.activeTenantForUser(user)) ?? SYSTEM_TENANT_ID,
+      user.id,
+      user.email,
+      {
+        ipAddress: context.ipAddress ?? null,
+        userAgent: context.userAgent ?? null,
+        requestId: context.requestId,
+      }
+    );
     return { message: "Password has been reset. You can now sign in with your new password." };
   }
 
@@ -1288,9 +1374,29 @@ export class AuthService {
     }
 
     // ACTIVE membership + ACTIVE tenant → sign in.
+    // Phase 4: flag a sign-in from a device this account has not used here
+    // before. Must run before issueSession — the new session's refresh row is
+    // the "current device", and once it exists every sign-in looks known.
+    await securityAlertService.recordNewDeviceLogin(
+      membership.tenantId,
+      user.id,
+      context.userAgent ?? null,
+      {
+        ipAddress: context.ipAddress ?? null,
+        deviceLabel: labelForUserAgent(context.userAgent),
+        requestId: context.requestId,
+      }
+    );
+
     const session = await issueSession(
       membership,
-      intendedWorkspace ?? workspaceScopeForRole(membership.role)
+      intendedWorkspace ?? workspaceScopeForRole(membership.role),
+      undefined,
+      {
+        deviceLabel: labelForUserAgent(context.userAgent),
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+      }
     );
     await auditService.record({
       tenantId: membership.tenantId,
@@ -1377,7 +1483,7 @@ export class AuthService {
     const session = await prisma.$transaction(async (tx) => {
       const claimed = await tx.refreshToken.updateMany({
         where: { id: storedToken.id, revokedAt: null },
-        data: { revokedAt: new Date() },
+        data: { revokedAt: new Date(), lastUsedAt: new Date() },
       });
 
       if (claimed.count !== 1) return null;
@@ -1388,7 +1494,12 @@ export class AuthService {
       const nextSession = await issueSession(
         membership,
         payload.workspace ?? workspaceScopeForRole(membership.role),
-        tx
+        tx,
+        {
+          deviceLabel: labelForUserAgent(context.userAgent),
+          ipAddress: context.ipAddress,
+          userAgent: context.userAgent,
+        }
       );
       await auditService.record(
         {
@@ -1452,6 +1563,20 @@ export class AuthService {
     }
   }
 
+  // The one workspace a password reset alert should be filed under. Resets
+  // happen on a public endpoint with no tenant context, so fall back to the
+  // account's active workspace, then the first ACTIVE one.
+  private async activeTenantForUser(
+    user: { id: string }
+  ): Promise<string | null> {
+    const memberships = await membershipRepository.findByUserId(user.id);
+    const live = memberships.find(
+      (membership) =>
+        membership.status === "ACTIVE" && membership.tenant.status === "ACTIVE"
+    );
+    return live?.tenantId ?? null;
+  }
+
   async changePassword(
     input: ChangePasswordInput,
     userId: string,
@@ -1481,6 +1606,11 @@ export class AuthService {
       );
     }
 
+    enforcePasswordPolicy(input.newPassword, {
+      email: user.email,
+      currentPassword: input.currentPassword,
+    });
+
     const passwordHash = await hashPassword(input.newPassword);
     await prisma.$transaction(async (tx) => {
       await tx.appUser.update({ where: { id: userId }, data: { passwordHash } });
@@ -1501,6 +1631,11 @@ export class AuthService {
         },
         tx
       );
+    });
+    await securityAlertService.recordPasswordChanged(tenantId, userId, user.email, {
+      ipAddress: context.ipAddress ?? null,
+      userAgent: context.userAgent ?? null,
+      requestId: context.requestId,
     });
   }
 
@@ -1532,6 +1667,81 @@ export class AuthService {
         tx
       );
       return revoked.count;
+    });
+  }
+
+  /**
+   * Lists the account's live sessions for this workspace ("where am I signed
+   * in"). A refresh token is one session; the row that was issued most recently
+   * is the one still on screen, so it is flagged as the current session.
+   */
+  async listSessions(userId: string, tenantId: string): Promise<SessionInfo[]> {
+    const rows = await prisma.refreshToken.findMany({
+      where: { userId, tenantId, revokedAt: null },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return rows.map((row, index) => ({
+      id: row.id,
+      deviceLabel:
+        row.deviceLabel ??
+        (row.userAgent ? labelForUserAgent(row.userAgent) : "Unknown device"),
+      ipAddress: row.ipAddress,
+      createdAt: row.createdAt,
+      lastUsedAt: row.lastUsedAt,
+      isCurrent: index === 0,
+    }));
+  }
+
+  /**
+   * Revokes a single session (refresh token) for this workspace. The access
+   * token it chose to "forget" stays alive until it expires — this is the
+   * "no, that old phone should not stay signed in" path, not a log-out. A
+   * revoked session stops being renewable immediately, and a client that
+   * tries to refresh with it gets a 401.
+   */
+  async revokeSession(
+    userId: string,
+    tenantId: string,
+    sessionId: string,
+    context: RequestContext
+  ): Promise<void> {
+    const session = await prisma.refreshToken.findFirst({
+      where: { id: sessionId, userId, tenantId },
+    });
+    if (!session || session.revokedAt) {
+      throw new AppError(
+        "Session not found or already revoked",
+        404,
+        ErrorCodes.NOT_FOUND
+      );
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.refreshToken.update({
+        where: { id: sessionId },
+        data: { revokedAt: new Date() },
+      });
+      await auditService.record(
+        {
+          tenantId,
+          actorUserId: userId,
+          eventType: AuditEventTypes.SESSION_REVOKED,
+          targetType: "RefreshToken",
+          targetId: sessionId,
+          requestId: context.requestId,
+          ipAddress: context.ipAddress,
+          userAgent: context.userAgent,
+          metadata: {
+            sessionDeviceLabel:
+              session.deviceLabel ??
+              (session.userAgent
+                ? labelForUserAgent(session.userAgent)
+                : "Unknown device"),
+          },
+        },
+        tx
+      );
     });
   }
 
@@ -1662,6 +1872,21 @@ export class AuthService {
         reason,
       },
     });
+
+    // Phase 4: surface a burst of failed sign-ins from one address so the
+    // owner sees a credential attack as an alert, not as log mining.
+    if (userId && tenantId !== SYSTEM_TENANT_ID) {
+      await securityAlertService.recordFailedLoginBurst(
+        tenantId,
+        userId,
+        email,
+        {
+          ipAddress: context.ipAddress ?? null,
+          userAgent: context.userAgent ?? null,
+          requestId: context.requestId,
+        }
+      );
+    }
   }
 
   private async handleRefreshTokenReuse(
@@ -1692,6 +1917,19 @@ export class AuthService {
         tx
       );
     });
+
+    const reuseActor = await userRepository.findById(token.userId);
+    await securityAlertService.recordRefreshTokenReuse(
+      token.tenantId,
+      token.userId,
+      reuseActor?.email ?? "unknown",
+      {
+        ipAddress: context.ipAddress ?? null,
+        userAgent: context.userAgent ?? null,
+        deviceLabel: labelForUserAgent(context.userAgent),
+        requestId: context.requestId,
+      }
+    );
 
     throw new AppError(
       "Refresh token reuse detected",

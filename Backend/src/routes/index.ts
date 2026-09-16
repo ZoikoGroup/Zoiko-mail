@@ -15,9 +15,14 @@ import { integrationRouter } from "../modules/integration/integration.routes.js"
 import { jobRouter } from "../modules/job/job.routes.js";
 import { lifecycleRouter } from "../modules/lifecycle/lifecycle.routes.js";
 import { supportPlatformRouter, supportRouter } from "../modules/support/support.routes.js";
+import { ticketPlatformRouter, ticketRouter } from "../modules/ticket/ticket.routes.js";
 import { connectorRouter } from "../modules/connector/connector.routes.js";
 import { deliveryProtectionRouter } from "../modules/delivery-protection/delivery-protection.routes.js";
 import { billingRouter } from "../modules/billing/billing.routes.js";
+import { permissionRouter } from "../modules/permission/permission.routes.js";
+import { groupRouter } from "../modules/group/group.routes.js";
+import { ownershipRouter } from "../modules/ownership/ownership.routes.js";
+import { securityAlertRouter } from "../modules/security-alert/security-alert.routes.js";
 
 const apiRouter = Router();
 
@@ -37,6 +42,10 @@ apiRouter.use("/notifications", notificationRouter);
 apiRouter.use("/integrations", integrationRouter);
 apiRouter.use("/jobs", jobRouter);
 apiRouter.use("/lifecycle", lifecycleRouter);
+// Mount ticket routers before the generic support routers: /support/tickets
+// and /support/platform/tickets are more specific and must win the match.
+apiRouter.use("/support/platform/tickets", ticketPlatformRouter);
+apiRouter.use("/support/tickets", ticketRouter);
 // Mount the platform support console before the tenant-scoped /support router:
 // supportRouter runs tenantContext (ACTIVE membership required), which would
 // otherwise reject staff sessions that lack a tenant context.
@@ -45,5 +54,9 @@ apiRouter.use("/support", supportRouter);
 apiRouter.use("/connectors", connectorRouter);
 apiRouter.use("/delivery-protection", deliveryProtectionRouter);
 apiRouter.use("/billing", billingRouter);
+apiRouter.use("/permissions", permissionRouter);
+apiRouter.use("/groups", groupRouter);
+apiRouter.use("/ownership", ownershipRouter);
+apiRouter.use("/security-alerts", securityAlertRouter);
 
 export { apiRouter };

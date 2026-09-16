@@ -40,6 +40,14 @@ export class AIService {
     });
   }
 
+  async remove(id: string, tenantId: string, userId: string) {
+    const action = await prisma.aIAction.findFirst({ where: { id, tenantId, createdByUserId: userId } });
+    if (!action) throw new AppError("AI action not found", 404, ErrorCodes.NOT_FOUND);
+    const removed = await prisma.aIAction.delete({ where: { id: action.id, tenantId } });
+    await auditService.record({ tenantId, actorUserId: userId, eventType: "AI_ACTION_DELETED", targetType: "AIAction", targetId: id });
+    return removed;
+  }
+
   async complete(id: string, input: { output: Prisma.InputJsonValue; confidenceScore: number; sourceExcerpt: string }, tenantId: string, userId: string) {
     const action = await prisma.aIAction.findFirst({ where: { id, tenantId, status: "PENDING" } });
     if (!action) throw new AppError("Pending AI action not found", 404, ErrorCodes.NOT_FOUND);

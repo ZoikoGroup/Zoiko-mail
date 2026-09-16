@@ -39,6 +39,10 @@ const SPEC_ADMIN_CAPABILITIES: Capability[] = [
   "policy.write",
   // §2 "View audit log": Admin = Limited. Held, then scoped in the service.
   "audit.read",
+  // Phase 4 security alerts: read + review both held so an Admin can run the
+  // alert inbox; the Owner resolves the ones that go furthest.
+  "security-alert.read",
+  "security-alert.review",
   // §2 "Request export": Admin = "By policy" + Step-up.
   "data.export",
   "support.grant.end",
@@ -296,8 +300,8 @@ describe("vocabulary integrity", () => {
     expect(orphans).toEqual([]);
   });
 
-  it("declares twenty-eight capabilities", () => {
-    expect(CAPABILITIES).toHaveLength(28);
-    expect(new Set(CAPABILITIES).size).toBe(28);
+  it("declares thirty capabilities", () => {
+    expect(CAPABILITIES).toHaveLength(30);
+    expect(new Set(CAPABILITIES).size).toBe(30);
   });
 });

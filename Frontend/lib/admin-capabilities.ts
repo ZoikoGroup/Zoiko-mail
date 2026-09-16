@@ -40,6 +40,8 @@ export type Capability =
   | "policy.write"
   | "policy.security.write"
   | "audit.read"
+  | "security-alert.read"
+  | "security-alert.review"
   // Money and liability
   | "billing.read"
   | "billing.plan.write"

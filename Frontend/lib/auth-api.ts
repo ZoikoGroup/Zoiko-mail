@@ -348,3 +348,40 @@ export async function resetPassword(
     auth: false,
   });
 }
+
+/** A single live sign-in for the current workspace. */
+export interface SessionInfo {
+  id: string;
+  deviceLabel: string;
+  ipAddress: string | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+  isCurrent: boolean;
+}
+
+export interface SessionListResponse {
+  sessions: SessionInfo[];
+}
+
+export async function getSessions(): Promise<SessionListResponse> {
+  return apiRequest<SessionListResponse>("/auth/sessions");
+}
+
+export async function revokeSession(sessionId: string): Promise<MessageResponse> {
+  return apiRequest<MessageResponse>(`/auth/sessions/${sessionId}/revoke`, {
+    method: "POST",
+  });
+}
+
+/** The password rules the server enforces, served for the forms to render. */
+export interface PasswordPolicy {
+  minLength: number;
+  maxLength: number;
+  minClasses: number;
+  classes: Array<{ id: string; label: string; test: string }>;
+  forbidden: string[];
+}
+
+export async function getPasswordPolicy(): Promise<PasswordPolicy> {
+  return apiRequest<PasswordPolicy>("/auth/password-policy", { auth: false });
+}

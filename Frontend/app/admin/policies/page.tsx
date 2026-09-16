@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { usePolicyGroups } from "@/lib/admin-hooks";
+import { usePolicyGroups, useUpdatePolicyRules } from "@/lib/admin-hooks";
 import { useCan } from "@/lib/admin-capabilities";
 import {
   Card,
@@ -17,12 +16,7 @@ import {
 export default function AdminPoliciesPage() {
   const can = useCan();
   const { data: groups, isLoading, error } = usePolicyGroups();
-
-  // Optimistic local state so the screen is explorable before the API exists.
-  // Keyed by toggle key; absent means "use the fixture value".
-  const [overrides, setOverrides] = useState<Record<string, boolean>>({});
-  const toggle = (key: string, current: boolean) =>
-    setOverrides((prev) => ({ ...prev, [key]: !current }));
+  const updateRules = useUpdatePolicyRules();
 
   const canWriteSecurityPolicy = can("policy.security.write");
 
@@ -71,16 +65,27 @@ export default function AdminPoliciesPage() {
               badge={groupLocked ? <Pill tone="warn">{group.restriction}</Pill> : undefined}
             >
               {group.toggles.map((item) => {
-                const enabled = overrides[item.key] ?? item.enabled;
                 const locked = item.locked || groupLocked;
+                const pending = updateRules.isPending;
                 return (
                   <ToggleRow
                     key={item.key}
                     label={item.label}
                     detail={item.detail}
-                    enabled={enabled}
+                    enabled={item.enabled}
                     locked={locked}
-                    onToggle={locked ? undefined : () => toggle(item.key, enabled)}
+                    onToggle={
+                      locked
+                        ? undefined
+                        : () =>
+                            updateRules.mutate({
+                              policyId: item.policyId,
+                              rules: item.rules,
+                              ruleKey: item.ruleKey,
+                              enabled: !item.enabled,
+                            })
+                    }
+                    disabled={pending}
                   />
                 );
               })}

@@ -13,7 +13,9 @@ export const lifecycleRouter = Router();
 const body = z.object({ idempotencyKey: z.string().trim().min(8).max(120), reason: z.string().trim().min(3).max(500).optional() });
 const params = z.object({ requestId: z.string().uuid() });
 const confirmDeletionBody = z.object({
-  confirmation: z.literal("DELETE_TENANT_PERMANENTLY"),
+  // The frontend sends the organization name typed into the confirm dialog;
+  // the security control is the `tenantName` match below, not this field.
+  confirmation: z.string().trim().min(1).max(200),
   tenantName: z.string().trim().min(1).max(200),
 });
 lifecycleRouter.use(authenticate, tenantContext, requireRole("OWNER"));

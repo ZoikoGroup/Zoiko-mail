@@ -17,16 +17,23 @@
  */
 import { apiRequest } from "./api-client";
 import type {
+  AlertReviewAction,
   AuditEventDto,
+  CapabilityCell,
+  CapabilityGroupDto,
   CommitmentDto,
   ConnectorDto,
   DomainDto,
   GroupDto,
+  GuardrailDto,
   InvitationDto,
   MailboxDto,
   MemberDto,
   NotificationDto,
   PolicyGroupDto,
+  PolicyRulesDto,
+  PolicyToggleDto,
+  SecurityAlertListResponse,
   SettingsDto,
   SupportGrantDto,
   SyncErrorDto,
@@ -216,6 +223,33 @@ export async function fetchAuditEvents(limit = 50): Promise<AuditEventDto[]> {
   }));
 }
 
+/* ── security alerts ───────────────────────────────────────────────────── */
+
+/**
+ * The workspace alert inbox. The backend returns status tallies alongside the
+ * rows so the filter chips and the rail badge never round-trip twice.
+ */
+export async function fetchSecurityAlerts(): Promise<SecurityAlertListResponse> {
+  const res = await apiRequest<SecurityAlertListResponse>("/security-alerts");
+  return {
+    counts: res.counts ?? {},
+    openCount: res.openCount ?? 0,
+    alerts: res.alerts ?? [],
+  };
+}
+
+/** Owner/admin decision on one alert. The server audits who decided, and how. */
+export async function reviewSecurityAlert(
+  id: string,
+  action: AlertReviewAction,
+  note?: string
+): Promise<void> {
+  await apiRequest(`/security-alerts/${id}/review`, {
+    method: "POST",
+    body: JSON.stringify({ action, ...(note ? { note } : {}) }),
+  });
+}
+
 /* ── connectors ────────────────────────────────────────────────────────── */
 
 interface ApiConnectedAccount {
@@ -285,6 +319,75 @@ export async function fetchSyncErrors(): Promise<SyncErrorDto[]> {
   }));
 }
 
+/* ── permissions ──────────────────────────────────────────────────────── */
+
+/**
+ * Capability codes, as the server returns them, with the label the matrix
+ * screen shows. Codes are the stable identifier; the label is a translation,
+ * not a second source of truth — the values still come from the backend.
+ */
+const CAPABILITY_LABELS: Record<string, string> = {
+  "mail.own.rw": "Read and send own mail",
+  "commitments.own.manage": "Manage own commitments",
+  "connector.own.connect": "Connect own inbox",
+  "mail.other.read": "Read another member's mail",
+  "people.read": "See the user list",
+  "people.invite.member": "Invite a Member",
+  "people.invite.admin": "Invite an Admin",
+  "people.invite.owner": "Invite an Owner",
+  "people.member.manage": "Suspend or remove a Member",
+  "people.admin.manage": "Suspend or remove an Admin",
+  "people.owner.manage": "Act on an Owner",
+  "people.mfa.reset": "Reset another person's MFA",
+  "workspace.settings.read": "Read workspace settings",
+  "workspace.settings.write": "Change workspace settings",
+  "workspace.mailboxes.manage": "Manage mailboxes",
+  "workspace.domains.manage": "Manage domains",
+  "workspace.groups.manage": "Manage groups",
+  "policy.write": "Set or change policies",
+  "policy.security.write": "Set the security policy",
+  "audit.read": "Read the audit log",
+  "billing.read": "View billing and seats",
+  "billing.plan.write": "Change the plan",
+  "data.export": "Export all workspace data",
+  "tenant.ownership.transfer": "Transfer ownership",
+  "tenant.delete": "Delete the tenant",
+  "support.standing": "Hold standing access",
+  "support.workspace.access": "Access a workspace",
+  "support.grant.end": "End a support grant early",
+};
+
+interface ApiMatrixRow {
+  capability: string;
+  member: CapabilityCell;
+  admin: CapabilityCell;
+  owner: CapabilityCell;
+  support: CapabilityCell;
+}
+
+/** The authoritative matrix, straight off the server the middleware enforces. */
+export async function fetchCapabilityMatrix(): Promise<CapabilityGroupDto[]> {
+  const res = await apiRequest<{ groups: { group: string; rows: ApiMatrixRow[] }[] }>(
+    "/permissions/matrix"
+  );
+  return (res.groups ?? []).map((group) => ({
+    group: group.group,
+    rows: group.rows.map((row) => ({
+      capability: CAPABILITY_LABELS[row.capability] ?? row.capability,
+      member: row.member,
+      admin: row.admin,
+      owner: row.owner,
+      support: row.support,
+    })),
+  }));
+}
+
+/** Escalation guardrails — same shape on the wire as on screen. */
+export async function fetchGuardrails(): Promise<GuardrailDto[]> {
+  const res = await apiRequest<{ guardrails: GuardrailDto[] }>("/permissions/guardrails");
+  return res.guardrails ?? [];
+}
+
 /* ── policies ──────────────────────────────────────────────────────────── */
 
 interface ApiPolicy {
@@ -294,7 +397,7 @@ interface ApiPolicy {
   description: string | null;
   version: number;
   status: string;
-  rules: Record<string, unknown> | null;
+  rules: PolicyRulesDto | null;
 }
 
 export async function fetchPolicyGroups(): Promise<PolicyGroupDto[]> {
@@ -305,34 +408,94 @@ export async function fetchPolicyGroups(): Promise<PolicyGroupDto[]> {
   }
 
   return Object.entries(byType).map(([type, policies]) => {
-    // One active version per type is the contract; fall back to the newest.
-    const active =
-      policies.find((p: ApiPolicy) => p.status === "ACTIVE") ??
-      [...policies].sort((a: ApiPolicy, b: ApiPolicy) => b.version - a.version)[0];
-    const rules = (active?.rules ?? {}) as Record<string, unknown>;
+    // The newest version is the working copy: the screen edits that one, and a
+    // PATCH supersedes it with a newer draft rather than overwriting the live
+    // contract. Reading the newest keeps the toggle in step with what was saved.
+    const latest = [...policies].sort((a: ApiPolicy, b: ApiPolicy) => b.version - a.version)[0];
+    const rules = latest?.rules ?? null;
 
     const group: PolicyGroupDto = {
-      group: active?.name ?? type,
+      group: latest?.name ?? type,
       // SECURITY policy is Owner-only: the matrix withholds
       // `policy.security.write` from an Admin, so the group is shown but
       // marked out of reach rather than hidden.
       restriction:
         type === "SECURITY" ? "Owner only — requires policy.security.write" : null,
-      toggles: Object.entries(rules)
-        .filter(([, value]) => typeof value === "boolean")
-        .map(([key, value]) => ({
-          key,
-          // Turn camelCase rule keys into readable labels.
-          label: key.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase()),
-          detail: `${type} policy · version ${active?.version ?? 1}`,
-          enabled: value as boolean,
-          // Whether an Admin may flip a given rule is evaluation step 8, which
-          // is not wired yet. Shown as editable; the server refuses if not.
-          locked: type === "SECURITY",
-        })),
+      toggles: rules ? buildPolicyToggles(type, latest!, rules) : [],
     };
     return group;
   });
+}
+
+/** Binary leaves of a policy's rules become toggles; stringy ones stay unpainted. */
+function buildPolicyToggles(
+  type: string,
+  policy: ApiPolicy,
+  rules: PolicyRulesDto
+): PolicyToggleDto[] {
+  const locked = type === "SECURITY";
+  const toggles: PolicyToggleDto[] = [
+    {
+      key: "__default",
+      label: "Allow by default",
+      detail:
+        rules.defaultEffect === "ALLOW"
+          ? "Requests that match no condition go through."
+          : "Requests that match no condition are refused.",
+      enabled: rules.defaultEffect === "ALLOW",
+      locked,
+      policyId: policy.id,
+      ruleKey: "__default",
+      rules,
+    },
+  ];
+
+  rules.conditions.forEach((condition, index) => {
+    // Only boolean-valued conditions are genuinely on/off; the rest are shown
+    // in the detail text rather than forced into a binary switch.
+    if (typeof condition.value !== "boolean") return;
+    toggles.push({
+      key: `cond-${index}`,
+      label: condition.field.replace(/[._]/g, " ").replace(/^./, (c) => c.toUpperCase()),
+      detail: `${condition.field} ${condition.operator.toLowerCase().replace(/_/g, " ")} ${condition.value} is ${condition.effect === "ALLOW" ? "allowed" : "refused"}`,
+      enabled: condition.effect === "ALLOW",
+      locked,
+      policyId: policy.id,
+      ruleKey: `__condition:${index}`,
+      rules,
+    });
+  });
+
+  return toggles;
+}
+
+/**
+ * Flips one leaf of a policy's rules and PATCHes the version, which the server
+ * supersedes with a newer draft. Sending the full rules object keeps the
+ * untouched leaves intact.
+ */
+export async function updatePolicyRules(
+  policyId: string,
+  rules: PolicyRulesDto,
+  ruleKey: string,
+  enabled: boolean
+): Promise<void> {
+  let next: PolicyRulesDto;
+  if (ruleKey === "__default") {
+    next = { ...rules, defaultEffect: enabled ? "ALLOW" : "DENY" };
+  } else if (ruleKey.startsWith("__condition:")) {
+    const index = Number(ruleKey.slice("__condition:".length));
+    next = {
+      ...rules,
+      conditions: rules.conditions.map((condition, i) =>
+        i === index ? { ...condition, effect: enabled ? "ALLOW" : "DENY" } : condition
+      ),
+    };
+  } else {
+    throw new Error(`Unknown policy rule leaf: ${ruleKey}`);
+  }
+
+  await apiRequest(`/policies/${policyId}`, { method: "PATCH", body: { rules: next } });
 }
 
 /* ── notifications ─────────────────────────────────────────────────────── */
@@ -363,6 +526,19 @@ export async function fetchNotifications(): Promise<NotificationDto[]> {
     severity: SEVERITY[n.type] ?? "INFO",
     readAt: n.readAt ? ago(n.readAt) : null,
   }));
+}
+
+/** Marks one notification read. The server refuses rows it does not own. */
+export async function markNotificationRead(id: string): Promise<void> {
+  await apiRequest(`/notifications/${id}/read`, { method: "PATCH" });
+}
+
+/** Marks every unread notification for the caller read; returns the count. */
+export async function markAllNotificationsRead(): Promise<number> {
+  const data = await apiRequest<{ updated: number }>("/notifications/read-all", {
+    method: "POST",
+  });
+  return data.updated ?? 0;
 }
 
 /* ── tenant settings ───────────────────────────────────────────────────── */
@@ -476,13 +652,48 @@ export async function fetchActiveSupportGrant(): Promise<SupportGrantDto | null>
 
 /* ── groups ────────────────────────────────────────────────────────────── */
 
-/**
- * There is no Group model, module or endpoint in the backend. This throws so
- * the screen shows its error state, which is the honest rendering of a feature
- * that does not exist — a fixture here would look like a working feature.
- */
+interface ApiGroup {
+  id: string;
+  name: string | null;
+  address: string;
+  kind: GroupDto["kind"];
+  status: GroupDto["status"];
+  createdAt: string;
+  _count?: { members: number };
+}
+
+/** Shared mailboxes and distribution groups, as the Group module serves them. */
 export async function fetchGroups(): Promise<GroupDto[]> {
-  throw new Error("Groups are not implemented in the API yet");
+  const res = await apiRequest<{ groups: ApiGroup[] }>("/groups");
+  return (res.groups ?? []).map((g) => ({
+    id: g.id,
+    name: g.name,
+    address: g.address,
+    kind: g.kind,
+    memberCount: g._count?.members ?? 0,
+    status: g.status,
+  }));
+}
+
+/** Creates a shared mailbox or distribution group. */
+export async function createGroup(input: {
+  name: string;
+  address: string;
+  kind: GroupDto["kind"];
+}): Promise<void> {
+  await apiRequest("/groups", { method: "POST", body: input });
+}
+
+/** Updates a group — used for suspending/reactivating via its status. */
+export async function updateGroup(
+  groupId: string,
+  patch: { name?: string; status?: GroupDto["status"] }
+): Promise<void> {
+  await apiRequest(`/groups/${groupId}`, { method: "PATCH", body: patch });
+}
+
+export async function deleteGroup(groupId: string): Promise<void> {
+  await apiRequest(`/groups/${groupId}`, { method: "DELETE" });
 }
 
 /** The drafted invitation letter, as the API returns it. */

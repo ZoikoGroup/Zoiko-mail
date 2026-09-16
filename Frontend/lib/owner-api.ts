@@ -733,3 +733,51 @@ export async function confirmDeletion(
 export async function downloadExport(requestId: string): Promise<Blob> {
   return apiRequest<Blob>(`/lifecycle/exports/${requestId}/download`);
 }
+
+// ─── Ownership transfer ───────────────────────────────────────────────────────
+
+export interface OwnershipTransfer {
+  id: string;
+  tenantId: string;
+  initiatorUserId: string;
+  targetMembershipId: string;
+  status: "PENDING" | "COMPLETED" | "CANCELLED";
+  approvedByUserId: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  initiator: { id: string; email: string; displayName: string };
+  approvedBy: { id: string; email: string; displayName: string } | null;
+  targetMembership: {
+    id: string;
+    user: { id: string; email: string; displayName: string };
+  };
+}
+
+export async function getOwnershipTransfers(): Promise<OwnershipTransfer[]> {
+  const res = await apiRequest<{ transfers: OwnershipTransfer[] }>("/ownership");
+  return res.transfers;
+}
+
+export async function initiateOwnershipTransfer(targetMembershipId: string): Promise<OwnershipTransfer> {
+  return apiRequest<OwnershipTransfer>("/ownership/transfers", {
+    method: "POST",
+    body: { targetMembershipId },
+  });
+}
+
+export interface OwnershipTransferApproval {
+  transfer: OwnershipTransfer;
+  demoted: { id: string };
+  promoted: { id: string };
+}
+
+export async function approveOwnershipTransfer(transferId: string): Promise<OwnershipTransferApproval> {
+  return apiRequest<OwnershipTransferApproval>(`/ownership/transfers/${transferId}/approve`, {
+    method: "POST",
+  });
+}
+
+export async function cancelOwnershipTransfer(transferId: string): Promise<void> {
+  await apiRequest(`/ownership/transfers/${transferId}/cancel`, { method: "POST" });
+}

@@ -135,4 +135,25 @@ authRouter.post(
   authController.logoutAll
 );
 
+// The password policy is public — the register and reset screens render the
+// requirements before the account exists, so it cannot sit behind auth.
+authRouter.get(
+  "/password-policy",
+  authController.passwordPolicy
+);
+
+authRouter.get(
+  "/sessions",
+  authenticate,
+  tenantContext,
+  authController.listSessions
+);
+
+authRouter.post(
+  "/sessions/:sessionId/revoke",
+  authenticate,
+  tenantContext,
+  authController.revokeSession
+);
+
 export { authRouter };

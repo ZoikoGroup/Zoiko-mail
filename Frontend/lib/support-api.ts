@@ -517,3 +517,117 @@ export function revokePlatformGrant(grantId: string): Promise<PlatformGrant> {
 export function fetchPlatformDiagnostics(grantId: string): Promise<SupportDiagnosticsData> {
   return platformRequest<SupportDiagnosticsData>(`/support/platform/diagnostics?grantId=${encodeURIComponent(grantId)}`);
 }
+
+// ---------------------------------------------------------------------------
+// Support tickets. Tenant members talk to /support/tickets; staff use the
+// platform console routes under /support/platform/tickets.
+// ---------------------------------------------------------------------------
+
+export type TicketCategory = "DELIVERY" | "DOMAIN" | "BILLING" | "ACCOUNT" | "SECURITY" | "OTHER";
+export type TicketSeverity = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
+export type TicketStatus = "OPEN" | "IN_PROGRESS" | "WAITING_TENANT" | "RESOLVED" | "CLOSED";
+
+export interface TicketAuthor {
+  id: string;
+  email: string;
+  displayName: string;
+}
+
+export interface TicketComment {
+  id: string;
+  authorType: string;
+  internal: boolean;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+  author: TicketAuthor | null;
+}
+
+export interface SupportTicket {
+  id: string;
+  ticketNumber: number;
+  tenantId: string;
+  tenantName: string;
+  subject: string;
+  description: string;
+  category: TicketCategory;
+  severity: TicketSeverity;
+  status: TicketStatus;
+  openedBy: TicketAuthor | null;
+  openedByType: string;
+  assignedStaff: TicketAuthor | null;
+  slaDueAt: string | null;
+  resolvedAt: string | null;
+  closedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  comments: TicketComment[];
+}
+
+export interface TicketListParams {
+  tenantId?: string;
+  status?: TicketStatus;
+  severity?: TicketSeverity;
+  assigned?: "me" | "unassigned" | "all";
+  q?: string;
+  limit?: number;
+}
+
+export interface CreateTicketInput {
+  subject: string;
+  description: string;
+  category: TicketCategory;
+  severity: TicketSeverity;
+}
+
+export interface UpdateTicketInput {
+  status?: TicketStatus;
+  severity?: TicketSeverity;
+  assignedStaffId?: string | null;
+}
+
+export function listPlatformTickets(params: TicketListParams = {}): Promise<{ tickets: SupportTicket[] }> {
+  return platformRequest<{ tickets: SupportTicket[] }>(`/support/platform/tickets${listQueryString(params)}`);
+}
+
+export function getPlatformTicket(ticketId: string): Promise<SupportTicket> {
+  return platformRequest<SupportTicket>(`/support/platform/tickets/${encodeURIComponent(ticketId)}`);
+}
+
+export function createPlatformTicket(input: CreateTicketInput & { tenantId: string; assignedStaffId?: string | null }): Promise<SupportTicket> {
+  return platformRequest<SupportTicket>("/support/platform/tickets", { method: "POST", body: input });
+}
+
+export function updatePlatformTicket(ticketId: string, input: UpdateTicketInput): Promise<SupportTicket> {
+  return platformRequest<SupportTicket>(`/support/platform/tickets/${encodeURIComponent(ticketId)}`, { method: "PATCH", body: input });
+}
+
+export function commentPlatformTicket(ticketId: string, body: string, internal: boolean): Promise<TicketComment> {
+  return platformRequest<TicketComment>(`/support/platform/tickets/${encodeURIComponent(ticketId)}/comments`, {
+    method: "POST",
+    body: { body, internal },
+  });
+}
+
+export function listPlatformStaff(): Promise<{ staff: TicketAuthor[] }> {
+  return platformRequest<{ staff: TicketAuthor[] }>("/support/platform/tickets/staff");
+}
+
+export function listTenantTickets(params: Pick<TicketListParams, "status" | "q" | "limit"> = {}): Promise<{ tickets: SupportTicket[]; ticketCounts: Record<string, number> }> {
+  return apiRequest<{ tickets: SupportTicket[]; ticketCounts: Record<string, number> }>(`/support/tickets${listQueryString(params)}`);
+}
+
+export function getTenantTicket(ticketId: string): Promise<SupportTicket> {
+  return apiRequest<SupportTicket>(`/support/tickets/${encodeURIComponent(ticketId)}`);
+}
+
+export function createTenantTicket(input: CreateTicketInput): Promise<SupportTicket> {
+  return apiRequest<SupportTicket>("/support/tickets", { method: "POST", body: input });
+}
+
+export function commentTenantTicket(ticketId: string, body: string): Promise<TicketComment> {
+  return apiRequest<TicketComment>(`/support/tickets/${encodeURIComponent(ticketId)}/comments`, {
+    method: "POST",
+    body: { body },
+  });
+}

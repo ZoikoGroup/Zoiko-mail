@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
+import { publicPasswordPolicy } from "../../common/utils/passwordPolicy.js";
 import { authService } from "./auth.service.js";
 
 function getRequestContext(req: Request) {
@@ -193,4 +194,28 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response) =>
 export const selectWorkspace = asyncHandler(async (req: Request, res: Response) => {
   const result = await authService.selectWorkspace(req.body, getRequestContext(req));
   res.json({ success: true, data: result });
+});
+
+export const passwordPolicy = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, publicPasswordPolicy(), req.requestId);
+});
+
+export const listSessions = asyncHandler(async (req: Request, res: Response) => {
+  const tenant = req.tenantContext!;
+  const sessions = await authService.listSessions(tenant.userId, tenant.tenantId);
+  sendSuccess(res, 200, { sessions }, req.requestId);
+});
+
+export const revokeSession = asyncHandler(async (req: Request, res: Response) => {
+  const tenant = req.tenantContext!;
+  const sessionId = Array.isArray(req.params.sessionId)
+    ? req.params.sessionId[0]
+    : req.params.sessionId;
+  await authService.revokeSession(
+    tenant.userId,
+    tenant.tenantId,
+    sessionId,
+    getRequestContext(req)
+  );
+  sendSuccess(res, 200, { message: "Session revoked" }, req.requestId);
 });

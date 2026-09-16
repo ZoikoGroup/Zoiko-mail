@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useMe } from "@/lib/auth-hooks";
 import { useUpdateTenant } from "@/lib/owner-hooks";
+import { TransferOwnershipCard } from "@/components/owner/transfer-ownership/TransferOwnership";
 import type { MeResponse } from "@/lib/auth-api";
 import { Building2, Save } from "lucide-react";
 
@@ -123,6 +124,8 @@ export default function OrganizationSettingsPage() {
             {updateTenant.isError && <span className="text-xs text-[var(--crit)]">Failed to save. Please try again.</span>}
           </div>
         </div>
+
+        <TransferOwnershipCard />
       </div>
     </ProtectedRoute>
   );

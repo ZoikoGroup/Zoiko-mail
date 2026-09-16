@@ -10,5 +10,8 @@ actionRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEM
 
 actionRouter.get("/", validate(listActionsSchema, "query"), asyncHandler(async (req, res) => { sendSuccess(res, 200, { actions: await actionService.list(req.tenantContext!.tenantId, req.tenantContext!.userId, req.query as unknown as import("./action.schema.js").ListActionsInput) }, req.requestId); }));
 
+actionRouter.get("/:actionId", validate(actionIdSchema, "params"), asyncHandler(async (req, res) => { sendSuccess(res, 200, await actionService.get(String(req.params.actionId), req.tenantContext!.tenantId, req.tenantContext!.userId), req.requestId); }));
+
 actionRouter.post("/", validate(createActionSchema), asyncHandler(async (req, res) => { sendSuccess(res, 201, await actionService.create(req.body, req.tenantContext!.tenantId, req.tenantContext!.userId, req.tenantContext!.membershipId), req.requestId); }));
 actionRouter.patch("/:actionId", validate(actionIdSchema, "params"), validate(updateActionSchema), asyncHandler(async (req, res) => { sendSuccess(res, 200, await actionService.update(String(req.params.actionId), req.body, req.tenantContext!.tenantId, req.tenantContext!.userId), req.requestId); }));
+actionRouter.delete("/:actionId", validate(actionIdSchema, "params"), asyncHandler(async (req, res) => { sendSuccess(res, 200, await actionService.remove(String(req.params.actionId), req.tenantContext!.tenantId, req.tenantContext!.userId), req.requestId); }));

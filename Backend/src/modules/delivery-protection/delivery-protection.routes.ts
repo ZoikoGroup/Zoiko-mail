@@ -2,7 +2,7 @@ import { Router } from "express";
 import { authenticate, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
-import { createSuppressionSchema, suppressionIdSchema, warmupMailboxSchema } from "./delivery-protection.schema.js";
+import { createSuppressionSchema, setWarmupCapSchema, suppressionIdSchema, warmupMailboxSchema } from "./delivery-protection.schema.js";
 import { deliveryProtectionService } from "./delivery-protection.service.js";
 
 export const deliveryProtectionRouter = Router();
@@ -29,6 +29,11 @@ deliveryProtectionRouter.get("/mailboxes/:mailboxId/warmup", validate(warmupMail
 deliveryProtectionRouter.post("/mailboxes/:mailboxId/warmup/evaluate", validate(warmupMailboxSchema, "params"), asyncHandler(async (req, res) => {
   sendSuccess(res, 200, await deliveryProtectionService.evaluateWarmup(
     req.tenantContext!.tenantId, String(req.params.mailboxId), req.tenantContext!.userId
+  ), req.requestId);
+}));
+deliveryProtectionRouter.put("/mailboxes/:mailboxId/warmup-cap", validate(warmupMailboxSchema, "params"), validate(setWarmupCapSchema), asyncHandler(async (req, res) => {
+  sendSuccess(res, 200, await deliveryProtectionService.setWarmupCap(
+    req.tenantContext!.tenantId, String(req.params.mailboxId), req.body.cap, req.tenantContext!.userId
   ), req.requestId);
 }));
 

@@ -49,6 +49,9 @@ const OWNER: RoleMatrix = {
   "policy.write": "ALLOW",
   "policy.security.write": "ALLOW",
   "audit.read": "ALLOW",
+  // Phase 4: the owner is accountable for the workspace's posture.
+  "security-alert.read": "ALLOW",
+  "security-alert.review": "ALLOW",
   // Money and liability.
   "billing.read": "ALLOW",
   "billing.plan.write": "ALLOW",
@@ -95,6 +98,10 @@ const ADMIN: RoleMatrix = {
   // lives in the audit service, which withholds the Owner-reserved
   // governance categories. See ADMIN_AUDIT_EXCLUDED_PREFIXES.
   "audit.read": "ALLOW",
+  // Phase 4: bounded operator investigates; Owner resolves the ones that go
+  // all the way. Read and review are both held so an Admin can run the inbox.
+  "security-alert.read": "ALLOW",
+  "security-alert.review": "ALLOW",
   // §2 "Request export": Admin = "By policy" + Step-up. Step-up is expressed
   // here; the policy half is evaluation step 8 and belongs to the policy gate,
   // not to the matrix.

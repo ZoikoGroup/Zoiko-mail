@@ -15,27 +15,37 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  createGroup,
+  deleteGroup,
   fetchActiveSupportGrant,
   fetchAuditEvents,
+  fetchCapabilityMatrix,
   fetchCommitments,
   fetchConnectors,
   fetchDomains,
   fetchGroups,
+  fetchGuardrails,
   fetchInvitations,
-  previewInvitation,
-  sendInvitation,
-  updateWorkspaceSettings,
   fetchMailboxes,
   fetchMembers,
   fetchNotifications,
   fetchPolicyGroups,
+  fetchSecurityAlerts,
   fetchSettings,
   fetchSyncErrors,
   fetchTenant,
+  markAllNotificationsRead,
+  markNotificationRead,
+  previewInvitation,
+  reviewSecurityAlert,
+  sendInvitation,
+  updateGroup,
+  updatePolicyRules,
+  updateWorkspaceSettings,
 } from "./admin-queries";
 import type { InvitationDraftInput, WorkspaceSettingsPatch } from "./admin-queries";
-import { CAPABILITY_MATRIX, GUARDRAILS } from "./admin-api";
 import type {
+  AlertReviewAction,
   AuditEventDto,
   CapabilityGroupDto,
   CommitmentDto,
@@ -49,6 +59,8 @@ import type {
   MemberDto,
   NotificationDto,
   PolicyGroupDto,
+  PolicyRulesDto,
+  SecurityAlertListResponse,
   SettingsDto,
   SupportGrantDto,
   SyncErrorDto,
@@ -113,7 +125,6 @@ export function useDomains(): QueryLike<DomainDto[]> {
   return shape(useQuery({ queryKey: ["domains"], queryFn: fetchDomains, ...LIVE }));
 }
 
-/** No Group model exists server-side; the screen shows its error state. */
 export function useGroups(): QueryLike<GroupDto[]> {
   return shape(
     useQuery({ queryKey: ["groups"], queryFn: fetchGroups, retry: false, ...LIVE })
@@ -124,6 +135,29 @@ export function useAuditEvents(): QueryLike<AuditEventDto[]> {
   return shape(
     useQuery({ queryKey: ["audit"], queryFn: () => fetchAuditEvents(50), ...LIVE })
   );
+}
+
+/* ── security alerts ───────────────────────────────────────────────────── */
+
+export function useSecurityAlerts(): QueryLike<SecurityAlertListResponse> {
+  return shape(
+    useQuery({ queryKey: ["security-alerts"], queryFn: fetchSecurityAlerts, ...LIVE })
+  );
+}
+
+/**
+ * Owner/admin decision on an alert. Refreshing the inbox after a review keeps
+ * the row's badge and the rail count honest without a reload.
+ */
+export function useReviewSecurityAlert() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, action, note }: { id: string; action: AlertReviewAction; note?: string }) =>
+      reviewSecurityAlert(id, action, note),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["security-alerts"] });
+    },
+  });
 }
 
 export function useConnectors(): QueryLike<ConnectorDto[]> {
@@ -174,18 +208,28 @@ export function useActiveSupportGrant(): QueryLike<SupportGrantDto | null> {
 /* ── still static, and marked as such ──────────────────────────────────── */
 
 /**
- * The permission matrix is documentation of the server's own table. Serving it
- * from `GET /permissions/matrix` would be better, but until that exists this
- * is a transcription rather than invented data — and `useCan` already reflects
- * the live decisions from `GET /users/me/capabilities`.
+ * The permission matrix, served straight off the server the middleware
+ * enforces so the screen can never drift from what the API actually allows.
  */
 export function useCapabilityMatrix(): QueryLike<CapabilityGroupDto[]> {
-  return { data: CAPABILITY_MATRIX, isLoading: false, error: null };
+  return shape(
+    useQuery({
+      queryKey: ["capability-matrix"],
+      queryFn: fetchCapabilityMatrix,
+      ...LIVE,
+    })
+  );
 }
 
-/** Guardrails have no backend representation at all — nothing to read yet. */
+/** Escalation guardrails, served from the backend alongside the matrix. */
 export function useGuardrails(): QueryLike<GuardrailDto[]> {
-  return { data: GUARDRAILS, isLoading: false, error: null };
+  return shape(
+    useQuery({
+      queryKey: ["guardrails"],
+      queryFn: fetchGuardrails,
+      ...LIVE,
+    })
+  );
 }
 
 /* ── rail counts ───────────────────────────────────────────────────────── */
@@ -197,9 +241,8 @@ export function useGuardrails(): QueryLike<GuardrailDto[]> {
  * resolved, so a still-loading item keeps its previous badge rather than
  * flickering to 0. A resolved-but-empty list carries its real 0.
  *
- * Groups and Inbox are intentionally absent: groups have no backend read yet
- * (`useGroups` throws), and mail needs a member-level hook that does not live
- * in this module.
+ * Groups now have a real read and carry their own badge; Inbox stays absent
+ * because mail needs a member-level hook that does not live in this module.
  */
 export function useAdminNavCounts(): Partial<Record<string, number>> {
   const people = useWorkspacePeople();
@@ -208,6 +251,8 @@ export function useAdminNavCounts(): Partial<Record<string, number>> {
   const domains = useDomains();
   const notifications = useNotifications();
   const commitments = useCommitments();
+  const groups = useGroups();
+  const securityAlerts = useSecurityAlerts();
 
   const counts: Partial<Record<string, number>> = {};
   if (people.data) counts["/admin/users"] = people.data.length;
@@ -218,6 +263,8 @@ export function useAdminNavCounts(): Partial<Record<string, number>> {
     counts["/admin/notifications"] = notifications.data.filter((n) => !n.readAt).length;
   }
   if (commitments.data) counts["/admin/commitments"] = commitments.data.length;
+  if (groups.data) counts["/admin/groups"] = groups.data.length;
+  if (securityAlerts.data) counts["/admin/security-alerts"] = securityAlerts.data.openCount;
   return counts;
 }
 
@@ -341,6 +388,89 @@ export function useUpdateWorkspaceSettings() {
         // derived from the same read.
         qc.invalidateQueries({ queryKey: ["tenant"] }),
       ]);
+    },
+  });
+}
+
+/* ── notifications ─────────────────────────────────────────────────────── */
+
+export function useMarkNotificationRead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => markNotificationRead(id),
+    onSuccess: async () => {
+      // The read state drives both the row styling and the unread badge, so
+      // the whole list is re-read rather than trusting the mutation.
+      await qc.invalidateQueries({ queryKey: ["notifications"] });
+    },
+  });
+}
+
+export function useMarkAllNotificationsRead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => markAllNotificationsRead(),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["notifications"] });
+      await qc.invalidateQueries({ queryKey: ["admin-nav-counts"] });
+    },
+  });
+}
+
+/* ── groups ────────────────────────────────────────────────────────────── */
+
+export function useCreateGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { name: string; address: string; kind: GroupDto["kind"] }) =>
+      createGroup(input),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["groups"] });
+    },
+  });
+}
+
+export function useUpdateGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      groupId: string;
+      patch: { name?: string; status?: GroupDto["status"] };
+    }) => updateGroup(input.groupId, input.patch),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["groups"] });
+    },
+  });
+}
+
+export function useDeleteGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (groupId: string) => deleteGroup(groupId),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["groups"] }),
+        qc.invalidateQueries({ queryKey: ["admin-nav-counts"] }),
+      ]);
+    },
+  });
+}
+
+/* ── policies ──────────────────────────────────────────────────────────── */
+
+export function useUpdatePolicyRules() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      policyId: string;
+      rules: PolicyRulesDto;
+      ruleKey: string;
+      enabled: boolean;
+    }) => updatePolicyRules(input.policyId, input.rules, input.ruleKey, input.enabled),
+    onSuccess: async () => {
+      // The server supersedes with a new draft version, so re-reading is the
+      // only way to reflect the actual result (new version, same leaf flipped).
+      await qc.invalidateQueries({ queryKey: ["policies"] });
     },
   });
 }
