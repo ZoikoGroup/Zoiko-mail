@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
-import { authHeader, registerUser } from "./helpers.js";
+import { authHeader, registerUser, stepUpHeader } from "./helpers.js";
 
 const app = createApp();
 
@@ -23,6 +23,7 @@ describe("Provider-independent platform modules", () => {
     const draft = await request(app).post("/api/v1/mail/drafts").set(authHeader(owner.accessToken))
       .send({ subject: "Governed work", textBody: "Confirm launch", recipients: { to: [member.email] } }).expect(201);
     const policy = await request(app).post("/api/v1/policies").set(authHeader(owner.accessToken))
+      .set(await stepUpHeader(app, owner.accessToken))
       .send({ type: "AI", name: "Allow governed AI", rules: { defaultEffect: "ALLOW", conditions: [] } }).expect(201);
     await request(app).post(`/api/v1/policies/${policy.body.data.id}/activate`).set(authHeader(owner.accessToken)).expect(200);
 

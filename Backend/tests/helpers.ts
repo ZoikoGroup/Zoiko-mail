@@ -282,3 +282,28 @@ export async function loginUser(
 export function authHeader(token: string): { Authorization: string } {
   return { Authorization: `Bearer ${token}` };
 }
+
+/**
+ * A fresh step-up token — Security §5, AC-003.
+ *
+ * Five admin actions require the caller to have re-authenticated at action
+ * time: removing a domain, deleting a mailbox, rotating provider credentials,
+ * changing AI policy, and granting support access. A test exercising one of
+ * those has to obtain this the way the console does, or the route answers 403
+ * and the test is only proving the gate exists.
+ *
+ * Lives here rather than in each spec because five files need it, and five
+ * copies would drift the moment the password fixture changes.
+ */
+export async function stepUpHeader(
+  app: Parameters<typeof request>[0],
+  accessToken: string,
+  password = "Password123!"
+): Promise<{ "x-step-up-token": string }> {
+  const response = await request(app)
+    .post("/api/v1/auth/step-up")
+    .set(authHeader(accessToken))
+    .send({ password })
+    .expect(200);
+  return { "x-step-up-token": response.body.data.stepUpToken as string };
+}

@@ -11,7 +11,7 @@ vi.mock("node:dns/promises", () => ({
 
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
-import { authHeader, registerUser } from "./helpers.js";
+import { authHeader, registerUser, stepUpHeader } from "./helpers.js";
 
 const app = createApp();
 
@@ -205,11 +205,13 @@ describe("Domains API", () => {
     await request(app)
       .delete(`/api/v1/domains/${active.domain.id}`)
       .set(authHeader(active.owner.accessToken))
+      .set(await stepUpHeader(app, active.owner.accessToken))
       .expect(409);
 
     const res = await request(app)
       .delete(`/api/v1/domains/${inactive.domain.id}`)
       .set(authHeader(inactive.owner.accessToken))
+      .set(await stepUpHeader(app, inactive.owner.accessToken))
       .expect(200);
     expect(res.body.data.domainName).toBe(inactive.domain.domainName);
 
@@ -219,6 +221,7 @@ describe("Domains API", () => {
     await request(app)
       .delete(`/api/v1/domains/${inactive.domain.id}`)
       .set(authHeader(inactive.owner.accessToken))
+      .set(await stepUpHeader(app, inactive.owner.accessToken))
       .expect(404);
   });
 
