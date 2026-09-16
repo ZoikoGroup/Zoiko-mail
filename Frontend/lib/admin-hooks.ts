@@ -37,6 +37,9 @@ import {
   sendInvitation,
   updateWorkspaceSettings,
   fetchMailboxes,
+  createMailbox,
+  deleteMailbox,
+  setMailboxSending,
   fetchMembers,
   fetchNotifications,
   fetchPolicies,
@@ -662,5 +665,46 @@ export function useDomainChecks(domainId: string | null): QueryLike<DomainCheckD
       enabled: Boolean(domainId),
       ...LIVE,
     })
+  );
+}
+
+/* ── mailbox lifecycle ─────────────────────────────────────────────────── */
+
+/** Every mailbox write moves the list and the dashboard tile counted off it. */
+function useMailboxMutation<TInput>(fn: (input: TInput) => Promise<void>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["mailboxes"] }),
+        qc.invalidateQueries({ queryKey: ["admin-dashboard"] }),
+      ]);
+    },
+  });
+}
+
+export function useCreateMailbox() {
+  return useMailboxMutation((membershipId: string) => createMailbox(membershipId));
+}
+
+export function useDeleteMailbox() {
+  return useMailboxMutation(
+    ({ mailboxId, stepUpToken }: { mailboxId: string; stepUpToken?: string }) =>
+      deleteMailbox(mailboxId, stepUpToken)
+  );
+}
+
+export function useSetMailboxSending() {
+  return useMailboxMutation(
+    ({
+      mailboxId,
+      suspended,
+      reason,
+    }: {
+      mailboxId: string;
+      suspended: boolean;
+      reason?: string;
+    }) => setMailboxSending(mailboxId, { suspended, reason })
   );
 }

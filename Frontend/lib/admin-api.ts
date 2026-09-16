@@ -30,6 +30,12 @@ export interface InvitationDto {
 
 export interface MailboxDto {
   id: string;
+  /**
+   * The member this mailbox belongs to, or null for a shared or distribution
+   * mailbox, which belongs to the workspace rather than to one person.
+   * Carried so the create dialog can offer members who have no mailbox yet.
+   */
+  membershipId: string | null;
   address: string;
   type: "INDIVIDUAL" | "SHARED";
   status: "ACTIVE" | "SUSPENDED" | "PROVISIONING";

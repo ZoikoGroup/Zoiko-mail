@@ -130,6 +130,7 @@ export async function fetchInvitations(): Promise<InvitationDto[]> {
 
 interface ApiMailbox {
   id: string;
+  membershipId: string | null;
   address: string;
   storageUsed: number | string;
   storageLimit: number | string;
@@ -146,6 +147,7 @@ export async function fetchMailboxes(): Promise<MailboxDto[]> {
   const rows = Array.isArray(res) ? res : (res.mailboxes ?? []);
   return rows.map((m) => ({
     id: m.id,
+    membershipId: m.membershipId ?? null,
     address: m.address,
     // Real now. Anything without a single owning membership is shared as far
     // as this screen is concerned; the Groups screen draws the finer
@@ -179,6 +181,49 @@ export async function setMailboxAi(
     // Only enabling is step-up (RBAC §2). Restricting a mailbox is the safe
     // direction and stays one click.
     stepUpToken,
+  });
+}
+
+/**
+ * Provision a mailbox for a member who has none.
+ *
+ * Takes a membership rather than an address: the server names the mailbox
+ * after the member's own email, so the two cannot drift apart and an admin
+ * cannot create `dana@acme.com` for somebody who is not Dana.
+ */
+export async function createMailbox(membershipId: string): Promise<void> {
+  await apiRequest("/mail/admin/mailboxes", {
+    method: "POST",
+    body: { membershipId },
+  });
+}
+
+/** Remove a mailbox. Step-up per RBAC §2; suspend first and offer an export. */
+export async function deleteMailbox(
+  mailboxId: string,
+  stepUpToken?: string
+): Promise<void> {
+  await apiRequest(`/mail/admin/mailboxes/${mailboxId}`, {
+    method: "DELETE",
+    stepUpToken,
+  });
+}
+
+/**
+ * Stop or resume sending from one mailbox.
+ *
+ * A reason is required when suspending and the server enforces that — this is
+ * the lever an admin pulls during an abuse or compromise incident, and an
+ * unexplained suspension is not much use to whoever picks the incident up
+ * next.
+ */
+export async function setMailboxSending(
+  mailboxId: string,
+  input: { suspended: boolean; reason?: string }
+): Promise<void> {
+  await apiRequest(`/mail/admin/mailboxes/${mailboxId}/sending`, {
+    method: "PATCH",
+    body: input,
   });
 }
 

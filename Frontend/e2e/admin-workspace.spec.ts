@@ -46,6 +46,7 @@ interface Options {
 function mailbox(over: Record<string, unknown> = {}) {
   return {
     id: "mbx1",
+    membershipId: "m1",
     address: "dana@acme.test",
     storageUsed: 1_000_000_000,
     storageLimit: 5_000_000_000,
@@ -110,6 +111,9 @@ async function signIn(page: Page, opts: Options = {}): Promise<Calls> {
     return route.fulfill(json({ ok: true }));
   };
 
+  // Declared before the ":mailboxId" pattern, which anchors at the end and so
+  // would not match this nested path at all.
+  await page.route(/\/api\/v1\/mail\/admin\/mailboxes\/[^/]+\/sending$/, record);
   await page.route(/\/api\/v1\/mail\/admin\/shared-mailboxes/, record);
   await page.route(/\/api\/v1\/mail\/admin\/mailboxes\/[^/]+$/, record);
   await page.route(/\/api\/v1\/mail\/admin\/mailboxes(\?|$)/, (route) =>
@@ -317,5 +321,105 @@ test.describe("the unreachable provider panel is gone", () => {
     // Reaching another workspace takes a sign-in, so the session that belongs
     // elsewhere is ended rather than left usable.
     await expect(page).toHaveURL(/\/login/, { timeout: 60_000 });
+  });
+});
+
+test.describe("mailbox lifecycle", () => {
+  /**
+   * Create was a styled, capability-gated button with no handler at all —
+   * the last inert control in the workspace, and PRD §16 names it a console
+   * requirement. Stop-sending is the lever the audit spec prescribes for a
+   * compromise signal, and it had no UI either.
+   */
+  test("creating a mailbox provisions it for a member, not from a typed address", async ({
+    page,
+  }) => {
+    const calls = await signIn(page, {
+      mailboxes: [],
+      members: [
+        {
+          id: "m2",
+          role: "MEMBER",
+          status: "ACTIVE",
+          createdAt: "2026-09-01T09:00:00.000Z",
+          updatedAt: "2026-09-01T09:00:00.000Z",
+          user: {
+            id: "u2",
+            email: "dana@acme.test",
+            displayName: "Dana Reed",
+            mfaEnrolledAt: null,
+          },
+        },
+      ],
+    });
+    await page.goto("/admin/mailboxes");
+
+    await page.getByRole("button", { name: "Create mailbox" }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Member").selectOption("m2");
+    await dialog.getByRole("button", { name: "Create mailbox" }).click();
+
+    // A membership, not an address: the server names the mailbox after the
+    // member's own email so an admin cannot create one for somebody else.
+    await expect
+      .poll(() => wrote(calls, "POST", "/mail/admin/mailboxes")?.body)
+      .toEqual({ membershipId: "m2" });
+  });
+
+  test("a member who already has one is not offered again", async ({ page }) => {
+    await signIn(page, { mailboxes: [mailbox({ membershipId: "m1" })] });
+    await page.goto("/admin/mailboxes");
+
+    await page.getByRole("button", { name: "Create mailbox" }).click();
+
+    // The server refuses a second mailbox with a 409, so offering the member
+    // would be inviting it.
+    await expect(page.getByText(/Every active member already has a mailbox/)).toBeVisible();
+  });
+
+  test("stopping sending requires a reason and sends it", async ({ page }) => {
+    const calls = await signIn(page);
+    await page.goto("/admin/mailboxes");
+
+    await page.getByRole("button", { name: "Stop sending" }).click();
+
+    // An unexplained suspension is little use to whoever picks up the incident.
+    const dialog = page.getByRole("dialog");
+    const confirm = dialog.getByRole("button", { name: "Stop sending" });
+    await expect(confirm).toBeDisabled();
+
+    await dialog.getByLabel("Reason").fill("Compromised account reported");
+    await confirm.click();
+
+    await expect
+      .poll(() => wrote(calls, "PATCH", "/mail/admin/mailboxes/mbx1/sending")?.body)
+      .toEqual({ suspended: true, reason: "Compromised account reported" });
+  });
+
+  test("resuming needs no reason, since it restores the normal state", async ({ page }) => {
+    const calls = await signIn(page, {
+      mailboxes: [mailbox({ sendSuspendedAt: "2026-09-01T09:00:00.000Z" })],
+    });
+    await page.goto("/admin/mailboxes");
+
+    await page.getByRole("button", { name: "Resume", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Resume sending" }).click();
+
+    await expect
+      .poll(() => wrote(calls, "PATCH", "/mail/admin/mailboxes/mbx1/sending")?.body)
+      .toEqual({ suspended: false, reason: undefined });
+  });
+
+  test("deleting says to stop sending first, which is the matrix's own order", async ({
+    page,
+  }) => {
+    await signIn(page);
+    await page.goto("/admin/mailboxes");
+
+    await page.getByRole("button", { name: "Delete", exact: true }).click();
+
+    // RBAC §2: "suspend-first, offer export".
+    await expect(page.getByText(/still able to send/)).toBeVisible();
+    await expect(page.getByText(/offer the owner an export/i)).toBeVisible();
   });
 });
