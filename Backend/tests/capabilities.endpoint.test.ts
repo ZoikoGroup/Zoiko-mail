@@ -89,7 +89,6 @@ describe("GET /me/capabilities", () => {
       "policy.security.write",
       "people.owner.manage",
       "people.invite.owner",
-      "people.mfa.reset",
       "mail.other.read",
     ]) {
       expect(res.body.data.capabilities).not.toContain(withheld);

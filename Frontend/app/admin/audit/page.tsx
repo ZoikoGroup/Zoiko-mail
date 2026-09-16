@@ -34,7 +34,7 @@ function matchesFilter(event: AuditEventDto, filter: string): boolean {
   if (filter === "Support") return event.actorType === "support";
   if (filter === "AI") return event.actorType === "ai_worker" || event.eventType.startsWith("AI");
   if (filter === "System") return event.actorType === "system";
-  if (filter === "Identity") return /sign-in|login|MFA|password/i.test(event.eventType);
+  if (filter === "Identity") return /sign-in|login|password/i.test(event.eventType);
   return true;
 }
 

@@ -42,7 +42,6 @@ export default function AdminDashboardPage() {
   }
 
   const c = data.counts;
-  const mfaGap = c.mfaTotal - c.mfaCovered;
   const pct = (used: number, total: number) => (total > 0 ? (used / total) * 100 : 0);
 
   return (
@@ -60,16 +59,6 @@ export default function AdminDashboardPage() {
       />
 
       <StaticNote>Mirrors GET /admin/dashboard — one aggregate call, not seven</StaticNote>
-
-      {mfaGap > 0 && (
-        <Notice tone="warn">
-          <b className="text-[var(--warn)]">
-            {mfaGap === 1 ? "One person has" : `${mfaGap} people have`} no second factor.
-          </b>{" "}
-          They can still sign in, which makes them the weakest point in the workspace. An Owner can
-          require MFA for everyone — an Admin cannot set the security policy.
-        </Notice>
-      )}
 
       <div className="mb-5 grid grid-cols-[repeat(auto-fit,minmax(152px,1fr))] gap-2.5">
         <StatTile label="Users" value={c.people} sub={`${c.pendingInvitations} pending invites`} />
@@ -90,13 +79,6 @@ export default function AdminDashboardPage() {
           value={`${c.domainsVerified}/${c.domainsTotal}`}
           sub="verified"
           tone="ok"
-        />
-        <StatTile
-          label="MFA coverage"
-          value={c.mfaCovered}
-          suffix={`/${c.mfaTotal}`}
-          tone="warn"
-          meter={pct(c.mfaCovered, c.mfaTotal)}
         />
         <StatTile
           label="Failed sends"

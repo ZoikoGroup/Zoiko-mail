@@ -40,7 +40,6 @@ const GROUP_BY_CAPABILITY: Record<Capability, string> = {
   "people.member.manage": "People",
   "people.admin.manage": "People",
   "people.owner.manage": "People",
-  "people.mfa.reset": "People",
   "workspace.settings.read": "Workspace",
   "workspace.settings.write": "Workspace",
   "workspace.mailboxes.manage": "Workspace",

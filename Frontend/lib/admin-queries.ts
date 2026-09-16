@@ -12,8 +12,8 @@
  *     up empty with no error to show for it.
  *  2. Where the backend has nothing to offer a DTO field, these mappers use a
  *     neutral value and say so in a comment. They never invent a plausible
- *     one — a fabricated MFA method or last-seen time is worse than an honest
- *     blank, because it reads as real.
+ *     one — a fabricated last-seen time is worse than an honest blank,
+ *     because it reads as real.
  */
 import { apiRequest } from "./api-client";
 import type {
@@ -82,9 +82,6 @@ export async function fetchMembers(): Promise<MemberDto[]> {
     id: m.id,
     role: m.role,
     status: m.status,
-    // MFA does not exist in the backend yet (Security AC-002 is unimplemented),
-    // so every row is honestly NONE rather than a guessed method.
-    mfaMethod: "NONE",
     // No last-seen column exists on the membership; null renders as "—".
     lastActiveAt: null,
     user: {
@@ -338,7 +335,6 @@ const CAPABILITY_LABELS: Record<string, string> = {
   "people.member.manage": "Suspend or remove a Member",
   "people.admin.manage": "Suspend or remove an Admin",
   "people.owner.manage": "Act on an Owner",
-  "people.mfa.reset": "Reset another person's MFA",
   "workspace.settings.read": "Read workspace settings",
   "workspace.settings.write": "Change workspace settings",
   "workspace.mailboxes.manage": "Manage mailboxes",

@@ -6,7 +6,6 @@
  * (GET /permissions/matrix and GET /permissions/guardrails).
  */
 
-export type MfaMethod = "PASSKEY" | "TOTP" | "NONE";
 export type MembershipRole = "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT";
 export type MembershipStatus = "ACTIVE" | "INVITED" | "SUSPENDED" | "REMOVED";
 
@@ -14,7 +13,6 @@ export interface MemberDto {
   id: string;
   role: MembershipRole;
   status: MembershipStatus;
-  mfaMethod: MfaMethod;
   lastActiveAt: string | null;
   user: { id: string; email: string; displayName: string };
 }
@@ -137,8 +135,6 @@ export interface DashboardDto {
     connectedMicrosoft: number;
     domainsVerified: number;
     domainsTotal: number;
-    mfaCovered: number;
-    mfaTotal: number;
     failedSends24h: number;
     storageUsedGb: number;
     storageLimitGb: number;

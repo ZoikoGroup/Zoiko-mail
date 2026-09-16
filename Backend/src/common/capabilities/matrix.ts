@@ -39,7 +39,6 @@ const OWNER: RoleMatrix = {
   "people.member.manage": "ALLOW",
   "people.admin.manage": "ALLOW",
   "people.owner.manage": "ALLOW",
-  "people.mfa.reset": "STEP_UP",
   // Workspace.
   "workspace.settings.read": "ALLOW",
   "workspace.settings.write": "ALLOW",

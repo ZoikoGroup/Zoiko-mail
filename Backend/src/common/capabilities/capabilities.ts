@@ -25,7 +25,6 @@ export const CAPABILITIES = [
   "people.member.manage",
   "people.admin.manage",
   "people.owner.manage",
-  "people.mfa.reset",
   // Workspace.
   "workspace.settings.read",
   "workspace.settings.write",

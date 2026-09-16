@@ -158,13 +158,6 @@ export default function AdminInvitationsPage() {
             <b className="text-[var(--ink)]">Single use, 72-hour expiry</b>, revocable at any time.
           </TokenStep>
           <TokenStep>
-            Privileged roles{" "}
-            <b className="text-[var(--ink)]">must enrol MFA before the membership activates</b>
-            <span className="font-mono-num ml-1.5 rounded bg-[var(--crit-soft)] px-1.5 py-px text-[9px] font-bold uppercase tracking-[0.06em] text-[var(--crit)]">
-              Gate
-            </span>
-          </TokenStep>
-          <TokenStep>
             The membership records <b className="text-[var(--ink)]">who granted it</b>, so every
             escalation has a name against it.
           </TokenStep>

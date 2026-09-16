@@ -123,7 +123,6 @@ describe("capability matrix — Security §7.2 step 6", () => {
       "tenant.ownership.transfer",
       "tenant.delete",
       "policy.security.write",
-      "people.mfa.reset",
       "people.owner.manage",
       "people.invite.owner",
       "mail.other.read",
@@ -201,24 +200,6 @@ describe("capability resolution defaults to denial", () => {
 });
 
 describe("conditional resolver kinds", () => {
-  it("holds people.mfa.reset behind step-up for an Owner", () => {
-    // The step-up path is asserted here on a capability the Owner genuinely
-    // holds. `mail.other.read` used to serve this purpose, which was the bug:
-    // it made an Owner's access to private mail look like a re-auth away.
-    const pending = resolveCapability("people.mfa.reset", activeOwner);
-    expect(pending.kind).toBe("STEP_UP");
-    expect(pending.allowed).toBe(false);
-    expect(pending.requiresStepUp).toBe(true);
-    expect(pending.reason).toBe("REQUIRES_STEP_UP");
-
-    const satisfied = resolveCapability("people.mfa.reset", {
-      ...activeOwner,
-      stepUpSatisfied: true,
-    });
-    expect(satisfied.allowed).toBe(true);
-    expect(satisfied.reason).toBe("ALLOWED");
-  });
-
   it("holds destructive tenant capabilities behind a second approver", () => {
     for (const capability of ["tenant.delete", "tenant.ownership.transfer"]) {
       const alone = resolveCapability(capability, activeOwner);

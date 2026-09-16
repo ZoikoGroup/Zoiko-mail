@@ -8,7 +8,7 @@
  * fixtures are gone; every hook below is a real read. Because the shape never
  * changed, no component needed editing when they were swapped.
  *
- * Where the backend genuinely has nothing — groups, guardrails, MFA — the hook
+ * Where the backend genuinely has nothing — groups, guardrails — the hook
  * surfaces that as an error or a neutral value rather than inventing data. A
  * plausible-looking number is worse than a blank, because it reads as real and
  * gets trusted.
@@ -322,11 +322,6 @@ export function useDashboard(): QueryLike<DashboardDto> {
         connectedMicrosoft: conns.filter((c) => c.name === "Microsoft 365").length,
         domainsVerified: doms.filter((d) => d.verificationStatus === "VERIFIED").length,
         domainsTotal: doms.length,
-        // MFA (AC-002) does not exist. Reporting zero coverage is accurate:
-        // nobody has a second factor, because the feature is unbuilt. The
-        // dashboard's warning then states something true.
-        mfaCovered: 0,
-        mfaTotal: people.filter((m) => m.status === "ACTIVE").length,
         // Suspended mailboxes are the closest real signal to failed sending
         // until the delivery-events read is wired.
         failedSends24h: boxes.filter((m) => m.status === "SUSPENDED").length,
