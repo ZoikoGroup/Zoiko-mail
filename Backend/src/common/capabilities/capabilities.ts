@@ -59,6 +59,10 @@ export const CAPABILITIES = [
   // Support.
   "support.standing",
   "support.workspace.access",
+  // Security §5 lists "support access grant" among the high-risk actions that
+  // require step-up. Granting a stranger access to a tenant is exactly that,
+  // and the route gated on a bare role.
+  "support.grant.create",
   "support.grant.end",
 ] as const;
 

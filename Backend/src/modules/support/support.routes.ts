@@ -19,7 +19,7 @@ supportRouter.get("/diagnostics", asyncHandler(async (req, res) => {
   sendSuccess(res, 200, result, req.requestId);
 }));
 supportRouter.get("/access-grants", requireRole("OWNER", "ADMIN"), asyncHandler(async(req,res)=>{sendSuccess(res,200,{grants:await supportService.list(req.tenantContext!.tenantId)},req.requestId);}));
-supportRouter.post("/access-grants", requireRole("OWNER"), validate(createGrantSchema), asyncHandler(async(req,res)=>{const c=req.tenantContext!;sendSuccess(res,201,await supportService.create(req.body,c.tenantId,c.userId),req.requestId);}));
+supportRouter.post("/access-grants", requireCapability("support.grant.create"), validate(createGrantSchema), asyncHandler(async(req,res)=>{const c=req.tenantContext!;sendSuccess(res,201,await supportService.create(req.body,c.tenantId,c.userId),req.requestId);}));
 supportRouter.delete("/access-grants/:grantId", requireCapability("support.grant.end"), validate(grantIdSchema,"params"), asyncHandler(async(req,res)=>{const c=req.tenantContext!;sendSuccess(res,200,await supportService.revoke(String(req.params.grantId),c.tenantId,c.userId),req.requestId);}));
 
 // ---------------------------------------------------------------------------

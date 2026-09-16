@@ -301,6 +301,8 @@ interface ApiDomainCheck {
 interface ApiAuditEvent {
   id: string;
   eventType: string;
+  /** Audit §6.2. Null only on rows written before the column existed. */
+  actorType: string | null;
   targetType: string | null;
   targetId: string | null;
   createdAt: string;
@@ -315,9 +317,13 @@ function toAuditEvent(e: ApiAuditEvent): AuditEventDto {
     id: e.id,
     eventType: e.eventType,
     actorName: e.actor ? personName(e.actor) : "System",
-    // The row records no actor_type (Audit §6.2 asks for one); infer the only
-    // distinction the data supports — a human actor, or the system.
-    actorType: e.actor ? "user" : "system",
+    // The server records actor_type now (Audit §6.2). The fallback is for rows
+    // written before the column existed, which genuinely did not capture it —
+    // inferring from whether there is an actor is all those rows support, and
+    // it is what this line used to do for *every* row. That is why the Admin,
+    // Support and AI filters could never match anything.
+    actorType: (e.actorType?.toLowerCase() as AuditEventDto["actorType"]) ??
+      (e.actor ? "user" : "system"),
     targetLabel: e.targetType
       ? `${e.targetType}${e.targetId ? ` · ${e.targetId.slice(0, 8)}` : ""}`
       : "—",
@@ -338,6 +344,8 @@ export interface AuditQuery {
   limit?: number;
   /** Event-type prefixes, OR-ed. A category is a set of them, not one type. */
   eventTypePrefix?: string[];
+  /** Audit §6.2's actor type — who acted, as opposed to what happened. */
+  actorType?: "USER" | "ADMIN" | "SUPPORT" | "SYSTEM" | "PROVIDER" | "AI_WORKER";
   /** ISO instants; the server refuses a range that ends before it starts. */
   from?: string;
   to?: string;
@@ -357,6 +365,7 @@ function auditSearchParams(query: AuditQuery): URLSearchParams {
   for (const prefix of query.eventTypePrefix ?? []) {
     params.append("eventTypePrefix", prefix);
   }
+  if (query.actorType) params.set("actorType", query.actorType);
   if (query.from) params.set("from", query.from);
   if (query.to) params.set("to", query.to);
   return params;

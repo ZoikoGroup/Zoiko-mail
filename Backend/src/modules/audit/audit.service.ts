@@ -1,9 +1,17 @@
-import type { Prisma } from "@prisma/client";
+import type { AuditActorType, Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 
 export interface RecordAuditEventInput {
   tenantId: string;
   actorUserId?: string | null;
+  /**
+   * Audit §6.2. Omit it and the event is classified from what is knowable:
+   * a human actor is USER, and no actor at all is SYSTEM. A caller that knows
+   * better — the AI worker, the support path, a provider callback — says so,
+   * because those three are exactly the ones an investigator filters on and
+   * exactly the ones the shape of the row cannot reveal.
+   */
+  actorType?: AuditActorType;
   eventType: string;
   targetType?: string | null;
   targetId?: string | null;
@@ -11,11 +19,20 @@ export interface RecordAuditEventInput {
   ipAddress?: string | null;
   userAgent?: string | null;
   metadata?: Prisma.InputJsonValue;
+  /**
+   * Audit §6.2: required for material policy or permission changes. A hash
+   * rather than the values, so the trail proves what changed without copying
+   * policy content into a second store that then needs its own governance and
+   * its own deletion schedule.
+   */
+  beforeHash?: string | null;
+  afterHash?: string | null;
 }
 
 export interface AuditExportFilters {
   eventType?: string;
   eventTypePrefix?: string[];
+  actorType?: "USER" | "ADMIN" | "SUPPORT" | "SYSTEM" | "PROVIDER" | "AI_WORKER";
   actorUserId?: string;
   targetType?: string;
   targetId?: string;
@@ -114,6 +131,7 @@ export function auditWhere(
   return {
     tenantId,
     eventType: filters.eventType,
+    actorType: filters.actorType,
     // OR-ed with each other, AND-ed with everything else — a category is a set
     // of prefixes, and narrowing by category must not widen anything.
     ...(prefixes.length
@@ -157,6 +175,7 @@ export class AuditService {
       data: {
         tenantId: input.tenantId,
         actorUserId: input.actorUserId ?? null,
+        actorType: input.actorType ?? (input.actorUserId ? "USER" : "SYSTEM"),
         eventType: input.eventType,
         targetType: input.targetType ?? null,
         targetId: input.targetId ?? null,
@@ -164,6 +183,8 @@ export class AuditService {
         ipAddress: input.ipAddress ?? null,
         userAgent: input.userAgent ?? null,
         metadata: input.metadata ?? undefined,
+        beforeHash: input.beforeHash ?? null,
+        afterHash: input.afterHash ?? null,
       },
     });
   }

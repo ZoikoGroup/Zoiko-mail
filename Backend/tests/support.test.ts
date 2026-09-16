@@ -6,6 +6,20 @@ import { prisma } from "../src/config/prisma.js";
 
 const app = createApp();
 
+/**
+ * A fresh step-up token. Security §5 lists "support access grant" among the
+ * high-risk actions, and §11.1 step 3 makes the Owner the one who authorises
+ * it — letting someone outside the tenant in is not routine administration.
+ */
+async function stepUp(accessToken: string): Promise<string> {
+  const response = await request(app)
+    .post("/api/v1/auth/step-up")
+    .set(authHeader(accessToken))
+    .send({ password: "Password123!" })
+    .expect(200);
+  return response.body.data.stepUpToken as string;
+}
+
 describe("Temporary audited SUPPORT access", () => {
   it("requires an active owner-approved grant and denies mailbox access", async () => {
     const owner = await registerUser(app, { email: "support-owner@zoiko.test" });
@@ -19,6 +33,7 @@ describe("Temporary audited SUPPORT access", () => {
     await request(app).get("/api/v1/messages").set(authHeader(token)).expect(403);
 
     const grant = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
+      .set("x-step-up-token", await stepUp(owner.accessToken))
       .send({ supportMembershipId: added.body.data.id, reason: "Investigate tenant configuration failure", expiresInMinutes: 30, scopes: ["TENANT_DIAGNOSTICS", "AUDIT_READ"] }).expect(201);
     const diagnostics = await request(app).get("/api/v1/support/diagnostics").set(authHeader(token))
       .set("x-support-grant-id", grant.body.data.id).expect(200);
@@ -90,6 +105,7 @@ describe("Temporary audited SUPPORT access", () => {
       .send({ email: support.email, role: "SUPPORT" }).expect(201);
 
     const grant = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
+      .set("x-step-up-token", await stepUp(owner.accessToken))
       .send({ supportMembershipId: added.body.data.id, reason: "Investigate admin revoke flow", expiresInMinutes: 30, scopes: ["TENANT_DIAGNOSTICS"] }).expect(201);
 
     const adminLogin = await loginUser(app, admin.email, admin.password, owner.tenantId);
@@ -111,6 +127,7 @@ describe("Temporary audited SUPPORT access", () => {
       .send({ email: support.email, role: "SUPPORT" }).expect(201);
 
     const grant = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
+      .set("x-step-up-token", await stepUp(owner.accessToken))
       .send({ supportMembershipId: added.body.data.id, reason: "Investigate member revoke denial", expiresInMinutes: 30, scopes: ["TENANT_DIAGNOSTICS"] }).expect(201);
 
     const memberLogin = await loginUser(app, member.email, member.password, owner.tenantId);

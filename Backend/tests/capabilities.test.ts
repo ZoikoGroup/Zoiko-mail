@@ -310,8 +310,8 @@ describe("vocabulary integrity", () => {
     expect(orphans).toEqual([]);
   });
 
-  it("declares thirty-six capabilities", () => {
-    expect(CAPABILITIES).toHaveLength(36);
-    expect(new Set(CAPABILITIES).size).toBe(36);
+  it("declares thirty-seven capabilities", () => {
+    expect(CAPABILITIES).toHaveLength(37);
+    expect(new Set(CAPABILITIES).size).toBe(37);
   });
 });

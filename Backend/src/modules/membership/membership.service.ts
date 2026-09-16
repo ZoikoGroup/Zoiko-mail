@@ -488,6 +488,10 @@ export class MembershipService {
       {
         tenantId: context.tenantId,
         actorUserId: context.userId,
+        // Every route into this service sits behind a people.* capability,
+        // which only an Owner or Admin holds — so these are administration,
+        // not a member acting on their own account (Audit §6.2).
+        actorType: "ADMIN",
         eventType,
         targetType: "TenantMembership",
         targetId,

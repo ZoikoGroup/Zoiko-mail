@@ -93,7 +93,12 @@ export interface AuditEventDto {
   id: string;
   eventType: string;
   actorName: string;
-  actorType: "user" | "admin" | "support" | "system" | "ai_worker";
+  /**
+   * Audit §6.2's enumerated actor type, lower-cased for display. "provider" is
+   * a callback from Google or Microsoft acting on its own schedule, which is
+   * neither a person nor this system.
+   */
+  actorType: "user" | "admin" | "support" | "system" | "ai_worker" | "provider";
   targetLabel: string;
   createdAtLabel: string;
 }

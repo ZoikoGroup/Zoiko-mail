@@ -93,6 +93,7 @@ describe("GET /audit/events/export", () => {
     expect(header(response.text)).toEqual([
       "created_at",
       "event_type",
+      "actor_type",
       "actor_email",
       "actor_name",
       "target_type",
@@ -175,7 +176,7 @@ describe("GET /audit/events/export", () => {
     const dataStart = body.indexOf("\n") + 1;
     const record = parseCsvLine(body.slice(dataStart).replace(/\n$/, ""));
     expect(record).toHaveLength(headerFields.length);
-    expect(JSON.parse(record[9]!)).toMatchObject({
+    expect(JSON.parse(record[10]!)).toMatchObject({
       note: 'has, a comma and a "quote" and a\nnewline',
     });
   });
@@ -193,7 +194,8 @@ describe("GET /audit/events/export", () => {
       .expect(200);
 
     // Prefixed, so a spreadsheet shows the text rather than evaluating it.
-    expect(rows(response.text)[0]![5]).toBe("'=1+1");
+    // target_id, one column further right now that actor_type is carried.
+    expect(rows(response.text)[0]![6]).toBe("'=1+1");
   });
 
   it("redacts the same metadata the list endpoint redacts", async () => {

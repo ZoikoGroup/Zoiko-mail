@@ -39,6 +39,24 @@ const CATEGORIES: Array<{ label: string; prefixes: string[] }> = [
   { label: "Billing", prefixes: ["BILLING_", "SUBSCRIPTION_", "INVOICE_", "PLAN_"] },
 ];
 
+/**
+ * Who acted, as opposed to what happened — Audit §6.2's actor_type.
+ *
+ * These chips existed before and could not work: they tested an actorType the
+ * mapper derived from "has an actor or not", so Admin and Support matched
+ * nothing in any workspace. The column exists now, and the filter is applied
+ * by the server, so they search the whole log rather than one page.
+ */
+const ACTORS: Array<{ label: string; value: AuditQuery["actorType"] }> = [
+  { label: "Anyone", value: undefined },
+  { label: "Admin", value: "ADMIN" },
+  { label: "Member", value: "USER" },
+  { label: "Support", value: "SUPPORT" },
+  { label: "AI worker", value: "AI_WORKER" },
+  { label: "Provider", value: "PROVIDER" },
+  { label: "System", value: "SYSTEM" },
+];
+
 const PAGE_SIZE = 25;
 
 /** Actor type is what separates a human action from the system's own. */
@@ -48,6 +66,7 @@ const ACTOR_TONE: Record<AuditEventDto["actorType"], Tone> = {
   support: "warn",
   system: "nu",
   ai_worker: "ai",
+  provider: "nu",
 };
 
 /** A date input gives a day; the API wants an instant. */
@@ -74,6 +93,7 @@ export default function AdminAuditPage() {
 
 function AuditLog() {
   const [category, setCategory] = useState<string>(CATEGORIES[0]!.label);
+  const [actor, setActor] = useState<string>(ACTORS[0]!.label);
   const [fromDay, setFromDay] = useState("");
   const [toDay, setToDay] = useState("");
   const [page, setPage] = useState(1);
@@ -82,10 +102,11 @@ function AuditLog() {
     const prefixes = CATEGORIES.find((c) => c.label === category)?.prefixes ?? [];
     return {
       eventTypePrefix: prefixes.length ? prefixes : undefined,
+      actorType: ACTORS.find((a) => a.label === actor)?.value,
       from: startOfDay(fromDay),
       to: endOfDay(toDay),
     };
-  }, [category, fromDay, toDay]);
+  }, [category, actor, fromDay, toDay]);
 
   const { data, isLoading, error } = useAuditEvents({ ...filters, page, limit: PAGE_SIZE });
   const exporter = useExportAuditEvents();
@@ -137,6 +158,12 @@ function AuditLog() {
         options={CATEGORIES.map((c) => c.label)}
         active={category}
         onChange={reset(setCategory)}
+      />
+
+      <FilterChips
+        options={ACTORS.map((a) => a.label)}
+        active={actor}
+        onChange={reset(setActor)}
       />
 
       <div className="mb-3.5 flex flex-wrap items-end gap-3">

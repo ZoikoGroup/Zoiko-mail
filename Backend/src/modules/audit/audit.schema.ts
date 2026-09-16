@@ -24,6 +24,14 @@ export const auditEventQuerySchema = z
         value === undefined ? undefined : (Array.isArray(value) ? value : [value])
       )
       .pipe(z.array(z.string().trim().min(1).max(100)).max(20).optional()),
+    /**
+     * Audit §6.2's actor type. The screen's Admin / Support / AI filters read
+     * this; before the column existed they tested a value the mapper could
+     * never produce, so they matched nothing in any workspace.
+     */
+    actorType: z
+      .enum(["USER", "ADMIN", "SUPPORT", "SYSTEM", "PROVIDER", "AI_WORKER"])
+      .optional(),
     actorUserId: z.string().uuid().optional(),
     targetType: z.string().trim().min(1).max(100).optional(),
     targetId: z.string().trim().min(1).max(255).optional(),
@@ -62,6 +70,14 @@ export const auditExportQuerySchema = z
         value === undefined ? undefined : (Array.isArray(value) ? value : [value])
       )
       .pipe(z.array(z.string().trim().min(1).max(100)).max(20).optional()),
+    /**
+     * Audit §6.2's actor type. The screen's Admin / Support / AI filters read
+     * this; before the column existed they tested a value the mapper could
+     * never produce, so they matched nothing in any workspace.
+     */
+    actorType: z
+      .enum(["USER", "ADMIN", "SUPPORT", "SYSTEM", "PROVIDER", "AI_WORKER"])
+      .optional(),
     actorUserId: z.string().uuid().optional(),
     targetType: z.string().trim().min(1).max(100).optional(),
     targetId: z.string().trim().min(1).max(255).optional(),

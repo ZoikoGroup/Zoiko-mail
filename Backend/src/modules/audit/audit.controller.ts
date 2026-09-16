@@ -56,6 +56,10 @@ function csvField(value: unknown): string {
 const EXPORT_COLUMNS = [
   "created_at",
   "event_type",
+  // Audit §6.2 names actor_type a required field, so the evidence export
+  // carries it rather than leaving an investigator to infer it from whether
+  // there is an email in the next column.
+  "actor_type",
   "actor_email",
   "actor_name",
   "target_type",
@@ -113,6 +117,7 @@ export const exportCsv = asyncHandler(async (req: Request, res: Response) => {
         [
           csvField(event.createdAt),
           csvField(event.eventType),
+          csvField(event.actorType),
           csvField(event.actor?.email),
           csvField(event.actor?.displayName),
           csvField(event.targetType),

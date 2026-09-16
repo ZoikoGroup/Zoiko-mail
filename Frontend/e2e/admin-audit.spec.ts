@@ -281,15 +281,48 @@ test.describe("export", () => {
   });
 });
 
-test.describe("the dead chips are gone", () => {
-  test("Admin and Support are no longer offered, because they matched nothing", async ({
-    page,
-  }) => {
-    await openAudit(page);
+test.describe("the actor chips work now that the column exists", () => {
+  test("Admin sends an actorType the server can filter on", async ({ page }) => {
+    const asked = await openAudit(page);
 
-    // Both tested actorType === "admin" / "support", and the mapper only ever
-    // produces "user" or "system" — so they were permanently empty filters.
-    const chips = page.locator("button", { hasText: /^(Admin|Support)$/ });
-    await expect(chips).toHaveCount(0);
+    // These existed before and matched nothing: they tested an actorType the
+    // mapper derived from "has an actor or not", so it was only ever "user"
+    // or "system". Audit §6.2 asked for the column; now it is there.
+    await page.getByRole("button", { name: "Admin", exact: true }).click();
+
+    await expect.poll(() => latestList(asked)?.get("actorType")).toBe("ADMIN");
+  });
+
+  test("Support and AI are distinguishable, which they never were", async ({ page }) => {
+    const asked = await openAudit(page);
+
+    await page.getByRole("button", { name: "Support", exact: true }).click();
+    await expect.poll(() => latestList(asked)?.get("actorType")).toBe("SUPPORT");
+
+    // "AI worker" rather than "AI": the category row already offers an "AI"
+    // chip for AI_/COMMITMENT_ event types, and two chips reading the same
+    // word mean different things.
+    await page.getByRole("button", { name: "AI worker", exact: true }).click();
+    await expect.poll(() => latestList(asked)?.get("actorType")).toBe("AI_WORKER");
+  });
+
+  test("Anyone sends no actor filter at all", async ({ page }) => {
+    const asked = await openAudit(page);
+
+    // The screen's own opening read. Returning to "Anyone" later reuses the
+    // cached query rather than refetching, which is correct — so the
+    // assertion is about what it asks for on arrival.
+    expect(latestList(asked)!.get("actorType")).toBeNull();
+  });
+
+  test("the actor filter and the category filter compose", async ({ page }) => {
+    const asked = await openAudit(page);
+
+    await page.getByRole("button", { name: "Identity", exact: true }).click();
+    await page.getByRole("button", { name: "Admin", exact: true }).click();
+
+    // Both dimensions on one request: who acted, and what kind of thing it was.
+    await expect.poll(() => latestList(asked)?.get("actorType")).toBe("ADMIN");
+    expect(latestList(asked)!.getAll("eventTypePrefix").length).toBeGreaterThan(0);
   });
 });

@@ -69,6 +69,12 @@ const OWNER: RoleMatrix = {
   "tenant.ownership.transfer": "TWO_PERSON",
   "tenant.delete": "TWO_PERSON",
   // Support.
+  // §11.1 step 3: the Owner authorises support access, and §5 lists granting
+  // it beside tenant deletion and domain removal. Letting someone outside the
+  // tenant in is not a routine administrative act, so it takes a fresh
+  // password. Withheld from Admin entirely — the matrix gives Admin the
+  // ability to *end* a grant, never to start one.
+  "support.grant.create": "STEP_UP",
   "support.grant.end": "ALLOW",
 };
 
