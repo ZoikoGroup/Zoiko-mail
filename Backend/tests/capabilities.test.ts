@@ -281,8 +281,8 @@ describe("vocabulary integrity", () => {
     expect(orphans).toEqual([]);
   });
 
-  it("declares thirty capabilities", () => {
-    expect(CAPABILITIES).toHaveLength(30);
-    expect(new Set(CAPABILITIES).size).toBe(30);
+  it("declares twenty-nine capabilities", () => {
+    expect(CAPABILITIES).toHaveLength(29);
+    expect(new Set(CAPABILITIES).size).toBe(29);
   });
 });

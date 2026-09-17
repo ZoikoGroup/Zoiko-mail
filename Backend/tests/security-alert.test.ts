@@ -83,7 +83,7 @@ describe("Security alerts", () => {
       where: { tenantId: user.tenantId, eventType: "SECURITY_ALERT_REVIEWED", targetId: alertId },
     });
     expect(audit).toBeTruthy();
-    expect((audit?.metadata as { action: string }).action).toBe("RESOLVE");
+    expect((audit!.metadata as { action: string }).action).toBe("RESOLVE");
   });
 
   it("alerts on a failed-login burst from one address", async () => {

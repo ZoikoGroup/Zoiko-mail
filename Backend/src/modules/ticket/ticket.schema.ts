@@ -34,6 +34,7 @@ export const ticketListQuerySchema = z.object({
   status: TicketStatusSchema.optional(),
   severity: TicketSeveritySchema.optional(),
   assigned: z.enum(["me", "unassigned", "all"]).optional(),
+  overdue: z.enum(["true", "false"]).optional().transform((v) => v === "true"),
   q: z.string().trim().optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
 });

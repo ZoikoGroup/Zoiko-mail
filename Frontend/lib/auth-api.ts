@@ -136,6 +136,8 @@ export interface MeResponse {
    * session belongs to, because one role can sign into more than one.
    */
   workspace?: "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT";
+  /** True if the account has a password set (can sign in with email/password). */
+  hasPassword: boolean;
 }
 
 // Pull tokens out regardless of which shape the endpoint used.

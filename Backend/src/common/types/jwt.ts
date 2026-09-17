@@ -172,6 +172,7 @@ export interface TenantContextData {
     displayName: string;
     status: string;
     platformRole: PlatformRole;
+    passwordHash: string | null;
   };
 }
 

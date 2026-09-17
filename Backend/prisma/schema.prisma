@@ -621,13 +621,14 @@ model IntegrationLink {
 model ConnectedAccount {
   id                      String                 @id @default(uuid()) @db.Uuid
   tenantId                String                 @map("tenant_id") @db.Uuid
-  membershipId            String                 @map("membership_id") @db.Uuid
+  membershipId            String?                @map("membership_id") @db.Uuid
   userId                  String                 @map("user_id") @db.Uuid
   provider                ConnectorProvider
   providerAccountId       String                 @map("provider_account_id")
   email                   String
   scopes                  String[]
   status                  ConnectedAccountStatus @default(PENDING)
+  isOrgLevel              Boolean                @default(false) @map("is_org_level")
   // Ref into the Secret Manager (or local-equivalent store) holding the
   // provider's OAuth access + refresh tokens. Tokens never live in this table
   // (Security §15): only the lookup key does. The ref is deterministic from
@@ -646,7 +647,7 @@ model ConnectedAccount {
   createdAt               DateTime               @default(now()) @map("created_at")
   updatedAt               DateTime               @updatedAt @map("updated_at")
   tenant                  Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  membership              TenantMembership       @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  membership              TenantMembership?      @relation(fields: [membershipId], references: [id], onDelete: SetNull)
   user                    AppUser                @relation(fields: [userId], references: [id], onDelete: Cascade)
   providerEvents          ProviderEvent[]
 

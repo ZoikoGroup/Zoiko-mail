@@ -7,6 +7,7 @@ export { default as GoogleSignInButton } from "./GoogleSignInButton";
 export { default as LoginForm } from "./forms/LoginForm";
 export { default as RegisterForm } from "./forms/RegisterForm";
 export { default as ChangePasswordForm } from "./forms/ChangePasswordForm";
+export { default as SetPasswordForm } from "./forms/SetPasswordForm";
 export { default as AuthLayout } from "./layout/AuthLayout";
 export { default as AuthContainer } from "./layout/AuthContainer";
 export { default as AuthShowcase } from "./layout/AuthShowcase";

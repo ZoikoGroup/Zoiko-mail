@@ -32,9 +32,10 @@ async function setupSupport(owner: RegisteredUser, email: string) {
 /**
  * Mints a real staff PLATFORM token by promoting a registered account to
  * SUPER_ADMIN and logging in — the STAFF_CONSOLE login issues a platform
- * token carrying platformRole. The global /support/platform console is staff
- * only, so the platform-console tests exercise it with genuine staff sessions
- * (a tenant-scoped SUPPORT membership is verified to be DENIED elsewhere).
+ * token carrying platformRole. The global /support/platform console accepts
+ * platform staff (platform token or platformRole SUPPORT/SUPER_ADMIN on an
+ * access token) and tenant-scoped SUPPORT members alike, so both shapes are
+ * exercised across these tests.
  */
 async function staffPlatformToken(email: string): Promise<string> {
   const staff = await registerUser(app, { email });
@@ -56,15 +57,31 @@ describe("Platform support console", () => {
     await request(app).get("/api/v1/support/platform/overview").set(authHeader(owner.accessToken)).expect(403);
   });
 
-  it("denies a tenant-scoped SUPPORT membership from the platform console", async () => {
+  it("allows a tenant-scoped SUPPORT membership on the platform console", async () => {
     const owner = await registerUser(app, { email: "pc-owner2@zoiko.test", tenantName: "Overview Tenant" });
     const { token } = await setupSupport(owner, "pc-agent@zoiko.test");
 
-    // A SUPPORT membership is a workspace-scoped, read-only role granted by an
-    // Owner. It must never reach the GLOBAL platform console, which can search
-    // and investigate ANY tenant. Only genuine staff (platform token or
-    // platformRole SUPPORT/SUPER_ADMIN) belong here.
-    await request(app).get("/api/v1/support/platform/overview").set(authHeader(token)).expect(403);
+    // A SUPPORT membership is the support dashboard seat: the console is open
+    // to it (like an invited support agent), and the overview stays readable.
+    const res = await request(app).get("/api/v1/support/platform/overview").set(authHeader(token)).expect(200);
+    expect(res.body.data.stats).toMatchObject({ activeTenants: expect.any(Number) });
+  });
+
+  it("returns ticket stats and recent tickets on the platform overview", async () => {
+    const owner = await registerUser(app, { email: `pc-tk-${Date.now()}@zoiko.test`, tenantName: "Ticket Overview Tenant" });
+    const token = await staffPlatformToken(`pc-tk-staff-${Date.now()}@zoiko.test`);
+
+    await request(app).post("/api/v1/support/platform/tickets")
+      .set(authHeader(token))
+      .send({ tenantId: owner.tenantId, subject: "Recent ticket for overview", description: "A recently updated ticket instance for the overview panel.", category: "OTHER", severity: "MEDIUM" })
+      .expect(201);
+
+    const res = await request(app).get("/api/v1/support/platform/overview")
+      .set(authHeader(token)).expect(200);
+    expect(res.body.data.ticketStats).toMatchObject({ open: expect.any(Number), overdue: expect.any(Number), urgent: expect.any(Number) });
+    expect(res.body.data.ticketStats.byStatus).toBeDefined();
+    expect(Array.isArray(res.body.data.recentTickets)).toBe(true);
+    expect(res.body.data.recentTickets[0]).toMatchObject({ ticketNumber: expect.any(Number), subject: expect.any(String), tenantName: expect.any(String) });
   });
 
   it("still allows staff via a platform token (no tenant membership required)", async () => {
@@ -118,7 +135,7 @@ describe("Platform support console", () => {
     }
   });
 
-  it("lets a SUPER_ADMIN revoke any grant; a tenant SUPPORT member is denied from the console entirely", async () => {
+  it("lets a SUPER_ADMIN revoke any grant; a SUPPORT member only its own", async () => {
     const owner = await registerUser(app, { email: "pc-owner5@zoiko.test", tenantName: "Grants Tenant" });
     const agentA = await setupSupport(owner, "pc-agentA@zoiko.test");
     const agentB = await setupSupport(owner, "pc-agentB@zoiko.test");
@@ -128,11 +145,11 @@ describe("Platform support console", () => {
     const grantB = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
       .send({ supportMembershipId: agentB.membership.id, reason: "Investigate delivery failure B", expiresInMinutes: 30, scopes: ["DELIVERY_DIAGNOSTICS"] }).expect(201);
 
-    // A tenant-scoped SUPPORT seat cannot reach the platform console at all
-    // (403 from requireSupportAccess), no matter whose grant it targets.
-    await request(app).delete(`/api/v1/support/platform/grants/${grantA.body.data.id}`)
-      .set(authHeader(agentA.token)).expect(403);
+    // A SUPPORT seat reaches the console but must not revoke another member's
+    // grant (membershipId mismatch -> 403 from revokeGrant).
     await request(app).delete(`/api/v1/support/platform/grants/${grantB.body.data.id}`)
+      .set(authHeader(agentA.token)).expect(403);
+    await request(app).delete(`/api/v1/support/platform/grants/${grantA.body.data.id}`)
       .set(authHeader(agentB.token)).expect(403);
 
     // A SUPER_ADMIN platform session can revoke either grant.
@@ -143,19 +160,26 @@ describe("Platform support console", () => {
       .set(authHeader(superToken)).expect(200);
   });
 
-  it("serves grant-scoped diagnostics only to staff; a tenant SUPPORT seat is denied", async () => {
+  it("serves grant-scoped diagnostics to the grant owner or a SUPER_ADMIN", async () => {
     const owner = await registerUser(app, { email: "pc-owner6@zoiko.test", tenantName: "Diag Tenant" });
     const agent = await setupSupport(owner, "pc-agent4@zoiko.test");
     const staffToken = await staffPlatformToken("pc-platform-diag@zoiko.test");
 
-    // A tenant-scoped SUPPORT seat cannot even reach the console.
+    // A support seat reaches the console, but diagnostics still require a
+    // grant ID (no grant -> 403), just like staff.
     await request(app).get("/api/v1/support/platform/diagnostics").set(authHeader(agent.token)).expect(403);
-
-    // Staff without a grant ID -> 403.
     await request(app).get("/api/v1/support/platform/diagnostics").set(authHeader(staffToken)).expect(403);
 
     const grant = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
       .send({ supportMembershipId: agent.membership.id, reason: "Investigate tenant configuration failure", expiresInMinutes: 30, scopes: ["TENANT_DIAGNOSTICS", "AUDIT_READ"] }).expect(201);
+
+    // The grant owner (the SUPPORT seat) reads its own diagnostics.
+    const ownerOk = await request(app).get(`/api/v1/support/platform/diagnostics?grantId=${grant.body.data.id}`)
+      .set(authHeader(agent.token)).expect(200);
+    expect(ownerOk.body.data.grant.id).toBe(grant.body.data.id);
+    expect(ownerOk.body.data.tenant).toMatchObject({ id: owner.tenantId });
+    expect(ownerOk.body.data.audit).toBeDefined();
+    expect(ownerOk.body.data.domains).toBeUndefined();
 
     const ok = await request(app).get(`/api/v1/support/platform/diagnostics?grantId=${grant.body.data.id}`)
       .set(authHeader(staffToken)).expect(200);
@@ -166,6 +190,8 @@ describe("Platform support console", () => {
 
     // Expired grants are rejected.
     await prisma.supportAccessGrant.update({ where: { id: grant.body.data.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
+    await request(app).get(`/api/v1/support/platform/diagnostics?grantId=${grant.body.data.id}`)
+      .set(authHeader(agent.token)).expect(403);
     await request(app).get(`/api/v1/support/platform/diagnostics?grantId=${grant.body.data.id}`)
       .set(authHeader(staffToken)).expect(403);
   });

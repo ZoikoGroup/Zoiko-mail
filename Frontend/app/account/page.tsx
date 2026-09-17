@@ -2,7 +2,7 @@
 
 import { AppShell } from "@/components/shell/AppShell";
 import Link from "next/link";
-import { ChangePasswordForm, ActiveSessions } from "@/components/auth";
+import { ChangePasswordForm, SetPasswordForm, ActiveSessions } from "@/components/auth";
 import { Avatar, RoleBadge } from "@/components/home/HomeBits";
 import { useMe } from "@/lib/auth-hooks";
 import type { MeResponse } from "@/lib/auth-api";
@@ -11,6 +11,7 @@ import { KeyRound, ShieldCheck, Fingerprint, LifeBuoy, MonitorSmartphone } from 
 export default function AccountPage() {
   const { data } = useMe();
   const me = data as MeResponse | undefined;
+  const hasPassword = me?.hasPassword ?? false;
 
   return (
     <AppShell>
@@ -73,7 +74,17 @@ export default function AccountPage() {
           <KeyRound className="h-3.5 w-3.5" /> Password
         </h2>
         <div className="zoiko-card mt-3 p-6">
-          <ChangePasswordForm />
+          {hasPassword ? (
+            <ChangePasswordForm />
+          ) : (
+            <>
+              <p className="mb-4 text-sm text-[var(--ink3)]">
+                This account was created with Google and has no password set.
+                Set a password to enable email/password sign-in.
+              </p>
+              <SetPasswordForm isInitialSet />
+            </>
+          )}
         </div>
 
         {/* Active sessions */}

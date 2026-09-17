@@ -184,14 +184,14 @@ export function workspaceScopeForRole(role: MembershipRole): WorkspaceScope {
 }
 
 /**
- * A Google sign-in always acts as a member, however senior the account is.
- *
- * Reaching the admin, owner or support console is a deliberate act that must
- * go through a sign-in aimed at it. Without this an Owner who used the Google
- * button would land in the owner console, which is precisely what the rule
- * forbids.
+ * A Google sign-in uses the same workspace scope derivation as password
+ * sign-in — the console matches the membership role (OWNER→OWNER, ADMIN→ADMIN,
+ * MEMBER→MEMBER). This ensures consistent dashboard access regardless of
+ * authentication method.
  */
-export const GOOGLE_WORKSPACE_SCOPE: WorkspaceScope = "MEMBER";
+export function googleWorkspaceScope(role: MembershipRole): WorkspaceScope {
+  return workspaceScopeForRole(role);
+}
 
 function buildAccessToken(
   membership: MembershipWithRelations,
@@ -912,7 +912,7 @@ export class AuthService {
     if (!user.passwordHash) {
       await this.recordLoginFailure(user.id, input.email, "password_login_unavailable", context);
       throw new AppError(
-        "This account signs in with Google. Use \"Continue with Google\" instead.",
+        "This account was created with Google and has no password set. Use \"Continue with Google\" to sign in, or use \"Forgot password\" to set a password and then sign in with email.",
         401,
         ErrorCodes.UNAUTHORIZED
       );
@@ -968,12 +968,7 @@ export class AuthService {
         // Google addresses can change; keep the record current.
         data: { lastUsedAt: new Date(), email: profile.email },
       });
-      return this.resolveAuthState(
-        identity.user,
-        undefined,
-        context,
-        GOOGLE_WORKSPACE_SCOPE
-      );
+      return this.resolveAuthState(identity.user, undefined, context);
     }
 
     const existingUser = await userRepository.findByEmail(profile.email);
@@ -1025,7 +1020,7 @@ export class AuthService {
         created,
         undefined,
         context,
-        GOOGLE_WORKSPACE_SCOPE
+        "MEMBER"
       );
     }
 
@@ -1092,20 +1087,19 @@ export class AuthService {
       return user;
     });
 
-    return this.resolveAuthState(
-      linked,
-      undefined,
-      context,
-      GOOGLE_WORKSPACE_SCOPE
-    );
+return this.resolveAuthState(
+        linked,
+        undefined,
+        context
+      );
   }
 
   /** Ordered guard chain. First matching guard decides the state. */
   /**
    * `intendedWorkspace` fixes the console the session is bound to. Left
-   * undefined it follows the membership role, which is what a password
-   * sign-in wants. Google passes MEMBER explicitly so a social sign-in can
-   * never open a console.
+   * undefined it follows the membership role — both password and Google sign-in
+   * now derive the workspace from the role (OWNER→OWNER, ADMIN→ADMIN, MEMBER→MEMBER)
+   * so the console is consistent regardless of authentication method.
    */
   private async resolveAuthState(
     user: Awaited<ReturnType<typeof userRepository.findByEmail>> & {},
@@ -1587,28 +1581,33 @@ export class AuthService {
     if (!user) {
       throw new AppError("Current password is incorrect", 401, ErrorCodes.UNAUTHORIZED);
     }
-    if (!user.passwordHash) {
-      throw new AppError(
-        "This account signs in with Google and has no password to change.",
-        400,
-        ErrorCodes.VALIDATION_ERROR
-      );
-    }
-    if (!(await verifyPassword(input.currentPassword, user.passwordHash))) {
-      throw new AppError("Current password is incorrect", 401, ErrorCodes.UNAUTHORIZED);
-    }
 
-    if (await verifyPassword(input.newPassword, user.passwordHash)) {
-      throw new AppError(
-        "New password must be different from the current password",
-        409,
-        ErrorCodes.CONFLICT
-      );
+    const hasExistingPassword = !!user.passwordHash;
+
+    // If user has an existing password, verify the current password
+    if (hasExistingPassword) {
+      if (!(await verifyPassword(input.currentPassword, user.passwordHash!))) {
+        throw new AppError("Current password is incorrect", 401, ErrorCodes.UNAUTHORIZED);
+      }
+
+      if (await verifyPassword(input.newPassword, user.passwordHash!)) {
+        throw new AppError(
+          "New password must be different from the current password",
+          409,
+          ErrorCodes.CONFLICT
+        );
+      }
+    } else {
+      // User has no password (Google-only account) - this is initial password set
+      // Verify that currentPassword is empty (signal from frontend)
+      if (input.currentPassword && input.currentPassword.trim() !== "") {
+        throw new AppError("Current password must be empty when setting initial password", 400, ErrorCodes.VALIDATION_ERROR);
+      }
     }
 
     enforcePasswordPolicy(input.newPassword, {
       email: user.email,
-      currentPassword: input.currentPassword,
+      currentPassword: hasExistingPassword ? input.currentPassword : undefined,
     });
 
     const passwordHash = await hashPassword(input.newPassword);
@@ -1749,6 +1748,7 @@ export class AuthService {
     tenant: AuthSessionResponse["tenant"];
     membership: AuthSessionResponse["membership"];
     workspace: WorkspaceScope;
+    hasPassword: boolean;
   } {
     if (!req.tenantContext) {
       throw new AppError("Tenant context required", 403, ErrorCodes.FORBIDDEN);
@@ -1774,6 +1774,7 @@ export class AuthService {
       // Which console this session belongs to. The shells gate on this, so it
       // has to come from the server rather than be inferred from the role.
       workspace,
+      hasPassword: !!user.passwordHash,
     };
   }
 

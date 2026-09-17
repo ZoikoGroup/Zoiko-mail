@@ -73,6 +73,18 @@ function padNum(n: number): string {
   return `TKT-${String(n).padStart(4, "0")}`;
 }
 
+function dueIn(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const diff = new Date(iso).getTime() - Date.now();
+  if (Number.isNaN(diff)) return iso;
+  const mins = Math.round(diff / 60000);
+  if (mins <= 0) return "overdue";
+  if (mins < 60) return `in ${mins}m`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `in ${hrs}h`;
+  return `in ${Math.round(hrs / 24)}d`;
+}
+
 function Avatar({ name }: { name: string | null | undefined }) {
   const initial = (name ?? "?").trim().charAt(0).toUpperCase() || "?";
   return <span className="av">{initial}</span>;
@@ -84,6 +96,7 @@ export default function TicketsPage() {
   const [status, setStatus] = useState("");
   const [severity, setSeverity] = useState("");
   const [assigned, setAssigned] = useState("");
+  const [overdue, setOverdue] = useState("");
 
   const [rows, setRows] = useState<SupportTicket[]>([]);
   const [loading, setLoading] = useState(false);
@@ -170,6 +183,10 @@ export default function TicketsPage() {
           <option value="unassigned">Unassigned</option>
           <option value="all">All</option>
         </select>
+        <select className="fselect" value={overdue} onChange={(e) => setOverdue(e.target.value)}>
+          <option value="">SLA</option>
+          <option value="overdue">Overdue</option>
+        </select>
         <button
           className="btn pri"
           onClick={() =>
@@ -178,6 +195,7 @@ export default function TicketsPage() {
               status: (status || undefined) as TicketStatus | undefined,
               severity: (severity || undefined) as TicketSeverity | undefined,
               assigned: (assigned || undefined) as TicketListParams["assigned"],
+              overdue: overdue === "overdue" ? true : undefined,
               limit: 50,
             })
           }
@@ -191,6 +209,7 @@ export default function TicketsPage() {
             setStatus("");
             setSeverity("");
             setAssigned("");
+            setOverdue("");
             setParams({ limit: 50 });
           }}
         >
@@ -230,6 +249,7 @@ export default function TicketsPage() {
                   <th>Requester</th>
                   <th>Severity</th>
                   <th>Status</th>
+                  <th>SLA</th>
                   <th>Assignee</th>
                   <th>Updated</th>
                 </tr>
@@ -247,13 +267,14 @@ export default function TicketsPage() {
                     <td>
                       <span className={`pill ${statusTone(t.status)}`}>{t.status.replace("_", " ")}</span>
                     </td>
+                    <td className={t.slaOverdue ? "crit" : "muted"}>{t.slaOverdue ? "overdue" : dueIn(t.slaDueAt)}</td>
                     <td>{t.assignedStaff?.displayName ?? t.assignedStaff?.email ?? <span className="muted">Unassigned</span>}</td>
                     <td className="muted">{ago(t.updatedAt)}</td>
                   </tr>
                 ))}
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="muted">
+                    <td colSpan={9} className="muted">
                       No tickets match.
                     </td>
                   </tr>

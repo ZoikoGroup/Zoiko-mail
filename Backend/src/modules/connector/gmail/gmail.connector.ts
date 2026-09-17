@@ -121,6 +121,17 @@ class GmailConnector {
       include: { membership: { include: { mailbox: true, user: { select: { id: true } } } } },
     });
     if (!account) throw new AppError("Connected account not found", 404, ErrorCodes.NOT_FOUND);
+
+    // Org-level accounts have no mailbox to sync into
+    if (account.isOrgLevel || !account.membership) {
+      // For org-level accounts, we still update the sync timestamp but don't import messages
+      await prisma.connectedAccount.update({
+        where: { id: account.id },
+        data: { lastSyncedAt: new Date(), status: "ACTIVE", lastErrorCode: null },
+      });
+      return { fetched: 0, imported: 0, deleted: 0, checkpointHistoryId: null };
+    }
+
     const mailbox = account.membership.mailbox;
     if (!mailbox) throw new AppError("Gmail account has no mailbox to sync into", 409, ErrorCodes.CONFLICT);
 

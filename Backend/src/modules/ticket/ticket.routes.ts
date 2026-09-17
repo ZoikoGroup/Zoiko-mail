@@ -84,6 +84,7 @@ ticketPlatformRouter.get("/", validate(ticketListQuerySchema, "query"), asyncHan
       status: typeof q.status === "string" && q.status.trim() ? (q.status as never) : undefined,
       severity: typeof q.severity === "string" && q.severity.trim() ? (q.severity as never) : undefined,
       assigned,
+      overdue: (q as { overdue?: unknown }).overdue === true,
       q: typeof q.q === "string" ? q.q : undefined,
       limit: typeof q.limit === "string" && q.limit.trim() ? Number(q.limit) : 50,
     });

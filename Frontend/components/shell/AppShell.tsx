@@ -61,8 +61,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   // session that belongs elsewhere is ended rather than left usable.
   //
   // A tenant support member is covered by this too: their session is
-  // SUPPORT-scoped, so it is turned away here rather than quietly redirected
-  // to /tenant-support, because reaching another workspace takes a sign-in.
+  // SUPPORT-scoped, so it is turned away here and they land on the support
+  // console at /support after re-authenticating for that workspace.
   //
   // Skipped for staff, whose platform token has no tenant membership and no
   // workspace scope; the effect above has already sent them to /support.

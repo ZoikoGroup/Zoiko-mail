@@ -77,7 +77,7 @@ describe("a session is bound to the console it was opened for", () => {
   });
 
   describe("Google sign-in", () => {
-    it("always opens the member console, however senior the account", async () => {
+    it("opens the console matching the account's role (same as password sign-in)", async () => {
       const owner = await registerUser(app, {
         email: googleProfile.email,
         tenantName: "Google Owner Workspace",
@@ -87,27 +87,25 @@ describe("a session is bound to the console it was opened for", () => {
       const viaGoogle = await signInWithGoogle().expect(200);
       expect(viaGoogle.body.data.state).toBe("SIGNED_IN");
 
-      // The same person, the same workspace, a different console: signing in
-      // with Google must never land in an administration console.
-      expect(decode(viaGoogle.body.data.accessToken).workspace).toBe("MEMBER");
-      expect(viaGoogle.body.data.membership.role).toBe("MEMBER");
+      // Google sign-in now derives workspace from role, same as password sign-in.
+      expect(decode(viaGoogle.body.data.accessToken).workspace).toBe("OWNER");
+      expect(viaGoogle.body.data.membership.role).toBe("OWNER");
     });
 
-    it("cannot reach an owner-only surface, even for an owner", async () => {
+    it("can reach an owner-only surface when the account is an Owner", async () => {
       await registerUser(app, {
         email: googleProfile.email,
         tenantName: "Google Owner Surface",
       });
 
       const viaGoogle = await signInWithGoogle().expect(200);
-      const refused = await ownerOnly(viaGoogle.body.data.accessToken);
+      const allowed = await ownerOnly(viaGoogle.body.data.accessToken);
 
-      // Authority follows the console, not the membership: this is the whole
-      // point of scoping rather than merely routing the browser elsewhere.
-      expect(refused.status).toBe(403);
+      // Google sign-in now gets the same workspace scope as password sign-in.
+      expect(allowed.status).toBe(200);
     });
 
-    it("stays a member session across a refresh", async () => {
+    it("keeps the same workspace scope across a refresh", async () => {
       await registerUser(app, {
         email: googleProfile.email,
         tenantName: "Google Refresh Workspace",
@@ -119,11 +117,10 @@ describe("a session is bound to the console it was opened for", () => {
         .send({ refreshToken: viaGoogle.body.data.refreshToken })
         .expect(200);
 
-      // A refresh that re-derived the scope from the role would hand an Owner
-      // the owner console without them ever signing in for it.
-      expect(decode(refreshed.body.data.accessToken).workspace).toBe("MEMBER");
-      const refusedAgain = await ownerOnly(refreshed.body.data.accessToken);
-      expect(refusedAgain.status).toBe(403);
+      // Refresh preserves the workspace scope from the original sign-in.
+      expect(decode(refreshed.body.data.accessToken).workspace).toBe("OWNER");
+      const allowedAgain = await ownerOnly(refreshed.body.data.accessToken);
+      expect(allowedAgain.status).toBe(200);
     });
   });
 

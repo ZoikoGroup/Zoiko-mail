@@ -135,7 +135,7 @@ describe("Support tickets", () => {
     expect(tenantView.body.data.comments[0].body).toBe("A refund has been issued.");
   });
 
-  it("rejects a tenant-scoped SUPPORT membership from the platform ticket console", async () => {
+  it("allows a tenant-scoped SUPPORT membership to read the platform ticket list", async () => {
     const owner = await registerUser(app, { email: `tk-owner4-${Date.now()}@zoiko.test`, tenantName: "Ticket Gate Tenant" });
     const support = await registerUser(app, { email: `tk-support-${Date.now()}@zoiko.test` });
     await request(app).post("/api/v1/membership/members")
@@ -144,7 +144,60 @@ describe("Support tickets", () => {
       .expect(201);
     const session = await loginUser(app, support.email, support.password, owner.tenantId);
 
-    await request(app).get("/api/v1/support/platform/tickets")
-      .set(authHeader(session.accessToken)).expect(403);
+    const res = await request(app).get("/api/v1/support/platform/tickets")
+      .set(authHeader(session.accessToken)).expect(200);
+    expect(Array.isArray(res.body.data.tickets)).toBe(true);
+  });
+
+  it("auto-reopens a WAITING_TENANT ticket when the tenant replies", async () => {
+    const owner = await registerUser(app, { email: `tk-auto-${Date.now()}@zoiko.test`, tenantName: "Auto Reopen Tenant" });
+    const member = await registerUser(app, { email: `tk-auto-m-${Date.now()}@zoiko.test` });
+    await request(app).post("/api/v1/membership/members")
+      .set(authHeader(owner.accessToken))
+      .send({ email: member.email, role: "MEMBER" })
+      .expect(201);
+    const memberSession = await loginUser(app, member.email, member.password, owner.tenantId);
+    const { token } = await staffPlatformToken(`tk-auto-s-${Date.now()}@zoiko.test`);
+
+    const created = await request(app).post("/api/v1/support/tickets")
+      .set(authHeader(memberSession.accessToken))
+      .send({ subject: "Waiting on us", description: "We are waiting to confirm details from our side.", category: "OTHER", severity: "LOW" })
+      .expect(201);
+    const ticketId = created.body.data.id;
+
+    await request(app).patch(`/api/v1/support/platform/tickets/${ticketId}`)
+      .set(authHeader(token))
+      .send({ status: "WAITING_TENANT" })
+      .expect(200);
+
+    await request(app).post(`/api/v1/support/tickets/${ticketId}/comments`)
+      .set(authHeader(memberSession.accessToken))
+      .send({ body: "We confirm the account details are correct." })
+      .expect(201);
+
+    const detail = await request(app).get(`/api/v1/support/platform/tickets/${ticketId}`)
+      .set(authHeader(token)).expect(200);
+    expect(detail.body.data.status).toBe("IN_PROGRESS");
+  });
+
+  it("flags overdue SLAs and filters the platform list", async () => {
+    const owner = await registerUser(app, { email: `tk-sla-${Date.now()}@zoiko.test`, tenantName: "SLA Tenant" });
+    const { token } = await staffPlatformToken(`tk-sla-s-${Date.now()}@zoiko.test`);
+
+    const created = await request(app).post("/api/v1/support/platform/tickets")
+      .set(authHeader(token))
+      .send({ tenantId: owner.tenantId, subject: "SLA breached demo", description: "Ticket whose SLA we will let expire.", category: "OTHER", severity: "URGENT" })
+      .expect(201);
+    const ticketId = created.body.data.id;
+
+    await prisma.supportTicket.update({ where: { id: ticketId }, data: { slaDueAt: new Date(Date.now() - 60_000) } });
+
+    const detail = await request(app).get(`/api/v1/support/platform/tickets/${ticketId}`)
+      .set(authHeader(token)).expect(200);
+    expect(detail.body.data.slaOverdue).toBe(true);
+
+    const overdue = await request(app).get("/api/v1/support/platform/tickets?overdue=true")
+      .set(authHeader(token)).expect(200);
+    expect(overdue.body.data.tickets.map((t: any) => t.id)).toContain(ticketId);
   });
 });

@@ -13,18 +13,13 @@ export default function PlatformConsolePage() {
 
   useEffect(() => { document.title = "Support | Zoiko Mail"; }, []);
 
-  // This page is the GLOBAL platform console — staff only. A tenant-scoped
-  // SUPPORT member (invited by a workspace Owner for read-only diagnostics)
-  // must be routed to their tenant workspace instead; the backend also
-  // rejects their token on /support/platform. If we don't hold a staff
-  // platform token and aren't authenticated staff, bounce to login.
+  // The support console is the single support dashboard: session-scoped SUPPORT
+  // members (invited by a workspace Owner) and platform staff both land here.
+  // If we don't hold a staff platform token and aren't authenticated, bounce to
+  // the staff sign-in page.
   useEffect(() => {
-    if (me && me.membership?.role === "SUPPORT") {
-      router.replace("/tenant-support");
-      return;
-    }
     if (!getPlatformToken() && !isLoading && !me) {
-      router.replace("/login");
+      router.replace("/staff/login");
     }
   }, [me, isLoading, router]);
 

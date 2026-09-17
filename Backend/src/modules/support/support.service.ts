@@ -286,6 +286,24 @@ export class SupportService {
         }),
       ]);
 
+    const [openTickets, overdueTickets, urgentTickets, ticketsByStatus, recentTickets] = await Promise.all([
+        prisma.supportTicket.count({ where: { status: { notIn: ["RESOLVED", "CLOSED"] } } }),
+        prisma.supportTicket.count({ where: { slaDueAt: { lt: new Date() }, status: { notIn: ["RESOLVED", "CLOSED"] } } }),
+        prisma.supportTicket.count({ where: { severity: "URGENT", status: { notIn: ["RESOLVED", "CLOSED"] } } }),
+        prisma.supportTicket.groupBy({ by: ["status"], _count: true }),
+        prisma.supportTicket.findMany({
+          orderBy: { updatedAt: "desc" },
+          take: 8,
+          select: {
+            id: true, ticketNumber: true, subject: true, category: true, severity: true, status: true,
+            updatedAt: true, slaDueAt: true,
+            tenant: { select: { id: true, name: true } },
+            assignedStaff: { select: { id: true, displayName: true } },
+            openedBy: { select: { id: true, email: true, displayName: true } },
+          },
+        }),
+      ]);
+
     const issues = [
       ...failedMessages.map((m) => ({
         id: m.id, kind: "message" as const,
@@ -355,6 +373,26 @@ export class SupportService {
         failedJobs,
         retryJobs,
       },
+      ticketStats: {
+        open: openTickets,
+        overdue: overdueTickets,
+        urgent: urgentTickets,
+        byStatus: Object.fromEntries(ticketsByStatus.map((r) => [r.status, r._count])),
+      },
+      recentTickets: recentTickets.map((t) => ({
+        id: t.id,
+        ticketNumber: t.ticketNumber,
+        subject: t.subject,
+        tenantId: t.tenant.id,
+        tenantName: t.tenant.name,
+        category: t.category,
+        severity: t.severity,
+        status: t.status,
+        assignedStaff: t.assignedStaff ? { id: t.assignedStaff.id, name: t.assignedStaff.displayName } : null,
+        slaDueAt: t.slaDueAt,
+        slaOverdue: t.slaDueAt ? t.slaDueAt.getTime() < Date.now() && t.status !== "RESOLVED" && t.status !== "CLOSED" : false,
+        updatedAt: t.updatedAt,
+      })),
       providerHealth: {
         byProvider: byProvider.map((r) => ({ provider: r.provider, count: r._count._all })),
         byStatus: byStatus.map((r) => ({ status: r.status, count: r._count._all })),

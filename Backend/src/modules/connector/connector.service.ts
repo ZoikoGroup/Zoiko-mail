@@ -24,6 +24,7 @@ interface CreateAccountInput {
   providerAccountId: string;
   email: string;
   scopes: string[];
+  isOrgLevel?: boolean;
 }
 
 interface NormalizedCallback {
@@ -102,27 +103,53 @@ export class ConnectorService {
   ) {
     try {
       const account = await prisma.$transaction(async (tx) => {
-        const membership = await tx.tenantMembership.findFirst({
-          where: {
-            id: context.membershipId,
-            tenantId: context.tenantId,
-            userId: context.userId,
-            status: "ACTIVE",
-          },
-          select: { id: true },
-        });
-        if (!membership) {
-          throw new AppError("Active membership not found", 403, ErrorCodes.FORBIDDEN);
+        let membershipId: string | null = context.membershipId;
+        let isOrgLevel = false;
+
+        if (input.isOrgLevel) {
+          // For org-level connections, verify the user is an Owner or Admin
+          const membership = await tx.tenantMembership.findFirst({
+            where: {
+              id: context.membershipId,
+              tenantId: context.tenantId,
+              userId: context.userId,
+              status: "ACTIVE",
+              role: { in: ["OWNER", "ADMIN"] },
+            },
+            select: { id: true },
+          });
+          if (!membership) {
+            throw new AppError("Only Owners and Admins can create organization-level connections", 403, ErrorCodes.FORBIDDEN);
+          }
+          isOrgLevel = true;
+          membershipId = null;
+        } else {
+          // Regular user-level connection
+          const membership = await tx.tenantMembership.findFirst({
+            where: {
+              id: context.membershipId,
+              tenantId: context.tenantId,
+              userId: context.userId,
+              status: "ACTIVE",
+            },
+            select: { id: true },
+          });
+          if (!membership) {
+            throw new AppError("Active membership not found", 403, ErrorCodes.FORBIDDEN);
+          }
         }
+
         const created = await tx.connectedAccount.create({
           data: {
             tenantId: context.tenantId,
-            membershipId: context.membershipId,
+            membershipId,
             userId: context.userId,
+            isOrgLevel,
             ...input,
           },
           select: {
             id: true, provider: true, email: true, scopes: true, status: true,
+            isOrgLevel: true,
             createdAt: true, updatedAt: true,
           },
         });
@@ -133,7 +160,7 @@ export class ConnectorService {
           targetType: "ConnectedAccount",
           targetId: created.id,
           requestId: context.requestId,
-          metadata: { provider: input.provider, scopes: input.scopes },
+          metadata: { provider: input.provider, scopes: input.scopes, isOrgLevel },
         }, tx);
         return created;
       });

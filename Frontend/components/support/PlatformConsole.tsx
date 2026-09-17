@@ -51,6 +51,7 @@ import TicketsPage from "@/components/support/TicketsPage";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { AccessDenied } from "@/components/ui/AccessDenied";
 import {
+  AlarmClock,
   AlertCircle,
   AlertTriangle,
   Ban,
@@ -58,6 +59,7 @@ import {
   Boxes,
   Building2,
   Cog,
+  Flame,
   Globe,
   KeyRound,
   Link2,
@@ -68,6 +70,7 @@ import {
   Server,
   ShieldAlert,
   ShieldCheck,
+  Ticket,
   Users,
   XCircle,
 } from "lucide-react";
@@ -246,12 +249,15 @@ function Pill({ status }: { status: string | null | undefined }) {
 function OverviewPage({
   data,
   onOpenTenant,
+  onOpenTickets,
 }: {
   data: PlatformOverview | null;
   onOpenTenant: (tenantId: string) => void;
+  onOpenTickets: () => void;
 }) {
   if (!data) return null;
   const s = data.stats;
+  const ts = data.ticketStats;
   const stats: Array<{ label: string; val: string | number; tone: string; sub: string; icon?: LucideIcon }> = [
     { label: "Active Tenants", val: s.activeTenants, tone: "", sub: "across the platform", icon: Building2 },
     { label: "Members", val: s.tenantMembers, tone: "", sub: "tenant users", icon: Users },
@@ -262,6 +268,9 @@ function OverviewPage({
     { label: "Sync Failures 24h", val: s.syncFailures24h, tone: s.syncFailures24h > 0 ? "warn" : "ok", sub: "provider webhook errors", icon: AlertTriangle },
     { label: "Failed Jobs", val: s.failedJobs, tone: s.failedJobs > 0 ? "crit" : "ok", sub: "exhausted retries", icon: XCircle },
     { label: "Retry Jobs", val: s.retryJobs, tone: s.retryJobs > 0 ? "warn" : "ok", sub: "scheduled to retry", icon: RotateCw },
+    { label: "Open Tickets", val: ts.open, tone: ts.open > 0 ? "" : "ok", sub: "not resolved or closed", icon: Ticket },
+    { label: "Overdue SLA", val: ts.overdue, tone: ts.overdue > 0 ? "crit" : "ok", sub: "breached response time", icon: AlarmClock },
+    { label: "Urgent Tickets", val: ts.urgent, tone: ts.urgent > 0 ? "crit" : "ok", sub: "URGENT severity open", icon: Flame },
   ];
 
   return (
@@ -1993,7 +2002,7 @@ export default function PlatformConsole() {
             ) : overviewError ? (
               <LoadErr error={overviewError} onRetry={loadOverview} />
             ) : (
-              <OverviewPage data={overview} onOpenTenant={openTenant} />
+              <OverviewPage data={overview} onOpenTenant={openTenant} onOpenTickets={() => setPage("tickets")} />
             ))}
           {page === "tickets" && <TicketsPage />}
           {page === "tenants" && (

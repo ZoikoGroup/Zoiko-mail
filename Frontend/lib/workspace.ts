@@ -12,15 +12,16 @@ export type WorkspaceScope = "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT";
  * Where each workspace lives.
  *
  * SUPPORT means a tenant member holding the support role, and it lands on the
- * read-only /tenant-support page. Not /support: that is the platform console
- * for Zoiko staff, who authenticate with a platform token that carries no
- * workspace scope at all, so it is never reached through this map.
+ * full support console at /support with every section (Overview, Tenants,
+ * Provider Events, Delivery Events, Jobs, Audit, Tickets, Grants, …) visible.
+ * Staff sign in with a platform token that carries no workspace scope at all,
+ * so they reach /support the same way.
  */
 export const WORKSPACE_HREF: Record<WorkspaceScope, string> = {
   OWNER: "/owner",
   ADMIN: "/admin",
   MEMBER: "/inbox",
-  SUPPORT: "/tenant-support",
+  SUPPORT: "/support",
 };
 
 /**

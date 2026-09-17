@@ -194,6 +194,26 @@ export interface PlatformOverview {
     failedJobs: number;
     retryJobs: number;
   };
+  ticketStats: {
+    open: number;
+    overdue: number;
+    urgent: number;
+    byStatus: Record<string, number>;
+  };
+  recentTickets: Array<{
+    id: string;
+    ticketNumber: number;
+    subject: string;
+    tenantId: string;
+    tenantName: string;
+    category: TicketCategory;
+    severity: TicketSeverity;
+    status: TicketStatus;
+    assignedStaff: { id: string; name: string } | null;
+    slaDueAt: string | null;
+    slaOverdue: boolean;
+    updatedAt: string;
+  }>;
   providerHealth: {
     byProvider: Array<{ provider: string; count: number }>;
     byStatus: Array<{ status: string; count: number }>;
@@ -557,6 +577,7 @@ export interface SupportTicket {
   openedByType: string;
   assignedStaff: TicketAuthor | null;
   slaDueAt: string | null;
+  slaOverdue: boolean;
   resolvedAt: string | null;
   closedAt: string | null;
   createdAt: string;
@@ -569,6 +590,7 @@ export interface TicketListParams {
   status?: TicketStatus;
   severity?: TicketSeverity;
   assigned?: "me" | "unassigned" | "all";
+  overdue?: boolean;
   q?: string;
   limit?: number;
 }
