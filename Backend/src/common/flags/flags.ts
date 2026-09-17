@@ -27,6 +27,7 @@ export const FLAGS = [
   "custom_domain_enabled",
   "provider_callbacks_accepting",
   "google_login_enabled",
+  "mfa_enforcement_enabled",
 ] as const;
 
 export type FlagName = (typeof FLAGS)[number];
@@ -42,6 +43,7 @@ const FLAG_SCOPES: Record<FlagName, ReadonlyArray<keyof FlagScope>> = {
   custom_domain_enabled: ["tenantId"],
   provider_callbacks_accepting: ["provider"],
   google_login_enabled: ["tenantId"],
+  mfa_enforcement_enabled: [],
 };
 
 export interface FlagScope {
@@ -84,6 +86,8 @@ function globalDefault(name: FlagName): boolean {
       return env.FLAG_PROVIDER_CALLBACKS_ACCEPTING;
     case "google_login_enabled":
       return env.FLAG_GOOGLE_LOGIN_ENABLED;
+    case "mfa_enforcement_enabled":
+      return env.FLAG_MFA_ENFORCEMENT_ENABLED;
   }
 }
 

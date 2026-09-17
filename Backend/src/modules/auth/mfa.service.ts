@@ -16,6 +16,7 @@ import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
 import { generateTotpSecret, totpUri, verifyTotp } from "./totp.js";
 import { SYSTEM_TENANT_ID } from "./auth.types.js";
+import { isFlagEnabled } from "../../common/flags/index.js";
 
 /**
  * Multi-factor authentication — AC-002, Security §5.
@@ -56,6 +57,8 @@ const ALGORITHM = "aes-256-gcm";
 export function roleRequiresMfa(role: MembershipRole): boolean {
   return MFA_REQUIRED_ROLES.includes(role);
 }
+
+export function mfaEnforcementEnabled(): boolean { return isFlagEnabled("mfa_enforcement_enabled"); }
 
 let warnedAboutDerivedKey = false;
 
@@ -320,7 +323,8 @@ export class MfaService {
       where: { id: userId },
       select: { platformRole: true },
     });
-    if (privileged || staff.platformRole !== "NONE") {
+    // if (privileged || staff.platformRole !== "NONE") {
+    if (mfaEnforcementEnabled() && (privileged || staff.platformRole !== "NONE")) {
       throw new AppError(
         "MFA is required for this account and cannot be removed",
         403,
@@ -392,8 +396,12 @@ export class MfaService {
       // never confirmed; the settings screen offers to resume rather than
       // pretending nothing happened.
       enrolmentPending: Boolean(user.mfaSecret && !user.mfaEnrolledAt),
-      required: Boolean(privileged) || user.platformRole !== "NONE",
-      requiredBecause: privileged?.role ?? (user.platformRole !== "NONE" ? user.platformRole : null),
+      // required: Boolean(privileged) || user.platformRole !== "NONE",
+      required: mfaEnforcementEnabled() && (Boolean(privileged) || user.platformRole !== "NONE"),
+      // requiredBecause: privileged?.role ?? (user.platformRole !== "NONE" ? user.platformRole : null),
+      requiredBecause: mfaEnforcementEnabled()
+        ? privileged?.role ?? (user.platformRole !== "NONE" ? user.platformRole : null)
+        : null,
       remainingRecoveryCodes: remaining,
     };
   }
