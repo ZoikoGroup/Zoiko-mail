@@ -18,7 +18,7 @@ import { deliveryProtectionService } from "../delivery-protection/delivery-prote
 import { sharedMailboxService } from "./shared-mailbox.service.js";
 import { participantService } from "../participant/participant.service.js";
 import { jobService } from "../job/job.service.js";
-import type { BulkMailboxActionInput, CreateDraftInput, CreateLabelInput, ListMailInput, UpdateDraftInput, UpdateLabelInput, UpdateMailboxItemInput } from "./mail.schema.js";
+import type { BulkMailboxActionInput, CreateDraftInput, CreateLabelInput, ListMailInput, UpdateDraftInput, UpdateLabelInput, UpdateMailboxItemInput, updateSignatureSchema } from "./mail.schema.js";
 
 interface MailContext {
   tenantId: string;
@@ -839,6 +839,7 @@ export class MailService {
           }, tx);
         }
 
+        // await this.audit(tx, context, "MAIL_SENT", message.id, { recipientCount: recipients.length });
         // §10: "all shared mailbox sends must capture actor_user_id and
       // mailbox_id". The actor is already the audit actor; the mailbox has to
       // be said explicitly, or the record cannot answer who sent that as the
@@ -1083,15 +1084,35 @@ export class MailService {
       ...(filters.labelId ? {
         labels: { some: { tenantId: context.tenantId, labelId: filters.labelId } },
       } : {}),
-      ...(filters.q ? {
+      ...(filters.q || filters.from || filters.to || filters.hasAttachment || filters.dateAfter || filters.dateBefore ? {
         message: {
-          OR: [
-            { subject: { contains: filters.q, mode: "insensitive" as const } },
-            { textBody: { contains: filters.q, mode: "insensitive" as const } },
-            { fromAddress: { contains: filters.q, mode: "insensitive" as const } },
-            { fromName: { contains: filters.q, mode: "insensitive" as const } },
-            { recipients: { some: { email: { contains: filters.q, mode: "insensitive" as const } } } },
-          ],
+          ...(filters.q ? {
+            OR: [
+              { subject: { contains: filters.q, mode: "insensitive" as const } },
+              { textBody: { contains: filters.q, mode: "insensitive" as const } },
+              { fromAddress: { contains: filters.q, mode: "insensitive" as const } },
+              { fromName: { contains: filters.q, mode: "insensitive" as const } },
+              { recipients: { some: { email: { contains: filters.q, mode: "insensitive" as const } } } },
+            ],
+          } : {}),
+          ...(filters.from ? {
+            OR: [
+              { fromAddress: { contains: filters.from, mode: "insensitive" as const } },
+              { fromName: { contains: filters.from, mode: "insensitive" as const } },
+            ],
+          } : {}),
+          ...(filters.to ? {
+            recipients: { some: { email: { contains: filters.to, mode: "insensitive" as const } } },
+          } : {}),
+          ...(filters.hasAttachment ? {
+            attachments: { some: {} },
+          } : {}),
+          ...(filters.dateAfter || filters.dateBefore ? {
+            createdAt: {
+              ...(filters.dateAfter ? { gte: filters.dateAfter } : {}),
+              ...(filters.dateBefore ? { lte: filters.dateBefore } : {}),
+            },
+          } : {}),
         },
       } : {}),
     };
@@ -1807,6 +1828,33 @@ export class MailService {
       userAgent: context.userAgent,
       metadata,
     }, tx);
+  }
+
+  // ─── Add these methods to MailService class in mail.service.ts ───────────────
+
+  async getSignature(context: MailContext) {
+    const mailbox = await this.mailbox(context);
+    return { signature: mailbox.signature ?? null };
+  }
+
+  async updateSignature(signature: string | null, context: MailContext) {
+    const mailbox = await this.mailbox(context);
+    const updated = await prisma.mailbox.update({
+      where: { id: mailbox.id },
+      data: { signature },
+      select: { id: true, signature: true },
+    });
+    await auditService.record({
+      tenantId: context.tenantId,
+      actorUserId: context.userId,
+      eventType: "MAILBOX_SIGNATURE_UPDATED",
+      targetType: "Mailbox",
+      targetId: mailbox.id,
+      requestId: context.requestId,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+    });
+    return { signature: updated.signature ?? null };
   }
 }
 

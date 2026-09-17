@@ -45,6 +45,7 @@ model Tenant {
   domainDnsChecks     DomainDnsCheck[]
   subscriptions       Subscription[]
   invoices            Invoice[]
+  contacts            Contact[]
   mailboxAccess       MailboxAccess[]
   aliases             Alias[]
   forwardingRules     ForwardingRule[]
@@ -182,6 +183,7 @@ model TenantMembership {
   receivedMessages    MessageRecipient[]
   supportAccessGrants SupportAccessGrant[]
   connectedAccounts   ConnectedAccount[]
+  contacts            Contact[]
 
   @@unique([tenantId, userId])
   @@index([userId])
@@ -300,6 +302,7 @@ model Mailbox {
   bounceCount          Int              @default(0) @map("bounce_count")
   complaintCount       Int              @default(0) @map("complaint_count")
   customWarmupCap      Int?             @map("custom_warmup_cap")
+  signature            String?          @map("signature")
   /// Whether AI may process this mailbox's content — Data Model §6.16,
   /// Security §9 and AC-008. A mailbox with this off is what the security
   /// spec calls a restricted mailbox: AI is excluded from it until an
@@ -1454,6 +1457,29 @@ model Invoice {
   @@index([tenantId])
   @@index([status])
   @@map("invoices")
+}
+
+model Contact {
+  id           String           @id @default(uuid()) @db.Uuid
+  tenantId     String           @map("tenant_id") @db.Uuid
+  membershipId String           @map("membership_id") @db.Uuid
+  firstName    String?          @map("first_name")
+  lastName     String?          @map("last_name")
+  email        String
+  phone        String?
+  company      String?
+  jobTitle     String?          @map("job_title")
+  notes        String?
+  tags         String[]         @default([])
+  avatarUrl    String?          @map("avatar_url")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+  tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  membership   TenantMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, membershipId, email])
+  @@index([tenantId, membershipId])
+  @@map("contacts")
 }
 
 model StripeWebhookEvent {
