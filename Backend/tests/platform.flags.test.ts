@@ -12,12 +12,14 @@ afterEach(() => {
 });
 
 describe("feature flags — Infrastructure §15", () => {
-  it("declares all nine named flags", () => {
-    expect(FLAGS).toHaveLength(9);
+  it("declares all ten named flags", () => {
+    // expect(FLAGS).toHaveLength(9);
+    expect(FLAGS).toHaveLength(10);
     expect(FLAGS).toContain("outbound_sending_enabled");
     expect(FLAGS).toContain("hosted_mail_pilot_enabled");
     expect(FLAGS).toContain("provider_callbacks_accepting");
     expect(FLAGS).toContain("google_login_enabled");
+    expect(FLAGS).toContain("mfa_enforcement_enabled");
   });
 
   it("defaults Track B capabilities to off so hosted mail ships disabled", () => {

@@ -149,6 +149,7 @@ export const envSchema = z.object({
   // automatically; exhausted retries surface as a retryable job failure.
   OPENAI_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(300_000).default(30_000),
   OPENAI_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
+   FLAG_MFA_ENFORCEMENT_ENABLED: boolFlag("true"),
   FLAG_HOSTED_MAIL_PILOT_ENABLED: boolFlag("false"),
   FLAG_OUTBOUND_SENDING_ENABLED: boolFlag("true"),
   FLAG_CUSTOM_DOMAIN_ENABLED: boolFlag("false"),

@@ -20,7 +20,8 @@ import type {
   WorkspaceScope,
 } from "../../common/types/jwt.js";
 import { auditService } from "../audit/audit.service.js";
-import { mfaService, roleRequiresMfa } from "./mfa.service.js";
+// import { mfaService, roleRequiresMfa } from "./mfa.service.js";
+import { mfaEnforcementEnabled, mfaService, roleRequiresMfa } from "./mfa.service.js";
 import { membershipRepository } from "../membership/membership.repository.js";
 import type { MembershipWithRelations } from "../membership/membership.repository.js";
 import { userRepository } from "../user/user.repository.js";
@@ -1477,8 +1478,9 @@ export class AuthService {
     role: MembershipRole | Exclude<PlatformRole, "NONE">,
     context: RequestContext
   ): Promise<AuthState | null> {
-    const required =
-      intent.kind === "platform" || roleRequiresMfa(role as MembershipRole);
+    // const required =
+    // intent.kind === "platform" || roleRequiresMfa(role as MembershipRole);
+    const required = mfaEnforcementEnabled() && (intent.kind === "platform" || roleRequiresMfa(role as MembershipRole));
     if (!required) return null;
 
     const enrolled = await mfaService.isEnrolled(user.id);
