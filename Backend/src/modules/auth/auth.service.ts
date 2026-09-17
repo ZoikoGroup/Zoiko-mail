@@ -771,7 +771,21 @@ export class AuthService {
       }
       // Same activation rule as createWorkspace: verifying the OTP plus a
       // successful join promotes a pending account to ACTIVE.
-      if (user.status === "PENDING_VERIFICATION") {
+      //
+      // INVITED belongs here as much as PENDING_VERIFICATION, and leaving it
+      // out was a live defect rather than a tidy-up. createInvitation writes
+      // an INVITED placeholder for an invitee with no account, so an account
+      // reaching this line is far more likely to be INVITED than PENDING —
+      // and every one of them left here with an ACTIVE membership, a valid
+      // session, and an AppUser that tenantContext refuses on the very next
+      // request as "User account is disabled". The workspace was unusable
+      // from the moment it was joined.
+      //
+      // membership.service.acceptInvitation, the other half of this pair,
+      // has always promoted INVITED and says why: accepting proves control
+      // of the address. That reasoning does not change with the route taken
+      // to accept, so the two agree now.
+      if (user.status === "PENDING_VERIFICATION" || user.status === "INVITED") {
         await tx.appUser.update({
           where: { id: userId },
           data: {

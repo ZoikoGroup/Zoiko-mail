@@ -251,7 +251,14 @@ test.describe("a sign-in with no workspace reaches the create-workspace screen",
     await page.goto("/login");
     await signIn(page);
 
-    await expect(page).toHaveURL(/\/create-workspace$/);
+    // Same 60s budget as settlesOn and expectSentToLogin, and for the same
+    // reason: the browser cannot arrive until /create-workspace has compiled,
+    // and a cold route in dev takes tens of seconds by itself. On the default
+    // 15s this failed in a full-suite run and passed every time in isolation,
+    // which is the worst way for a test to be wrong — it teaches people to
+    // re-run rather than read. The bounce this test exists to catch is still
+    // caught by the assertions below, which keep the default budget.
+    await expect(page).toHaveURL(/\/create-workspace$/, { timeout: 60_000 });
     await expect(
       page.getByRole("heading", { name: /create your workspace/i })
     ).toBeVisible();
@@ -592,4 +599,116 @@ test.describe("an invited account lands in the workspace it was invited to", () 
       await expect(page.getByRole("navigation").first()).toBeVisible({ timeout: 30_000 });
     });
   }
+});
+
+test.describe("accepting an invitation from the sign-in flow", () => {
+  /**
+   * The path an invited person actually takes, and the one that had no test.
+   *
+   * The invitation email links to /accept-invitation, which needs a session
+   * the invitee does not have yet — the placeholder account was created with
+   * a random password. So they set one by reset, sign in, and login answers
+   * INVITATION_PENDING rather than a session. The acceptance card on
+   * /auth-status is where the invitation is actually taken up.
+   *
+   * That card hand-rolled its own fetch and read `data.accessToken` and
+   * `data.membership.role` off a response that nests both under `session`.
+   * Both were undefined, so it stored nothing and routed by
+   * resolveWorkspaceHref(undefined) — the member home. An admin invitee
+   * landed one workspace short of the one they were invited to, holding no
+   * token, and the guard there returned them to the sign-in page.
+   *
+   * The payloads below are the server's own shapes: WorkspaceOption for the
+   * invitation (so `name`, never `tenantName`) and the unflattened
+   * { state, session } for the join.
+   */
+  const invitation = (role: Scope) => ({
+    id: "t1",
+    name: "Stub Workspace",
+    planCode: "starter",
+    role,
+    membershipId: "m1",
+    membershipStatus: "INVITED",
+    tenantStatus: "ACTIVE",
+    selectable: false,
+  });
+
+  async function stubInvitationPending(page: Page, role: Scope, join: unknown) {
+    await stubLogin(page, {
+      success: true,
+      data: {
+        state: "INVITATION_PENDING",
+        user: { id: "u1", email: "someone@zoiko.test", displayName: "Someone" },
+        invitations: [invitation(role)],
+        pendingToken: "pending-token",
+      },
+    });
+    await page.route(`${API}/auth/join-workspace`, (route) =>
+      route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: join }),
+      })
+    );
+  }
+
+  for (const role of ["ADMIN", "MEMBER"] as const) {
+    test(`a ${role} invitee accepting lands in ${HOME[role]}`, async ({ page }) => {
+      await stubSessionReads(page, role);
+      await stubInvitationPending(page, role, {
+        state: "SIGNED_IN",
+        session: {
+          accessToken: "stub-access-token",
+          refreshToken: "stub-refresh-token",
+          expiresIn: "12h",
+          user: { id: "u1", email: "someone@zoiko.test", displayName: "Someone" },
+          tenant: { id: "t1", name: "Stub Workspace", planCode: "starter" },
+          membership: { id: "m1", role },
+          workspace: role,
+        },
+      });
+
+      await page.goto("/login");
+      await signIn(page);
+      await expect(page).toHaveURL(/\/auth-status/, { timeout: 60_000 });
+
+      // The card names the workspace being joined. It read `tenantName`,
+      // which this payload has never carried, so it was blank — nobody can
+      // decide whether to accept an invitation to nowhere.
+      await expect(page.getByText("Stub Workspace")).toBeVisible();
+
+      await page.getByRole("button", { name: "Accept" }).click();
+
+      await settlesOn(page, HOME[role]);
+      await expect(page.getByRole("navigation").first()).toBeVisible({
+        timeout: 30_000,
+      });
+    });
+  }
+
+  test("an admin invitee sent to enrol a second factor gets the challenge, not the member workspace", async ({
+    page,
+  }) => {
+    await stubSessionReads(page, "ADMIN");
+    // AC-002: joining an Admin seat answers a challenge and no session at
+    // all. The old card assumed every join ends signed in, so it read an
+    // absent token, stored nothing, and sent a new admin to /inbox.
+    await stubInvitationPending(page, "ADMIN", {
+      state: "MFA_ENROLLMENT_REQUIRED",
+      user: { id: "u1", email: "someone@zoiko.test", displayName: "Someone" },
+      mfaToken: "mfa-token",
+      requiredBecause: "Admin accounts require a second factor",
+      enrolment: {
+        secret: "JBSWY3DPEHPK3PXP",
+        uri: "otpauth://totp/Zoiko%20Mail:someone@zoiko.test?secret=JBSWY3DPEHPK3PXP",
+      },
+    });
+
+    await page.goto("/login");
+    await signIn(page);
+    await expect(page).toHaveURL(/\/auth-status/, { timeout: 60_000 });
+    await page.getByRole("button", { name: "Accept" }).click();
+
+    await expect(page).toHaveURL(/\/verify-mfa/, { timeout: 60_000 });
+  });
 });
