@@ -7,6 +7,17 @@ export const createActionSchema = z.object({
   threadId: z.string().uuid().optional(),
   dueAt: z.iso.datetime().optional(),
   priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).default("MEDIUM"),
+  /**
+   * Who owes the action and who is waiting for it — §6.10.
+   *
+   * Addresses rather than participant ids: either side may be somebody
+   * outside the workspace, and a client that has just read an email knows
+   * the address, not an internal identifier. The server resolves each to a
+   * participant, creating one if this is the first time the address has been
+   * seen, which is the same path every inbound message takes.
+   */
+  owedByEmail: z.string().trim().email().max(320).optional(),
+  owedToEmail: z.string().trim().email().max(320).optional(),
 });
 export const updateActionSchema = z.object({
   status: z.enum(["OPEN", "IN_PROGRESS", "SNOOZED", "COMPLETED", "DISMISSED"]),

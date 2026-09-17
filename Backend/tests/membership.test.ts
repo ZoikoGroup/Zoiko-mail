@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
-import { authHeader, registerUser } from "./helpers.js";
+import { authHeader, registerUser, loginUser } from "./helpers.js";
 
 const app = createApp();
 
@@ -74,20 +74,17 @@ describe("Tenant membership management", () => {
       .send({ email: admin.email, role: "ADMIN" })
       .expect(201);
 
-    const login = await request(app)
-      .post("/api/v1/auth/login")
-      .send({ email: admin.email, password: admin.password, tenantId: owner.tenantId })
-      .expect(200);
+    const login = await loginUser(app, admin.email, admin.password, owner.tenantId);
 
     await request(app)
       .post("/api/v1/membership/members")
-      .set(authHeader(login.body.data.session.accessToken))
+      .set(authHeader(login.accessToken))
       .send({ email: candidate.email, role: "OWNER" })
       .expect(403);
 
     await request(app)
       .patch(`/api/v1/membership/members/${owner.membershipId}`)
-      .set(authHeader(login.body.data.session.accessToken))
+      .set(authHeader(login.accessToken))
       .send({ status: "SUSPENDED" })
       .expect(403);
 

@@ -48,8 +48,44 @@ export interface EmailMessage {
   author: { id: string; email: string; displayName: string };
 }
 
-// A row in a folder = mailbox item + its message + labels.
-export interface MailItem {
+/**
+ * A message as a list endpoint returns it: metadata, a snippet, and a count
+ * of attachments — no body.
+ *
+ * List responses carry this and detail responses carry `EmailMessage`, which
+ * is why they are separate types rather than one with optional fields. The
+ * API stopped shipping bodies in lists (API §9 / AC-011), and an optional
+ * `textBody` would let a screen read one and silently render nothing.
+ */
+export interface EmailMessageSummary {
+  id: string;
+  subject: string;
+  snippet: string | null;
+  status: MessageStatus;
+  sentAt: string | null;
+  scheduledAt: string | null;
+  threadId: string | null;
+  authorUserId: string;
+  fromAddress: string | null;
+  fromName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  recipients: MailRecipient[];
+  hasAttachments: boolean;
+  attachmentCount: number;
+  author: { id: string; email: string; displayName: string };
+  /**
+   * The AI action that produced this draft, when one did.
+   *
+   * On the summary as well as the detail because that is where it is used:
+   * the draft-generation poll lists DRAFTS and looks for the message its
+   * action produced. An id is metadata, so carrying it here is consistent
+   * with AC-011 — what the list must not carry is the body.
+   */
+  sourceAiActionId?: string | null;
+}
+
+interface MailItemBase {
   id: string;
   messageId: string;
   folder: MailFolder;
@@ -58,6 +94,15 @@ export interface MailItem {
   createdAt: string;
   updatedAt: string;
   labels: MailLabel[];
+}
+
+/** A row in a folder listing. */
+export interface MailListItem extends MailItemBase {
+  message: EmailMessageSummary;
+}
+
+/** A single message read by id, and what the mutations return. */
+export interface MailItem extends MailItemBase {
   message: EmailMessage;
 }
 
@@ -72,7 +117,7 @@ export interface MailPagination {
 }
 
 export interface ListMailResponse {
-  items: MailItem[];
+  items: MailListItem[];
   pagination: MailPagination;
 }
 
@@ -102,6 +147,18 @@ export interface CreateDraftInput {
   textBody?: string | null;
   htmlBody?: string | null;
   recipients: Recipients;
+  /** Send as a shared mailbox instead of one's own address (Security §10). */
+  sendAsMailboxId?: string;
+}
+
+/** An address the caller may compose from. */
+export interface SendableMailbox {
+  id: string;
+  address: string;
+  type: "USER" | "SHARED" | "DISTRIBUTION" | "SYSTEM" | "NO_REPLY";
+  shared: boolean;
+  /** Listed but unusable: sending from this mailbox is currently suspended. */
+  sendSuspended: boolean;
 }
 
 export type BulkAction =
@@ -203,17 +260,38 @@ export async function scheduleDraft(messageId: string, scheduledAt: string) {
   });
 }
 
-export async function reply(messageId: string, body: { textBody?: string; htmlBody?: string }) {
+/**
+ * Addresses the caller may send from.
+ *
+ * Their own mailbox plus any shared mailbox they hold send on — the server
+ * decides that, so a mailbox they can only read never reaches the picker.
+ */
+export async function listSendableMailboxes(): Promise<{ mailboxes: SendableMailbox[] }> {
+  return apiRequest<{ mailboxes: SendableMailbox[] }>("/mail/send-as");
+}
+
+export async function reply(
+  messageId: string,
+  body: { textBody?: string; htmlBody?: string; sendAsMailboxId?: string }
+) {
   return apiRequest<MailItem>(`/mail/${messageId}/reply`, { method: "POST", body });
 }
 
-export async function replyAll(messageId: string, body: { textBody?: string; htmlBody?: string }) {
+export async function replyAll(
+  messageId: string,
+  body: { textBody?: string; htmlBody?: string; sendAsMailboxId?: string }
+) {
   return apiRequest<MailItem>(`/mail/${messageId}/reply-all`, { method: "POST", body });
 }
 
 export async function forward(
   messageId: string,
-  body: { recipients: Recipients; textBody?: string; htmlBody?: string }
+  body: {
+    recipients: Recipients;
+    textBody?: string;
+    htmlBody?: string;
+    sendAsMailboxId?: string;
+  }
 ) {
   return apiRequest<MailItem>(`/mail/${messageId}/forward`, { method: "POST", body });
 }
@@ -275,15 +353,27 @@ export async function deleteAttachment(
 // The list view returns one thread per row with only the most recent message
 // preview inside; the detail view returns the full message list chronologically.
 
-export interface MessageThread {
+interface MessageThreadBase {
   id: string;
   subjectNormalized: string;
   messageCount: number;
   lastMessageAt: string;
   createdAt: string;
-  // In list responses this contains only the most recent message (backend
-  // does `take: 1`). In detail responses it contains all messages in
-  // chronological order.
+}
+
+/**
+ * A thread in a list response: the most recent message only (the backend does
+ * `take: 1`), and as a summary rather than a full message.
+ *
+ * The list screen shows a preview, which is what `snippet` is for. It used to
+ * receive the whole body and cut 140 characters out of it in the browser.
+ */
+export interface ThreadSummary extends MessageThreadBase {
+  messages: EmailMessageSummary[];
+}
+
+/** A thread read by id: every message it holds, in chronological order. */
+export interface MessageThread extends MessageThreadBase {
   messages: EmailMessage[];
 }
 
@@ -295,7 +385,7 @@ export interface ThreadPagination {
 }
 
 export interface ListThreadsResponse {
-  threads: MessageThread[];
+  threads: ThreadSummary[];
   pagination: ThreadPagination;
 }
 

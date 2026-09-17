@@ -19,8 +19,13 @@ import {
   fetchAuditEvents,
   fetchCommitments,
   fetchConnectors,
+  fetchDashboard,
   fetchDomains,
   fetchGroups,
+  fetchGroupAssignees,
+  createGroup,
+  assignToGroup,
+  removeFromGroup,
   fetchInvitations,
   previewInvitation,
   sendInvitation,
@@ -31,9 +36,19 @@ import {
   fetchPolicyGroups,
   fetchSettings,
   fetchSyncErrors,
-  fetchTenant,
+  setMailboxAi,
+  fetchMailboxRouting,
+  createAlias,
+  deleteAlias,
+  createForwarding,
+  deleteForwarding,
 } from "./admin-queries";
-import type { InvitationDraftInput, WorkspaceSettingsPatch } from "./admin-queries";
+import type {
+  GroupAssigneeDto,
+  MailboxRoutingDto,
+  InvitationDraftInput,
+  WorkspaceSettingsPatch,
+} from "./admin-queries";
 import { CAPABILITY_MATRIX, GUARDRAILS } from "./admin-api";
 import type {
   AuditEventDto,
@@ -109,14 +124,124 @@ export function useMailboxes(): QueryLike<MailboxDto[]> {
   return shape(useQuery({ queryKey: ["mailboxes"], queryFn: fetchMailboxes, ...LIVE }));
 }
 
+/** Restrict or unrestrict a mailbox for AI processing. */
+export function useSetMailboxAi() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ mailboxId, aiEnabled }: { mailboxId: string; aiEnabled: boolean }) =>
+      setMailboxAi(mailboxId, aiEnabled),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["mailboxes"] }),
+  });
+}
+
+/** Aliases and forwarding for one mailbox. */
+export function useMailboxRouting(mailboxId: string | null): QueryLike<MailboxRoutingDto> {
+  return shape(
+    useQuery({
+      queryKey: ["mailbox-routing", mailboxId],
+      queryFn: () => fetchMailboxRouting(mailboxId as string),
+      enabled: Boolean(mailboxId),
+      ...LIVE,
+    })
+  );
+}
+
+function useRoutingMutation<T>(fn: (input: T) => Promise<void>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["mailbox-routing"] }),
+  });
+}
+
+export function useCreateAlias() {
+  return useRoutingMutation((input: { mailboxId: string; address: string }) =>
+    createAlias(input.mailboxId, input.address)
+  );
+}
+
+export function useDeleteAlias() {
+  return useRoutingMutation((input: { mailboxId: string; aliasId: string }) =>
+    deleteAlias(input.mailboxId, input.aliasId)
+  );
+}
+
+export function useCreateForwarding() {
+  return useRoutingMutation(
+    (input: { mailboxId: string; forwardToAddress: string; keepCopy: boolean }) =>
+      createForwarding(input.mailboxId, {
+        forwardToAddress: input.forwardToAddress,
+        keepCopy: input.keepCopy,
+      })
+  );
+}
+
+export function useDeleteForwarding() {
+  return useRoutingMutation((input: { mailboxId: string; ruleId: string }) =>
+    deleteForwarding(input.mailboxId, input.ruleId)
+  );
+}
+
 export function useDomains(): QueryLike<DomainDto[]> {
   return shape(useQuery({ queryKey: ["domains"], queryFn: fetchDomains, ...LIVE }));
 }
 
-/** No Group model exists server-side; the screen shows its error state. */
+/** Shared mailboxes and distribution addresses. */
 export function useGroups(): QueryLike<GroupDto[]> {
+  return shape(useQuery({ queryKey: ["groups"], queryFn: fetchGroups, ...LIVE }));
+}
+
+/** Who is assigned to one shared mailbox, and with which permissions. */
+export function useGroupAssignees(mailboxId: string | null): QueryLike<GroupAssigneeDto[]> {
   return shape(
-    useQuery({ queryKey: ["groups"], queryFn: fetchGroups, retry: false, ...LIVE })
+    useQuery({
+      queryKey: ["group-assignees", mailboxId],
+      queryFn: () => fetchGroupAssignees(mailboxId as string),
+      enabled: Boolean(mailboxId),
+      ...LIVE,
+    })
+  );
+}
+
+/** Invalidates both the roster and the group list, whose counts move with it. */
+function useGroupMutation<T>(fn: (input: T) => Promise<void>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["groups"] }),
+        qc.invalidateQueries({ queryKey: ["group-assignees"] }),
+      ]);
+    },
+  });
+}
+
+export function useCreateGroup() {
+  return useGroupMutation((input: { address: string; type: "SHARED" | "DISTRIBUTION" }) =>
+    createGroup(input)
+  );
+}
+
+export function useAssignToGroup() {
+  return useGroupMutation(
+    (input: {
+      mailboxId: string;
+      membershipId: string;
+      canRead?: boolean;
+      canSend?: boolean;
+      canManage?: boolean;
+      canAssign?: boolean;
+    }) => {
+      const { mailboxId, ...rest } = input;
+      return assignToGroup(mailboxId, rest);
+    }
+  );
+}
+
+export function useRemoveFromGroup() {
+  return useGroupMutation((input: { mailboxId: string; membershipId: string }) =>
+    removeFromGroup(input.mailboxId, input.membershipId)
   );
 }
 
@@ -224,74 +349,26 @@ export function useAdminNavCounts(): Partial<Record<string, number>> {
 /* ── dashboard ─────────────────────────────────────────────────────────── */
 
 /**
- * Composed from the individual reads rather than a single `GET /admin/dashboard`.
+ * One read — `GET /admin/dashboard` — with the old fan-out as its fallback.
  *
- * Deliberate: one aggregate endpoint becomes the slowest route in the app and
- * couples every tile to one response, so a single failing subsystem blanks the
- * whole page. Composing here means each underlying query fails on its own and
- * the rest of the dashboard still renders.
+ * The fan-out was there for a good reason: an aggregate that fails as a unit
+ * turns one broken subsystem into a blank page. That objection is answered on
+ * the server rather than by keeping seven calls: each section of the aggregate
+ * resolves independently and a failure comes back named in `degraded`, so the
+ * page still renders everything that worked.
+ *
+ * What the fan-out cost was real. It fetched every member, every mailbox,
+ * every domain and every connector row and then called `.length` on them.
+ * Those are now counts, done by the database.
  */
-export function useDashboard(): QueryLike<DashboardDto> {
-  const tenant = useQuery({ queryKey: ["tenant"], queryFn: fetchTenant, ...LIVE });
-  const members = useMembers();
-  const mailboxes = useMailboxes();
-  const domains = useDomains();
-  const connectors = useConnectors();
-  const audit = useAuditEvents();
-
-  const parts = [tenant, members, mailboxes, domains, connectors, audit];
-  const isLoading = parts.some((p) => p.isLoading);
-  const error = (parts.find((p) => p.error)?.error as Error) ?? null;
-
-  if (isLoading || !tenant.data || !members.data) {
-    return { data: undefined, isLoading, error };
-  }
-
-  const people = members.data;
-  const boxes = mailboxes.data ?? [];
-  const doms = domains.data ?? [];
-  const conns = connectors.data ?? [];
-
-  return {
-    data: {
-      tenant: {
-        name: tenant.data.name,
-        planCode: tenant.data.planCode,
-        // Region is not modelled on the tenant; show the timezone, which is.
-        region: tenant.data.timezone ?? "—",
-        status: tenant.data.status.toLowerCase(),
-      },
-      counts: {
-        // Every membership except REMOVED, which is what the API returns.
-        people: people.length,
-        pendingInvitations: people.filter((m) => m.status === "INVITED").length,
-        mailboxes: boxes.length,
-        // Seat entitlement lives with billing, which is the Owner's domain and
-        // has no endpoint. Falls back to the mailbox count so the meter reads
-        // full rather than implying headroom that may not exist.
-        mailboxSeats: boxes.length,
-        connectedAccounts: conns.length,
-        connectedGmail: conns.filter((c) => c.name === "Gmail").length,
-        connectedMicrosoft: conns.filter((c) => c.name === "Microsoft 365").length,
-        domainsVerified: doms.filter((d) => d.verificationStatus === "VERIFIED").length,
-        domainsTotal: doms.length,
-        // MFA (AC-002) does not exist. Reporting zero coverage is accurate:
-        // nobody has a second factor, because the feature is unbuilt. The
-        // dashboard's warning then states something true.
-        mfaCovered: 0,
-        mfaTotal: people.filter((m) => m.status === "ACTIVE").length,
-        // Suspended mailboxes are the closest real signal to failed sending
-        // until the delivery-events read is wired.
-        failedSends24h: boxes.filter((m) => m.status === "SUSPENDED").length,
-        storageUsedGb: boxes.reduce((sum, m) => sum + m.storageUsedGb, 0),
-        storageLimitGb: boxes.reduce((sum, m) => sum + m.storageLimitGb, 0),
-      },
-      recentAudit: (audit.data ?? []).slice(0, 6),
-      providerSync: conns.slice(0, 6),
-    },
-    isLoading: false,
-    error,
-  };
+export function useDashboard(windowHours = 24): QueryLike<DashboardDto> {
+  return shape(
+    useQuery({
+      queryKey: ["admin-dashboard", windowHours],
+      queryFn: () => fetchDashboard(windowHours),
+      ...LIVE,
+    })
+  );
 }
 
 /**

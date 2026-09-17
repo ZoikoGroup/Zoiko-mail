@@ -1,8 +1,20 @@
 name: CI
 
-# Lives at the repository root because GitHub Actions only reads
-# .github/workflows from the root. The previous copies under Backend/.github and
-# Frontend/.github were never executed.
+# NOT RUNNING. GitHub Actions only reads .github/workflows from the repository
+# root, and this file is not there — it sits under Backend/ to keep the root to
+# Backend and Frontend only, which is a deliberate project constraint.
+#
+# Nothing in this pipeline executes against a commit while it lives here. It
+# was briefly at the root and green; it was moved back on request. To turn CI
+# back on, from the repository root:
+#
+#     mkdir -p .github/workflows
+#     git mv Backend/.github/workflows/ci.yml       .github/workflows/ci.yml
+#     git mv Backend/.github/workflows/security.yml .github/workflows/security.yml
+#
+# Until then every gate below — 326 backend tests, both type checks, lint,
+# the OpenAPI contract lint, migration drift, the container build — runs only
+# when a developer remembers to run it locally.
 
 on:
   push:
@@ -161,8 +173,14 @@ jobs:
           cache: npm
           cache-dependency-path: Frontend/package-lock.json
       - run: npm ci
-      - run: npm run lint
-      - run: npm run build
+      - name: Lint
+        run: npm run lint
+      # The superseded Frontend/.github copy ran this and the root copy did
+      # not, so the frontend type check was the one gate nobody was running.
+      - name: Type check
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
 
   # ── Container build — Infrastructure §13 "Artifact" stage ──────────────
   # Proves the runtime image boots. The publish job below pushes and signs it.

@@ -1,4 +1,5 @@
 import { prisma } from "../../config/prisma.js";
+import { participantService } from "../participant/participant.service.js";
 import { env } from "../../config/env.js";
 import { auditService } from "../audit/audit.service.js";
 import { normalizeSubject, uniqueParticipants } from "../message/message.utils.js";
@@ -162,6 +163,33 @@ export class ProviderMailService {
             },
           },
         });
+        // Inbound mail names its participants too — §6.7 is about every
+        // address the workspace has seen, not only the ones it wrote to.
+        const canonicalParticipants = await participantService.recordThreadParticipation(
+          {
+            tenantId: mapping.tenantId,
+            threadId: thread.id,
+            messageId: message.id,
+            addresses: [
+              ...item.from.map((value) => ({
+                email: value.address,
+                displayName: value.name ?? null,
+                role: "SENDER" as const,
+              })),
+              ...recipients.map((value) => ({
+                email: value.address,
+                displayName: value.name ?? null,
+                role: value.type === "CC" ? ("CC" as const) : ("RECIPIENT" as const),
+              })),
+            ],
+          },
+          tx
+        );
+        await tx.messageThread.update({
+          where: { id: thread.id, tenantId: mapping.tenantId },
+          data: { participants: canonicalParticipants },
+        });
+
         await auditService.record({
           tenantId: mapping.tenantId,
           actorUserId: mapping.userId,

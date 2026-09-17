@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   authenticate,
+  idempotency,
   requireCapability,
   requireRole,
   tenantContext,
@@ -10,7 +11,7 @@ import * as controller from "./billing.controller.js";
 import { checkoutSchema } from "./billing.schema.js";
 
 const billingRouter = Router();
-billingRouter.use(authenticate, tenantContext);
+billingRouter.use(authenticate, tenantContext, idempotency);
 
 // Plans and read-only subscription state — any OWNER/ADMIN may view.
 billingRouter.get("/plans", requireRole("OWNER", "ADMIN"), controller.listPlans);

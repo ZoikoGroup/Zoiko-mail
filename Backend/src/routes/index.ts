@@ -21,16 +21,23 @@ import { billingRouter } from "../modules/billing/billing.routes.js";
 import { contactRouter } from "../modules/contact/contact.routes.js";
 import { authenticate } from "../common/middleware/authenticate.js";
 import { tenantContext } from "../common/middleware/tenantContext.js";
+import { dashboardRouter } from "../modules/dashboard/dashboard.routes.js";
+import { participantRouter } from "../modules/participant/participant.routes.js";
 
 const apiRouter = Router();
 
 apiRouter.use("/auth", authRouter);
+// Admin-console aggregates. Mounted at /admin so the console's own reads are
+// grouped, rather than hanging a dashboard off /tenants alongside the tenant
+// resource itself.
+apiRouter.use("/admin", dashboardRouter);
 apiRouter.use("/membership", membershipRouter);
 apiRouter.use("/users", userRouter);
 apiRouter.use("/tenants", tenantRouter);
 apiRouter.use("/audit", auditRouter);
 apiRouter.use("/policies", policyRouter);
 apiRouter.use("/mail", mailRouter);
+apiRouter.use("/participants", participantRouter);
 apiRouter.use("/messages", messageRouter);
 apiRouter.use("/threads", threadRouter);
 apiRouter.use("/domains", domainRouter);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
-import { authHeader, registerUser, type RegisteredUser } from "./helpers.js";
+import { authHeader, registerUser, type RegisteredUser, loginUser, platformSignIn } from "./helpers.js";
 import { prisma } from "../src/config/prisma.js";
 
 const app = createApp();
@@ -16,10 +16,8 @@ async function addSupportMember(owner: RegisteredUser, email: string) {
 }
 
 async function supportAccessToken(support: RegisteredUser, tenantId: string): Promise<string> {
-  const login = await request(app).post("/api/v1/auth/login")
-    .send({ email: support.email, password: support.password, tenantId })
-    .expect(200);
-  return login.body.data.session?.accessToken ?? login.body.data.accessToken;
+  const login = await loginUser(app, support.email, support.password, tenantId);
+  return login.accessToken as string;
 }
 
 async function setupSupport(owner: RegisteredUser, email: string) {
@@ -39,11 +37,9 @@ async function setupSupport(owner: RegisteredUser, email: string) {
 async function staffPlatformToken(email: string): Promise<string> {
   const staff = await registerUser(app, { email });
   await prisma.appUser.update({ where: { id: staff.userId }, data: { platformRole: "SUPER_ADMIN" } });
-  const login = await request(app).post("/api/v1/auth/login")
-    .send({ email: staff.email, password: staff.password })
-    .expect(200);
-  expect(login.body.data.state).toBe("STAFF_CONSOLE");
-  const platformToken = login.body.data.platformToken as string;
+  // A staff sign-in passes the same MFA gate as an Owner (AC-002), so this
+  // answers the challenge before any console token exists.
+  const platformToken = await platformSignIn(app, staff.email, staff.password, staff.mfaSecret);
   expect(platformToken).toBeTruthy();
   return platformToken;
 }
@@ -71,11 +67,12 @@ describe("Platform support console", () => {
     const staff = await registerUser(app, { email: "pc-staff@zoiko.test" });
     await prisma.appUser.update({ where: { id: staff.userId }, data: { platformRole: "SUPER_ADMIN" } });
 
-    const login = await request(app).post("/api/v1/auth/login")
-      .send({ email: staff.email, password: staff.password })
-      .expect(200);
-    expect(login.body.data.state).toBe("STAFF_CONSOLE");
-    const platformToken = login.body.data.platformToken as string;
+    const platformToken = await platformSignIn(
+      app,
+      staff.email,
+      staff.password,
+      staff.mfaSecret
+    );
     expect(platformToken).toBeTruthy();
 
     const res = await request(app).get("/api/v1/support/platform/overview").set(authHeader(platformToken)).expect(200);
@@ -212,10 +209,12 @@ describe("Platform support console", () => {
 
     const staff = await registerUser(app, { email: "pc-staff-support@zoiko.test" });
     await prisma.appUser.update({ where: { id: staff.userId }, data: { platformRole: "SUPPORT" } });
-    const login = await request(app).post("/api/v1/auth/login")
-      .send({ email: staff.email, password: staff.password }).expect(200);
-    expect(login.body.data.state).toBe("STAFF_CONSOLE");
-    const platformToken = login.body.data.platformToken as string;
+    const platformToken = await platformSignIn(
+      app,
+      staff.email,
+      staff.password,
+      staff.mfaSecret
+    );
     expect(platformToken).toBeTruthy();
 
     // A staff SUPPORT session has no tenant membershipId, so it can never match

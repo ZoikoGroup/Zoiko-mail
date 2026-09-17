@@ -87,26 +87,67 @@ export interface ConnectorDto {
   status: "ACTIVE" | "REAUTH_REQUIRED" | "IDLE";
 }
 
+/** Failure counts behind the dashboard's failed-sends tile. */
+export interface DeliveryFailureSummaryDto {
+  windowHours: number;
+  failed: number;
+  /** Per-type breakdown, so the tile can say what kind of failure it saw. */
+  byType: Record<string, number>;
+}
+
 export interface DashboardDto {
-  tenant: { name: string; planCode: string; region: string; status: string };
+  /**
+   * `timezone`, not `region`. The tenant has no region column — Data Model
+   * §6.1 specifies `primary_region` and the schema does not implement it — so
+   * the subtitle used to print the timezone under the word "region". Naming
+   * the field for what it holds is what stops that recurring.
+   */
+  tenant: { name: string; planCode: string; timezone: string; status: string };
   counts: {
     people: number;
     pendingInvitations: number;
     mailboxes: number;
-    mailboxSeats: number;
+    suspendedMailboxes: number;
     connectedAccounts: number;
     connectedGmail: number;
     connectedMicrosoft: number;
     domainsVerified: number;
     domainsTotal: number;
-    mfaCovered: number;
-    mfaTotal: number;
-    failedSends24h: number;
     storageUsedGb: number;
     storageLimitGb: number;
   };
+  /**
+   * MFA state, reported rather than inferred.
+   *
+   * Counted two ways, because they answer different questions. `covered` of
+   * `total` is how much of the workspace holds a second factor; `requiredCovered`
+   * of `requiredTotal` is the only one that means compliance, since AC-002
+   * compels Owners, Admins and Support and leaves members free to decline.
+   * A workspace can be fully compliant with most of its people unenrolled,
+   * and warning on the wider number tells an Admin to chase a problem that
+   * does not exist.
+   *
+   * `supported: false` is now only produced by the fallback path, which
+   * composes the dashboard from individual reads and has no way to count.
+   */
+  mfa: {
+    supported: boolean;
+    covered: number;
+    total: number;
+    requiredCovered: number;
+    requiredTotal: number;
+  };
+  /** Null while the read is in flight or refused; the tile then shows "—". */
+  deliveryFailures: DeliveryFailureSummaryDto | null;
   recentAudit: AuditEventDto[];
   providerSync: ConnectorDto[];
+  /**
+   * Sections the server could not read. Empty on a healthy response. Present
+   * so the page can name what is missing instead of showing a confident zero.
+   */
+  degraded: string[];
+  /** True when the audit tail was withheld for lack of `audit.read`. */
+  auditWithheld: boolean;
 }
 
 export interface SupportGrantDto {

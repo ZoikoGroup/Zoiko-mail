@@ -5,7 +5,7 @@ import Link from "next/link";
 import { MessagesSquare, Search } from "lucide-react";
 import {AppShell} from "@/components/shell/AppShell";
 import { useThreads } from "@/lib/mail-hooks";
-import type { MessageThread } from "@/lib/mail-api";
+import type { ThreadSummary } from "@/lib/mail-api";
 
 const PAGE_SIZE = 25;
 
@@ -120,11 +120,13 @@ export default function ThreadsPage() {
 
 // ---- Row -------------------------------------------------------------------
 
-function ThreadRow({ thread }: { thread: MessageThread }) {
+function ThreadRow({ thread }: { thread: ThreadSummary }) {
   // Backend returns the most recent message as messages[0] in list mode.
   const latest = thread.messages[0];
-  const preview =
-    latest?.textBody?.slice(0, 140) ?? latest?.subject ?? "(no preview available)";
+  // The server cuts the preview now. This used to receive the whole message
+  // body and slice 140 characters off it here, which meant every row on the
+  // screen shipped a complete email to render one line of it.
+  const preview = latest?.snippet ?? latest?.subject ?? "(no preview available)";
   const author = latest?.author?.displayName ?? latest?.fromName ?? "Unknown sender";
 
   return (

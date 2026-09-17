@@ -430,12 +430,16 @@ export class SupportService {
       tenantId: m.tenant.id,
       tenantName: m.tenant.name,
       tenantStatus: m.tenant.status,
-      memberName: m.membership.user.displayName,
-      memberEmail: m.membership.user.email,
+      // Null for a shared mailbox, which belongs to the workspace rather than
+      // to a person. Support sees that as "no single owner" rather than a
+      // blank name, which would read as missing data.
+      memberName: m.membership?.user.displayName ?? null,
+      memberEmail: m.membership?.user.email ?? null,
+      mailboxType: m.type,
       suspended: m.sendSuspendedAt !== null,
       suspensionReason: m.sendSuspensionReason,
       createdAt: m.createdAt,
-      connectedAccounts: m.membership.connectedAccounts,
+      connectedAccounts: m.membership?.connectedAccounts ?? [],
     }));
   }
 
@@ -679,8 +683,13 @@ export class SupportService {
         orderBy: { updatedAt: "desc" },
         take: 20,
       }),
+      // A shared mailbox has no owning membership and so no connected
+      // accounts; `none` keeps the query valid and returns an empty list
+      // rather than silently matching every account in the tenant.
       prisma.providerEvent.findMany({
-        where: { tenantId, connectedAccount: { membershipId: mailbox.membershipId } },
+        where: mailbox.membershipId
+          ? { tenantId, connectedAccount: { membershipId: mailbox.membershipId } }
+          : { tenantId, id: { in: [] } },
         include: { connectedAccount: { select: { email: true, provider: true } } },
         orderBy: { receivedAt: "desc" },
         take: 20,
@@ -719,8 +728,9 @@ export class SupportService {
         sendSuspensionReason: mailbox.sendSuspensionReason,
         createdAt: mailbox.createdAt,
         updatedAt: mailbox.updatedAt,
-        member: mailbox.membership.user,
-        connectedAccounts: mailbox.membership.connectedAccounts,
+        type: mailbox.type,
+        member: mailbox.membership?.user ?? null,
+        connectedAccounts: mailbox.membership?.connectedAccounts ?? [],
       },
       syncJobs: syncJobs.map((j) => ({ id: j.id, type: j.type, status: j.status, attempts: j.attempts, maxAttempts: j.maxAttempts, lastError: j.lastError, runAt: j.runAt, createdAt: j.createdAt, updatedAt: j.updatedAt, resource: jobResource(j.payload) })),
       providerEvents: providerEvents.map((e) => ({ id: e.id, providerEventId: e.providerEventId, provider: e.connectedAccount.provider, accountEmail: e.connectedAccount.email, eventType: e.eventType, processingStatus: e.processingStatus, errorCode: e.errorCode, attempts: e.attempts, receivedAt: e.receivedAt })),

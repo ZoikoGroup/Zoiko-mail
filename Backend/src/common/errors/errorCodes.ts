@@ -33,6 +33,11 @@ export const ErrorCodes = {
   MEMBERSHIP_SUSPENDED: "MEMBERSHIP_SUSPENDED",
   TENANT_SUSPENDED: "TENANT_SUSPENDED",
   WORKSPACE_ACCESS_DENIED: "WORKSPACE_ACCESS_DENIED",
+  // API §7. Distinct codes because the three failures need three different
+  // client behaviours: send a key, stop reusing this one, or wait and re-read.
+  IDEMPOTENCY_KEY_REQUIRED: "IDEMPOTENCY_KEY_REQUIRED",
+  IDEMPOTENCY_PAYLOAD_MISMATCH: "IDEMPOTENCY_PAYLOAD_MISMATCH",
+  IDEMPOTENCY_REQUEST_IN_PROGRESS: "IDEMPOTENCY_REQUEST_IN_PROGRESS",
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];

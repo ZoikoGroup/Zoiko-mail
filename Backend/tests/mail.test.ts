@@ -82,10 +82,17 @@ describe("Mail module", () => {
       .set(authHeader(owner.accessToken))
       .expect(200);
 
+    // The internal recipient really did receive it, so the message is SENT.
     expect(sent.body.data.status).toBe("SENT");
+    // The external one is FAILED rather than QUEUED, and that is the point of
+    // the change: this environment has no outbound provider configured, so
+    // nothing will ever carry that address. QUEUED claimed the message was
+    // still in flight, which was how external mail silently disappeared while
+    // reporting success. With a provider configured the same send takes the
+    // SENDING path and the external recipient is genuinely QUEUED.
     expect(sent.body.data.recipients).toEqual(expect.arrayContaining([
       expect.objectContaining({ email: member.email, deliveryStatus: "DELIVERED" }),
-      expect.objectContaining({ email: "outside@example.com", deliveryStatus: "QUEUED" }),
+      expect.objectContaining({ email: "outside@example.com", deliveryStatus: "FAILED" }),
     ]));
     const deliveryEvents = await request(app)
       .get(`/api/v1/mail/${draft.body.data.id}/delivery-events`)

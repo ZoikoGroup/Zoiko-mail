@@ -46,6 +46,13 @@ model Tenant {
   subscriptions       Subscription[]
   invoices            Invoice[]
   contacts            Contact[]
+  mailboxAccess       MailboxAccess[]
+  aliases             Alias[]
+  forwardingRules     ForwardingRule[]
+  idempotencyRecords  IdempotencyRecord[]
+  participants        Participant[]
+  threadParticipants  ThreadParticipant[]
+
   @@map("tenants")
 }
 
@@ -54,6 +61,14 @@ model AppUser {
   email                   String                 @unique
   googleId                String?                @unique @map("google_id")
   passwordHash            String?                @map("password_hash")
+  /// AES-256-GCM ciphertext, not a hash: whoever can read a TOTP secret
+  /// can mint valid codes forever, so it is closer to a plaintext password
+  /// than to the hash beside it (AC-002).
+  mfaSecret               String?                @map("mfa_secret")
+  mfaEnrolledAt           DateTime?              @map("mfa_enrolled_at")
+  /// The last time-step spent, so one code cannot be replayed inside its
+  /// own window (RFC 6238 section 5.2).
+  mfaLastUsedStep         Int?                   @map("mfa_last_used_step")
   displayName             String                 @map("display_name")
   avatarUrl               String?                @map("avatar_url")
   phoneNumber             String?                @map("phone_number")
@@ -91,6 +106,10 @@ model AppUser {
   connectedAccounts       ConnectedAccount[]
   identities              UserIdentity[]
   usedSelectionTokens     UsedSelectionToken[]
+  mailboxAccessGrants     MailboxAccess[]        @relation("MailboxAccessGrantor")
+  idempotencyRecords      IdempotencyRecord[]    @relation("IdempotencyActor")
+  mfaRecoveryCodes        MfaRecoveryCode[]
+  participantIdentities   Participant[]          @relation("ParticipantIdentity")
   @@map("app_users")
 }
 
@@ -160,6 +179,7 @@ model TenantMembership {
   tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user                AppUser              @relation(fields: [userId], references: [id], onDelete: Cascade)
   mailbox             Mailbox?
+  mailboxAccess       MailboxAccess[]
   receivedMessages    MessageRecipient[]
   supportAccessGrants SupportAccessGrant[]
   connectedAccounts   ConnectedAccount[]
@@ -230,7 +250,13 @@ model TenantPolicy {
 model Mailbox {
   id                   String           @id @default(uuid()) @db.Uuid
   tenantId             String           @map("tenant_id") @db.Uuid
-  membershipId         String           @unique @map("membership_id") @db.Uuid
+  /// Null for a shared or distribution mailbox, which belongs to the
+  /// workspace rather than to one person. Still unique when present, so a
+  /// member has at most one personal mailbox. Requiring it was what made
+  /// shared mailboxes unrepresentable (Security §10).
+  membershipId         String?          @unique @map("membership_id") @db.Uuid
+  /// Data Model §6.16 mailbox_type.
+  type                 MailboxType      @default(USER)
   address              String
   storageUsed          BigInt           @default(0) @map("storage_used")
   storageLimit         BigInt           @default(1073741824) @map("storage_limit")
@@ -247,12 +273,26 @@ model Mailbox {
   complaintCount       Int              @default(0) @map("complaint_count")
   customWarmupCap      Int?             @map("custom_warmup_cap")
   signature            String?          @map("signature")
+  /// Whether AI may process this mailbox's content — Data Model §6.16,
+  /// Security §9 and AC-008. A mailbox with this off is what the security
+  /// spec calls a restricted mailbox: AI is excluded from it until an
+  /// Owner or Admin explicitly turns it back on, and that change is audited.
+  ///
+  /// Defaults true because AI eligibility was previously hardcoded true for
+  /// every mailbox. Defaulting false would have silently switched AI off for
+  /// every existing workspace on migration, which is a product change wearing
+  /// a schema change's clothes.
+  aiEnabled            Boolean          @default(true) @map("ai_enabled")
   createdAt            DateTime         @default(now()) @map("created_at")
   updatedAt            DateTime         @updatedAt @map("updated_at")
   tenant               Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  membership           TenantMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  membership           TenantMembership? @relation(fields: [membershipId], references: [id], onDelete: Cascade)
   items                MailboxMessage[]
   labels               MailLabel[]
+  access               MailboxAccess[]
+  aliases              Alias[]
+  forwardingRules      ForwardingRule[]
+  sentAsMessages       EmailMessage[]   @relation("SentAsMailbox")
 
   @@unique([tenantId, address])
   @@index([tenantId, membershipId])
@@ -282,11 +322,17 @@ model EmailMessage {
   providerUid       String?             @map("provider_uid")
   fromAddress       String?             @map("from_address")
   fromName          String?             @map("from_name")
+  /// The shared mailbox this was sent as, when it was not sent as the
+  /// author's own — Security §10: "All shared mailbox sends must capture
+  /// actor_user_id and mailbox_id". `authorUserId` is the actor; this is the
+  /// mailbox. Null means an ordinary personal send.
+  sentAsMailboxId   String?             @map("sent_as_mailbox_id") @db.Uuid
   createdAt         DateTime            @default(now()) @map("created_at")
   updatedAt         DateTime            @updatedAt @map("updated_at")
   tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   author            AppUser             @relation("MessageAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
   thread            MessageThread?      @relation(fields: [threadId], references: [id], onDelete: SetNull)
+  sentAsMailbox     Mailbox?            @relation("SentAsMailbox", fields: [sentAsMailboxId], references: [id], onDelete: SetNull)
   recipients        MessageRecipient[]
   mailboxItems      MailboxMessage[]
   attachments       MessageAttachment[]
@@ -299,9 +345,82 @@ model EmailMessage {
 
   @@index([tenantId, authorUserId, createdAt])
   @@index([tenantId, threadId, createdAt])
+  @@index([sentAsMailboxId])
   @@unique([tenantId, providerType, providerMessageId])
   @@unique([tenantId, sourceAiActionId])
   @@map("email_messages")
+}
+
+/**
+ * A person or address, normalized once per workspace — Data Model §6.7.
+ *
+ * "Normalizes a person or email identity inside a tenant so commitments can
+ * be owed by and owed to stable entities across messages and threads." Before
+ * this, a participant was a string in a JSON array on the thread: you could
+ * not ask what else an address had been involved in, and a commitment could
+ * only be owned by an internal user, so an obligation owed *to* a customer
+ * had nowhere to point.
+ *
+ * `canonicalEmail` is citext, so `Alex@example.com` and `alex@example.com`
+ * are the same participant at the database rather than only when the
+ * application remembers to lowercase. The uniqueness the specification asks
+ * for is partial — one *active* participant per address — and Prisma cannot
+ * express a partial index, so it lives in the migration and deliberately not
+ * here; declaring it would report as permanent drift.
+ */
+model Participant {
+  id               String             @id @default(uuid()) @db.Uuid
+  tenantId         String             @map("tenant_id") @db.Uuid
+  canonicalEmail   String             @map("canonical_email") @db.Citext
+  displayName      String?            @map("display_name")
+  participantType  ParticipantType    @default(UNKNOWN) @map("participant_type")
+  /// Set when the address belongs to a member of this workspace.
+  linkedUserId     String?            @map("linked_user_id") @db.Uuid
+  organizationName String?            @map("organization_name")
+  firstSeenAt      DateTime           @default(now()) @map("first_seen_at")
+  lastSeenAt       DateTime           @default(now()) @map("last_seen_at")
+  /// The row this one was folded into, when two turned out to be one person.
+  mergeParentId    String?            @map("merge_parent_id") @db.Uuid
+  status           ParticipantStatus  @default(ACTIVE)
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+  tenant           Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  linkedUser       AppUser?           @relation("ParticipantIdentity", fields: [linkedUserId], references: [id], onDelete: SetNull)
+  mergeParent      Participant?       @relation("ParticipantMerge", fields: [mergeParentId], references: [id], onDelete: SetNull)
+  mergedFrom       Participant[]      @relation("ParticipantMerge")
+  threadLinks      ThreadParticipant[]
+  owedCommitments  Commitment[]       @relation("CommitmentOwedBy")
+  awaitedCommitments Commitment[]     @relation("CommitmentOwedTo")
+
+  @@index([tenantId, lastSeenAt(sort: Desc)])
+  @@index([tenantId, linkedUserId])
+  @@map("participants")
+}
+
+/**
+ * What a participant did in a thread — Data Model §6.8.
+ *
+ * Roles accumulate rather than replace: somebody who sent the first message
+ * and was copied on the third is both, and a timeline that forgot the first
+ * would misattribute the conversation.
+ */
+model ThreadParticipant {
+  id             String                  @id @default(uuid()) @db.Uuid
+  tenantId       String                  @map("tenant_id") @db.Uuid
+  threadId       String                  @map("thread_id") @db.Uuid
+  participantId  String                  @map("participant_id") @db.Uuid
+  roles          ThreadParticipantRole[]
+  firstMessageId String?                 @map("first_message_id") @db.Uuid
+  lastMessageId  String?                 @map("last_message_id") @db.Uuid
+  createdAt      DateTime                @default(now()) @map("created_at")
+  updatedAt      DateTime                @updatedAt @map("updated_at")
+  tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  thread         MessageThread           @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  participant    Participant             @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, threadId, participantId])
+  @@index([tenantId, participantId, updatedAt(sort: Desc)])
+  @@map("thread_participants")
 }
 
 model MessageThread {
@@ -316,6 +435,7 @@ model MessageThread {
   updatedAt         DateTime       @updatedAt @map("updated_at")
   tenant            Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   messages          EmailMessage[]
+  participantLinks  ThreadParticipant[]
 
   @@index([tenantId, lastMessageAt])
   @@map("message_threads")
@@ -336,6 +456,94 @@ model MessageRecipient {
   @@unique([messageId, email, type])
   @@index([tenantId, email])
   @@map("message_recipients")
+}
+
+/**
+ * Who may act in a shared mailbox, and how — Security §10 and §9.1.
+ *
+ * "Users must be assigned to a shared mailbox before access", and "read,
+ * send, manage and assign permissions must be separable", so they are four
+ * columns rather than one role. A personal mailbox needs no row here: its
+ * owner is Mailbox.membershipId.
+ */
+model MailboxAccess {
+  id              String           @id @default(uuid()) @db.Uuid
+  tenantId        String           @map("tenant_id") @db.Uuid
+  mailboxId       String           @map("mailbox_id") @db.Uuid
+  membershipId    String           @map("membership_id") @db.Uuid
+  canRead         Boolean          @default(true) @map("can_read")
+  canSend         Boolean          @default(false) @map("can_send")
+  canManage       Boolean          @default(false) @map("can_manage")
+  canAssign       Boolean          @default(false) @map("can_assign")
+  grantedByUserId String           @map("granted_by_user_id") @db.Uuid
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  mailbox         Mailbox          @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  membership      TenantMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  grantedBy       AppUser          @relation("MailboxAccessGrantor", fields: [grantedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([mailboxId, membershipId])
+  @@index([tenantId, membershipId])
+  @@map("mailbox_access")
+}
+
+/**
+ * An extra address that routes to a mailbox — Data Model §6.17.
+ *
+ * §6.17 specifies `unique(lower(alias_address)) where status = active`, a
+ * partial unique index, which the Prisma schema language cannot express;
+ * writing it in raw SQL alone would show up forever as schema drift and fail
+ * the migrate-diff gate in CI. So the status enum drops `deleted` and removal
+ * deletes the row: a plain unique on the address then gives exactly the
+ * routing guarantee §6.17 is after, and a suspended alias still holds its
+ * address, which is the point of suspending it. The audit log keeps the
+ * history the soft-delete row would have.
+ *
+ * Unique globally rather than per tenant, matching §6.17 and the domain rule
+ * beside it: an address has to route somewhere unambiguous.
+ */
+model Alias {
+  id        String      @id @default(uuid()) @db.Uuid
+  tenantId  String      @map("tenant_id") @db.Uuid
+  mailboxId String      @map("mailbox_id") @db.Uuid
+  address   String      @unique
+  status    AliasStatus @default(ACTIVE)
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+  tenant    Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  mailbox   Mailbox     @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, mailboxId, status])
+  @@map("aliases")
+}
+
+/**
+ * Where a mailbox's incoming mail is copied or redirected — Data Model §6.18.
+ *
+ * Same reasoning as Alias on the missing `deleted` status. Uniqueness is per
+ * mailbox and destination so the same address cannot be added twice, which is
+ * §6.18's ux_forwarding_unique_active.
+ *
+ * Creating one is audited because Security §9 requires it: forwarding is how
+ * mail quietly leaves an organisation, so the record of who set it up matters
+ * more than for most settings.
+ */
+model ForwardingRule {
+  id               String      @id @default(uuid()) @db.Uuid
+  tenantId         String      @map("tenant_id") @db.Uuid
+  mailboxId        String      @map("mailbox_id") @db.Uuid
+  forwardToAddress String      @map("forward_to_address")
+  keepCopy         Boolean     @default(true) @map("keep_copy")
+  status           AliasStatus @default(ACTIVE)
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+  tenant           Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  mailbox          Mailbox     @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+
+  @@unique([mailboxId, forwardToAddress])
+  @@index([tenantId, mailboxId, status])
+  @@map("forwarding_rules")
 }
 
 model MailboxMessage {
@@ -514,6 +722,12 @@ model Commitment {
   threadId        String?          @map("thread_id") @db.Uuid
   ownerUserId     String           @map("owner_user_id") @db.Uuid
   createdByUserId String           @map("created_by_user_id") @db.Uuid
+  /// Who owes the action, and who is waiting for it (§6.10). Either may be
+  /// somebody outside the workspace, which is why they are participants
+  /// rather than users — an obligation owed to a customer had nowhere to
+  /// point before.
+  owedByParticipantId String?      @map("owed_by_participant_id") @db.Uuid
+  owedToParticipantId String?      @map("owed_to_participant_id") @db.Uuid
   text            String
   dueAt           DateTime?        @map("due_at")
   priority        ActionPriority   @default(MEDIUM)
@@ -521,15 +735,19 @@ model Commitment {
   snoozedUntil    DateTime?        @map("snoozed_until")
   createdAt       DateTime         @default(now()) @map("created_at")
   updatedAt       DateTime         @updatedAt @map("updated_at")
-  // Track the AIAction that produced this commitment so a confirmed extraction
-  // is never duplicated and can be traced back to its source action (ZM-BE-008).
-  sourceAiActionId String?         @map("source_ai_action_id") @db.Uuid
-  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  owner            AppUser          @relation("CommitmentOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
-  createdBy        AppUser          @relation("CommitmentCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  sourceAiAction   AIAction?        @relation(fields: [sourceAiActionId], references: [id], onDelete: SetNull)
+  /// Track the AIAction that produced this commitment so a confirmed extraction
+  /// is never duplicated and can be traced back to its source action (ZM-BE-008).
+  sourceAiActionId    String?      @map("source_ai_action_id") @db.Uuid
+  tenant              Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner               AppUser      @relation("CommitmentOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  createdBy           AppUser      @relation("CommitmentCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  owedBy              Participant? @relation("CommitmentOwedBy", fields: [owedByParticipantId], references: [id], onDelete: SetNull)
+  owedTo              Participant? @relation("CommitmentOwedTo", fields: [owedToParticipantId], references: [id], onDelete: SetNull)
+  sourceAiAction      AIAction?    @relation(fields: [sourceAiActionId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, ownerUserId, status, dueAt])
+  @@index([tenantId, owedByParticipantId])
+  @@index([tenantId, owedToParticipantId])
   @@map("commitments")
 }
 
@@ -666,24 +884,108 @@ model BackgroundJob {
   @@map("background_jobs")
 }
 
+/**
+ * Export and deletion workflows — Data Model §6.14, AC-012.
+ *
+ * The deletion half carries a service-level agreement: "customer data subject
+ * to deletion must be hard-deleted or irreversibly anonymized within 30 days
+ * unless legal/security retention exception applies". That makes three fields
+ * load-bearing and none of them existed — the request had no verification
+ * moment to count from, no deadline, and no way to record a legal hold. A
+ * workflow that cannot say when a deletion is late does not have an SLA.
+ *
+ * `hardDeleteDeadline` is derived by the server from `verifiedAt` and never
+ * accepted from a client, which is what §6.14's "scheduler enforces <= 30
+ * days" means in practice.
+ */
 model DataLifecycleRequest {
-  id                String          @id @default(uuid()) @db.Uuid
-  tenantId          String          @map("tenant_id") @db.Uuid
-  requestedByUserId String          @map("requested_by_user_id") @db.Uuid
-  type              LifecycleType
-  status            LifecycleStatus @default(REQUESTED)
-  reason            String?
-  jobId             String?         @unique @map("job_id") @db.Uuid
-  approvedAt        DateTime?       @map("approved_at")
-  completedAt       DateTime?       @map("completed_at")
-  createdAt         DateTime        @default(now()) @map("created_at")
-  updatedAt         DateTime        @updatedAt @map("updated_at")
-  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  requestedBy       AppUser         @relation("LifecycleRequester", fields: [requestedByUserId], references: [id], onDelete: Restrict)
-  job               BackgroundJob?  @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  id                 String               @id @default(uuid()) @db.Uuid
+  tenantId           String               @map("tenant_id") @db.Uuid
+  requestedByUserId  String               @map("requested_by_user_id") @db.Uuid
+  type               LifecycleType
+  status             LifecycleStatus      @default(REQUESTED)
+  /// What is being erased. Null on export requests, which target nothing.
+  targetType         LifecycleTargetType? @map("target_type")
+  /// The target id, where the target is narrower than the workspace.
+  targetId           String?              @map("target_id") @db.Uuid
+  reason             String?
+  jobId              String?              @unique @map("job_id") @db.Uuid
+  approvedAt         DateTime?            @map("approved_at")
+  /// When the request was verified. The SLA clock starts here (§6.14).
+  verifiedAt         DateTime?            @map("verified_at")
+  /// When execution is due. Never later than the deadline.
+  scheduledFor       DateTime?            @map("scheduled_for")
+  /// verifiedAt + 30 days, or null while a legal hold suspends the clock.
+  hardDeleteDeadline DateTime?            @map("hard_delete_deadline")
+  /// Legal, security, payment or fraud basis for retaining past the SLA.
+  blockReason        String?              @map("block_reason")
+  completedAt        DateTime?            @map("completed_at")
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @updatedAt @map("updated_at")
+  tenant             Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  requestedBy        AppUser              @relation("LifecycleRequester", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  job                BackgroundJob?       @relation(fields: [jobId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, type, status])
+  // §6.14's two indexes: the first is SLA monitoring, which sweeps by deadline
+  // across tenants; the second is the per-workspace queue view.
+  @@index([status, hardDeleteDeadline])
+  @@index([tenantId, status, createdAt(sort: Desc)])
   @@map("data_lifecycle_requests")
+}
+
+/**
+ * Single-use recovery codes for a lost authenticator — AC-002.
+ *
+ * Hashed the way a password is, because that is what they are: a bearer
+ * secret that grants a session. Enforcing MFA without a recovery path would
+ * turn a lost phone into a lost workspace, and the Security specification
+ * assumes one exists when it forbids support staff from bypassing MFA
+ * "without a security-admin approved exception".
+ */
+model MfaRecoveryCode {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  codeHash  String    @map("code_hash")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  user      AppUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, usedAt])
+  @@map("mfa_recovery_codes")
+}
+
+/**
+ * Replay protection for side-effecting requests — API §7.
+ *
+ * §7 requires an Idempotency-Key on every write, scoped to
+ * tenant + actor + endpoint family + key, held for 24 hours, replaying the
+ * original response for a repeat of the same payload and refusing a repeat
+ * that carries a different one.
+ *
+ * The scope is a composite unique index rather than the key alone, which is
+ * what makes §7's "idempotency records must never deduplicate across tenants"
+ * true by construction instead of by remembering to filter.
+ */
+model IdempotencyRecord {
+  id             String            @id @default(uuid()) @db.Uuid
+  tenantId       String            @map("tenant_id") @db.Uuid
+  actorUserId    String            @map("actor_user_id") @db.Uuid
+  endpointFamily String            @map("endpoint_family")
+  key            String
+  /** SHA-256 of the canonical request body, to detect a reused key. */
+  requestHash    String            @map("request_hash")
+  status         IdempotencyStatus @default(IN_PROGRESS)
+  responseStatus Int?              @map("response_status")
+  responseBody   Json?             @map("response_body")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  expiresAt      DateTime          @map("expires_at")
+  tenant         Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actor          AppUser           @relation("IdempotencyActor", fields: [actorUserId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, actorUserId, endpointFamily, key])
+  @@index([expiresAt])
+  @@map("idempotency_records")
 }
 
 model SupportAccessGrant {
@@ -795,6 +1097,26 @@ enum DeliveryStatus {
   DELIVERED
   QUEUED
   FAILED
+}
+
+/**
+ * Data Model §6.16 names user, shared, system and no_reply. DISTRIBUTION is
+ * added for a group address that fans out without storing mail of its own —
+ * the admin Groups screen distinguishes it, and PRD §11.3 lists basic group
+ * addresses.
+ */
+/** §6.17 and §6.18 name active, suspended and deleted; see the Alias note. */
+enum AliasStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum MailboxType {
+  USER
+  SHARED
+  DISTRIBUTION
+  SYSTEM
+  NO_REPLY
 }
 
 enum MailFolder {
@@ -953,11 +1275,68 @@ enum LifecycleType {
 
 enum LifecycleStatus {
   REQUESTED
+  /// Verified, which is when §6.14 starts the 30-day clock.
+  VERIFIED
   APPROVED
+  /// Retained past the SLA on a recorded legal or security basis.
+  BLOCKED
+  /// Verified and waiting for its execution time inside the window.
+  SCHEDULED
   PROCESSING
   COMPLETED
+  FAILED
   REJECTED
   CANCELLED
+}
+
+/// What a deletion request erases — §6.14's target_type. Only TENANT and USER
+/// execute today; the rest are declared because the SLA applies to each of
+/// them and a request has to be able to name its target. Asking for one that
+/// has no executor is refused at the API rather than accepted and never run.
+enum LifecycleTargetType {
+  TENANT
+  MAILBOX
+  CONNECTED_ACCOUNT
+  USER
+  AI_OUTPUTS
+  SYNCED_DATA
+}
+
+/// §6.7: internal_user, external_person, group_address, system, unknown.
+enum ParticipantType {
+  INTERNAL_USER
+  EXTERNAL_PERSON
+  /// A shared mailbox, distribution address or alias rather than a person.
+  GROUP_ADDRESS
+  /// no-reply, mailer-daemon and friends: nobody is behind the address.
+  SYSTEM
+  UNKNOWN
+}
+
+/// §6.7: active, merged, suppressed, deleted.
+enum ParticipantStatus {
+  ACTIVE
+  /// Folded into another row; `mergeParentId` names the survivor.
+  MERGED
+  SUPPRESSED
+  DELETED
+}
+
+/// §6.8: sender, recipient, cc, bcc, mentioned, inferred_owner.
+enum ThreadParticipantRole {
+  SENDER
+  RECIPIENT
+  CC
+  BCC
+  MENTIONED
+  INFERRED_OWNER
+}
+
+enum IdempotencyStatus {
+  /** Claimed by a request that has not answered yet. */
+  IN_PROGRESS
+  /** Answered; the stored response is what a replay returns. */
+  COMPLETED
 }
 
 enum SupportScope {

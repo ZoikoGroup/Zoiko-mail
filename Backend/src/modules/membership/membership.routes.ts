@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authenticate, requireCapability, tenantContext, validate } from "../../common/middleware/index.js";
+import { authenticate, idempotency, requireCapability, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./membership.controller.js";
 import { acceptInvitationSchema, addMemberSchema, createInvitationSchema, membershipIdParamsSchema, previewInvitationSchema, updateMemberSchema } from "./membership.schema.js";
 
@@ -15,7 +15,7 @@ membershipRouter.post(
 // Reading the roster is the floor for this router; each mutation then names
 // the capability it actually needs. Gating writes at the same level as reads
 // is what makes a role check feel like a permission model without being one.
-membershipRouter.use(authenticate, tenantContext, requireCapability("people.read"));
+membershipRouter.use(authenticate, tenantContext, requireCapability("people.read"), idempotency);
 
 membershipRouter.get("/members", controller.list);
 

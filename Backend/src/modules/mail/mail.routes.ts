@@ -1,20 +1,32 @@
 import { Router } from "express";
-import { authenticate, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
+import { authenticate, idempotency, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./mail.controller.js";
 import { attachmentUpload } from "./attachment.middleware.js";
-import { adminDeliveryEventsQuerySchema, adminUpdateMailboxSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema, updateSignatureSchema } from "./mail.schema.js";
+import { adminDeliveryEventsQuerySchema, adminDeliverySummaryQuerySchema,updateSignatureSchema, adminUpdateMailboxSchema, assignMailboxSchema, createSharedMailboxSchema, mailboxAssigneeParamsSchema, createAliasSchema, createForwardingSchema, aliasParamsSchema, forwardingParamsSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, mailboxScopeSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
 
 const mailRouter = Router();
-mailRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBER"));
+mailRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBER"), idempotency);
 // Admin literal paths MUST be registered before any /:messageId routes,
 // otherwise "/admin/delivery-events" is captured as messageId="admin".
+// The count goes before the feed: both are exact literals so Express would
+// match either way, but keeping the more specific path first is the habit that
+// stops the next nested route being swallowed.
+mailRouter.get(
+  "/admin/delivery-events/summary",
+  requireCapability("workspace.mailboxes.manage"),
+  validate(adminDeliverySummaryQuerySchema, "query"),
+  controller.adminDeliveryFailureSummary
+);
 mailRouter.get(
   "/admin/delivery-events",
-  requireRole("OWNER", "ADMIN"),
+  requireCapability("workspace.mailboxes.manage"),
   validate(adminDeliveryEventsQuerySchema, "query"),
   controller.adminListDeliveryEvents
 );
 // Same rule for the unread-count badge endpoint.
+// The compose screen's From picker. Above /:messageId so "send-as" is not
+// parsed as a message id.
+mailRouter.get("/send-as", controller.listSendableMailboxes);
 mailRouter.get("/unread-counts", controller.unreadCounts);
 mailRouter.get("/", validate(listMailSchema, "query"), controller.list);
 mailRouter.post("/drafts", validate(createDraftSchema), controller.createDraft);
@@ -39,6 +51,76 @@ mailRouter.put("/:messageId/labels/:labelId", validate(messageLabelParamsSchema,
 mailRouter.delete("/:messageId/labels/:labelId", validate(messageLabelParamsSchema, "params"), controller.removeLabel);
 
 // ─── Admin: Mailbox management (must be before /:messageId wildcard) ──────────
+// ─── Shared mailboxes and group addresses — Security §10 ─────────────────
+// Gated on workspace.groups.manage, which the matrix gives Owner and Admin
+// and withholds from Member. Registered before "/admin/mailboxes/:mailboxId"
+// so "shared" is not read as a mailbox id.
+mailRouter.get(
+  "/admin/shared-mailboxes",
+  requireCapability("workspace.groups.manage"),
+  controller.listSharedMailboxes
+);
+mailRouter.post(
+  "/admin/shared-mailboxes",
+  requireCapability("workspace.groups.manage"),
+  validate(createSharedMailboxSchema),
+  controller.createSharedMailbox
+);
+mailRouter.get(
+  "/admin/shared-mailboxes/:mailboxId/assignees",
+  requireCapability("workspace.groups.manage"),
+  validate(mailboxIdParamsSchema, "params"),
+  controller.listMailboxAssignees
+);
+mailRouter.post(
+  "/admin/shared-mailboxes/:mailboxId/assignees",
+  requireCapability("workspace.groups.manage"),
+  validate(mailboxIdParamsSchema, "params"),
+  validate(assignMailboxSchema),
+  controller.assignMailbox
+);
+mailRouter.delete(
+  "/admin/shared-mailboxes/:mailboxId/assignees/:membershipId",
+  requireCapability("workspace.groups.manage"),
+  validate(mailboxAssigneeParamsSchema, "params"),
+  controller.unassignMailbox
+);
+// ─── Aliases and forwarding — Data Model §6.17, §6.18, Security §9 ──────
+// Under the mailbox they belong to, and gated the same way mailbox settings
+// are. Registered before "/admin/mailboxes/:mailboxId" so the nested paths
+// are not swallowed by the patch route.
+mailRouter.get(
+  "/admin/mailboxes/:mailboxId/routing",
+  requireCapability("workspace.mailboxes.manage"),
+  validate(mailboxIdParamsSchema, "params"),
+  controller.listMailboxRouting
+);
+mailRouter.post(
+  "/admin/mailboxes/:mailboxId/aliases",
+  requireCapability("workspace.mailboxes.manage"),
+  validate(mailboxIdParamsSchema, "params"),
+  validate(createAliasSchema),
+  controller.createAlias
+);
+mailRouter.delete(
+  "/admin/mailboxes/:mailboxId/aliases/:aliasId",
+  requireCapability("workspace.mailboxes.manage"),
+  validate(aliasParamsSchema, "params"),
+  controller.deleteAlias
+);
+mailRouter.post(
+  "/admin/mailboxes/:mailboxId/forwarding",
+  requireCapability("workspace.mailboxes.manage"),
+  validate(mailboxIdParamsSchema, "params"),
+  validate(createForwardingSchema),
+  controller.createForwarding
+);
+mailRouter.delete(
+  "/admin/mailboxes/:mailboxId/forwarding/:ruleId",
+  requireCapability("workspace.mailboxes.manage"),
+  validate(forwardingParamsSchema, "params"),
+  controller.deleteForwarding
+);
 mailRouter.get("/admin/mailboxes", requireCapability("workspace.mailboxes.manage"), controller.listAllMailboxes);
 mailRouter.post("/admin/mailboxes", requireCapability("workspace.mailboxes.manage"), controller.adminCreateMailbox);
 mailRouter.delete("/admin/mailboxes/:mailboxId", requireCapability("workspace.mailboxes.manage"), validate(mailboxIdParamsSchema, "params"), controller.adminDeleteMailbox);
@@ -59,7 +141,12 @@ mailRouter.patch(
   controller.adminUpdateMailbox
 );
 
-mailRouter.get("/:messageId", validate(messageIdParamsSchema, "params"), controller.get);
+mailRouter.get(
+  "/:messageId",
+  validate(messageIdParamsSchema, "params"),
+  validate(mailboxScopeSchema, "query"),
+  controller.get
+);
 mailRouter.patch("/:messageId", validate(messageIdParamsSchema, "params"), validate(updateMailboxItemSchema), controller.updateMailboxItem);
 mailRouter.delete("/:messageId", validate(messageIdParamsSchema, "params"), controller.permanentlyDelete);
 mailRouter.patch("/drafts/:messageId", validate(messageIdParamsSchema, "params"), validate(updateDraftSchema), controller.updateDraft);

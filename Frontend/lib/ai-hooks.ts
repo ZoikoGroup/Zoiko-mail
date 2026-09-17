@@ -9,7 +9,7 @@ import {
   type AIAction,
   type AIActionType,
 } from "./ai-api";
-import { listMail, type MailItem } from "./mail-api";
+import { listMail, type MailListItem } from "./mail-api";
 
 export function useAiActions() {
   return useQuery({
@@ -68,7 +68,10 @@ export function useReviewAiAction() {
 export type AiDraftPollState =
   | { phase: "idle" }
   | { phase: "generating" }
-  | { phase: "ready"; draft: MailItem }
+  // A list row, not a detail: the poll finds the draft by listing DRAFTS, and
+  // list rows carry metadata and a snippet rather than a body (AC-011). A
+  // caller that needs the body opens the draft, which is a detail read.
+  | { phase: "ready"; draft: MailListItem }
   | { phase: "failed"; message: string };
 
 export function useAiDraftPoll(

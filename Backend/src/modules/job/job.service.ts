@@ -1,10 +1,12 @@
 import type { JobType, Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
+import { withCrossTenant } from "../../config/tenantScope.js";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
 import { exportStorage } from "../lifecycle/export.storage.js";
 import { attachmentStorage } from "../mail/attachment.storage.js";
+import { lifecycleService } from "../lifecycle/lifecycle.service.js";
 import { createHash } from "node:crypto";
 import { providerMailService } from "../provider-mail/provider-mail.service.js";
 import { aiService } from "../ai/ai.service.js";
@@ -54,83 +56,71 @@ export class JobService {
   }
 
   async processNext() {
-    const job = await this.claimSupported();
-    if (!job) return { processed: false };
-    try {
-      if (job.type === "DATA_EXPORT") {
-        const result = await this.processExport(job.id, job.tenantId, job.createdByUserId);
-        return { processed: true, jobId: job.id, type: job.type, result };
-      }
-      if (job.type === "DATA_DELETION") {
-        const result = await this.processDeletion(job.id, job.tenantId, job.createdByUserId, job.payload);
-        return { processed: true, jobId: job.id, type: job.type, result };
-      }
-      if (job.type === "IMAP_SYNC") {
-        const result = await providerMailService.syncInbox();
-        await this.complete(job.id, job.tenantId, result);
-        return { processed: true, jobId: job.id, type: job.type, result };
-      }
-      // if (job.type === "SMTP_SEND") {
-      //   const messageId = typeof job.payload === "object" && job.payload !== null && !Array.isArray(job.payload)
-      //     && typeof job.payload.messageId === "string" ? job.payload.messageId : null;
-      //   if (!messageId) throw new Error("SMTP job has no message id");
-      //   const result = await providerMailService.sendMessage(messageId, job.tenantId);
-      //   await this.complete(job.id, job.tenantId, result);
-      //   return { processed: true, jobId: job.id, type: job.type, result };
-      // }
-      if (job.type === "SMTP_SEND") {
-        const messageId = typeof job.payload === "object" && job.payload !== null && !Array.isArray(job.payload)
-          && typeof job.payload.messageId === "string" ? job.payload.messageId : null;
-        if (!messageId) throw new Error("SMTP job has no message id");
-        const result = await providerMailService.sendMessage(messageId, job.tenantId);
+    // The job worker claims whatever is due, from any workspace, so it declares that it crosses the boundary rather than being refused by the row-level policies (AC-004).
+    return withCrossTenant(async () => {
+      const job = await this.claimSupported();
+      if (!job) return { processed: false };
+      try {
+        if (job.type === "DATA_EXPORT") {
+          const result = await this.processExport(job.id, job.tenantId, job.createdByUserId);
+          return { processed: true, jobId: job.id, type: job.type, result };
+        }
+        if (job.type === "DATA_DELETION") {
+          const result = await this.processDeletion(job.id, job.tenantId, job.createdByUserId, job.payload);
+          return { processed: true, jobId: job.id, type: job.type, result };
+        }
+        if (job.type === "IMAP_SYNC") {
+          const result = await providerMailService.syncInbox();
+          await this.complete(job.id, job.tenantId, result);
+          return { processed: true, jobId: job.id, type: job.type, result };
+        }
+        if (job.type === "SMTP_SEND") {
+          const messageId = typeof job.payload === "object" && job.payload !== null && !Array.isArray(job.payload)
+            && typeof job.payload.messageId === "string" ? job.payload.messageId : null;
+          if (!messageId) throw new Error("SMTP job has no message id");
+          const result = await providerMailService.sendMessage(messageId, job.tenantId);
 
-        // Real SMTP delivery happened — flip the message from SENDING → SENT.
-        // No-op if it's already SENT (idempotent retry after a race).
-        await prisma.emailMessage.updateMany({
-          where: { id: messageId, tenantId: job.tenantId, status: "SENDING" },
-          data: { status: "SENT", sentAt: new Date(), scheduleLastError: null },
-        });
-
-        await this.complete(job.id, job.tenantId, result);
-        return { processed: true, jobId: job.id, type: job.type, result };
-      }
-      if (job.type === "AI_EXTRACTION") {
-        const result = await aiService.processExtraction(job.id, job.tenantId, job.createdByUserId, job.payload);
-        return { processed: true, jobId: job.id, type: job.type, result };
-      }
-      if (job.type === "AI_DRAFT_GENERATION") {
-        const result = await aiService.processDraftGeneration(job.id, job.tenantId, job.createdByUserId, job.payload);
-        return { processed: true, jobId: job.id, type: job.type, result };
-      }
-      const result = await this.processDigest(job.id, job.tenantId, job.createdByUserId, job.payload);
-      return { processed: true, jobId: job.id, type: job.type, result };
-
-      // } catch (error) {
-      //   const message = error instanceof Error ? error.message : "Background job failed";
-      //   await this.fail(job.id, job.tenantId, message);
-      //   return { processed: true, jobId: job.id, type: job.type, error: message };
-      // }
-      
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Background job failed";
-      const failedJob = await this.fail(job.id, job.tenantId, message);
-
-      // If SMTP_SEND has exhausted retries, mark the message FAILED so the
-      // UI stops showing SENDING forever. During retries, leave it as
-      // SENDING — the worker will try again shortly.
-      if (job.type === "SMTP_SEND" && failedJob.status === "FAILED") {
-        const messageId = typeof job.payload === "object" && job.payload !== null && !Array.isArray(job.payload)
-          && typeof job.payload.messageId === "string" ? job.payload.messageId : null;
-        if (messageId) {
+          // Real SMTP delivery happened — flip the message from SENDING → SENT.
+          // No-op if it's already SENT (idempotent retry after a race).
           await prisma.emailMessage.updateMany({
             where: { id: messageId, tenantId: job.tenantId, status: "SENDING" },
-            data: { status: "FAILED", scheduleLastError: message.slice(0, 1000) },
+            data: { status: "SENT", sentAt: new Date(), scheduleLastError: null },
           });
-        }
-      }
 
-      return { processed: true, jobId: job.id, type: job.type, error: message };
-    }
+          await this.complete(job.id, job.tenantId, result);
+          return { processed: true, jobId: job.id, type: job.type, result };
+        }
+        if (job.type === "AI_EXTRACTION") {
+          const result = await aiService.processExtraction(job.id, job.tenantId, job.createdByUserId, job.payload);
+          return { processed: true, jobId: job.id, type: job.type, result };
+        }
+        if (job.type === "AI_DRAFT_GENERATION") {
+          const result = await aiService.processDraftGeneration(job.id, job.tenantId, job.createdByUserId, job.payload);
+          return { processed: true, jobId: job.id, type: job.type, result };
+        }
+        const result = await this.processDigest(job.id, job.tenantId, job.createdByUserId, job.payload);
+        return { processed: true, jobId: job.id, type: job.type, result };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Background job failed";
+        const failedJob = await this.fail(job.id, job.tenantId, message);
+
+        // If SMTP_SEND has exhausted retries, mark the message FAILED so the
+        // UI stops showing SENDING forever. During retries, leave it as
+        // SENDING — the worker will try again shortly.
+        if (job.type === "SMTP_SEND" && failedJob.status === "FAILED") {
+          const messageId = typeof job.payload === "object" && job.payload !== null && !Array.isArray(job.payload)
+            && typeof job.payload.messageId === "string" ? job.payload.messageId : null;
+          if (messageId) {
+            await prisma.emailMessage.updateMany({
+              where: { id: messageId, tenantId: job.tenantId, status: "SENDING" },
+              data: { status: "FAILED", scheduleLastError: message.slice(0, 1000) },
+            });
+          }
+        }
+
+        return { processed: true, jobId: job.id, type: job.type, error: message };
+      }
+    });
   }
 
   private async processExport(jobId: string, tenantId: string, actorUserId: string) {
@@ -266,6 +256,37 @@ export class JobService {
     const requestId = typeof payload === "object" && payload !== null && !Array.isArray(payload)
       && payload.confirmed === true && typeof payload.requestId === "string" ? payload.requestId : null;
     if (!requestId) throw new Error("Tenant deletion lacks final confirmation");
+
+    // §6.14 gives a deletion request a target, and the two executable targets
+    // do very different things: a tenant erase destroys everything and issues
+    // a receipt, a user request anonymizes one person and leaves the
+    // workspace standing. Dispatched here rather than in two job types so the
+    // SLA, the deadline and the audit trail stay in one workflow.
+    const targeted = await prisma.dataLifecycleRequest.findFirst({
+      where: { id: requestId, tenantId, type: "DELETION" },
+      select: { id: true, targetType: true, targetId: true, status: true },
+    });
+    if (targeted?.targetType === "USER") {
+      if (!targeted.targetId) throw new Error("User deletion request has no target");
+      if (!["APPROVED", "SCHEDULED", "PROCESSING"].includes(targeted.status)) {
+        throw new Error("User deletion request is not approved");
+      }
+      await prisma.dataLifecycleRequest.update({
+        where: { id: targeted.id, tenantId },
+        data: { status: "PROCESSING" },
+      });
+      const outcome = await lifecycleService.anonymizeUser(tenantId, targeted.targetId, {
+        tenantId,
+        userId: actorUserId,
+      });
+      const completed = await prisma.dataLifecycleRequest.update({
+        where: { id: targeted.id, tenantId },
+        data: { status: "COMPLETED", completedAt: new Date() },
+      });
+      await this.complete(jobId, tenantId, { ...outcome, completedAt: completed.completedAt });
+      return outcome;
+    }
+
     const [tenant, request, attachmentRows, jobs, counts] = await Promise.all([
       prisma.tenant.findFirst({ where: { id: tenantId }, select: { id: true, name: true } }),
       prisma.dataLifecycleRequest.findFirst({
