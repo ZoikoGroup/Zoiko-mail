@@ -447,7 +447,17 @@ export async function joinWorkspace(
     }
   );
 
-  setTokens(data.accessToken, data.refreshToken);
+  // The join response is { state, session: { accessToken, ... } } — it is NOT
+  // flattened the way /auth/login is, so reading data.accessToken off the top
+  // level got undefined and stored the string "undefined" as the session. It
+  // read as signed in, so the join redirected to the workspace, and there the
+  // shell asked /auth/me with `Bearer undefined`: an admin joiner bounced
+  // straight back to sign-in, a member joiner sat on a spinner. Both had done
+  // everything right, and neither symptom pointed here.
+  //
+  // applyAuthTokens is the helper that already copes with every shape the API
+  // uses; createWorkspace beside it has always called it.
+  applyAuthTokens(data as unknown as AuthResponse);
 
   return data;
 }

@@ -67,8 +67,28 @@ async function stubSessionReads(
   workspace: Scope,
   role: string = workspace
 ) {
-  await page.route(`${API}/auth/me`, (route) =>
-    route.fulfill({
+  // Refuses anything but the token it issued, exactly as the server does. A
+  // stub that answered 200 regardless would hide the whole class of defect
+  // these tests are for — a client that routes to a console without having
+  // stored the session looks identical to one that stored it, until the
+  // guard runs.
+  //
+  // Checking the value and not merely the header's presence is the part that
+  // bites: setTokens writes `String(undefined)`, so a client that stored
+  // nothing still sends "Bearer undefined" and a presence check waves it
+  // through while the real server rejects it as a malformed JWT.
+  await page.route(`${API}/auth/me`, (route) => {
+    if (route.request().headers()["authorization"] !== "Bearer stub-access-token") {
+      return route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: false,
+          error: { code: "UNAUTHORIZED", message: "Authentication required" },
+        }),
+      });
+    }
+    return route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
@@ -82,8 +102,8 @@ async function stubSessionReads(
           workspace,
         },
       }),
-    })
-  );
+    });
+  });
 
   // Anything else a dashboard asks for. Shaped as an object rather than a
   // bare array: an array made the admin dashboard throw inside its error
@@ -463,4 +483,113 @@ test.describe("a privileged sign-in stops for a second factor", () => {
     await page.goto("/verify-mfa");
     await expectSentToLogin(page);
   });
+});
+
+test.describe("an invited account lands in the workspace it was invited to", () => {
+  /**
+   * The join response is `{ state, session: { accessToken, ... } }` and is NOT
+   * flattened the way /auth/login is. joinWorkspace read `data.accessToken`
+   * off the top level and stored the string "undefined" as the session, so
+   * the new joiner was redirected to their workspace and then turned away
+   * from it having done everything right.
+   *
+   * Both roles are covered because the same broken session fails differently
+   * in each shell — /admin bounces to sign-in, /inbox spins — and a test
+   * written against only one of those symptoms would have called the other
+   * fixed.
+   *
+   * Driven through the real forms rather than by seeding tokens, because the
+   * defect is in what the client does with the response. A test that stored
+   * the tokens itself would pass with the bug still in place.
+   */
+  async function stubInvitedSignUp(page: Page, role: Scope) {
+    const session = {
+      accessToken: "stub-access-token",
+      refreshToken: "stub-refresh-token",
+      expiresIn: "12h",
+      user: { id: "u1", email: "someone@zoiko.test", displayName: "Someone" },
+      tenant: { id: "t1", name: "Stub Workspace", planCode: "starter" },
+      membership: { id: "m1", role },
+      workspace: role,
+    };
+
+    await page.route(`${API}/auth/register`, (route) =>
+      route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: { user: { id: "u1" }, pendingToken: "pending-1" },
+        }),
+      })
+    );
+    await page.route(`${API}/auth/verify-otp`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            pendingToken: "pending-2",
+            // Keyed by membershipId, as PendingInvitationSummary is — the
+            // join button stays disabled without it, which is the shape the
+            // form selects on.
+            pendingInvitations: [
+              {
+                membershipId: "m1",
+                tenantId: "t1",
+                tenantName: "Stub Workspace",
+                role,
+              },
+            ],
+          },
+        }),
+      })
+    );
+    // Nested only — exactly what the server sends, and the shape that broke it.
+    await page.route(`${API}/auth/join-workspace`, (route) =>
+      route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: { state: "SIGNED_IN", session } }),
+      })
+    );
+  }
+
+  for (const role of ["ADMIN", "MEMBER"] as const) {
+    test(`a joiner invited as ${role} settles on ${HOME[role]}`, async ({ page }) => {
+      await stubSessionReads(page, role);
+      await stubInvitedSignUp(page, role);
+
+      await page.goto("/login");
+      await page.getByRole("button", { name: "Create one" }).click();
+
+      await page.getByPlaceholder("John Doe").fill("Someone");
+      await page.getByPlaceholder("john@example.com").fill("someone@zoiko.test");
+      await page.getByPlaceholder("Create password").fill("Password123!");
+      await page.getByPlaceholder("Confirm password").fill("Password123!");
+      // exact: the Google button renders as "Continue with Google" once its
+      // iframe loads, and collides with this one when it wins the race.
+      await page.getByRole("button", { name: "Continue", exact: true }).click();
+
+      // Six single-character boxes rather than one field.
+      const digits = page.locator('input[maxlength="1"]');
+      await expect(digits.first()).toBeVisible({ timeout: 30_000 });
+      for (let i = 0; i < 6; i += 1) await digits.nth(i).fill(String(i + 1));
+      await page.getByRole("button", { name: "Verify Code" }).click();
+
+      await page.getByRole("button", { name: /Join Stub Workspace/ }).click();
+
+      // Settles, because the bug looked like a working redirect for an
+      // instant before the guard undid it.
+      await settlesOn(page, HOME[role]);
+
+      // And the console is actually on screen. The URL alone is not enough:
+      // the two shells fail differently on a missing session — the admin one
+      // bounces to /login, the member one sits on /inbox showing its loading
+      // spinner for ever, because isLoggedIn() reads the literal string
+      // "undefined" as a token and only /auth/me knows better.
+      await expect(page.getByRole("navigation").first()).toBeVisible({ timeout: 30_000 });
+    });
+  }
 });
