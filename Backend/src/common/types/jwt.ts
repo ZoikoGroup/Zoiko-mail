@@ -1,6 +1,6 @@
 import type { MembershipRole, PlatformRole } from "@prisma/client";
 
-export type TokenType = "access" | "refresh" | "pending" | "platform" | "selection";
+export type TokenType = "access" | "refresh" | "pending" | "platform" | "selection" | "step-up";
 
 /**
  * The one workspace a session may act in.
@@ -18,6 +18,24 @@ export type TokenType = "access" | "refresh" | "pending" | "platform" | "selecti
  * is, so reaching a console takes a deliberate sign-in.
  */
 export type WorkspaceScope = "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT";
+
+/**
+ * Proof that the caller re-entered their password just now — Security §5,
+ * AC-003, RBAC §2 "fresh step-up authentication required at action time".
+ *
+ * Separate from the access token and deliberately short-lived, because the
+ * point is freshness: an access token proves who you are for hours, and the
+ * high-risk actions in §5 want evidence that the person at the keyboard is
+ * still the account holder. Bound to the tenant as well as the user, so a
+ * step-up performed in one workspace cannot authorise a destructive action
+ * in another.
+ */
+export interface StepUpTokenPayload {
+  sub: string;
+  tenantId: string;
+  type: "step-up";
+  jti: string;
+}
 
 export interface AccessTokenPayload {
   sub: string;
@@ -111,6 +129,25 @@ export interface PlatformRefreshTokenPayload {
   platformRole: Exclude<PlatformRole, "NONE">;
   type: "platform-refresh";
   jti: string;
+}
+
+/**
+ * Issued when a privileged sign-in still owes a second factor — AC-002.
+ *
+ * Carries the sign-in it will complete, so answering the challenge issues
+ * exactly the session the password already earned: no wider, and no need to
+ * re-resolve which workspace was being entered. `enrolment` distinguishes the
+ * account that has an authenticator from the one that has to set one up,
+ * which are two different screens and two different next calls.
+ */
+export interface MfaChallengeTokenPayload {
+  sub: string;
+  type: "mfa";
+  jti: string;
+  enrolment: boolean;
+  intent:
+    | { kind: "tenant"; tenantId: string; membershipId: string; workspace: WorkspaceScope }
+    | { kind: "platform"; platformRole: Exclude<PlatformRole, "NONE"> };
 }
 
 /** Populated on req.auth by `authenticate` — always a tenant-scoped access token. */

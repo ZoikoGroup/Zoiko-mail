@@ -13,7 +13,7 @@ vi.mock("../src/modules/auth/google.verifier.js", () => ({
 
 const { createApp } = await import("../src/app.js");
 const { prisma } = await import("../src/config/prisma.js");
-const { authHeader, registerUser } = await import("./helpers.js");
+const { authHeader, registerUser, throughMfa } = await import("./helpers.js");
 
 const app = createApp();
 
@@ -77,50 +77,53 @@ describe("a session is bound to the console it was opened for", () => {
   });
 
   describe("Google sign-in", () => {
-    it("opens the console matching the account's role (same as password sign-in)", async () => {
+    it("always opens the member console, however senior the account", async () => {
       const owner = await registerUser(app, {
         email: googleProfile.email,
         tenantName: "Google Owner Workspace",
       });
       expect(decode(owner.accessToken).workspace).toBe("OWNER");
 
-      const viaGoogle = await signInWithGoogle().expect(200);
+      const viaGoogle = await throughMfa(app, await signInWithGoogle().expect(200));
       expect(viaGoogle.body.data.state).toBe("SIGNED_IN");
 
-      // Google sign-in now derives workspace from role, same as password sign-in.
-      expect(decode(viaGoogle.body.data.accessToken).workspace).toBe("OWNER");
-      expect(viaGoogle.body.data.membership.role).toBe("OWNER");
+      // The same person, the same workspace, a different console: signing in
+      // with Google must never land in an administration console.
+      expect(decode(viaGoogle.body.data.accessToken).workspace).toBe("MEMBER");
+      expect(viaGoogle.body.data.membership.role).toBe("MEMBER");
     });
 
-    it("can reach an owner-only surface when the account is an Owner", async () => {
+    it("cannot reach an owner-only surface, even for an owner", async () => {
       await registerUser(app, {
         email: googleProfile.email,
         tenantName: "Google Owner Surface",
       });
 
-      const viaGoogle = await signInWithGoogle().expect(200);
-      const allowed = await ownerOnly(viaGoogle.body.data.accessToken);
+      const viaGoogle = await throughMfa(app, await signInWithGoogle().expect(200));
+      const refused = await ownerOnly(viaGoogle.body.data.accessToken);
 
-      // Google sign-in now gets the same workspace scope as password sign-in.
-      expect(allowed.status).toBe(200);
+      // Authority follows the console, not the membership: this is the whole
+      // point of scoping rather than merely routing the browser elsewhere.
+      expect(refused.status).toBe(403);
     });
 
-    it("keeps the same workspace scope across a refresh", async () => {
+    it("stays a member session across a refresh", async () => {
       await registerUser(app, {
         email: googleProfile.email,
         tenantName: "Google Refresh Workspace",
       });
-      const viaGoogle = await signInWithGoogle().expect(200);
+      const viaGoogle = await throughMfa(app, await signInWithGoogle().expect(200));
 
       const refreshed = await request(app)
         .post("/api/v1/auth/refresh")
         .send({ refreshToken: viaGoogle.body.data.refreshToken })
         .expect(200);
 
-      // Refresh preserves the workspace scope from the original sign-in.
-      expect(decode(refreshed.body.data.accessToken).workspace).toBe("OWNER");
-      const allowedAgain = await ownerOnly(refreshed.body.data.accessToken);
-      expect(allowedAgain.status).toBe(200);
+      // A refresh that re-derived the scope from the role would hand an Owner
+      // the owner console without them ever signing in for it.
+      expect(decode(refreshed.body.data.accessToken).workspace).toBe("MEMBER");
+      const refusedAgain = await ownerOnly(refreshed.body.data.accessToken);
+      expect(refusedAgain.status).toBe(403);
     });
   });
 
@@ -149,14 +152,20 @@ describe("a session is bound to the console it was opened for", () => {
         .send({ email: adminEmail, role: "ADMIN" })
         .expect(201);
 
-      const asAdmin = await request(app)
-        .post("/api/v1/auth/login")
-        .send({
-          email: adminEmail,
-          password: admin.password,
-          tenantId: owner.tenantId,
-        })
-        .expect(200);
+      // An Admin sign-in passes the MFA gate first (AC-002); the console
+      // binding under test is a property of the session it finally issues.
+      const asAdmin = await throughMfa(
+        app,
+        await request(app)
+          .post("/api/v1/auth/login")
+          .send({
+            email: adminEmail,
+            password: admin.password,
+            tenantId: owner.tenantId,
+          })
+          .expect(200),
+        admin.mfaSecret
+      );
 
       const session = asAdmin.body.data.session ?? asAdmin.body.data;
       expect(decode(session.accessToken).workspace).toBe("ADMIN");
@@ -181,10 +190,14 @@ describe("a session is bound to the console it was opened for", () => {
       .send({ email, role: "ADMIN" })
       .expect(201);
 
-    const asAdmin = await request(app)
-      .post("/api/v1/auth/login")
-      .send({ email, password: person.password, tenantId: owner.tenantId })
-      .expect(200);
+    const asAdmin = await throughMfa(
+      app,
+      await request(app)
+        .post("/api/v1/auth/login")
+        .send({ email, password: person.password, tenantId: owner.tenantId })
+        .expect(200),
+      person.mfaSecret
+    );
     const session = asAdmin.body.data.session ?? asAdmin.body.data;
 
     await prisma.tenantMembership.updateMany({

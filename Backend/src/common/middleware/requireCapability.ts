@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import { AppError } from "../errors/AppError.js";
 import { ErrorCodes } from "../errors/errorCodes.js";
 import { resolveCapability, type CapabilityContext } from "../capabilities/index.js";
+import { verifyStepUpToken } from "../../modules/auth/auth.service.js";
 
 /**
  * Capability enforcement — Security §7.2, evaluation step 6.
@@ -20,12 +21,16 @@ import { resolveCapability, type CapabilityContext } from "../capabilities/index
 /**
  * Builds the resolver's inputs from the request.
  *
- * Step-up satisfaction, second-approver identity and support-grant state are
- * evaluation steps 8–10 and do not exist yet. They are reported here as
- * unsatisfied rather than assumed, which means a capability held only as
- * STEP_UP, TWO_PERSON or GRANT is currently denied — correctly, since nothing
- * can satisfy those conditions. No route is gated on such a capability for
- * that reason; doing so would lock out a caller who legitimately holds it.
+ * Step-up is real now (Security §5, AC-003): the caller re-enters their
+ * password at `POST /auth/step-up` and sends the short-lived token back as
+ * `x-step-up-token`. This used to be hardcoded false, which meant every
+ * STEP_UP capability — data export, MFA reset — resolved to a denial that
+ * nothing could clear, so no route could be gated on one without locking out
+ * the people who legitimately held it.
+ *
+ * Second-approver identity and support-grant state are still unsatisfied
+ * here. They are reported honestly rather than assumed, so a TWO_PERSON
+ * capability (tenant deletion, ownership transfer) still resolves closed.
  */
 function contextFrom(req: Request): CapabilityContext {
   const tenant = req.tenantContext;
@@ -34,7 +39,11 @@ function contextFrom(req: Request): CapabilityContext {
     // tenantContext only attaches for an ACTIVE membership, so reaching here
     // with a context at all means the membership is usable.
     membershipActive: Boolean(tenant),
-    stepUpSatisfied: false,
+    // Bound to this user and this tenant inside the verifier, so a step-up
+    // taken in one workspace cannot authorise an action in another.
+    stepUpSatisfied: tenant
+      ? verifyStepUpToken(req.header("x-step-up-token"), tenant.userId, tenant.tenantId)
+      : false,
     secondApproverUserId: null,
     hasActiveSupportGrant: false,
   };

@@ -7,8 +7,11 @@ import { jobService } from "./modules/job/job.service.js";
 import { operationalMetrics } from "./config/operationalMetrics.js";
 import { connectorService } from "./modules/connector/connector.service.js";
 import { providerMailService } from "./modules/provider-mail/provider-mail.service.js";
+import { lifecycleService } from "./modules/lifecycle/lifecycle.service.js";
+import { purgeExpiredIdempotencyRecords } from "./common/middleware/idempotency.js";
 import { gmailConnector } from "./modules/connector/gmail/gmail.connector.js";
 import { microsoftConnector } from "./modules/connector/m365/m365.connector.js";
+import { withTenant } from "./config/tenantScope.js";
 
 const app = createApp();
 const PORT = env.PORT;
@@ -91,6 +94,36 @@ if (env.MAIL_PROVIDER_ENABLED) {
     .catch((error: unknown) => logger.error({ error }, "Initial IMAP sync scheduling failed"));
 }
 
+/**
+ * Compliance housekeeping.
+ *
+ * Two duties that are both about time passing: AC-012 wants a deletion past
+ * its 30-day deadline to be visible as a breach rather than merely late, and
+ * API §7 records stop being replayable after 24 hours and should not
+ * accumulate forever.
+ *
+ * The sweep only records the breach; it deliberately does not execute the
+ * deletion. A tenant erase requires a typed confirmation by design, and
+ * having a timer perform the one action nobody confirmed would be the worst
+ * possible reading of an SLA.
+ */
+let complianceSweepRunning = false;
+const complianceSweep = setInterval(() => {
+  if (complianceSweepRunning) return;
+  complianceSweepRunning = true;
+  void Promise.all([lifecycleService.sweepOverdue(), purgeExpiredIdempotencyRecords()])
+    .then(([sla, purged]) => {
+      if (sla.breached > 0 || purged > 0) {
+        logger.info({ ...sla, purgedIdempotencyRecords: purged }, "Compliance sweep completed");
+      }
+    })
+    .catch((error: unknown) => logger.error({ error }, "Compliance sweep failed"))
+    .finally(() => {
+      complianceSweepRunning = false;
+    });
+}, env.COMPLIANCE_SWEEP_INTERVAL_MS);
+complianceSweep.unref();
+
 // ─── Gmail watch renewal (ZM-BE-005) ────────────────────────────────────────
 
 let gmailWatchRenewRunning = false;
@@ -134,7 +167,9 @@ const gmailCatchUp = setInterval(() => {
     });
     for (const account of accounts) {
       try {
-        const result = await gmailConnector.syncHistory(account.id, account.tenantId);
+        const result = await withTenant(account.tenantId, () =>
+          gmailConnector.syncHistory(account.id, account.tenantId)
+        );
         if (result.imported > 0) {
           logger.info({ accountId: account.id, ...result }, "Gmail catch-up sync imported messages");
         }
@@ -191,7 +226,9 @@ const microsoftCatchUp = setInterval(() => {
     });
     for (const account of accounts) {
       try {
-        const result = await microsoftConnector.syncInbox(account.id, account.tenantId);
+        const result = await withTenant(account.tenantId, () =>
+          microsoftConnector.syncInbox(account.id, account.tenantId)
+        );
         if (result.imported > 0) {
           logger.info({ accountId: account.id, ...result }, "Microsoft catch-up sync imported messages");
         }
@@ -218,6 +255,7 @@ async function shutdown(signal: string): Promise<void> {
   clearInterval(scheduler);
   clearInterval(jobWorker);
   clearInterval(providerEventWorker);
+  clearInterval(complianceSweep);
   clearInterval(providerSync);
   clearInterval(gmailCatchUp);
   clearInterval(microsoftRenew);

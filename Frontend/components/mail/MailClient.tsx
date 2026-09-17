@@ -28,7 +28,12 @@ import {
 import { ComposeModal } from "@/components/mail/ComposeModal";
 import { Modal } from "@/components/ui/Modal";
 import type { ComposerMode } from "@/lib/mail-hooks";
-import { downloadAttachment, type MailFolder, type MailItem } from "@/lib/mail-api";
+import {
+  downloadAttachment,
+  type MailFolder,
+  type MailItem,
+  type MailListItem,
+} from "@/lib/mail-api";
 import {
   DropdownMenu, DropdownItem,
 } from "@/components/ui/DropdownMenu";
@@ -37,7 +42,9 @@ import {
   Inbox, Send, FileText, Archive, Trash2, Star, Loader2, AlertCircle,
   ChevronLeft, ChevronRight, Paperclip, Download, ArrowLeft, MailOpen,
   Pencil, Reply, ReplyAll, Forward, Search, ShieldAlert, Tag, Settings2, X,
+  SlidersHorizontal, MailCheck,
 } from "lucide-react";
+import { AttachmentList } from "@/components/mail/AttachmentPreview";
 
 const FOLDERS: { key: MailFolder; label: string; icon: any }[] = [
   { key: "INBOX", label: "Inbox", icon: Inbox },
@@ -70,7 +77,8 @@ function bytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function sender(item: MailItem): string {
+/** Works for a list row or a detail read — both carry the sender fields. */
+function sender(item: MailListItem | MailItem): string {
   const m = item.message;
   return m.fromName || m.fromAddress || m.author?.displayName || m.author?.email || "Unknown";
 }
@@ -91,8 +99,26 @@ export function MailClient() {
   const [searchInput, setSearchInput] = useState("");
   const [q, setQ] = useState("");
   const [starredOnly, setStarredOnly] = useState(false);
+  const [unreadOnly, setUnreadOnly] = useState(false);
   const [labelFilter, setLabelFilter] = useState<string>("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [fromFilter, setFromFilter] = useState("");
+  const [toFilter, setToFilter] = useState("");
+  const [hasAttachment, setHasAttachment] = useState(false);
+  const [dateAfter, setDateAfter] = useState("");
+  const [dateBefore, setDateBefore] = useState("");
   const { data: labels = [] } = useMailLabels();
+
+  const advancedActive = fromFilter || toFilter || hasAttachment || dateAfter || dateBefore || unreadOnly;
+  const clearAdvanced = () => {
+    setFromFilter("");
+    setToFilter("");
+    setHasAttachment(false);
+    setDateAfter("");
+    setDateBefore("");
+    setUnreadOnly(false);
+    setShowAdvanced(false);
+  };
 
   // Debounce search input → query param; any filter change resets paging.
   useEffect(() => {
@@ -107,7 +133,7 @@ export function MailClient() {
     setPage(1);
     setSelectedId(null);
     setCheckedIds(new Set());
-  }, [starredOnly, labelFilter]);
+  }, [starredOnly, unreadOnly, labelFilter, fromFilter, toFilter, hasAttachment, dateAfter, dateBefore]);
 
   // Bulk selection
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
@@ -142,7 +168,13 @@ export function MailClient() {
     limit: 25,
     ...(q ? { q } : {}),
     ...(starredOnly ? { starredOnly: true } : {}),
+    ...(unreadOnly ? { unreadOnly: true } : {}),
     ...(labelFilter ? { labelId: labelFilter } : {}),
+    ...(fromFilter ? { from: fromFilter } : {}),
+    ...(toFilter ? { to: toFilter } : {}),
+    ...(hasAttachment ? { hasAttachment: true } : {}),
+    ...(dateAfter ? { dateAfter } : {}),
+    ...(dateBefore ? { dateBefore } : {}),
   });
   const items = data?.items ?? [];
   const pagination = data?.pagination;
@@ -158,7 +190,14 @@ export function MailClient() {
     setSearchInput("");
     setQ("");
     setStarredOnly(false);
+    setUnreadOnly(false);
     setLabelFilter("");
+    setFromFilter("");
+    setToFilter("");
+    setHasAttachment(false);
+    setDateAfter("");
+    setDateBefore("");
+    setShowAdvanced(false);
     setCheckedIds(new Set());
   };
 
@@ -179,11 +218,10 @@ export function MailClient() {
                 <button
                   key={f.key}
                   onClick={() => switchFolder(f.key)}
-                  className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition ${
-                    active
+                  className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition ${active
                       ? "bg-[var(--accent-soft)] font-medium text-[var(--accent-ink)]"
                       : "text-[var(--ink2)] hover:bg-[var(--s2)]"
-                  }`}
+                    }`}
                 >
                   <Icon className="h-4 w-4 shrink-0" /> {f.label}
                   {unread > 0 && (
@@ -199,9 +237,8 @@ export function MailClient() {
 
         {/* List column */}
         <section
-          className={`flex min-w-0 flex-col border-r border-[var(--border)] ${
-            selectedId ? "hidden md:flex md:w-80 lg:w-96" : "flex flex-1"
-          }`}
+          className={`flex min-w-0 flex-col border-r border-[var(--border)] ${selectedId ? "hidden md:flex md:w-80 lg:w-96" : "flex flex-1"
+            }`}
         >
           {/* Mobile folder switch */}
           <div className="flex gap-1.5 overflow-x-auto border-b border-[var(--border)] p-2 lg:hidden">
@@ -215,11 +252,10 @@ export function MailClient() {
               <button
                 key={f.key}
                 onClick={() => switchFolder(f.key)}
-                className={`shrink-0 rounded-full px-3 py-1 text-xs transition ${
-                  folder === f.key
+                className={`shrink-0 rounded-full px-3 py-1 text-xs transition ${folder === f.key
                     ? "bg-[var(--accent)] text-white"
                     : "bg-[var(--surface)] text-[var(--ink2)] ring-1 ring-inset ring-[var(--border)]"
-                }`}
+                  }`}
               >
                 {f.label}
               </button>
@@ -277,6 +313,14 @@ export function MailClient() {
             >
               <Settings2 className="h-3.5 w-3.5" />
             </button>
+            <button
+              onClick={() => setShowAdvanced((s) => !s)}
+              className={`zoiko-btn sm shrink-0 ${advancedActive ? "pri" : ""}`}
+              title="Advanced filters"
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              {advancedActive && <span className="hidden sm:inline">Filtered</span>}
+            </button>
             {folder === "TRASH" && (
               <button
                 onClick={() => setConfirmEmpty(true)}
@@ -289,6 +333,78 @@ export function MailClient() {
               </button>
             )}
           </div>
+
+          {/* Advanced filter panel */}
+          {showAdvanced && (
+            <div className="border-b border-[var(--border)] bg-[var(--s2)] px-3 py-2.5">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                <div>
+                  <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-[var(--ink3)]">From</label>
+                  <input
+                    value={fromFilter}
+                    onChange={(e) => setFromFilter(e.target.value)}
+                    placeholder="Name or email…"
+                    className="h-7 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 text-xs text-[var(--ink)] placeholder:text-[var(--ink3)] focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-[var(--ink3)]">To</label>
+                  <input
+                    value={toFilter}
+                    onChange={(e) => setToFilter(e.target.value)}
+                    placeholder="Recipient email…"
+                    className="h-7 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 text-xs text-[var(--ink)] placeholder:text-[var(--ink3)] focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-[var(--ink3)]">After</label>
+                  <input
+                    type="date"
+                    value={dateAfter}
+                    onChange={(e) => setDateAfter(e.target.value)}
+                    className="h-7 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 text-xs text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-[var(--ink3)]">Before</label>
+                  <input
+                    type="date"
+                    value={dateBefore}
+                    onChange={(e) => setDateBefore(e.target.value)}
+                    className="h-7 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 text-xs text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+                  />
+                </div>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-3">
+                <label className="flex cursor-pointer items-center gap-1.5 text-xs text-[var(--ink2)]">
+                  <input
+                    type="checkbox"
+                    checked={hasAttachment}
+                    onChange={(e) => setHasAttachment(e.target.checked)}
+                    className="h-3.5 w-3.5 accent-[var(--accent)]"
+                  />
+                  <Paperclip className="h-3 w-3" /> Has attachment
+                </label>
+                <label className="flex cursor-pointer items-center gap-1.5 text-xs text-[var(--ink2)]">
+                  <input
+                    type="checkbox"
+                    checked={unreadOnly}
+                    onChange={(e) => setUnreadOnly(e.target.checked)}
+                    className="h-3.5 w-3.5 accent-[var(--accent)]"
+                  />
+                  <MailCheck className="h-3 w-3" /> Unread only
+                </label>
+                {advancedActive && (
+                  <button
+                    onClick={clearAdvanced}
+                    className="ml-auto text-xs text-[var(--crit)] hover:underline"
+                  >
+                    Clear all filters
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Bulk action bar */}
           {checkedIds.size > 0 && (
@@ -349,9 +465,8 @@ export function MailClient() {
                   </label>
                   <button
                     onClick={() => setSelectedId(it.messageId)}
-                    className={`min-w-0 flex-1 flex-col gap-1 px-2 py-3 pr-4 text-left transition hover:bg-[var(--s2)] ${
-                      selectedId === it.messageId ? "bg-[var(--s2)]" : ""
-                    }`}
+                    className={`min-w-0 flex-1 flex-col gap-1 px-2 py-3 pr-4 text-left transition hover:bg-[var(--s2)] ${selectedId === it.messageId ? "bg-[var(--s2)]" : ""
+                      }`}
                   >
                     <div className="flex items-center gap-2">
                       {!it.isRead && <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--accent)]" />}
@@ -367,7 +482,10 @@ export function MailClient() {
                       {it.message.subject || "(no subject)"}
                     </span>
                     <div className="flex items-center gap-1.5">
-                      {it.message.attachments.length > 0 && (
+                      {/* A flag, not the attachment list — the list endpoint
+                          returns `has_attachments` per API §9 and names the
+                          files only on the detail read. */}
+                      {it.message.hasAttachments && (
                         <Paperclip className="h-3 w-3 text-[var(--ink3)]" />
                       )}
                       {it.labels.slice(0, 2).map((l) => (
@@ -643,7 +761,7 @@ function ReadingPane({
               {m.attachments.length} attachment{m.attachments.length > 1 ? "s" : ""}
             </div>
             <div className="flex flex-wrap gap-2">
-              {m.attachments.map((att) => (
+              {/* {m.attachments.map((att) => (
                 <button
                   key={att.id}
                   onClick={() => downloadAttachment(messageId, att)}
@@ -656,7 +774,9 @@ function ReadingPane({
                   </div>
                   <Download className="ml-2 h-4 w-4 text-[var(--ink3)]" />
                 </button>
-              ))}
+              ))} */}
+              {/* Attachments */}
+              <AttachmentList messageId={messageId} attachments={m.attachments} />
             </div>
           </div>
         )}
@@ -728,9 +848,8 @@ function LabelManagerModal({ open, onClose }: { open: boolean; onClose: () => vo
                 key={c}
                 onClick={() => setColor(c)}
                 aria-label={`Use color ${c}`}
-                className={`h-6 w-6 rounded-full transition ${
-                  color === c ? "ring-2 ring-offset-2 ring-[var(--ink2)] ring-offset-[var(--surface)]" : ""
-                }`}
+                className={`h-6 w-6 rounded-full transition ${color === c ? "ring-2 ring-offset-2 ring-[var(--ink2)] ring-offset-[var(--surface)]" : ""
+                  }`}
                 style={{ backgroundColor: c }}
               />
             ))}

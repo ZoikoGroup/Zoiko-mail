@@ -12,6 +12,15 @@ export const createDraftSchema = z.object({
   textBody: z.string().max(2_000_000).nullable().optional(),
   htmlBody: z.string().max(2_000_000).nullable().optional(),
   recipients: recipientsSchema,
+  /**
+   * Send as a shared mailbox instead of your own — Security §10.
+   *
+   * Absent means your own mailbox, which is what every existing caller gets.
+   * Present requires `canSend` on that mailbox; until now that permission was
+   * stored and returned but never enforced anywhere, because there was no way
+   * to send as a shared mailbox at all.
+   */
+  sendAsMailboxId: z.string().uuid().optional(),
 });
 
 export const updateDraftSchema = createDraftSchema.partial();
@@ -26,6 +35,9 @@ export const attachmentParamsSchema = z.object({
   attachmentId: z.string().uuid(),
 });
 export const mailboxIdParamsSchema = z.object({ mailboxId: z.string().uuid() });
+
+/** Reading one message out of a shared mailbox rather than one's own. */
+export const mailboxScopeSchema = z.object({ mailboxId: z.string().uuid().optional() });
 export const updateSendingStatusSchema = z.object({
   suspended: z.boolean(),
   reason: z.string().trim().min(3).max(500).optional(),
@@ -59,17 +71,75 @@ export const adminUpdateMailboxSchema = z
     // Per-day send cap overriding the warm-up ladder. Null clears the override
     // and returns the mailbox to the standard schedule.
     customWarmupCap: z.coerce.number().int().min(1).max(100_000).nullable().optional(),
+    // Whether AI may process this mailbox (AC-008). Turning it off is what
+    // makes a mailbox "restricted" in the security spec's sense.
+    aiEnabled: z.boolean().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "Provide at least one field to update",
   });
 
+/* ── shared mailboxes — Security §10 ─────────────────────────────────── */
+
+export const createSharedMailboxSchema = z.object({
+  address: emailSchema,
+  // SHARED holds mail the assignees read; DISTRIBUTION only fans out.
+  type: z.enum(["SHARED", "DISTRIBUTION"]).default("SHARED"),
+});
+
+/**
+ * Four separable permissions, per §10. Omitted fields default to read-only
+ * rather than to the caller's last values: widening access should be typed
+ * out, not inherited.
+ */
+export const assignMailboxSchema = z.object({
+  membershipId: z.string().uuid(),
+  canRead: z.boolean().optional(),
+  canSend: z.boolean().optional(),
+  canManage: z.boolean().optional(),
+  canAssign: z.boolean().optional(),
+});
+
+export const mailboxAssigneeParamsSchema = z.object({
+  mailboxId: z.string().uuid(),
+  membershipId: z.string().uuid(),
+});
+
+/* ── aliases and forwarding — Data Model §6.17, §6.18 ────────────────── */
+
+export const createAliasSchema = z.object({ address: emailSchema });
+
+export const createForwardingSchema = z.object({
+  forwardToAddress: emailSchema,
+  // Default true: a rule that silently stops delivering to the mailbox is a
+  // surprising default for something an operator sets on someone else's mail.
+  keepCopy: z.boolean().default(true),
+});
+
+export const aliasParamsSchema = z.object({
+  mailboxId: z.string().uuid(),
+  aliasId: z.string().uuid(),
+});
+
+export const forwardingParamsSchema = z.object({
+  mailboxId: z.string().uuid(),
+  ruleId: z.string().uuid(),
+});
+
 export const listMailSchema = z.object({
   folder: z.enum(["DRAFTS", "INBOX", "ARCHIVE", "SENT", "TRASH", "QUARANTINE"]).default("INBOX"),
+  // Absent means the caller's own mailbox, which is what every existing
+  // caller gets. Present means a shared mailbox they must hold read on.
+  mailboxId: z.string().uuid().optional(),
   starredOnly: z.coerce.boolean().default(false),
   unreadOnly: z.coerce.boolean().default(false),
   labelId: z.string().uuid().optional(),
   q: z.string().trim().min(1).max(200).optional(),
+  from: z.string().trim().min(1).max(200).optional(),
+  to: z.string().trim().min(1).max(200).optional(),
+  hasAttachment: z.coerce.boolean().optional(),
+  dateAfter: z.coerce.date().optional(),
+  dateBefore: z.coerce.date().optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(25),
 });
@@ -79,6 +149,16 @@ export const adminDeliveryEventsQuerySchema = z.object({
     "COMPLAINED", "REJECTED", "BLOCKED", "SUPPRESSED", "RATE_LIMITED", "PROVIDER_ERROR",
   ]).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+/**
+ * Trailing window for the delivery-failure count.
+ *
+ * Capped at a week: the dashboard tile asks about recent operational health,
+ * and an unbounded window would turn a cheap aggregate into a full-table
+ * count as a workspace ages.
+ */
+export const adminDeliverySummaryQuerySchema = z.object({
+  windowHours: z.coerce.number().int().min(1).max(168).default(24),
 });
 export const updateMailboxItemSchema = z.object({
   isRead: z.boolean().optional(),
@@ -107,12 +187,21 @@ export const updateLabelSchema = createLabelSchema.partial()
 export const replySchema = z.object({
   textBody: z.string().max(2_000_000).nullable().optional(),
   htmlBody: z.string().max(2_000_000).nullable().optional(),
+  // Replying as a shared mailbox is the shape the support workflow actually
+  // takes: the message being answered sits in the team mailbox, and the answer
+  // has to go out from it rather than from whoever happened to pick it up.
+  sendAsMailboxId: z.string().uuid().optional(),
 });
 
 export const forwardSchema = replySchema.extend({
   recipients: recipientsSchema,
 });
 
+export const updateSignatureSchema = z.object({
+  signature: z.string().max(5000).nullable(),
+});
+
+export type UpdateSignatureInput = z.infer<typeof updateSignatureSchema>;
 export type CreateDraftInput = z.infer<typeof createDraftSchema>;
 export type UpdateDraftInput = z.infer<typeof updateDraftSchema>;
 export type ListMailInput = z.infer<typeof listMailSchema>;

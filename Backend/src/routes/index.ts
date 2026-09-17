@@ -15,24 +15,29 @@ import { integrationRouter } from "../modules/integration/integration.routes.js"
 import { jobRouter } from "../modules/job/job.routes.js";
 import { lifecycleRouter } from "../modules/lifecycle/lifecycle.routes.js";
 import { supportPlatformRouter, supportRouter } from "../modules/support/support.routes.js";
-import { ticketPlatformRouter, ticketRouter } from "../modules/ticket/ticket.routes.js";
 import { connectorRouter } from "../modules/connector/connector.routes.js";
 import { deliveryProtectionRouter } from "../modules/delivery-protection/delivery-protection.routes.js";
 import { billingRouter } from "../modules/billing/billing.routes.js";
-import { permissionRouter } from "../modules/permission/permission.routes.js";
-import { groupRouter } from "../modules/group/group.routes.js";
-import { ownershipRouter } from "../modules/ownership/ownership.routes.js";
-import { securityAlertRouter } from "../modules/security-alert/security-alert.routes.js";
+import { contactRouter } from "../modules/contact/contact.routes.js";
+import { authenticate } from "../common/middleware/authenticate.js";
+import { tenantContext } from "../common/middleware/tenantContext.js";
+import { dashboardRouter } from "../modules/dashboard/dashboard.routes.js";
+import { participantRouter } from "../modules/participant/participant.routes.js";
 
 const apiRouter = Router();
 
 apiRouter.use("/auth", authRouter);
+// Admin-console aggregates. Mounted at /admin so the console's own reads are
+// grouped, rather than hanging a dashboard off /tenants alongside the tenant
+// resource itself.
+apiRouter.use("/admin", dashboardRouter);
 apiRouter.use("/membership", membershipRouter);
 apiRouter.use("/users", userRouter);
 apiRouter.use("/tenants", tenantRouter);
 apiRouter.use("/audit", auditRouter);
 apiRouter.use("/policies", policyRouter);
 apiRouter.use("/mail", mailRouter);
+apiRouter.use("/participants", participantRouter);
 apiRouter.use("/messages", messageRouter);
 apiRouter.use("/threads", threadRouter);
 apiRouter.use("/domains", domainRouter);
@@ -42,21 +47,14 @@ apiRouter.use("/notifications", notificationRouter);
 apiRouter.use("/integrations", integrationRouter);
 apiRouter.use("/jobs", jobRouter);
 apiRouter.use("/lifecycle", lifecycleRouter);
-// Mount ticket routers before the generic support routers: /support/tickets
-// and /support/platform/tickets are more specific and must win the match.
-apiRouter.use("/support/platform/tickets", ticketPlatformRouter);
-apiRouter.use("/support/tickets", ticketRouter);
 // Mount the platform support console before the tenant-scoped /support router:
 // supportRouter runs tenantContext (ACTIVE membership required), which would
 // otherwise reject staff sessions that lack a tenant context.
 apiRouter.use("/support/platform", supportPlatformRouter);
 apiRouter.use("/support", supportRouter);
 apiRouter.use("/connectors", connectorRouter);
+apiRouter.use("/contacts", authenticate, tenantContext, contactRouter);
 apiRouter.use("/delivery-protection", deliveryProtectionRouter);
 apiRouter.use("/billing", billingRouter);
-apiRouter.use("/permissions", permissionRouter);
-apiRouter.use("/groups", groupRouter);
-apiRouter.use("/ownership", ownershipRouter);
-apiRouter.use("/security-alerts", securityAlertRouter);
 
 export { apiRouter };

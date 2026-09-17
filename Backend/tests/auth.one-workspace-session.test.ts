@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
-import { authHeader, registerUser } from "./helpers.js";
+import { authHeader, loginUser, registerUser, throughMfa } from "./helpers.js";
 
 const app = createApp();
 
@@ -69,6 +69,16 @@ const pick = (selectionToken: string, tenantId: string) =>
     .send({ selectionToken, tenantId });
 
 /**
+ * Pick a workspace and complete the sign-in.
+ *
+ * The account in these tests owns a workspace, so AC-002 stops the sign-in at
+ * an MFA challenge; the one-session-at-a-time rules being tested here are
+ * about what happens once a session exists.
+ */
+const open = async (selectionToken: string, tenantId: string) =>
+  throughMfa(app, await pick(selectionToken, tenantId).expect(200));
+
+/**
  * Tokens off a select-workspace response.
  *
  * Unlike /auth/login, which flattens the session onto the top level of its
@@ -77,7 +87,12 @@ const pick = (selectionToken: string, tenantId: string) =>
  */
 function sessionOf(res: { body: { data: Record<string, unknown> } }) {
   const session = res.body.data.session as
-    | { accessToken: string; refreshToken: string; tenant: { id: string } }
+    | {
+        accessToken: string;
+        refreshToken: string;
+        tenant: { id: string };
+        membership: { role: string };
+      }
     | undefined;
   expect(session?.accessToken).toBeTruthy();
   expect(session?.refreshToken).toBeTruthy();
@@ -94,7 +109,7 @@ describe("A user with two workspaces holds one session at a time", () => {
   it("offers both workspaces and opens the one that was picked", async () => {
     const selectionToken = await beginSignIn(user);
 
-    const opened = await pick(selectionToken, user.ownTenantId).expect(200);
+    const opened = await open(selectionToken, user.ownTenantId);
     expect(opened.body.data.state).toBe("SIGNED_IN");
     const session = sessionOf(opened);
     expect(session.tenant.id).toBe(user.ownTenantId);
@@ -124,12 +139,12 @@ describe("A user with two workspaces holds one session at a time", () => {
 
   it("ends the first workspace's session when the second is signed into", async () => {
     const first = sessionOf(
-      await pick(await beginSignIn(user), user.ownTenantId).expect(200)
+      await open(await beginSignIn(user), user.ownTenantId)
     );
     await probe(first.accessToken).expect(200);
 
     const second = sessionOf(
-      await pick(await beginSignIn(user), user.guestTenantId).expect(200)
+      await open(await beginSignIn(user), user.guestTenantId)
     );
     expect(second.tenant.id).toBe(user.guestTenantId);
 
@@ -143,9 +158,9 @@ describe("A user with two workspaces holds one session at a time", () => {
 
   it("stops the abandoned workspace being renewed with its refresh token", async () => {
     const first = sessionOf(
-      await pick(await beginSignIn(user), user.ownTenantId).expect(200)
+      await open(await beginSignIn(user), user.ownTenantId)
     );
-    await pick(await beginSignIn(user), user.guestTenantId).expect(200);
+    await open(await beginSignIn(user), user.guestTenantId);
 
     // Revoking the row matters as much as the activeTenantId check: a live
     // refresh token would otherwise mint a fresh access token for the
@@ -158,7 +173,7 @@ describe("A user with two workspaces holds one session at a time", () => {
   });
 
   it("records the workspace the latest sign-in claimed", async () => {
-    await pick(await beginSignIn(user), user.guestTenantId).expect(200);
+    await open(await beginSignIn(user), user.guestTenantId);
 
     const row = await prisma.appUser.findUniqueOrThrow({
       where: { id: user.userId },
@@ -177,10 +192,10 @@ describe("A user with two workspaces holds one session at a time", () => {
     // A suspended workspace issues no session, so spending the token here
     // would strand the user: they would have to sign in again purely because
     // they picked the wrong one of two options.
-    const blocked = await pick(selectionToken, user.guestTenantId).expect(200);
+    const blocked = await open(selectionToken, user.guestTenantId);
     expect(blocked.body.data.state).toBe("WORKSPACE_SUSPENDED");
 
-    const opened = await pick(selectionToken, user.ownTenantId).expect(200);
+    const opened = await open(selectionToken, user.ownTenantId);
     expect(opened.body.data.state).toBe("SIGNED_IN");
   });
 
@@ -191,19 +206,19 @@ describe("A user with two workspaces holds one session at a time", () => {
       email: `solo-${Date.now()}@zoiko.test`,
     });
 
-    const again = await request(app)
-      .post("/api/v1/auth/login")
-      .send({ email: solo.email, password: solo.password })
-      .expect(200);
-    expect(again.body.data.state).toBe("SIGNED_IN");
+    // Still an Owner, so still gated (AC-002) — the point of this test is
+    // that naming the tenant skips *selection*, not that it skips the second
+    // factor.
+    const again = await loginUser(app, solo.email, solo.password, undefined, solo.mfaSecret);
+    expect(again.state).toBe("SIGNED_IN");
 
     // Signing in again in the same workspace re-claims the same tenant, so
     // the newest session keeps working.
-    await probe(again.body.data.accessToken).expect(200);
+    await probe(again.accessToken).expect(200);
   });
   it("kills the access token the moment the user signs out", async () => {
     const session = sessionOf(
-      await pick(await beginSignIn(user), user.ownTenantId).expect(200)
+      await open(await beginSignIn(user), user.ownTenantId)
     );
     await probe(session.accessToken).expect(200);
 
@@ -222,7 +237,7 @@ describe("A user with two workspaces holds one session at a time", () => {
 
   it("kills the access token when the user signs out everywhere", async () => {
     const session = sessionOf(
-      await pick(await beginSignIn(user), user.guestTenantId).expect(200)
+      await open(await beginSignIn(user), user.guestTenantId)
     );
     await probe(session.accessToken).expect(200);
 
@@ -236,7 +251,7 @@ describe("A user with two workspaces holds one session at a time", () => {
 
   it("lets the user back in after signing out", async () => {
     const first = sessionOf(
-      await pick(await beginSignIn(user), user.ownTenantId).expect(200)
+      await open(await beginSignIn(user), user.ownTenantId)
     );
     await request(app)
       .post("/api/v1/auth/logout")
@@ -246,7 +261,7 @@ describe("A user with two workspaces holds one session at a time", () => {
     // Strict enforcement must not become a lockout: a fresh sign-in claims
     // the workspace again and works.
     const again = sessionOf(
-      await pick(await beginSignIn(user), user.ownTenantId).expect(200)
+      await open(await beginSignIn(user), user.ownTenantId)
     );
     await probe(again.accessToken).expect(200);
   });
@@ -258,7 +273,7 @@ describe("A user with two workspaces holds one session at a time", () => {
     });
 
     const selectionToken = await beginSignIn(user);
-    const refused = await pick(selectionToken, stranger.tenantId).expect(200);
+    const refused = await open(selectionToken, stranger.tenantId);
 
     // Naming someone else's tenant must not open it. The picker is a
     // convenience; membership is what authorises, and it is checked here
@@ -272,18 +287,12 @@ describe("A user with two workspaces holds one session at a time", () => {
     // role in this response. The same person is OWNER of one workspace and
     // MEMBER of the other, so a pick that reported the wrong one would route
     // them into a console they hold no authority in.
-    const asOwner = await pick(
-      await beginSignIn(user),
-      user.ownTenantId
-    ).expect(200);
-    expect(asOwner.body.data.session.membership.role).toBe("OWNER");
-    expect(asOwner.body.data.session.tenant.id).toBe(user.ownTenantId);
+    const asOwner = await open(await beginSignIn(user), user.ownTenantId);
+    expect(sessionOf(asOwner).membership.role).toBe("OWNER");
+    expect(sessionOf(asOwner).tenant.id).toBe(user.ownTenantId);
 
-    const asMember = await pick(
-      await beginSignIn(user),
-      user.guestTenantId
-    ).expect(200);
-    expect(asMember.body.data.session.membership.role).toBe("MEMBER");
-    expect(asMember.body.data.session.tenant.id).toBe(user.guestTenantId);
+    const asMember = await open(await beginSignIn(user), user.guestTenantId);
+    expect(sessionOf(asMember).membership.role).toBe("MEMBER");
+    expect(sessionOf(asMember).tenant.id).toBe(user.guestTenantId);
   });
 });

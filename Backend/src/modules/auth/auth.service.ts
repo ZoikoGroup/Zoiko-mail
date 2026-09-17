@@ -7,19 +7,20 @@ import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { hashPassword, verifyPassword } from "../../common/utils/password.js";
-import { enforcePasswordPolicy } from "../../common/utils/passwordPolicy.js";
-import { securityAlertService } from "../security-alert/security-alert.service.js";
 import { hashToken } from "../../common/utils/tokenHash.js";
 import { actingRole } from "../../common/utils/workspaceScope.js";
 import type {
   AccessTokenPayload,
+  MfaChallengeTokenPayload,
   PendingTokenPayload,
   PlatformTokenPayload,
   RefreshTokenPayload,
   SelectionTokenPayload,
+  StepUpTokenPayload,
   WorkspaceScope,
 } from "../../common/types/jwt.js";
 import { auditService } from "../audit/audit.service.js";
+import { mfaService, roleRequiresMfa } from "./mfa.service.js";
 import { membershipRepository } from "../membership/membership.repository.js";
 import type { MembershipWithRelations } from "../membership/membership.repository.js";
 import { userRepository } from "../user/user.repository.js";
@@ -54,61 +55,6 @@ interface RequestContext {
   requestId?: string;
   ipAddress?: string | null;
   userAgent?: string | null;
-}
-
-/** What a session "is" in the Where-am-I-signed-in list. */
-export interface SessionDeviceMetadata {
-  deviceLabel?: string | null;
-  ipAddress?: string | null;
-  userAgent?: string | null;
-}
-
-/** A session as it appears to its owner. */
-export interface SessionInfo {
-  id: string;
-  deviceLabel: string;
-  ipAddress: string | null;
-  createdAt: Date;
-  lastUsedAt: Date | null;
-  /** The session that issued this user's current access token. */
-  isCurrent: boolean;
-}
-
-/**
- * Turns a raw User-Agent into something a human recognises: platform first
- * ("Windows", "macOS", "iPhone"), then browser family. Unknown agents come
- * back as "Unknown device" — never a blank row in the list.
- */
-function labelForUserAgent(userAgent?: string | null): string {
-  const ua = (userAgent ?? "").toLowerCase();
-  const platform =
-    ua.includes("iphone") || ua.includes("ipad")
-      ? "iOS"
-      : ua.includes("android")
-        ? "Android"
-        : ua.includes("windows") || ua.includes("win32")
-          ? "Windows"
-          : ua.includes("mac os")
-            ? "macOS"
-            : ua.includes("linux")
-              ? "Linux"
-              : "";
-  const browser =
-    ua.includes("edg/")
-      ? "Edge"
-      : ua.includes("opr/") || ua.includes("opera")
-        ? "Opera"
-        : ua.includes("firefox")
-          ? "Firefox"
-          : ua.includes("chrome")
-            ? "Chrome"
-            : ua.includes("safari")
-              ? "Safari"
-              : "";
-  if (platform && browser) return `${platform} · ${browser}`;
-  if (platform) return platform;
-  if (browser) return browser;
-  return "Unknown device";
 }
 
 const membershipRoles = new Set<MembershipRole>([
@@ -184,14 +130,14 @@ export function workspaceScopeForRole(role: MembershipRole): WorkspaceScope {
 }
 
 /**
- * A Google sign-in uses the same workspace scope derivation as password
- * sign-in — the console matches the membership role (OWNER→OWNER, ADMIN→ADMIN,
- * MEMBER→MEMBER). This ensures consistent dashboard access regardless of
- * authentication method.
+ * A Google sign-in always acts as a member, however senior the account is.
+ *
+ * Reaching the admin, owner or support console is a deliberate act that must
+ * go through a sign-in aimed at it. Without this an Owner who used the Google
+ * button would land in the owner console, which is precisely what the rule
+ * forbids.
  */
-export function googleWorkspaceScope(role: MembershipRole): WorkspaceScope {
-  return workspaceScopeForRole(role);
-}
+export const GOOGLE_WORKSPACE_SCOPE: WorkspaceScope = "MEMBER";
 
 function buildAccessToken(
   membership: MembershipWithRelations,
@@ -313,6 +259,105 @@ function buildPlatformToken(
   return { token, expiresIn: env.JWT_ACCESS_EXPIRES_IN };
 }
 
+/**
+ * The window a second factor must be answered in.
+ *
+ * Long enough to open an authenticator app or find a recovery code, short
+ * enough that a token intercepted after a password check is not a standing
+ * invitation.
+ */
+const MFA_CHALLENGE_EXPIRES_IN = "10m";
+
+/**
+ * Issued when a privileged sign-in still owes its second factor — AC-002.
+ *
+ * The intent travels inside the token so answering the challenge mints
+ * exactly the session the password earned. Putting it in the token rather
+ * than re-deriving it on the second call also closes a subtle hole: the
+ * account cannot be promoted between the two requests and have the challenge
+ * hand back more than it was issued for.
+ */
+function buildMfaChallengeToken(
+  userId: string,
+  intent: MfaChallengeTokenPayload["intent"],
+  enrolment: boolean
+): { token: string; expiresIn: string } {
+  const payload: MfaChallengeTokenPayload = {
+    sub: userId,
+    type: "mfa",
+    jti: uuidv4(),
+    enrolment,
+    intent,
+  };
+  const token = jwt.sign(payload, env.JWT_ACCESS_SECRET, {
+    expiresIn: MFA_CHALLENGE_EXPIRES_IN,
+  });
+  return { token, expiresIn: MFA_CHALLENGE_EXPIRES_IN };
+}
+
+/**
+ * Decode a challenge token, or refuse.
+ *
+ * Every failure reads the same to the caller — expired, forged, or an access
+ * token presented in its place — because the difference is only useful to
+ * somebody probing.
+ */
+export function readMfaChallengeToken(token: string): MfaChallengeTokenPayload {
+  try {
+    const decoded = jwt.verify(token, env.JWT_ACCESS_SECRET) as MfaChallengeTokenPayload;
+    if (decoded.type !== "mfa") throw new Error("wrong token type");
+    return decoded;
+  } catch {
+    throw new AppError(
+      "This verification session has expired. Sign in again.",
+      401,
+      ErrorCodes.TOKEN_INVALID
+    );
+  }
+}
+
+/**
+ * Proof of a fresh password check, for the high-risk actions in Security §5.
+ *
+ * Bound to the tenant as well as the user: stepping up in one workspace must
+ * not authorise a destructive action in another, and a session can only act
+ * in one workspace at a time anyway.
+ */
+function buildStepUpToken(userId: string, tenantId: string): { token: string; expiresIn: string } {
+  const payload: StepUpTokenPayload = {
+    sub: userId,
+    tenantId,
+    type: "step-up",
+    jti: uuidv4(),
+  };
+  const token = jwt.sign(payload, env.JWT_ACCESS_SECRET, {
+    expiresIn: env.STEP_UP_EXPIRES_IN as jwt.SignOptions["expiresIn"],
+  });
+  return { token, expiresIn: env.STEP_UP_EXPIRES_IN };
+}
+
+/**
+ * True when the header carries a live step-up for this exact user and tenant.
+ *
+ * Verification failures are all treated the same way — expired, forged,
+ * belonging to someone else — because the caller has nothing useful to do
+ * with the distinction and it would tell an attacker which part they got
+ * right.
+ */
+export function verifyStepUpToken(
+  token: string | undefined,
+  userId: string,
+  tenantId: string
+): boolean {
+  if (!token) return false;
+  try {
+    const decoded = jwt.verify(token, env.JWT_ACCESS_SECRET) as StepUpTokenPayload;
+    return decoded.type === "step-up" && decoded.sub === userId && decoded.tenantId === tenantId;
+  } catch {
+    return false;
+  }
+}
+
 function toWorkspaceOption(m: MembershipWithRelations): WorkspaceOption {
   return {
     id: m.tenant.id,
@@ -330,8 +375,7 @@ async function persistRefreshToken(
   membership: MembershipWithRelations,
   refreshToken: string,
   expiresAt: Date,
-  tx: Prisma.TransactionClient | typeof prisma = prisma,
-  device?: SessionDeviceMetadata
+  tx: Prisma.TransactionClient | typeof prisma = prisma
 ): Promise<void> {
   await tx.refreshToken.create({
     data: {
@@ -339,9 +383,6 @@ async function persistRefreshToken(
       tenantId: membership.tenantId,
       tokenHash: hashToken(refreshToken),
       expiresAt,
-      deviceLabel: device?.deviceLabel ?? null,
-      ipAddress: device?.ipAddress ?? null,
-      userAgent: device?.userAgent ?? null,
     },
   });
 }
@@ -404,13 +445,12 @@ async function releaseActiveWorkspace(
 async function issueSession(
   membership: MembershipWithRelations,
   workspace: WorkspaceScope,
-  tx: Prisma.TransactionClient | typeof prisma = prisma,
-  device?: SessionDeviceMetadata
+  tx: Prisma.TransactionClient | typeof prisma = prisma
 ): Promise<AuthSessionResponse> {
   const accessToken = buildAccessToken(membership, workspace);
   const refresh = buildRefreshToken(membership, workspace);
 
-  await persistRefreshToken(membership, refresh.token, refresh.expiresAt, tx, device);
+  await persistRefreshToken(membership, refresh.token, refresh.expiresAt, tx);
   // After the new token is stored, so a failure here cannot leave the account
   // pointing at a workspace it holds no session for.
   await claimActiveWorkspace(membership, tx);
@@ -484,8 +524,6 @@ export class AuthService {
         ErrorCodes.CONFLICT
       );
     }
-
-    enforcePasswordPolicy(input.password, { email: input.email });
 
     const passwordHash = await hashPassword(input.password);
 
@@ -564,11 +602,19 @@ export class AuthService {
    * there's no tenant to attach yet), creates the Tenant + OWNER
    * membership, then issues a full session exactly like login does.
    */
+  /**
+   * Returns an AuthState rather than a session, because the account this
+   * creates is an Owner and AC-002 requires a second factor before an Owner
+   * gets a session. Enrolling seconds after sign-up is a deliberate onboarding
+   * cost: the alternative is a brand-new Owner holding an indefinitely
+   * refreshable session that never passed the control, which would make
+   * "enforced" mean "enforced from the second sign-in onwards".
+   */
   async createWorkspace(
     input: CreateWorkspaceInput,
     pendingToken: string,
     context: RequestContext
-  ): Promise<AuthSessionResponse> {
+  ): Promise<AuthState> {
     const userId = this.verifyPendingToken(pendingToken);
 
     const user = await userRepository.findById(userId);
@@ -634,16 +680,29 @@ export class AuthService {
       );
     }
 
-    return issueSession(
-      membershipWithRelations,
-      workspaceScopeForRole(membershipWithRelations.role),
-      undefined,
+    const owner = await prisma.appUser.findUniqueOrThrow({ where: { id: userId } });
+    const gate = await this.mfaGate(
+      owner,
+      { id: owner.id, email: owner.email, displayName: owner.displayName },
+      toWorkspaceOption(membershipWithRelations),
       {
-        deviceLabel: labelForUserAgent(context.userAgent),
-        ipAddress: context.ipAddress,
-        userAgent: context.userAgent,
-      }
+        kind: "tenant",
+        tenantId: membershipWithRelations.tenantId,
+        membershipId: membershipWithRelations.id,
+        workspace: workspaceScopeForRole(membershipWithRelations.role),
+      },
+      membershipWithRelations.role,
+      context
     );
+    if (gate) return gate;
+
+    return {
+      state: "SIGNED_IN",
+      session: await issueSession(
+        membershipWithRelations,
+        workspaceScopeForRole(membershipWithRelations.role)
+      ),
+    };
   }
 
   /**
@@ -654,11 +713,16 @@ export class AuthService {
    * The whole accept+session runs in one transaction so tokens are only
    * issued when the acceptance actually commits.
    */
+  /**
+   * Also an AuthState: an invitation can be to an Admin or Owner seat, and
+   * accepting one must not hand out a privileged session that skipped the
+   * control every other privileged sign-in passes.
+   */
   async joinWorkspace(
     input: JoinWorkspaceInput,
     pendingToken: string,
     context: RequestContext
-  ): Promise<AuthSessionResponse> {
+  ): Promise<AuthState> {
     const userId = this.verifyPendingToken(pendingToken);
 
     const session = await prisma.$transaction(async (tx) => {
@@ -734,19 +798,43 @@ export class AuthService {
         );
       }
 
-      return issueSession(
-        membershipWithRelations,
-        workspaceScopeForRole(membershipWithRelations.role),
-        tx,
-        {
-          deviceLabel: labelForUserAgent(context.userAgent),
-          ipAddress: context.ipAddress,
-          userAgent: context.userAgent,
-        }
-      );
+      return {
+        membership: membershipWithRelations,
+        session: await issueSession(
+          membershipWithRelations,
+          workspaceScopeForRole(membershipWithRelations.role),
+          tx
+        ),
+      };
     });
 
-    return session;
+    // Gated after the transaction, not inside it: the membership must be
+    // committed either way — the invitation has been accepted — and only the
+    // session it would have handed back is withheld.
+    const joiner = await prisma.appUser.findUniqueOrThrow({ where: { id: userId } });
+    const gate = await this.mfaGate(
+      joiner,
+      { id: joiner.id, email: joiner.email, displayName: joiner.displayName },
+      toWorkspaceOption(session.membership),
+      {
+        kind: "tenant",
+        tenantId: session.membership.tenantId,
+        membershipId: session.membership.id,
+        workspace: workspaceScopeForRole(session.membership.role),
+      },
+      session.membership.role,
+      context
+    );
+    if (gate) {
+      // The session minted inside the transaction must not survive the gate.
+      await prisma.refreshToken.updateMany({
+        where: { userId, tenantId: session.membership.tenantId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      return gate;
+    }
+
+    return { state: "SIGNED_IN", session: session.session };
   }
 
   /**
@@ -870,7 +958,6 @@ export class AuthService {
     if (await verifyPassword(input.newPassword, user.passwordHash)) {
       throw new AppError("New password must be different from your current password", 409, ErrorCodes.CONFLICT);
     }
-    enforcePasswordPolicy(input.newPassword, { email: input.email });
     const passwordHash = await hashPassword(input.newPassword);
     await ensureSystemTenant();
     await prisma.$transaction(async (tx) => {
@@ -886,16 +973,6 @@ export class AuthService {
         requestId: context.requestId, ipAddress: context.ipAddress, userAgent: context.userAgent,
       }, tx);
     });
-    await securityAlertService.recordPasswordReset(
-      (await this.activeTenantForUser(user)) ?? SYSTEM_TENANT_ID,
-      user.id,
-      user.email,
-      {
-        ipAddress: context.ipAddress ?? null,
-        userAgent: context.userAgent ?? null,
-        requestId: context.requestId,
-      }
-    );
     return { message: "Password has been reset. You can now sign in with your new password." };
   }
 
@@ -912,7 +989,7 @@ export class AuthService {
     if (!user.passwordHash) {
       await this.recordLoginFailure(user.id, input.email, "password_login_unavailable", context);
       throw new AppError(
-        "This account was created with Google and has no password set. Use \"Continue with Google\" to sign in, or use \"Forgot password\" to set a password and then sign in with email.",
+        "This account signs in with Google. Use \"Continue with Google\" instead.",
         401,
         ErrorCodes.UNAUTHORIZED
       );
@@ -968,7 +1045,12 @@ export class AuthService {
         // Google addresses can change; keep the record current.
         data: { lastUsedAt: new Date(), email: profile.email },
       });
-      return this.resolveAuthState(identity.user, undefined, context);
+      return this.resolveAuthState(
+        identity.user,
+        undefined,
+        context,
+        GOOGLE_WORKSPACE_SCOPE
+      );
     }
 
     const existingUser = await userRepository.findByEmail(profile.email);
@@ -1020,7 +1102,7 @@ export class AuthService {
         created,
         undefined,
         context,
-        "MEMBER"
+        GOOGLE_WORKSPACE_SCOPE
       );
     }
 
@@ -1087,19 +1169,20 @@ export class AuthService {
       return user;
     });
 
-return this.resolveAuthState(
-        linked,
-        undefined,
-        context
-      );
+    return this.resolveAuthState(
+      linked,
+      undefined,
+      context,
+      GOOGLE_WORKSPACE_SCOPE
+    );
   }
 
   /** Ordered guard chain. First matching guard decides the state. */
   /**
    * `intendedWorkspace` fixes the console the session is bound to. Left
-   * undefined it follows the membership role — both password and Google sign-in
-   * now derive the workspace from the role (OWNER→OWNER, ADMIN→ADMIN, MEMBER→MEMBER)
-   * so the console is consistent regardless of authentication method.
+   * undefined it follows the membership role, which is what a password
+   * sign-in wants. Google passes MEMBER explicitly so a social sign-in can
+   * never open a console.
    */
   private async resolveAuthState(
     user: Awaited<ReturnType<typeof userRepository.findByEmail>> & {},
@@ -1135,6 +1218,19 @@ return this.resolveAuthState(
 
     // 2. Platform-staff branch — staff resolve to a console, not a tenant.
     if (user.platformRole !== "NONE") {
+      // Support actors are named in AC-002 alongside Owners and Admins, and a
+      // staff console reaches across every workspace, so the gate matters more
+      // here than anywhere.
+      const staffGate = await this.mfaGate(
+        user,
+        publicUser,
+        undefined,
+        { kind: "platform", platformRole: user.platformRole },
+        user.platformRole,
+        context
+      );
+      if (staffGate) return staffGate;
+
       const platform = buildPlatformToken(user.id, user.platformRole);
       await ensureSystemTenant();
       await auditService.record({
@@ -1273,11 +1369,21 @@ return this.resolveAuthState(
       throw error;
     }
 
-    // 4. Only a real session spends the login. A pick that resolved to
-    //    anything else — a suspended workspace, a membership still pending —
-    //    issued no session, so the token is returned and the user can choose
-    //    a different workspace instead of being sent back to sign in.
-    if (result.state !== "SIGNED_IN") {
+    // 4. Only a real session — or a challenge that will become one — spends
+    //    the login. A pick that resolved to anything else, a suspended
+    //    workspace or a membership still pending, issued nothing, so the
+    //    token is returned and the user can choose a different workspace
+    //    instead of being sent back to sign in.
+    //
+    //    An MFA challenge counts as spent (AC-002). It is not a dead end: it
+    //    already names the workspace it will open, so releasing the token
+    //    would let one password entry raise challenges for several
+    //    workspaces at once.
+    const spent =
+      result.state === "SIGNED_IN" ||
+      result.state === "MFA_REQUIRED" ||
+      result.state === "MFA_ENROLLMENT_REQUIRED";
+    if (!spent) {
       await this.releaseSelectionToken(jti);
     }
 
@@ -1327,6 +1433,185 @@ return this.resolveAuthState(
    * through from resolveAuthState so the session it issues is bound to it.
    * Left undefined it follows the membership role.
    */
+  /**
+   * Whether this sign-in owes a second factor, and the state that asks for it.
+   *
+   * Returns null when the role does not require MFA, which leaves the member
+   * path exactly as it was — AC-002 names Owners, Admins and Support, and
+   * compelling every member into an authenticator would be a different
+   * decision than the one the specification made.
+   */
+  private async mfaGate(
+    user: { id: string },
+    publicUser: PublicUser,
+    workspace: WorkspaceOption | undefined,
+    intent: MfaChallengeTokenPayload["intent"],
+    role: MembershipRole | Exclude<PlatformRole, "NONE">,
+    context: RequestContext
+  ): Promise<AuthState | null> {
+    const required =
+      intent.kind === "platform" || roleRequiresMfa(role as MembershipRole);
+    if (!required) return null;
+
+    const enrolled = await mfaService.isEnrolled(user.id);
+    const challenge = buildMfaChallengeToken(user.id, intent, !enrolled);
+
+    await ensureSystemTenant();
+    await auditService.record({
+      tenantId: intent.kind === "tenant" ? intent.tenantId : SYSTEM_TENANT_ID,
+      actorUserId: user.id,
+      eventType: enrolled ? "MFA_CHALLENGE_ISSUED" : "MFA_ENROLMENT_REQUIRED",
+      targetType: "AppUser",
+      targetId: user.id,
+      requestId: context.requestId,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+      metadata: { role },
+    });
+
+    if (!enrolled) {
+      return {
+        state: "MFA_ENROLLMENT_REQUIRED",
+        user: publicUser,
+        workspace,
+        mfaToken: challenge.token,
+        expiresIn: challenge.expiresIn,
+        requiredBecause: String(role),
+      };
+    }
+
+    return {
+      state: "MFA_REQUIRED",
+      user: publicUser,
+      workspace,
+      mfaToken: challenge.token,
+      expiresIn: challenge.expiresIn,
+      remainingRecoveryCodes: await prisma.mfaRecoveryCode.count({
+        where: { userId: user.id, usedAt: null },
+      }),
+    };
+  }
+
+  /**
+   * Finish a sign-in that was waiting on a second factor.
+   *
+   * The membership is re-read rather than trusted from the token, because
+   * minutes may have passed: a revoked membership, a suspended workspace or a
+   * disabled account must all stop the session here rather than be discovered
+   * on the next request.
+   */
+  async completeMfaChallenge(
+    challengeToken: string,
+    code: string,
+    context: RequestContext
+  ): Promise<AuthState> {
+    const payload = readMfaChallengeToken(challengeToken);
+    await mfaService.verifyChallenge(payload.sub, code, context);
+
+    const user = await prisma.appUser.findUnique({ where: { id: payload.sub } });
+    if (!user || user.status !== "ACTIVE") {
+      throw new AppError("This account cannot sign in", 403, ErrorCodes.FORBIDDEN);
+    }
+
+    if (payload.intent.kind === "platform") {
+      const platform = buildPlatformToken(user.id, payload.intent.platformRole);
+      await ensureSystemTenant();
+      await auditService.record({
+        tenantId: SYSTEM_TENANT_ID,
+        actorUserId: user.id,
+        eventType: AuditEventTypes.LOGIN_SUCCESS,
+        targetType: "AppUser",
+        targetId: user.id,
+        requestId: context.requestId,
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+        metadata: { platformRole: payload.intent.platformRole, mfa: true },
+      });
+      return {
+        state: "STAFF_CONSOLE",
+        user: { id: user.id, email: user.email, displayName: user.displayName },
+        platformRole: payload.intent.platformRole,
+        platformToken: platform.token,
+        expiresIn: platform.expiresIn,
+      };
+    }
+
+    const membership = await membershipRepository.findByUserAndTenant(
+      user.id,
+      payload.intent.tenantId
+    );
+    if (!membership || membership.status !== "ACTIVE" || membership.tenant.status !== "ACTIVE") {
+      throw new AppError("This workspace is no longer available", 403, ErrorCodes.FORBIDDEN);
+    }
+
+    const session = await issueSession(membership, payload.intent.workspace);
+    await auditService.record({
+      tenantId: membership.tenantId,
+      actorUserId: user.id,
+      eventType: AuditEventTypes.LOGIN_SUCCESS,
+      targetType: "AppUser",
+      targetId: user.id,
+      requestId: context.requestId,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+      metadata: { mfa: true },
+    });
+    return { state: "SIGNED_IN", session };
+  }
+
+  /**
+   * Enrol while holding only a challenge token.
+   *
+   * The account has no session yet — that is the point of the state — so
+   * enrolment has to be reachable from the challenge, or a newly privileged
+   * user would be locked out by the very control meant to protect them.
+   */
+  async enrolFromChallenge(challengeToken: string, context: RequestContext) {
+    const payload = readMfaChallengeToken(challengeToken);
+    const user = await prisma.appUser.findUniqueOrThrow({
+      where: { id: payload.sub },
+      select: { email: true },
+    });
+    return mfaService.beginEnrolment(payload.sub, user.email, context);
+  }
+
+  /** Confirm that enrolment, and sign in with the session it was blocking. */
+  async confirmEnrolmentFromChallenge(
+    challengeToken: string,
+    code: string,
+    context: RequestContext
+  ): Promise<{ recoveryCodes: string[]; auth: AuthState }> {
+    const payload = readMfaChallengeToken(challengeToken);
+    const { recoveryCodes } = await mfaService.confirmEnrolment(payload.sub, code, context);
+
+    // The code that just proved the authenticator is spent, so the sign-in
+    // completes from the same act rather than asking for a second code
+    // seconds later.
+    const user = await prisma.appUser.findUniqueOrThrow({ where: { id: payload.sub } });
+    if (payload.intent.kind === "platform") {
+      const platform = buildPlatformToken(user.id, payload.intent.platformRole);
+      return {
+        recoveryCodes,
+        auth: {
+          state: "STAFF_CONSOLE",
+          user: { id: user.id, email: user.email, displayName: user.displayName },
+          platformRole: payload.intent.platformRole,
+          platformToken: platform.token,
+          expiresIn: platform.expiresIn,
+        },
+      };
+    }
+    const membership = await membershipRepository.findByUserAndTenant(
+      user.id,
+      payload.intent.tenantId
+    );
+    if (!membership || membership.status !== "ACTIVE" || membership.tenant.status !== "ACTIVE") {
+      throw new AppError("This workspace is no longer available", 403, ErrorCodes.FORBIDDEN);
+    }
+    const session = await issueSession(membership, payload.intent.workspace);
+    return { recoveryCodes, auth: { state: "SIGNED_IN", session } };
+  }
+
   private async resolveSelectedWorkspace(
     user: { id: string; email: string; displayName: string },
     membership: MembershipWithRelations,
@@ -1367,30 +1652,29 @@ return this.resolveAuthState(
       };
     }
 
-    // ACTIVE membership + ACTIVE tenant → sign in.
-    // Phase 4: flag a sign-in from a device this account has not used here
-    // before. Must run before issueSession — the new session's refresh row is
-    // the "current device", and once it exists every sign-in looks known.
-    await securityAlertService.recordNewDeviceLogin(
-      membership.tenantId,
-      user.id,
-      context.userAgent ?? null,
+    // AC-002: "MFA is enforced for Owners, Admins and Support actors." The
+    // gate sits here, immediately before the session is minted, because that
+    // is the one place every password, Google and workspace-selection path
+    // converges on.
+    const gate = await this.mfaGate(
+      user,
+      publicUser,
+      workspace,
       {
-        ipAddress: context.ipAddress ?? null,
-        deviceLabel: labelForUserAgent(context.userAgent),
-        requestId: context.requestId,
-      }
+        kind: "tenant",
+        tenantId: membership.tenantId,
+        membershipId: membership.id,
+        workspace: intendedWorkspace ?? workspaceScopeForRole(membership.role),
+      },
+      membership.role,
+      context
     );
+    if (gate) return gate;
 
+    // ACTIVE membership + ACTIVE tenant → sign in.
     const session = await issueSession(
       membership,
-      intendedWorkspace ?? workspaceScopeForRole(membership.role),
-      undefined,
-      {
-        deviceLabel: labelForUserAgent(context.userAgent),
-        ipAddress: context.ipAddress,
-        userAgent: context.userAgent,
-      }
+      intendedWorkspace ?? workspaceScopeForRole(membership.role)
     );
     await auditService.record({
       tenantId: membership.tenantId,
@@ -1477,7 +1761,7 @@ return this.resolveAuthState(
     const session = await prisma.$transaction(async (tx) => {
       const claimed = await tx.refreshToken.updateMany({
         where: { id: storedToken.id, revokedAt: null },
-        data: { revokedAt: new Date(), lastUsedAt: new Date() },
+        data: { revokedAt: new Date() },
       });
 
       if (claimed.count !== 1) return null;
@@ -1488,12 +1772,7 @@ return this.resolveAuthState(
       const nextSession = await issueSession(
         membership,
         payload.workspace ?? workspaceScopeForRole(membership.role),
-        tx,
-        {
-          deviceLabel: labelForUserAgent(context.userAgent),
-          ipAddress: context.ipAddress,
-          userAgent: context.userAgent,
-        }
+        tx
       );
       await auditService.record(
         {
@@ -1557,18 +1836,52 @@ return this.resolveAuthState(
     }
   }
 
-  // The one workspace a password reset alert should be filed under. Resets
-  // happen on a public endpoint with no tenant context, so fall back to the
-  // account's active workspace, then the first ACTIVE one.
-  private async activeTenantForUser(
-    user: { id: string }
-  ): Promise<string | null> {
-    const memberships = await membershipRepository.findByUserId(user.id);
-    const live = memberships.find(
-      (membership) =>
-        membership.status === "ACTIVE" && membership.tenant.status === "ACTIVE"
-    );
-    return live?.tenantId ?? null;
+  /**
+   * Re-authenticate for a high-risk action — Security §5, AC-003.
+   *
+   * Deliberately re-checks the password rather than trusting the access
+   * token: the token proves who signed in hours ago, and §5 wants evidence
+   * that the person at the keyboard right now is the account holder.
+   *
+   * Audited whether it succeeds or fails. A run of failures against a
+   * privileged action is exactly the signal §18's identity category exists
+   * to capture.
+   */
+  async stepUp(
+    input: { password: string },
+    context: { userId: string; tenantId: string; requestId?: string; ipAddress?: string | null; userAgent?: string | null }
+  ) {
+    const user = await prisma.appUser.findUnique({
+      where: { id: context.userId },
+      select: { id: true, passwordHash: true },
+    });
+    if (!user) throw new AppError("Account not found", 404, ErrorCodes.NOT_FOUND);
+
+    // A Google-only account has no password to re-enter. Saying so plainly
+    // beats a generic refusal the person cannot act on.
+    if (!user.passwordHash) {
+      throw new AppError(
+        "This account signs in with Google and has no password to confirm. Set a password before performing this action.",
+        409,
+        ErrorCodes.CONFLICT,
+        { reason: "NO_PASSWORD_SET" }
+      );
+    }
+
+    const ok = await verifyPassword(input.password, user.passwordHash);
+    await auditService.record({
+      tenantId: context.tenantId,
+      actorUserId: context.userId,
+      eventType: ok ? "STEP_UP_SUCCEEDED" : "STEP_UP_FAILED",
+      targetType: "AppUser",
+      targetId: context.userId,
+      requestId: context.requestId,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+    });
+    if (!ok) throw new AppError("Password is incorrect", 401, ErrorCodes.UNAUTHORIZED);
+
+    return buildStepUpToken(context.userId, context.tenantId);
   }
 
   async changePassword(
@@ -1581,34 +1894,24 @@ return this.resolveAuthState(
     if (!user) {
       throw new AppError("Current password is incorrect", 401, ErrorCodes.UNAUTHORIZED);
     }
-
-    const hasExistingPassword = !!user.passwordHash;
-
-    // If user has an existing password, verify the current password
-    if (hasExistingPassword) {
-      if (!(await verifyPassword(input.currentPassword, user.passwordHash!))) {
-        throw new AppError("Current password is incorrect", 401, ErrorCodes.UNAUTHORIZED);
-      }
-
-      if (await verifyPassword(input.newPassword, user.passwordHash!)) {
-        throw new AppError(
-          "New password must be different from the current password",
-          409,
-          ErrorCodes.CONFLICT
-        );
-      }
-    } else {
-      // User has no password (Google-only account) - this is initial password set
-      // Verify that currentPassword is empty (signal from frontend)
-      if (input.currentPassword && input.currentPassword.trim() !== "") {
-        throw new AppError("Current password must be empty when setting initial password", 400, ErrorCodes.VALIDATION_ERROR);
-      }
+    if (!user.passwordHash) {
+      throw new AppError(
+        "This account signs in with Google and has no password to change.",
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+    if (!(await verifyPassword(input.currentPassword, user.passwordHash))) {
+      throw new AppError("Current password is incorrect", 401, ErrorCodes.UNAUTHORIZED);
     }
 
-    enforcePasswordPolicy(input.newPassword, {
-      email: user.email,
-      currentPassword: hasExistingPassword ? input.currentPassword : undefined,
-    });
+    if (await verifyPassword(input.newPassword, user.passwordHash)) {
+      throw new AppError(
+        "New password must be different from the current password",
+        409,
+        ErrorCodes.CONFLICT
+      );
+    }
 
     const passwordHash = await hashPassword(input.newPassword);
     await prisma.$transaction(async (tx) => {
@@ -1630,11 +1933,6 @@ return this.resolveAuthState(
         },
         tx
       );
-    });
-    await securityAlertService.recordPasswordChanged(tenantId, userId, user.email, {
-      ipAddress: context.ipAddress ?? null,
-      userAgent: context.userAgent ?? null,
-      requestId: context.requestId,
     });
   }
 
@@ -1669,86 +1967,10 @@ return this.resolveAuthState(
     });
   }
 
-  /**
-   * Lists the account's live sessions for this workspace ("where am I signed
-   * in"). A refresh token is one session; the row that was issued most recently
-   * is the one still on screen, so it is flagged as the current session.
-   */
-  async listSessions(userId: string, tenantId: string): Promise<SessionInfo[]> {
-    const rows = await prisma.refreshToken.findMany({
-      where: { userId, tenantId, revokedAt: null },
-      orderBy: { createdAt: "desc" },
-    });
-
-    return rows.map((row, index) => ({
-      id: row.id,
-      deviceLabel:
-        row.deviceLabel ??
-        (row.userAgent ? labelForUserAgent(row.userAgent) : "Unknown device"),
-      ipAddress: row.ipAddress,
-      createdAt: row.createdAt,
-      lastUsedAt: row.lastUsedAt,
-      isCurrent: index === 0,
-    }));
-  }
-
-  /**
-   * Revokes a single session (refresh token) for this workspace. The access
-   * token it chose to "forget" stays alive until it expires — this is the
-   * "no, that old phone should not stay signed in" path, not a log-out. A
-   * revoked session stops being renewable immediately, and a client that
-   * tries to refresh with it gets a 401.
-   */
-  async revokeSession(
-    userId: string,
-    tenantId: string,
-    sessionId: string,
-    context: RequestContext
-  ): Promise<void> {
-    const session = await prisma.refreshToken.findFirst({
-      where: { id: sessionId, userId, tenantId },
-    });
-    if (!session || session.revokedAt) {
-      throw new AppError(
-        "Session not found or already revoked",
-        404,
-        ErrorCodes.NOT_FOUND
-      );
-    }
-
-    await prisma.$transaction(async (tx) => {
-      await tx.refreshToken.update({
-        where: { id: sessionId },
-        data: { revokedAt: new Date() },
-      });
-      await auditService.record(
-        {
-          tenantId,
-          actorUserId: userId,
-          eventType: AuditEventTypes.SESSION_REVOKED,
-          targetType: "RefreshToken",
-          targetId: sessionId,
-          requestId: context.requestId,
-          ipAddress: context.ipAddress,
-          userAgent: context.userAgent,
-          metadata: {
-            sessionDeviceLabel:
-              session.deviceLabel ??
-              (session.userAgent
-                ? labelForUserAgent(session.userAgent)
-                : "Unknown device"),
-          },
-        },
-        tx
-      );
-    });
-  }
-
   getCurrentUser(req: Request): AuthSessionResponse["user"] & {
     tenant: AuthSessionResponse["tenant"];
     membership: AuthSessionResponse["membership"];
     workspace: WorkspaceScope;
-    hasPassword: boolean;
   } {
     if (!req.tenantContext) {
       throw new AppError("Tenant context required", 403, ErrorCodes.FORBIDDEN);
@@ -1774,7 +1996,6 @@ return this.resolveAuthState(
       // Which console this session belongs to. The shells gate on this, so it
       // has to come from the server rather than be inferred from the role.
       workspace,
-      hasPassword: !!user.passwordHash,
     };
   }
 
@@ -1873,21 +2094,6 @@ return this.resolveAuthState(
         reason,
       },
     });
-
-    // Phase 4: surface a burst of failed sign-ins from one address so the
-    // owner sees a credential attack as an alert, not as log mining.
-    if (userId && tenantId !== SYSTEM_TENANT_ID) {
-      await securityAlertService.recordFailedLoginBurst(
-        tenantId,
-        userId,
-        email,
-        {
-          ipAddress: context.ipAddress ?? null,
-          userAgent: context.userAgent ?? null,
-          requestId: context.requestId,
-        }
-      );
-    }
   }
 
   private async handleRefreshTokenReuse(
@@ -1918,19 +2124,6 @@ return this.resolveAuthState(
         tx
       );
     });
-
-    const reuseActor = await userRepository.findById(token.userId);
-    await securityAlertService.recordRefreshTokenReuse(
-      token.tenantId,
-      token.userId,
-      reuseActor?.email ?? "unknown",
-      {
-        ipAddress: context.ipAddress ?? null,
-        userAgent: context.userAgent ?? null,
-        deviceLabel: labelForUserAgent(context.userAgent),
-        requestId: context.requestId,
-      }
-    );
 
     throw new AppError(
       "Refresh token reuse detected",

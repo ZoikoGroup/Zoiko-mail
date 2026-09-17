@@ -8,44 +8,49 @@
  * fixtures are gone; every hook below is a real read. Because the shape never
  * changed, no component needed editing when they were swapped.
  *
- * Where the backend genuinely has nothing — groups, guardrails — the hook
+ * Where the backend genuinely has nothing — groups, guardrails, MFA — the hook
  * surfaces that as an error or a neutral value rather than inventing data. A
  * plausible-looking number is worse than a blank, because it reads as real and
  * gets trusted.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  createGroup,
-  deleteGroup,
   fetchActiveSupportGrant,
   fetchAuditEvents,
-  fetchCapabilityMatrix,
   fetchCommitments,
   fetchConnectors,
+  fetchDashboard,
   fetchDomains,
   fetchGroups,
-  fetchGuardrails,
+  fetchGroupAssignees,
+  createGroup,
+  assignToGroup,
+  removeFromGroup,
   fetchInvitations,
+  previewInvitation,
+  sendInvitation,
+  updateWorkspaceSettings,
   fetchMailboxes,
   fetchMembers,
   fetchNotifications,
   fetchPolicyGroups,
-  fetchSecurityAlerts,
   fetchSettings,
   fetchSyncErrors,
-  fetchTenant,
-  markAllNotificationsRead,
-  markNotificationRead,
-  previewInvitation,
-  reviewSecurityAlert,
-  sendInvitation,
-  updateGroup,
-  updatePolicyRules,
-  updateWorkspaceSettings,
+  setMailboxAi,
+  fetchMailboxRouting,
+  createAlias,
+  deleteAlias,
+  createForwarding,
+  deleteForwarding,
 } from "./admin-queries";
-import type { InvitationDraftInput, WorkspaceSettingsPatch } from "./admin-queries";
 import type {
-  AlertReviewAction,
+  GroupAssigneeDto,
+  MailboxRoutingDto,
+  InvitationDraftInput,
+  WorkspaceSettingsPatch,
+} from "./admin-queries";
+import { CAPABILITY_MATRIX, GUARDRAILS } from "./admin-api";
+import type {
   AuditEventDto,
   CapabilityGroupDto,
   CommitmentDto,
@@ -59,8 +64,6 @@ import type {
   MemberDto,
   NotificationDto,
   PolicyGroupDto,
-  PolicyRulesDto,
-  SecurityAlertListResponse,
   SettingsDto,
   SupportGrantDto,
   SyncErrorDto,
@@ -121,13 +124,124 @@ export function useMailboxes(): QueryLike<MailboxDto[]> {
   return shape(useQuery({ queryKey: ["mailboxes"], queryFn: fetchMailboxes, ...LIVE }));
 }
 
+/** Restrict or unrestrict a mailbox for AI processing. */
+export function useSetMailboxAi() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ mailboxId, aiEnabled }: { mailboxId: string; aiEnabled: boolean }) =>
+      setMailboxAi(mailboxId, aiEnabled),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["mailboxes"] }),
+  });
+}
+
+/** Aliases and forwarding for one mailbox. */
+export function useMailboxRouting(mailboxId: string | null): QueryLike<MailboxRoutingDto> {
+  return shape(
+    useQuery({
+      queryKey: ["mailbox-routing", mailboxId],
+      queryFn: () => fetchMailboxRouting(mailboxId as string),
+      enabled: Boolean(mailboxId),
+      ...LIVE,
+    })
+  );
+}
+
+function useRoutingMutation<T>(fn: (input: T) => Promise<void>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["mailbox-routing"] }),
+  });
+}
+
+export function useCreateAlias() {
+  return useRoutingMutation((input: { mailboxId: string; address: string }) =>
+    createAlias(input.mailboxId, input.address)
+  );
+}
+
+export function useDeleteAlias() {
+  return useRoutingMutation((input: { mailboxId: string; aliasId: string }) =>
+    deleteAlias(input.mailboxId, input.aliasId)
+  );
+}
+
+export function useCreateForwarding() {
+  return useRoutingMutation(
+    (input: { mailboxId: string; forwardToAddress: string; keepCopy: boolean }) =>
+      createForwarding(input.mailboxId, {
+        forwardToAddress: input.forwardToAddress,
+        keepCopy: input.keepCopy,
+      })
+  );
+}
+
+export function useDeleteForwarding() {
+  return useRoutingMutation((input: { mailboxId: string; ruleId: string }) =>
+    deleteForwarding(input.mailboxId, input.ruleId)
+  );
+}
+
 export function useDomains(): QueryLike<DomainDto[]> {
   return shape(useQuery({ queryKey: ["domains"], queryFn: fetchDomains, ...LIVE }));
 }
 
+/** Shared mailboxes and distribution addresses. */
 export function useGroups(): QueryLike<GroupDto[]> {
+  return shape(useQuery({ queryKey: ["groups"], queryFn: fetchGroups, ...LIVE }));
+}
+
+/** Who is assigned to one shared mailbox, and with which permissions. */
+export function useGroupAssignees(mailboxId: string | null): QueryLike<GroupAssigneeDto[]> {
   return shape(
-    useQuery({ queryKey: ["groups"], queryFn: fetchGroups, retry: false, ...LIVE })
+    useQuery({
+      queryKey: ["group-assignees", mailboxId],
+      queryFn: () => fetchGroupAssignees(mailboxId as string),
+      enabled: Boolean(mailboxId),
+      ...LIVE,
+    })
+  );
+}
+
+/** Invalidates both the roster and the group list, whose counts move with it. */
+function useGroupMutation<T>(fn: (input: T) => Promise<void>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["groups"] }),
+        qc.invalidateQueries({ queryKey: ["group-assignees"] }),
+      ]);
+    },
+  });
+}
+
+export function useCreateGroup() {
+  return useGroupMutation((input: { address: string; type: "SHARED" | "DISTRIBUTION" }) =>
+    createGroup(input)
+  );
+}
+
+export function useAssignToGroup() {
+  return useGroupMutation(
+    (input: {
+      mailboxId: string;
+      membershipId: string;
+      canRead?: boolean;
+      canSend?: boolean;
+      canManage?: boolean;
+      canAssign?: boolean;
+    }) => {
+      const { mailboxId, ...rest } = input;
+      return assignToGroup(mailboxId, rest);
+    }
+  );
+}
+
+export function useRemoveFromGroup() {
+  return useGroupMutation((input: { mailboxId: string; membershipId: string }) =>
+    removeFromGroup(input.mailboxId, input.membershipId)
   );
 }
 
@@ -135,29 +249,6 @@ export function useAuditEvents(): QueryLike<AuditEventDto[]> {
   return shape(
     useQuery({ queryKey: ["audit"], queryFn: () => fetchAuditEvents(50), ...LIVE })
   );
-}
-
-/* ── security alerts ───────────────────────────────────────────────────── */
-
-export function useSecurityAlerts(): QueryLike<SecurityAlertListResponse> {
-  return shape(
-    useQuery({ queryKey: ["security-alerts"], queryFn: fetchSecurityAlerts, ...LIVE })
-  );
-}
-
-/**
- * Owner/admin decision on an alert. Refreshing the inbox after a review keeps
- * the row's badge and the rail count honest without a reload.
- */
-export function useReviewSecurityAlert() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, action, note }: { id: string; action: AlertReviewAction; note?: string }) =>
-      reviewSecurityAlert(id, action, note),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["security-alerts"] });
-    },
-  });
 }
 
 export function useConnectors(): QueryLike<ConnectorDto[]> {
@@ -208,28 +299,18 @@ export function useActiveSupportGrant(): QueryLike<SupportGrantDto | null> {
 /* ── still static, and marked as such ──────────────────────────────────── */
 
 /**
- * The permission matrix, served straight off the server the middleware
- * enforces so the screen can never drift from what the API actually allows.
+ * The permission matrix is documentation of the server's own table. Serving it
+ * from `GET /permissions/matrix` would be better, but until that exists this
+ * is a transcription rather than invented data — and `useCan` already reflects
+ * the live decisions from `GET /users/me/capabilities`.
  */
 export function useCapabilityMatrix(): QueryLike<CapabilityGroupDto[]> {
-  return shape(
-    useQuery({
-      queryKey: ["capability-matrix"],
-      queryFn: fetchCapabilityMatrix,
-      ...LIVE,
-    })
-  );
+  return { data: CAPABILITY_MATRIX, isLoading: false, error: null };
 }
 
-/** Escalation guardrails, served from the backend alongside the matrix. */
+/** Guardrails have no backend representation at all — nothing to read yet. */
 export function useGuardrails(): QueryLike<GuardrailDto[]> {
-  return shape(
-    useQuery({
-      queryKey: ["guardrails"],
-      queryFn: fetchGuardrails,
-      ...LIVE,
-    })
-  );
+  return { data: GUARDRAILS, isLoading: false, error: null };
 }
 
 /* ── rail counts ───────────────────────────────────────────────────────── */
@@ -241,8 +322,9 @@ export function useGuardrails(): QueryLike<GuardrailDto[]> {
  * resolved, so a still-loading item keeps its previous badge rather than
  * flickering to 0. A resolved-but-empty list carries its real 0.
  *
- * Groups now have a real read and carry their own badge; Inbox stays absent
- * because mail needs a member-level hook that does not live in this module.
+ * Groups and Inbox are intentionally absent: groups have no backend read yet
+ * (`useGroups` throws), and mail needs a member-level hook that does not live
+ * in this module.
  */
 export function useAdminNavCounts(): Partial<Record<string, number>> {
   const people = useWorkspacePeople();
@@ -251,8 +333,6 @@ export function useAdminNavCounts(): Partial<Record<string, number>> {
   const domains = useDomains();
   const notifications = useNotifications();
   const commitments = useCommitments();
-  const groups = useGroups();
-  const securityAlerts = useSecurityAlerts();
 
   const counts: Partial<Record<string, number>> = {};
   if (people.data) counts["/admin/users"] = people.data.length;
@@ -263,77 +343,32 @@ export function useAdminNavCounts(): Partial<Record<string, number>> {
     counts["/admin/notifications"] = notifications.data.filter((n) => !n.readAt).length;
   }
   if (commitments.data) counts["/admin/commitments"] = commitments.data.length;
-  if (groups.data) counts["/admin/groups"] = groups.data.length;
-  if (securityAlerts.data) counts["/admin/security-alerts"] = securityAlerts.data.openCount;
   return counts;
 }
 
 /* ── dashboard ─────────────────────────────────────────────────────────── */
 
 /**
- * Composed from the individual reads rather than a single `GET /admin/dashboard`.
+ * One read — `GET /admin/dashboard` — with the old fan-out as its fallback.
  *
- * Deliberate: one aggregate endpoint becomes the slowest route in the app and
- * couples every tile to one response, so a single failing subsystem blanks the
- * whole page. Composing here means each underlying query fails on its own and
- * the rest of the dashboard still renders.
+ * The fan-out was there for a good reason: an aggregate that fails as a unit
+ * turns one broken subsystem into a blank page. That objection is answered on
+ * the server rather than by keeping seven calls: each section of the aggregate
+ * resolves independently and a failure comes back named in `degraded`, so the
+ * page still renders everything that worked.
+ *
+ * What the fan-out cost was real. It fetched every member, every mailbox,
+ * every domain and every connector row and then called `.length` on them.
+ * Those are now counts, done by the database.
  */
-export function useDashboard(): QueryLike<DashboardDto> {
-  const tenant = useQuery({ queryKey: ["tenant"], queryFn: fetchTenant, ...LIVE });
-  const members = useMembers();
-  const mailboxes = useMailboxes();
-  const domains = useDomains();
-  const connectors = useConnectors();
-  const audit = useAuditEvents();
-
-  const parts = [tenant, members, mailboxes, domains, connectors, audit];
-  const isLoading = parts.some((p) => p.isLoading);
-  const error = (parts.find((p) => p.error)?.error as Error) ?? null;
-
-  if (isLoading || !tenant.data || !members.data) {
-    return { data: undefined, isLoading, error };
-  }
-
-  const people = members.data;
-  const boxes = mailboxes.data ?? [];
-  const doms = domains.data ?? [];
-  const conns = connectors.data ?? [];
-
-  return {
-    data: {
-      tenant: {
-        name: tenant.data.name,
-        planCode: tenant.data.planCode,
-        // Region is not modelled on the tenant; show the timezone, which is.
-        region: tenant.data.timezone ?? "—",
-        status: tenant.data.status.toLowerCase(),
-      },
-      counts: {
-        // Every membership except REMOVED, which is what the API returns.
-        people: people.length,
-        pendingInvitations: people.filter((m) => m.status === "INVITED").length,
-        mailboxes: boxes.length,
-        // Seat entitlement lives with billing, which is the Owner's domain and
-        // has no endpoint. Falls back to the mailbox count so the meter reads
-        // full rather than implying headroom that may not exist.
-        mailboxSeats: boxes.length,
-        connectedAccounts: conns.length,
-        connectedGmail: conns.filter((c) => c.name === "Gmail").length,
-        connectedMicrosoft: conns.filter((c) => c.name === "Microsoft 365").length,
-        domainsVerified: doms.filter((d) => d.verificationStatus === "VERIFIED").length,
-        domainsTotal: doms.length,
-        // Suspended mailboxes are the closest real signal to failed sending
-        // until the delivery-events read is wired.
-        failedSends24h: boxes.filter((m) => m.status === "SUSPENDED").length,
-        storageUsedGb: boxes.reduce((sum, m) => sum + m.storageUsedGb, 0),
-        storageLimitGb: boxes.reduce((sum, m) => sum + m.storageLimitGb, 0),
-      },
-      recentAudit: (audit.data ?? []).slice(0, 6),
-      providerSync: conns.slice(0, 6),
-    },
-    isLoading: false,
-    error,
-  };
+export function useDashboard(windowHours = 24): QueryLike<DashboardDto> {
+  return shape(
+    useQuery({
+      queryKey: ["admin-dashboard", windowHours],
+      queryFn: () => fetchDashboard(windowHours),
+      ...LIVE,
+    })
+  );
 }
 
 /**
@@ -383,89 +418,6 @@ export function useUpdateWorkspaceSettings() {
         // derived from the same read.
         qc.invalidateQueries({ queryKey: ["tenant"] }),
       ]);
-    },
-  });
-}
-
-/* ── notifications ─────────────────────────────────────────────────────── */
-
-export function useMarkNotificationRead() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => markNotificationRead(id),
-    onSuccess: async () => {
-      // The read state drives both the row styling and the unread badge, so
-      // the whole list is re-read rather than trusting the mutation.
-      await qc.invalidateQueries({ queryKey: ["notifications"] });
-    },
-  });
-}
-
-export function useMarkAllNotificationsRead() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => markAllNotificationsRead(),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["notifications"] });
-      await qc.invalidateQueries({ queryKey: ["admin-nav-counts"] });
-    },
-  });
-}
-
-/* ── groups ────────────────────────────────────────────────────────────── */
-
-export function useCreateGroup() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: { name: string; address: string; kind: GroupDto["kind"] }) =>
-      createGroup(input),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["groups"] });
-    },
-  });
-}
-
-export function useUpdateGroup() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: {
-      groupId: string;
-      patch: { name?: string; status?: GroupDto["status"] };
-    }) => updateGroup(input.groupId, input.patch),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["groups"] });
-    },
-  });
-}
-
-export function useDeleteGroup() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (groupId: string) => deleteGroup(groupId),
-    onSuccess: async () => {
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ["groups"] }),
-        qc.invalidateQueries({ queryKey: ["admin-nav-counts"] }),
-      ]);
-    },
-  });
-}
-
-/* ── policies ──────────────────────────────────────────────────────────── */
-
-export function useUpdatePolicyRules() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: {
-      policyId: string;
-      rules: PolicyRulesDto;
-      ruleKey: string;
-      enabled: boolean;
-    }) => updatePolicyRules(input.policyId, input.rules, input.ruleKey, input.enabled),
-    onSuccess: async () => {
-      // The server supersedes with a new draft version, so re-reading is the
-      // only way to reflect the actual result (new version, same leaf flipped).
-      await qc.invalidateQueries({ queryKey: ["policies"] });
     },
   });
 }

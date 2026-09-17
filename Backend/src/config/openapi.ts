@@ -7,10 +7,19 @@ export const openApiDocument = {
   info: {
     title: "Zoiko Mail API",
     version: "1.0.0",
-    description: "Multi-tenant Zoiko Mail API. Tenant context is always derived from the verified access token.",
+    description:
+      "Multi-tenant Zoiko Mail API. Tenant context is always derived from the verified access token. " +
+      "**Idempotency (section 7).** Every side-effecting request to a tenant-scoped endpoint must carry an " +
+      "`Idempotency-Key` header. Records are scoped to tenant + actor + endpoint family + key and held for " +
+      "24 hours: repeating a request with the same key and the same payload returns the original response " +
+      "(with `Idempotent-Replay: true`), while the same key with a different payload is refused with 409 " +
+      "`IDEMPOTENCY_PAYLOAD_MISMATCH`. A request that fails releases its key, so the same key may be retried. " +
+      "Unauthenticated endpoints, the platform support console and signature-verified provider callbacks are " +
+      "outside the contract: the first two have no tenant to scope a record to, and callbacks deduplicate on " +
+      "the provider's own event id.",
   },
   servers: [{ url: "http://localhost:5000", description: "Local development" }],
-  tags: ["System", "Authentication", "Users", "Tenants", "Memberships", "Policies", "Mail", "Messages", "Threads", "Domains", "AI", "Actions", "Notifications", "Integrations", "Connectors", "Delivery Protection", "Lifecycle", "Support", "Audit", "Billing", "Security Alerts"].map((name) => ({ name })),
+  tags: ["System", "Authentication", "Users", "Tenants", "Memberships", "Policies", "Mail", "Messages", "Threads", "Participants", "Domains", "AI", "Actions", "Notifications", "Integrations", "Connectors", "Delivery Protection", "Lifecycle", "Support", "Audit", "Billing"].map((name) => ({ name })),
   paths: {
     "/api/health": {
       get: { tags: ["System"], summary: "Health check", responses: { "200": ok("API is healthy") } },
@@ -113,6 +122,31 @@ export const openApiDocument = {
       },
     },
 
+    "/api/v1/auth/step-up": {
+      post: {
+        tags: ["Authentication"],
+        summary: "Re-authenticate for a high-risk action",
+        description:
+          "Security §5 / AC-003. Verifies the password again and returns a short-lived token; send it back as the x-step-up-token header on the privileged request. Bound to the caller and the workspace, so a step-up taken in one cannot authorise an action in another. Both success and failure are audited.",
+        operationId: "stepUp",
+        security: bearer,
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { type: "object", required: ["password"], properties: { password: { type: "string" } } },
+              example: { password: "CorrectHorseBattery1!" },
+            },
+          },
+        },
+        responses: {
+          "200": ok("Step-up token issued"),
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "409": ok("The account signs in with Google and has no password to confirm"),
+          "429": ok("Too many attempts"),
+        },
+      },
+    },
     "/api/v1/auth/forgot-password": {
       post: {
         tags: ["Authentication"], summary: "Request a password reset code",
@@ -165,68 +199,6 @@ export const openApiDocument = {
     },
     "/api/v1/auth/logout-all": {
       post: { tags: ["Authentication"], summary: "Revoke all refresh sessions in this tenant", security: bearer, responses: { "200": ok("Sessions revoked") } },
-    },
-    "/api/v1/auth/password-policy": {
-      get: {
-        tags: ["Authentication"], summary: "Get the enforced password policy (public — renders signup/reset forms)",
-        responses: {
-          "200": ok("The password policy object"),
-          "400": { $ref: "#/components/responses/ValidationError" },
-        },
-      },
-    },
-    "/api/v1/auth/sessions": {
-      get: {
-        tags: ["Authentication"], summary: "List live sessions for the current workspace", security: bearer,
-        responses: { "200": ok("Sessions returned") },
-      },
-    },
-    "/api/v1/auth/sessions/{sessionId}/revoke": {
-      post: {
-        tags: ["Authentication"], summary: "Revoke one session", security: bearer,
-        parameters: [
-          { name: "sessionId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
-        ],
-        responses: { "200": ok("Session revoked"), "404": ok("Session not found or already revoked") },
-      },
-    },
-    "/api/v1/security-alerts": {
-      get: {
-        tags: ["Security Alerts"], summary: "List security alerts for the workspace (OWNER/ADMIN)", security: bearer,
-        description: "Open alerts are returned newest-first, with optional pagination and status filtering.",
-        parameters: [
-          { name: "status", in: "query", schema: { type: "string", enum: ["OPEN", "ACKNOWLEDGED", "RESOLVED", "DISMISSED"] } },
-          { name: "page", in: "query", schema: { type: "integer", minimum: 1, default: 1 } },
-          { name: "pageSize", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 20 } },
-        ],
-        responses: { "200": ok("Alerts returned"), "403": { $ref: "#/components/responses/Forbidden" } },
-      },
-    },
-    "/api/v1/security-alerts/{alertId}": {
-      get: {
-        tags: ["Security Alerts"], summary: "Get one security alert (OWNER/ADMIN)", security: bearer,
-        parameters: [
-          { name: "alertId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
-        ],
-        responses: { "200": ok("Alert returned"), "403": { $ref: "#/components/responses/Forbidden" }, "404": ok("Alert not found in this workspace") },
-      },
-    },
-    "/api/v1/security-alerts/{alertId}/review": {
-      post: {
-        tags: ["Security Alerts"], summary: "Acknowledge, resolve or dismiss a security alert (OWNER/ADMIN)", security: bearer,
-        parameters: [
-          { name: "alertId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
-        ],
-        requestBody: jsonBody({
-          type: "object",
-          required: ["action"],
-          properties: {
-            action: { type: "string", enum: ["ACKNOWLEDGE", "RESOLVE", "DISMISS"] },
-            note: { type: "string", maxLength: 1000, description: "Optional decision note, recorded in the audit log" },
-          },
-        }),
-        responses: { "200": ok("Alert status updated and audit event recorded"), "403": { $ref: "#/components/responses/Forbidden" }, "404": ok("Alert not found in this workspace") },
-      },
     },
     "/api/v1/users/me": {
       get: { tags: ["Users"], summary: "Get own profile", security: bearer, responses: { "200": ok("Profile returned") } },
@@ -384,6 +356,80 @@ export const openApiDocument = {
         responses: { "200": ok("Mailbox items returned") },
       },
     },
+    "/api/v1/participants": {
+      get: {
+        tags: ["Participants"],
+        summary: "List participants the workspace has corresponded with",
+        description:
+          "API §12. A participant is a normalized person or address inside one workspace, derived from the mail that mentions them. Supports search by address or name, and filtering by kind — INTERNAL_USER for a colleague, GROUP_ADDRESS for a shared mailbox or distribution address, SYSTEM for a no-reply, EXTERNAL_PERSON for everybody else. Merged and deleted rows are history and are not listed.",
+        security: bearer,
+        parameters: [
+          { name: "q", in: "query", schema: { type: "string", maxLength: 200 }, description: "Matches address or display name." },
+          {
+            name: "type", in: "query",
+            schema: { type: "string", enum: ["INTERNAL_USER", "EXTERNAL_PERSON", "GROUP_ADDRESS", "SYSTEM", "UNKNOWN"] },
+          },
+          { name: "page", in: "query", schema: { type: "integer", minimum: 1, default: 1 } },
+          { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 25 } },
+        ],
+        responses: { "200": ok("Participants returned") },
+      },
+    },
+    "/api/v1/participants/{participantId}": {
+      get: {
+        tags: ["Participants"],
+        summary: "Resolve one participant",
+        description:
+          "The resolution path §12 requires, so a commitment or thread never has to expose an id a client cannot turn into a person. A merged id still resolves: it answers with the surviving row and names the id it was asked about, because that id may be sitting in a client cache and a 404 would make a successful deduplication look like data loss.",
+        security: bearer,
+        parameters: [{ name: "participantId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: {
+          "200": ok("Participant resolved"),
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
+      },
+    },
+    "/api/v1/participants/{participantId}/threads": {
+      get: {
+        tags: ["Participants"],
+        summary: "Threads this participant appears in (metadata only)",
+        description:
+          "Metadata only, and that is load-bearing rather than a style note: this read is keyed by somebody else's address, so returning bodies would make it a way to read mail by asking about the person instead of the message (AC-011).",
+        security: bearer,
+        parameters: [
+          { name: "participantId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+          { name: "page", in: "query", schema: { type: "integer", minimum: 1, default: 1 } },
+          { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 25 } },
+        ],
+        responses: { "200": ok("Threads returned"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/participants/{participantId}/commitments": {
+      get: {
+        tags: ["Participants"],
+        summary: "Commitments owed by or to this participant",
+        description:
+          "Either side may be somebody outside the workspace, which is what participants exist for: before them a commitment could only be owned by an internal user, so an obligation owed to a customer had nowhere to point.",
+        security: bearer,
+        parameters: [
+          { name: "participantId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+          { name: "page", in: "query", schema: { type: "integer", minimum: 1, default: 1 } },
+          { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 25 } },
+        ],
+        responses: { "200": ok("Commitments returned"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/threads/{threadId}/participants": {
+      get: {
+        tags: ["Participants"],
+        summary: "Participants on a thread, with the roles they held",
+        description:
+          "Roles accumulate across the thread — sender, recipient, cc, bcc — so somebody who sent the first message and was copied on the third is both.",
+        security: bearer,
+        parameters: [{ name: "threadId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: { "200": ok("Thread participants returned"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
     "/api/v1/messages": {
       get: {
         tags: ["Messages"], summary: "List and search messages accessible to the current mailbox", security: bearer,
@@ -472,6 +518,114 @@ export const openApiDocument = {
         responses: { "202": ok("Digest job queued") },
       },
     },
+    "/api/v1/auth/mfa": {
+      get: {
+        tags: ["Authentication"],
+        summary: "Whether this account holds a second factor, and whether it must",
+        description:
+          "AC-002 requires MFA for Owners, Admins and Support actors. `required` says whether this account is one of them, `requiredBecause` names the role, and `remainingRecoveryCodes` is what a settings screen warns on.",
+        security: bearer,
+        responses: { "200": ok("MFA status returned") },
+      },
+    },
+    "/api/v1/auth/mfa/enroll": {
+      post: {
+        tags: ["Authentication"],
+        summary: "Begin enrolment, returning a secret and an otpauth URI",
+        description:
+          "The secret is stored immediately, encrypted, but the factor is not active until a code confirms the authenticator holds it. An account that is already enrolled must remove the old authenticator first: enrolling silently over it would strand whichever device held the previous secret.",
+        security: bearer,
+        responses: {
+          "201": ok("Enrolment started"),
+          "409": { $ref: "#/components/responses/Conflict" },
+        },
+      },
+    },
+    "/api/v1/auth/mfa/confirm": {
+      post: {
+        tags: ["Authentication"],
+        summary: "Confirm enrolment and receive the recovery codes",
+        description:
+          "The recovery codes are returned exactly once; only their hashes are kept, so a second look is impossible by construction rather than by policy.",
+        security: bearer,
+        requestBody: jsonBody({
+          type: "object", required: ["code"],
+          properties: { code: { type: "string", minLength: 6, maxLength: 20 } },
+        }),
+        responses: { "200": ok("MFA enabled"), "401": { $ref: "#/components/responses/Unauthorized" } },
+      },
+    },
+    "/api/v1/auth/mfa/disable": {
+      post: {
+        tags: ["Authentication"],
+        summary: "Remove the second factor, where the role permits it",
+        description:
+          "Refused while the account holds a role AC-002 requires MFA for, which is what makes the requirement an enforcement rather than a default. A valid code is still required otherwise, so a stolen session cannot quietly strip the factor.",
+        security: bearer,
+        requestBody: jsonBody({
+          type: "object", required: ["code"],
+          properties: { code: { type: "string", minLength: 6, maxLength: 20 } },
+        }),
+        responses: {
+          "200": ok("MFA removed"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+        },
+      },
+    },
+    "/api/v1/auth/mfa/recovery-codes": {
+      post: {
+        tags: ["Authentication"],
+        summary: "Replace the recovery codes, voiding the previous set",
+        security: bearer,
+        requestBody: jsonBody({
+          type: "object", required: ["code"],
+          properties: { code: { type: "string", minLength: 6, maxLength: 20 } },
+        }),
+        responses: { "200": ok("New recovery codes returned") },
+      },
+    },
+    "/api/v1/auth/mfa/challenge/verify": {
+      post: {
+        tags: ["Authentication"],
+        summary: "Answer an MFA challenge and complete the sign-in",
+        description:
+          "Bearer token is the short-lived `mfaToken` from an MFA_REQUIRED sign-in, not an access token. Accepts a six-digit code or a single-use recovery code in the same field. Returns the auth state the password already earned: SIGNED_IN for a workspace, STAFF_CONSOLE for platform staff. A code is accepted once (RFC 6238 section 5.2), and repeated wrong codes lock the account out briefly.",
+        requestBody: jsonBody({
+          type: "object", required: ["code"],
+          properties: { code: { type: "string", minLength: 6, maxLength: 20 } },
+        }),
+        responses: {
+          "200": ok("Sign-in completed"),
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "429": ok("Too many incorrect codes"),
+        },
+      },
+    },
+    "/api/v1/auth/mfa/challenge/enroll": {
+      post: {
+        tags: ["Authentication"],
+        summary: "Enrol while holding only an MFA challenge token",
+        description:
+          "Reachable from an MFA_ENROLLMENT_REQUIRED sign-in, where no session exists yet. Without it a newly privileged account would be locked out by the very control meant to protect it.",
+        responses: { "201": ok("Enrolment started") },
+      },
+    },
+    "/api/v1/auth/mfa/challenge/confirm": {
+      post: {
+        tags: ["Authentication"],
+        summary: "Confirm that enrolment and complete the sign-in",
+        description:
+          "Returns the recovery codes and the auth state together: the code that proved the authenticator also completes the sign-in, rather than asking for a second code seconds later.",
+        requestBody: jsonBody({
+          type: "object", required: ["code"],
+          properties: { code: { type: "string", minLength: 6, maxLength: 20 } },
+        }),
+        responses: {
+          "200": ok("MFA enabled and signed in"),
+          "401": { $ref: "#/components/responses/Unauthorized" },
+        },
+      },
+    },
     "/api/v1/lifecycle/exports": {
       post: {
         tags: ["Lifecycle"], summary: "Queue an idempotent tenant data export (OWNER)", security: bearer,
@@ -487,8 +641,84 @@ export const openApiDocument = {
     },
     "/api/v1/lifecycle/deletions": {
       post: {
-        tags: ["Lifecycle"], summary: "Request approval-gated tenant deletion (OWNER)", security: bearer,
-        responses: { "202": ok("Deletion requested") },
+        tags: ["Lifecycle"],
+        summary: "Request an approval-gated deletion (OWNER)",
+        description:
+          "Approval is also verification, which starts the 30-day hard-delete clock required by AC-012. TENANT targets keep their second, name-typed confirmation; USER targets are confirmed by the approval itself and are anonymized irreversibly rather than deleted, because audit records must survive the erasure. Target types with no executor are refused rather than queued against an SLA that cannot be met.",
+        security: bearer,
+        requestBody: jsonBody({
+          type: "object",
+          properties: {
+            targetType: {
+              type: "string",
+              enum: ["TENANT", "MAILBOX", "CONNECTED_ACCOUNT", "USER", "AI_OUTPUTS", "SYNCED_DATA"],
+              default: "TENANT",
+              description: "Only TENANT and USER can be executed today.",
+            },
+            targetId: { type: "string", format: "uuid", description: "Required for any target narrower than the workspace." },
+            reason: { type: "string", minLength: 3, maxLength: 500 },
+            idempotencyKey: { type: "string", minLength: 8, maxLength: 120, description: "Optional; the Idempotency-Key header is the contract." },
+          },
+        }),
+        responses: {
+          "202": ok("Deletion requested"),
+          "422": ok("Target type has no executor, target id missing, or the requester is the target"),
+        },
+      },
+    },
+    "/api/v1/lifecycle/sla": {
+      get: {
+        tags: ["Lifecycle"],
+        summary: "Hard-delete SLA position for the workspace (OWNER)",
+        description:
+          "AC-012 monitoring: deletions past their deadline, deletions due inside a week, and deletions lawfully held. Overdue and blocked are reported separately on purpose — one is an incident, the other is a decision.",
+        security: bearer,
+        responses: { "200": ok("SLA position returned") },
+      },
+    },
+    "/api/v1/lifecycle/{requestId}/block": {
+      post: {
+        tags: ["Lifecycle"],
+        summary: "Place a legal or security hold on a deletion (OWNER)",
+        description:
+          "Suspends the SLA clock rather than extending it: the deadline is cleared, so monitoring stops counting down instead of reporting a permanent breach for data the workspace is required to keep. Any pending deletion job is cancelled. The stated basis is mandatory — a hold with no reason is indistinguishable from a missed deadline.",
+        security: bearer,
+        parameters: [{ name: "requestId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        requestBody: jsonBody({
+          type: "object", required: ["reason"],
+          properties: { reason: { type: "string", minLength: 10, maxLength: 500 } },
+        }),
+        responses: { "200": ok("Deletion blocked"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/lifecycle/{requestId}/unblock": {
+      post: {
+        tags: ["Lifecycle"],
+        summary: "Lift a hold, returning the request for re-approval (OWNER)",
+        description:
+          "Starts a fresh 30 days rather than resuming an expired countdown: the data was lawfully retained while held, and the SLA is measured from verification, so the request returns to REQUESTED and must be approved again.",
+        security: bearer,
+        parameters: [{ name: "requestId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: { "200": ok("Hold lifted"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/lifecycle/{requestId}/schedule": {
+      post: {
+        tags: ["Lifecycle"],
+        summary: "Defer execution to a time inside the SLA window (OWNER)",
+        description:
+          "Moves the queued job as well as the record, since the worker only claims jobs whose run time has arrived. A time after the hard-delete deadline is refused here and by a CHECK constraint, because a scheduling bug that pushed execution past the deadline would breach the SLA silently.",
+        security: bearer,
+        parameters: [{ name: "requestId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        requestBody: jsonBody({
+          type: "object", required: ["scheduledFor"],
+          properties: { scheduledFor: { type: "string", format: "date-time" } },
+        }),
+        responses: {
+          "200": ok("Execution scheduled"),
+          "422": ok("Time is in the past or after the hard-delete deadline"),
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
       },
     },
     "/api/v1/lifecycle/{requestId}/confirm-deletion": {
@@ -664,6 +894,16 @@ export const openApiDocument = {
         responses: { "200": ok("Grant revoked"), "403": { $ref: "#/components/responses/Forbidden" }, "404": { $ref: "#/components/responses/NotFound" } },
       },
     },
+    "/api/v1/mail/send-as": {
+      get: {
+        tags: ["Mail"],
+        summary: "Addresses the caller may compose from",
+        description:
+          "The caller's own mailbox plus every shared mailbox they hold canSend on. A shared mailbox they can only read is deliberately absent: read access is not permission to know the workspace can send from that address (Security §10).",
+        operationId: "listSendableMailboxes", security: bearer,
+        responses: { "200": ok("Sendable mailboxes returned") },
+      },
+    },
     "/api/v1/mail/drafts": {
       post: {
         tags: ["Mail"], summary: "Create a draft", security: bearer,
@@ -801,6 +1041,49 @@ export const openApiDocument = {
         responses: { "200": ok("Delivery events returned"), "404": { $ref: "#/components/responses/NotFound" } },
       },
     },
+    "/api/v1/admin/dashboard": {
+      get: {
+        tags: ["Tenants"],
+        summary: "Admin console dashboard aggregate (OWNER/ADMIN)",
+        description:
+          "One read for the admin console's opening screen. Sections resolve independently: a section that fails is named in `degraded` and returned null rather than failing the request. `auditWithheld` is true when the caller does not hold audit.read.",
+        operationId: "adminDashboardSummary",
+        security: bearer,
+        parameters: [
+          {
+            name: "windowHours",
+            in: "query",
+            schema: { type: "integer", minimum: 1, maximum: 168, default: 24 },
+            description: "Trailing window for the delivery-failure count.",
+          },
+        ],
+        responses: {
+          "200": ok("Dashboard summary returned"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "503": ok("Workspace could not be read"),
+        },
+      },
+    },
+    "/api/v1/mail/admin/delivery-events/summary": {
+      get: {
+        tags: ["Mail"],
+        summary: "Failed-send counts over a trailing window (OWNER/ADMIN)",
+        operationId: "adminDeliveryFailureSummary",
+        security: bearer,
+        parameters: [
+          {
+            name: "windowHours",
+            in: "query",
+            schema: { type: "integer", minimum: 1, maximum: 168, default: 24 },
+            description: "Trailing window in hours. Defaults to the last 24 hours.",
+          },
+        ],
+        responses: {
+          "200": ok("Failure counts returned"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+        },
+      },
+    },
     "/api/v1/mail/admin/delivery-events": {
       get: {
         tags: ["Mail"], summary: "Tenant-wide delivery event feed (OWNER/ADMIN)", security: bearer,
@@ -809,6 +1092,270 @@ export const openApiDocument = {
           { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 200, default: 50 } },
         ],
         responses: { "200": ok("Delivery events returned"), "403": { $ref: "#/components/responses/Forbidden" } },
+      },
+    },
+    "/api/v1/mail/admin/mailboxes/{mailboxId}/routing": {
+      get: {
+        tags: ["Mail"], summary: "Aliases and forwarding for a mailbox (OWNER/ADMIN)",
+        operationId: "listMailboxRouting", security: bearer,
+        parameters: [{ name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: {
+          "200": ok("Aliases and forwarding rules returned"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
+      },
+    },
+    "/api/v1/mail/admin/mailboxes/{mailboxId}/aliases": {
+      post: {
+        tags: ["Mail"],
+        summary: "Add an alias address to a mailbox (OWNER/ADMIN)",
+        description:
+          "Alias addresses are unique globally, not per tenant (Data Model §6.17): an address has to route somewhere unambiguous. A conflict does not disclose which workspace holds it.",
+        operationId: "createAlias", security: bearer,
+        parameters: [{ name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { type: "object", required: ["address"], properties: { address: { type: "string", format: "email" } } },
+              example: { address: "sales@acme.test" },
+            },
+          },
+        },
+        responses: {
+          "201": ok("Alias created"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+          "409": { $ref: "#/components/responses/Conflict" },
+        },
+      },
+    },
+    "/api/v1/mail/admin/mailboxes/{mailboxId}/aliases/{aliasId}": {
+      delete: {
+        tags: ["Mail"], summary: "Remove an alias (OWNER/ADMIN)",
+        operationId: "deleteAlias", security: bearer,
+        parameters: [
+          { name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+          { name: "aliasId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+        ],
+        responses: {
+          "200": ok("Alias removed"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
+      },
+    },
+    "/api/v1/mail/admin/mailboxes/{mailboxId}/forwarding": {
+      post: {
+        tags: ["Mail"],
+        summary: "Forward a mailbox to another address (OWNER/ADMIN)",
+        description:
+          "Creation is audited by name, per Security §9. keepCopy defaults true; false redirects without leaving a copy behind. A mailbox cannot forward to itself.",
+        operationId: "createForwarding", security: bearer,
+        parameters: [{ name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object", required: ["forwardToAddress"],
+                properties: {
+                  forwardToAddress: { type: "string", format: "email" },
+                  keepCopy: { type: "boolean", default: true },
+                },
+              },
+              example: { forwardToAddress: "archive@example.test", keepCopy: true },
+            },
+          },
+        },
+        responses: {
+          "201": ok("Forwarding rule created"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+          "409": { $ref: "#/components/responses/Conflict" },
+          "422": ok("A mailbox cannot forward to itself"),
+        },
+      },
+    },
+    "/api/v1/mail/admin/mailboxes/{mailboxId}/forwarding/{ruleId}": {
+      delete: {
+        tags: ["Mail"], summary: "Remove a forwarding rule (OWNER/ADMIN)",
+        operationId: "deleteForwarding", security: bearer,
+        parameters: [
+          { name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+          { name: "ruleId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+        ],
+        responses: {
+          "200": ok("Forwarding rule removed"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
+      },
+    },
+    "/api/v1/mail/admin/shared-mailboxes": {
+      get: {
+        tags: ["Mail"], summary: "List shared mailboxes and distribution addresses (OWNER/ADMIN)",
+        operationId: "listSharedMailboxes", security: bearer,
+        responses: { "200": ok("Shared mailboxes returned"), "403": { $ref: "#/components/responses/Forbidden" } },
+      },
+      post: {
+        tags: ["Mail"],
+        summary: "Create a shared mailbox or distribution address (OWNER/ADMIN)",
+        description:
+          "The mailbox has no owning membership: it belongs to the workspace. Nobody can reach it until they are assigned (Security §10).",
+        operationId: "createSharedMailbox", security: bearer,
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object", required: ["address"],
+                properties: {
+                  address: { type: "string", format: "email" },
+                  type: { type: "string", enum: ["SHARED", "DISTRIBUTION"], default: "SHARED" },
+                },
+              },
+              example: { address: "support@acme.test", type: "SHARED" },
+            },
+          },
+        },
+        responses: {
+          "201": ok("Shared mailbox created"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "409": { $ref: "#/components/responses/Conflict" },
+        },
+      },
+    },
+    "/api/v1/mail/admin/shared-mailboxes/{mailboxId}/assignees": {
+      get: {
+        tags: ["Mail"], summary: "Who is assigned to a shared mailbox (OWNER/ADMIN)",
+        operationId: "listMailboxAssignees", security: bearer,
+        parameters: [{ name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: {
+          "200": ok("Assignees returned"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
+      },
+      post: {
+        tags: ["Mail"],
+        summary: "Assign a member, or change their permissions (OWNER/ADMIN)",
+        description:
+          "Read, send, manage and assign are separable per Security §10. Omitted permissions default closed, and re-posting for an existing assignee updates rather than duplicating. Audited with the previous and new permissions.",
+        operationId: "assignMailbox", security: bearer,
+        parameters: [{ name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object", required: ["membershipId"],
+                properties: {
+                  membershipId: { type: "string", format: "uuid" },
+                  canRead: { type: "boolean", default: true },
+                  canSend: { type: "boolean", default: false },
+                  canManage: { type: "boolean", default: false },
+                  canAssign: { type: "boolean", default: false },
+                },
+              },
+              example: { membershipId: "0f8f2b1e-6c1a-4a5e-9a2b-6d3c1f0a7e44", canRead: true, canSend: true },
+            },
+          },
+        },
+        responses: {
+          "200": ok("Assignment created or updated"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
+      },
+    },
+    "/api/v1/mail/admin/shared-mailboxes/{mailboxId}/assignees/{membershipId}": {
+      delete: {
+        tags: ["Mail"],
+        summary: "Revoke a member's access to a shared mailbox (OWNER/ADMIN)",
+        description:
+          "Takes effect on the caller's next request: access is read per request rather than cached, which is what makes Security §10's session-invalidation requirement hold.",
+        operationId: "unassignMailbox", security: bearer,
+        parameters: [
+          { name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+          { name: "membershipId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+        ],
+        responses: {
+          "200": ok("Access revoked"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
+      },
+    },
+    "/api/v1/mail/admin/mailboxes": {
+      get: {
+        tags: ["Mail"], summary: "List every mailbox in the workspace (OWNER/ADMIN)",
+        operationId: "adminListMailboxes", security: bearer,
+        responses: { "200": ok("Mailboxes returned"), "403": { $ref: "#/components/responses/Forbidden" } },
+      },
+      post: {
+        tags: ["Mail"], summary: "Provision a mailbox for a member (OWNER/ADMIN)",
+        operationId: "adminCreateMailbox", security: bearer,
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object", required: ["membershipId"],
+                properties: { membershipId: { type: "string", format: "uuid" } },
+              },
+              example: { membershipId: "0f8f2b1e-6c1a-4a5e-9a2b-6d3c1f0a7e44" },
+            },
+          },
+        },
+        responses: {
+          "201": ok("Mailbox created"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "409": ok("Mailbox already exists, or the plan mailbox limit is reached"),
+        },
+      },
+    },
+    "/api/v1/mail/admin/mailboxes/{mailboxId}": {
+      patch: {
+        tags: ["Mail"],
+        summary: "Update mailbox quota, warm-up cap or AI access (OWNER/ADMIN)",
+        description:
+          "aiEnabled false is what the security spec calls a restricted mailbox: the AI service refuses to process it (AC-008). Every change is audited with the previous and new value.",
+        operationId: "adminUpdateMailbox", security: bearer,
+        parameters: [{ name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object", minProperties: 1,
+                properties: {
+                  storageLimit: { type: "integer", minimum: 1048576, maximum: 1099511627776, description: "Bytes." },
+                  customWarmupCap: { type: "integer", minimum: 1, maximum: 100000, nullable: true },
+                  aiEnabled: { type: "boolean" },
+                },
+              },
+              example: { aiEnabled: false },
+            },
+          },
+        },
+        responses: {
+          "200": ok("Mailbox updated"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+          "409": ok("Quota is below current usage"),
+        },
+      },
+      delete: {
+        tags: ["Mail"], summary: "Delete a mailbox (OWNER/ADMIN)",
+        operationId: "adminDeleteMailbox", security: bearer,
+        parameters: [{ name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: {
+          "200": ok("Mailbox deleted"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
       },
     },
     "/api/v1/mail/admin/mailboxes/{mailboxId}/sending": {
@@ -844,8 +1391,16 @@ export const openApiDocument = {
     },
     "/api/v1/mail/{messageId}": {
       get: {
-        tags: ["Mail"], summary: "Get a message from the current user's mailbox", security: bearer,
-        parameters: [{ name: "messageId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        tags: ["Mail"], summary: "Get a message from the current user's mailbox, or a shared one", security: bearer,
+        parameters: [
+          { name: "messageId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+          {
+            name: "mailboxId", in: "query", required: false,
+            schema: { type: "string", format: "uuid" },
+            description:
+              "Read the message out of a shared mailbox the caller holds canRead on, matching the same parameter on the list endpoint. Absent means their own mailbox.",
+          },
+        ],
         responses: { "200": ok("Message returned"), "404": { $ref: "#/components/responses/NotFound" } },
       },
       patch: {
@@ -861,13 +1416,57 @@ export const openApiDocument = {
       },
     },
     "/api/v1/mail/{messageId}/reply": {
-      post: { tags: ["Mail"], summary: "Create a reply draft in the existing thread", security: bearer, responses: { "201": ok("Reply draft created"), "404": { $ref: "#/components/responses/NotFound" } } },
+      post: { tags: ["Mail"], summary: "Create a reply draft in the existing thread", security: bearer, requestBody: jsonBody({
+        type: "object",
+        properties: {
+          textBody: { type: "string", nullable: true },
+          htmlBody: { type: "string", nullable: true },
+          sendAsMailboxId: {
+            type: "string", format: "uuid",
+            description:
+              "Answer as a shared mailbox. Needs canSend on it to compose and canRead on it to read the message being answered — the two permissions are separable, so both are checked (Security §10).",
+          },
+        },
+      }), responses: { "201": ok("Reply draft created"), "404": { $ref: "#/components/responses/NotFound" } } },
     },
     "/api/v1/mail/{messageId}/reply-all": {
-      post: { tags: ["Mail"], summary: "Create a reply-all draft without BCC disclosure", security: bearer, responses: { "201": ok("Reply-all draft created"), "404": { $ref: "#/components/responses/NotFound" } } },
+      post: { tags: ["Mail"], summary: "Create a reply-all draft without BCC disclosure", security: bearer, requestBody: jsonBody({
+        type: "object",
+        properties: {
+          textBody: { type: "string", nullable: true },
+          htmlBody: { type: "string", nullable: true },
+          sendAsMailboxId: {
+            type: "string", format: "uuid",
+            description:
+              "Answer as a shared mailbox. Needs canSend on it to compose and canRead on it to read the message being answered — the two permissions are separable, so both are checked (Security §10).",
+          },
+        },
+      }), responses: { "201": ok("Reply-all draft created"), "404": { $ref: "#/components/responses/NotFound" } } },
     },
     "/api/v1/mail/{messageId}/forward": {
-      post: { tags: ["Mail"], summary: "Create a forwarded-message draft in a new thread", security: bearer, responses: { "201": ok("Forward draft created"), "404": { $ref: "#/components/responses/NotFound" } } },
+      post: {
+        tags: ["Mail"], summary: "Create a forwarded-message draft in a new thread", security: bearer,
+        requestBody: jsonBody({
+          type: "object", required: ["recipients"],
+          properties: {
+            recipients: {
+              type: "object", required: ["to"],
+              properties: {
+                to: { type: "array", minItems: 1, maxItems: 100, items: { type: "string", format: "email" } },
+                cc: { type: "array", maxItems: 100, items: { type: "string", format: "email" } },
+                bcc: { type: "array", maxItems: 100, items: { type: "string", format: "email" } },
+              },
+            },
+            textBody: { type: "string", nullable: true },
+            htmlBody: { type: "string", nullable: true },
+            sendAsMailboxId: {
+              type: "string", format: "uuid",
+              description: "Forward from a shared mailbox, on the same terms as a reply.",
+            },
+          },
+        }),
+        responses: { "201": ok("Forward draft created"), "404": { $ref: "#/components/responses/NotFound" } },
+      },
     },
     "/api/v1/audit/events/{eventId}": {
       get: {
@@ -924,10 +1523,23 @@ export const openApiDocument = {
   },
   components: {
     securitySchemes: { bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" } },
-    parameters: { MembershipId: { name: "membershipId", in: "path", required: true, schema: { type: "string", format: "uuid" } } },
+    parameters: {
+      MembershipId: { name: "membershipId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+      IdempotencyKey: {
+        name: "Idempotency-Key", in: "header", required: true,
+        schema: { type: "string", minLength: 8, maxLength: 200 },
+        description:
+          "Client-generated key identifying this operation, per API §7. One key per intent: a retry of the same intent must reuse it.",
+      },
+    },
     responses: {
       ValidationError: { description: "Request validation failed" }, Unauthorized: { description: "Authentication failed" },
       Forbidden: { description: "Tenant or role access denied" }, NotFound: { description: "Tenant-scoped resource not found" }, Conflict: { description: "Resource state conflict" },
+      IdempotencyKeyRequired: { description: "The Idempotency-Key header is missing (IDEMPOTENCY_KEY_REQUIRED)" },
+      IdempotencyConflict: {
+        description:
+          "The key was already used with a different payload (IDEMPOTENCY_PAYLOAD_MISMATCH), or a request using it is still in flight (IDEMPOTENCY_REQUEST_IN_PROGRESS)",
+      },
       BadGateway: { description: "Upstream provider call failed" },
     },
     schemas: {
@@ -995,6 +1607,11 @@ export const openApiDocument = {
               bcc: { type: "array", maxItems: 100, items: { type: "string", format: "email" } },
             },
           },
+          sendAsMailboxId: {
+            type: "string", format: "uuid",
+            description:
+              "Compose as a shared mailbox. Requires canSend on it, re-checked when the draft is sent; the draft and the sent copy live in that mailbox, its send caps and warm-up ladder apply, and the mailbox is recorded on the message and in the MAIL_SENT audit event (Security §10). Omit for an ordinary personal send.",
+          },
         },
       },
       UpdateMailboxItemRequest: {
@@ -1030,3 +1647,61 @@ export const openApiDocument = {
     },
   },
 } as const;
+
+/**
+ * The idempotency header, applied to the operations that actually require it.
+ *
+ * Written as a pass over the document rather than by hand on each of the
+ * hundred-odd write operations: the middleware is mounted per router, so the
+ * rule really is "every tenant-scoped write", and stating it once here keeps
+ * the document from drifting away from the code the next time an endpoint is
+ * added.
+ */
+const IDEMPOTENCY_EXEMPT = [
+  // No tenant to scope a record to.
+  "/api/v1/auth/",
+  // Staff sessions, which carry no tenant context.
+  "/api/v1/support/platform",
+  // Deduplicated on the provider's own event id instead (§7).
+  "/api/v1/connectors/callbacks/",
+  "/api/v1/billing/webhook",
+];
+
+const WRITE_METHODS = ["post", "patch", "put", "delete"] as const;
+
+type Operation = {
+  parameters?: unknown[];
+  responses?: Record<string, unknown>;
+};
+
+function applyIdempotencyContract(document: typeof openApiDocument) {
+  const paths = document.paths as unknown as Record<string, Record<string, Operation>>;
+  for (const [path, item] of Object.entries(paths)) {
+    // Only tenant-scoped API endpoints; /api/health and friends are neither
+    // versioned nor tenant-scoped.
+    if (!path.startsWith("/api/v1/")) continue;
+    if (IDEMPOTENCY_EXEMPT.some((prefix) => path.startsWith(prefix))) continue;
+
+    for (const method of WRITE_METHODS) {
+      const operation = item[method];
+      if (!operation) continue;
+      operation.parameters = [
+        ...(operation.parameters ?? []),
+        { $ref: "#/components/parameters/IdempotencyKey" },
+      ];
+      operation.responses = {
+        ...(operation.responses ?? {}),
+        "400": { $ref: "#/components/responses/IdempotencyKeyRequired" },
+        "409": operation.responses?.["409"] ?? {
+          $ref: "#/components/responses/IdempotencyConflict",
+        },
+      };
+    }
+  }
+  return document;
+}
+
+export const openApiSpec = applyIdempotencyContract(
+  // Cloned so the `as const` document above stays the literal it reads as.
+  JSON.parse(JSON.stringify(openApiDocument)) as typeof openApiDocument
+);

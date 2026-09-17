@@ -12,28 +12,23 @@
  *     up empty with no error to show for it.
  *  2. Where the backend has nothing to offer a DTO field, these mappers use a
  *     neutral value and say so in a comment. They never invent a plausible
- *     one — a fabricated last-seen time is worse than an honest blank,
- *     because it reads as real.
+ *     one — a fabricated MFA method or last-seen time is worse than an honest
+ *     blank, because it reads as real.
  */
-import { apiRequest } from "./api-client";
+import { ApiError, apiRequest } from "./api-client";
 import type {
-  AlertReviewAction,
   AuditEventDto,
-  CapabilityCell,
-  CapabilityGroupDto,
   CommitmentDto,
   ConnectorDto,
+  DashboardDto,
+  DeliveryFailureSummaryDto,
   DomainDto,
   GroupDto,
-  GuardrailDto,
   InvitationDto,
   MailboxDto,
   MemberDto,
   NotificationDto,
   PolicyGroupDto,
-  PolicyRulesDto,
-  PolicyToggleDto,
-  SecurityAlertListResponse,
   SettingsDto,
   SupportGrantDto,
   SyncErrorDto,
@@ -73,7 +68,12 @@ interface ApiMembership {
   status: MemberDto["status"];
   createdAt: string;
   updatedAt: string;
-  user: { id: string; email: string; displayName: string | null };
+  user: {
+    id: string;
+    email: string;
+    displayName: string | null;
+    mfaEnrolledAt?: string | null;
+  };
 }
 
 export async function fetchMembers(): Promise<MemberDto[]> {
@@ -82,6 +82,15 @@ export async function fetchMembers(): Promise<MemberDto[]> {
     id: m.id,
     role: m.role,
     status: m.status,
+    // Read from the account now that a second factor exists (AC-002). This
+    // column reported NONE for everybody while there was nothing to read, and
+    // kept reporting it after there was — which is worse than blank, because
+    // an enrolled Owner appeared exposed.
+    //
+    // TOTP is the only method the product offers, so an enrolment date is
+    // enough to name it. An older server that does not send the field leaves
+    // this NONE rather than guessing.
+    mfaMethod: m.user.mfaEnrolledAt ? "TOTP" : "NONE",
     // No last-seen column exists on the membership; null renders as "—".
     lastActiveAt: null,
     user: {
@@ -121,6 +130,8 @@ interface ApiMailbox {
   storageLimit: number | string;
   sendSuspendedAt: string | null;
   sendSuspensionReason: string | null;
+  aiEnabled: boolean;
+  type: "USER" | "SHARED" | "DISTRIBUTION" | "SYSTEM" | "NO_REPLY";
 }
 
 export async function fetchMailboxes(): Promise<MailboxDto[]> {
@@ -131,16 +142,88 @@ export async function fetchMailboxes(): Promise<MailboxDto[]> {
   return rows.map((m) => ({
     id: m.id,
     address: m.address,
-    // Shared mailboxes need a model that does not exist yet, so every mailbox
-    // is individual by construction rather than by assumption.
-    type: "INDIVIDUAL",
+    // Real now. Anything without a single owning membership is shared as far
+    // as this screen is concerned; the Groups screen draws the finer
+    // shared/distribution distinction.
+    type: m.type === "USER" ? "INDIVIDUAL" : "SHARED",
     status: m.sendSuspendedAt ? "SUSPENDED" : "ACTIVE",
     storageUsedGb: gb(m.storageUsed),
     storageLimitGb: gb(m.storageLimit),
-    // Per-mailbox AI enablement (AC-008) is not implemented.
-    aiEnabled: false,
+    // The real column now (AC-008). A mailbox with this off is what the
+    // security spec calls restricted: AI is refused on it server-side.
+    aiEnabled: m.aiEnabled ?? true,
     sendSuspensionReason: m.sendSuspensionReason,
   }));
+}
+
+/**
+ * Turn AI processing on or off for one mailbox.
+ *
+ * The refusal is enforced in the AI service, not here — this only records the
+ * intent. Audited server-side with the old and new value, because §14.1
+ * requires mailbox-level AI enablement to leave evidence.
+ */
+export async function setMailboxAi(mailboxId: string, aiEnabled: boolean): Promise<void> {
+  await apiRequest(`/mail/admin/mailboxes/${mailboxId}`, {
+    method: "PATCH",
+    body: { aiEnabled },
+  });
+}
+
+/* ── aliases and forwarding — Data Model §6.17, §6.18 ─────────────────── */
+
+export interface AliasDto {
+  id: string;
+  address: string;
+  status: "ACTIVE" | "SUSPENDED";
+}
+
+export interface ForwardingDto {
+  id: string;
+  forwardToAddress: string;
+  keepCopy: boolean;
+  status: "ACTIVE" | "SUSPENDED";
+}
+
+export interface MailboxRoutingDto {
+  aliases: AliasDto[];
+  forwarding: ForwardingDto[];
+}
+
+export async function fetchMailboxRouting(mailboxId: string): Promise<MailboxRoutingDto> {
+  const res = await apiRequest<MailboxRoutingDto>(
+    `/mail/admin/mailboxes/${mailboxId}/routing`
+  );
+  return { aliases: res.aliases ?? [], forwarding: res.forwarding ?? [] };
+}
+
+export async function createAlias(mailboxId: string, address: string): Promise<void> {
+  await apiRequest(`/mail/admin/mailboxes/${mailboxId}/aliases`, {
+    method: "POST",
+    body: { address },
+  });
+}
+
+export async function deleteAlias(mailboxId: string, aliasId: string): Promise<void> {
+  await apiRequest(`/mail/admin/mailboxes/${mailboxId}/aliases/${aliasId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function createForwarding(
+  mailboxId: string,
+  input: { forwardToAddress: string; keepCopy: boolean }
+): Promise<void> {
+  await apiRequest(`/mail/admin/mailboxes/${mailboxId}/forwarding`, {
+    method: "POST",
+    body: input,
+  });
+}
+
+export async function deleteForwarding(mailboxId: string, ruleId: string): Promise<void> {
+  await apiRequest(`/mail/admin/mailboxes/${mailboxId}/forwarding/${ruleId}`, {
+    method: "DELETE",
+  });
 }
 
 /* ── domains ───────────────────────────────────────────────────────────── */
@@ -202,11 +285,10 @@ interface ApiAuditEvent {
   actor: { id: string; email: string; displayName: string | null } | null;
 }
 
-export async function fetchAuditEvents(limit = 50): Promise<AuditEventDto[]> {
-  const res = await apiRequest<{ events: ApiAuditEvent[] }>(
-    `/audit/events?limit=${limit}`
-  );
-  return (res.events ?? []).map((e) => ({
+/** Shared by the audit screen and the dashboard aggregate, which return the
+ *  same row shape — so there is one mapping rather than two that can drift. */
+function toAuditEvent(e: ApiAuditEvent): AuditEventDto {
+  return {
     id: e.id,
     eventType: e.eventType,
     actorName: e.actor ? personName(e.actor) : "System",
@@ -217,34 +299,14 @@ export async function fetchAuditEvents(limit = 50): Promise<AuditEventDto[]> {
       ? `${e.targetType}${e.targetId ? ` · ${e.targetId.slice(0, 8)}` : ""}`
       : "—",
     createdAtLabel: ago(e.createdAt),
-  }));
-}
-
-/* ── security alerts ───────────────────────────────────────────────────── */
-
-/**
- * The workspace alert inbox. The backend returns status tallies alongside the
- * rows so the filter chips and the rail badge never round-trip twice.
- */
-export async function fetchSecurityAlerts(): Promise<SecurityAlertListResponse> {
-  const res = await apiRequest<SecurityAlertListResponse>("/security-alerts");
-  return {
-    counts: res.counts ?? {},
-    openCount: res.openCount ?? 0,
-    alerts: res.alerts ?? [],
   };
 }
 
-/** Owner/admin decision on one alert. The server audits who decided, and how. */
-export async function reviewSecurityAlert(
-  id: string,
-  action: AlertReviewAction,
-  note?: string
-): Promise<void> {
-  await apiRequest(`/security-alerts/${id}/review`, {
-    method: "POST",
-    body: JSON.stringify({ action, ...(note ? { note } : {}) }),
-  });
+export async function fetchAuditEvents(limit = 50): Promise<AuditEventDto[]> {
+  const res = await apiRequest<{ events: ApiAuditEvent[] }>(
+    `/audit/events?limit=${limit}`
+  );
+  return (res.events ?? []).map(toAuditEvent);
 }
 
 /* ── connectors ────────────────────────────────────────────────────────── */
@@ -316,72 +378,193 @@ export async function fetchSyncErrors(): Promise<SyncErrorDto[]> {
   }));
 }
 
-/* ── permissions ──────────────────────────────────────────────────────── */
+/* ── delivery health ───────────────────────────────────────────────────── */
 
 /**
- * Capability codes, as the server returns them, with the label the matrix
- * screen shows. Codes are the stable identifier; the label is a translation,
- * not a second source of truth — the values still come from the backend.
+ * Failed-send counts for the dashboard tile.
+ *
+ * A dedicated count endpoint rather than counting rows from the delivery feed:
+ * that feed is capped at 200 rows, so counting client-side would under-report
+ * exactly when the number matters. The server decides what counts as a
+ * failure, so the tile and the feed cannot drift apart.
  */
-const CAPABILITY_LABELS: Record<string, string> = {
-  "mail.own.rw": "Read and send own mail",
-  "commitments.own.manage": "Manage own commitments",
-  "connector.own.connect": "Connect own inbox",
-  "mail.other.read": "Read another member's mail",
-  "people.read": "See the user list",
-  "people.invite.member": "Invite a Member",
-  "people.invite.admin": "Invite an Admin",
-  "people.invite.owner": "Invite an Owner",
-  "people.member.manage": "Suspend or remove a Member",
-  "people.admin.manage": "Suspend or remove an Admin",
-  "people.owner.manage": "Act on an Owner",
-  "workspace.settings.read": "Read workspace settings",
-  "workspace.settings.write": "Change workspace settings",
-  "workspace.mailboxes.manage": "Manage mailboxes",
-  "workspace.domains.manage": "Manage domains",
-  "workspace.groups.manage": "Manage groups",
-  "policy.write": "Set or change policies",
-  "policy.security.write": "Set the security policy",
-  "audit.read": "Read the audit log",
-  "billing.read": "View billing and seats",
-  "billing.plan.write": "Change the plan",
-  "data.export": "Export all workspace data",
-  "tenant.ownership.transfer": "Transfer ownership",
-  "tenant.delete": "Delete the tenant",
-  "support.standing": "Hold standing access",
-  "support.workspace.access": "Access a workspace",
-  "support.grant.end": "End a support grant early",
-};
-
-interface ApiMatrixRow {
-  capability: string;
-  member: CapabilityCell;
-  admin: CapabilityCell;
-  owner: CapabilityCell;
-  support: CapabilityCell;
-}
-
-/** The authoritative matrix, straight off the server the middleware enforces. */
-export async function fetchCapabilityMatrix(): Promise<CapabilityGroupDto[]> {
-  const res = await apiRequest<{ groups: { group: string; rows: ApiMatrixRow[] }[] }>(
-    "/permissions/matrix"
+export async function fetchDeliveryFailures(
+  windowHours = 24
+): Promise<DeliveryFailureSummaryDto> {
+  return apiRequest<DeliveryFailureSummaryDto>(
+    `/mail/admin/delivery-events/summary?windowHours=${windowHours}`
   );
-  return (res.groups ?? []).map((group) => ({
-    group: group.group,
-    rows: group.rows.map((row) => ({
-      capability: CAPABILITY_LABELS[row.capability] ?? row.capability,
-      member: row.member,
-      admin: row.admin,
-      owner: row.owner,
-      support: row.support,
-    })),
-  }));
 }
 
-/** Escalation guardrails — same shape on the wire as on screen. */
-export async function fetchGuardrails(): Promise<GuardrailDto[]> {
-  const res = await apiRequest<{ guardrails: GuardrailDto[] }>("/permissions/guardrails");
-  return res.guardrails ?? [];
+/**
+ * The summary, or null when the body is not one.
+ *
+ * Load-bearing, not defensive decoration: the tile reads `byType` with
+ * `Object.entries`, which throws on undefined. A proxy, a rewritten route or
+ * a catch-all answering 200 with some other object is enough to reach that,
+ * and the result is an unhandled error that takes the whole dashboard down
+ * rather than one tile showing "—".
+ */
+export function asFailureSummary(value: unknown): DeliveryFailureSummaryDto | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<DeliveryFailureSummaryDto>;
+  const usable =
+    typeof candidate.failed === "number" &&
+    typeof candidate.windowHours === "number" &&
+    typeof candidate.byType === "object" &&
+    candidate.byType !== null;
+  return usable ? (candidate as DeliveryFailureSummaryDto) : null;
+}
+
+/* ── dashboard ─────────────────────────────────────────────────────────── */
+
+interface ApiDashboard {
+  tenant: { name: string; planCode: string; timezone: string; status: string };
+  counts: DashboardDto["counts"];
+  mfa: DashboardDto["mfa"];
+  deliveryFailures: DeliveryFailureSummaryDto | null;
+  recentAudit: ApiAuditEvent[];
+  providerSync: ApiConnectedAccount[];
+  degraded: string[];
+  auditWithheld: boolean;
+}
+
+/**
+ * The dashboard in one read, falling back to composing it from the individual
+ * endpoints.
+ *
+ * The aggregate exists because the fan-out pulled five whole collections just
+ * to count them. The fallback exists because a client can be newer than the
+ * API it is talking to — the same reason `fetchConnectors` tries
+ * `/connectors/admin` before `/connectors`.
+ *
+ * Only a 404 falls back. A 403 must not: retrying as seven calls would either
+ * fail seven times or, worse, succeed at some of them and render data the
+ * caller was refused in aggregate.
+ */
+export async function fetchDashboard(windowHours = 24): Promise<DashboardDto> {
+  try {
+    const res = await apiRequest<ApiDashboard>(
+      `/admin/dashboard?windowHours=${windowHours}`
+    );
+    // Shape-checked rather than trusted. A proxy, a rewritten route or an
+    // older build can answer 200 with something else entirely, and reading
+    // `res.tenant.name` off that throws where falling back would have worked.
+    if (!res?.tenant?.name || !res.counts || !res.mfa) {
+      return composeDashboard(windowHours);
+    }
+    return {
+      tenant: {
+        name: res.tenant.name,
+        planCode: res.tenant.planCode,
+        timezone: res.tenant.timezone ?? "UTC",
+        status: res.tenant.status?.toLowerCase() ?? "unknown",
+      },
+      counts: res.counts,
+      // The two "required" figures arrived with AC-002. A server built before
+      // that answers without them, and defaulting to zero keeps the compliance
+      // banner quiet rather than firing it on an unknown — a warning derived
+      // from a missing field is a false alarm, and this page has exactly one
+      // banner region to spend.
+      mfa: {
+        ...res.mfa,
+        requiredCovered: res.mfa.requiredCovered ?? 0,
+        requiredTotal: res.mfa.requiredTotal ?? 0,
+      },
+      deliveryFailures: asFailureSummary(res.deliveryFailures),
+      recentAudit: (res.recentAudit ?? []).map(toAuditEvent),
+      providerSync: (res.providerSync ?? []).map(toConnector),
+      degraded: res.degraded ?? [],
+      auditWithheld: Boolean(res.auditWithheld),
+    };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return composeDashboard(windowHours);
+    }
+    throw error;
+  }
+}
+
+/**
+ * The pre-aggregate path, kept as the fallback.
+ *
+ * Uses `allSettled` so it reports the same partial-failure contract the
+ * aggregate does: a section that fails is named in `degraded` rather than
+ * failing the whole screen.
+ */
+async function composeDashboard(windowHours: number): Promise<DashboardDto> {
+  const [tenant, members, mailboxes, domains, connectors, audit, failures] =
+    await Promise.allSettled([
+      fetchTenant(),
+      fetchMembers(),
+      fetchMailboxes(),
+      fetchDomains(),
+      fetchConnectors(),
+      fetchAuditEvents(6),
+      fetchDeliveryFailures(windowHours),
+    ]);
+
+  // The tenant is the one section with nothing sensible to render without.
+  if (tenant.status === "rejected") throw tenant.reason;
+  if (members.status === "rejected") throw members.reason;
+
+  const degraded: string[] = [];
+  const settled = <T,>(
+    name: string,
+    result: PromiseSettledResult<T>,
+    fallback: T
+  ): T => {
+    if (result.status === "fulfilled") return result.value;
+    degraded.push(name);
+    return fallback;
+  };
+
+  const boxes = settled("mailboxes", mailboxes, []);
+  const doms = settled("domains", domains, []);
+  const conns = settled("connectors", connectors, []);
+  const events = settled("audit", audit, []);
+  const deliveryFailures = asFailureSummary(
+    settled<DeliveryFailureSummaryDto | null>("deliveryFailures", failures, null)
+  );
+  const people = members.value;
+
+  return {
+    tenant: {
+      name: tenant.value.name,
+      planCode: tenant.value.planCode,
+      timezone: tenant.value.timezone ?? "UTC",
+      status: tenant.value.status?.toLowerCase() ?? "unknown",
+    },
+    counts: {
+      people: people.length,
+      pendingInvitations: people.filter((m) => m.status === "INVITED").length,
+      mailboxes: boxes.length,
+      suspendedMailboxes: boxes.filter((m) => m.status === "SUSPENDED").length,
+      connectedAccounts: conns.length,
+      connectedGmail: conns.filter((c) => c.name === "Gmail").length,
+      connectedMicrosoft: conns.filter((c) => c.name === "Microsoft 365").length,
+      domainsVerified: doms.filter((d) => d.verificationStatus === "VERIFIED").length,
+      domainsTotal: doms.length,
+      storageUsedGb: boxes.reduce((sum, m) => sum + m.storageUsedGb, 0),
+      storageLimitGb: boxes.reduce((sum, m) => sum + m.storageLimitGb, 0),
+    },
+    // The fallback composes the dashboard from individual reads, and none of
+    // them counts enrolment. Unsupported is still the honest answer here —
+    // it says "this page could not tell", which is different from "nobody
+    // has enrolled".
+    mfa: {
+      supported: false,
+      covered: 0,
+      total: people.filter((m) => m.status === "ACTIVE").length,
+      requiredCovered: 0,
+      requiredTotal: 0,
+    },
+    deliveryFailures,
+    recentAudit: events.slice(0, 6),
+    providerSync: conns.slice(0, 6),
+    degraded,
+    auditWithheld: false,
+  };
 }
 
 /* ── policies ──────────────────────────────────────────────────────────── */
@@ -393,7 +576,7 @@ interface ApiPolicy {
   description: string | null;
   version: number;
   status: string;
-  rules: PolicyRulesDto | null;
+  rules: Record<string, unknown> | null;
 }
 
 export async function fetchPolicyGroups(): Promise<PolicyGroupDto[]> {
@@ -404,94 +587,34 @@ export async function fetchPolicyGroups(): Promise<PolicyGroupDto[]> {
   }
 
   return Object.entries(byType).map(([type, policies]) => {
-    // The newest version is the working copy: the screen edits that one, and a
-    // PATCH supersedes it with a newer draft rather than overwriting the live
-    // contract. Reading the newest keeps the toggle in step with what was saved.
-    const latest = [...policies].sort((a: ApiPolicy, b: ApiPolicy) => b.version - a.version)[0];
-    const rules = latest?.rules ?? null;
+    // One active version per type is the contract; fall back to the newest.
+    const active =
+      policies.find((p: ApiPolicy) => p.status === "ACTIVE") ??
+      [...policies].sort((a: ApiPolicy, b: ApiPolicy) => b.version - a.version)[0];
+    const rules = (active?.rules ?? {}) as Record<string, unknown>;
 
     const group: PolicyGroupDto = {
-      group: latest?.name ?? type,
+      group: active?.name ?? type,
       // SECURITY policy is Owner-only: the matrix withholds
       // `policy.security.write` from an Admin, so the group is shown but
       // marked out of reach rather than hidden.
       restriction:
         type === "SECURITY" ? "Owner only — requires policy.security.write" : null,
-      toggles: rules ? buildPolicyToggles(type, latest!, rules) : [],
+      toggles: Object.entries(rules)
+        .filter(([, value]) => typeof value === "boolean")
+        .map(([key, value]) => ({
+          key,
+          // Turn camelCase rule keys into readable labels.
+          label: key.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase()),
+          detail: `${type} policy · version ${active?.version ?? 1}`,
+          enabled: value as boolean,
+          // Whether an Admin may flip a given rule is evaluation step 8, which
+          // is not wired yet. Shown as editable; the server refuses if not.
+          locked: type === "SECURITY",
+        })),
     };
     return group;
   });
-}
-
-/** Binary leaves of a policy's rules become toggles; stringy ones stay unpainted. */
-function buildPolicyToggles(
-  type: string,
-  policy: ApiPolicy,
-  rules: PolicyRulesDto
-): PolicyToggleDto[] {
-  const locked = type === "SECURITY";
-  const toggles: PolicyToggleDto[] = [
-    {
-      key: "__default",
-      label: "Allow by default",
-      detail:
-        rules.defaultEffect === "ALLOW"
-          ? "Requests that match no condition go through."
-          : "Requests that match no condition are refused.",
-      enabled: rules.defaultEffect === "ALLOW",
-      locked,
-      policyId: policy.id,
-      ruleKey: "__default",
-      rules,
-    },
-  ];
-
-  rules.conditions.forEach((condition, index) => {
-    // Only boolean-valued conditions are genuinely on/off; the rest are shown
-    // in the detail text rather than forced into a binary switch.
-    if (typeof condition.value !== "boolean") return;
-    toggles.push({
-      key: `cond-${index}`,
-      label: condition.field.replace(/[._]/g, " ").replace(/^./, (c) => c.toUpperCase()),
-      detail: `${condition.field} ${condition.operator.toLowerCase().replace(/_/g, " ")} ${condition.value} is ${condition.effect === "ALLOW" ? "allowed" : "refused"}`,
-      enabled: condition.effect === "ALLOW",
-      locked,
-      policyId: policy.id,
-      ruleKey: `__condition:${index}`,
-      rules,
-    });
-  });
-
-  return toggles;
-}
-
-/**
- * Flips one leaf of a policy's rules and PATCHes the version, which the server
- * supersedes with a newer draft. Sending the full rules object keeps the
- * untouched leaves intact.
- */
-export async function updatePolicyRules(
-  policyId: string,
-  rules: PolicyRulesDto,
-  ruleKey: string,
-  enabled: boolean
-): Promise<void> {
-  let next: PolicyRulesDto;
-  if (ruleKey === "__default") {
-    next = { ...rules, defaultEffect: enabled ? "ALLOW" : "DENY" };
-  } else if (ruleKey.startsWith("__condition:")) {
-    const index = Number(ruleKey.slice("__condition:".length));
-    next = {
-      ...rules,
-      conditions: rules.conditions.map((condition, i) =>
-        i === index ? { ...condition, effect: enabled ? "ALLOW" : "DENY" } : condition
-      ),
-    };
-  } else {
-    throw new Error(`Unknown policy rule leaf: ${ruleKey}`);
-  }
-
-  await apiRequest(`/policies/${policyId}`, { method: "PATCH", body: { rules: next } });
 }
 
 /* ── notifications ─────────────────────────────────────────────────────── */
@@ -522,19 +645,6 @@ export async function fetchNotifications(): Promise<NotificationDto[]> {
     severity: SEVERITY[n.type] ?? "INFO",
     readAt: n.readAt ? ago(n.readAt) : null,
   }));
-}
-
-/** Marks one notification read. The server refuses rows it does not own. */
-export async function markNotificationRead(id: string): Promise<void> {
-  await apiRequest(`/notifications/${id}/read`, { method: "PATCH" });
-}
-
-/** Marks every unread notification for the caller read; returns the count. */
-export async function markAllNotificationsRead(): Promise<number> {
-  const data = await apiRequest<{ updated: number }>("/notifications/read-all", {
-    method: "POST",
-  });
-  return data.updated ?? 0;
 }
 
 /* ── tenant settings ───────────────────────────────────────────────────── */
@@ -648,48 +758,96 @@ export async function fetchActiveSupportGrant(): Promise<SupportGrantDto | null>
 
 /* ── groups ────────────────────────────────────────────────────────────── */
 
-interface ApiGroup {
+interface ApiSharedMailbox {
   id: string;
-  name: string | null;
   address: string;
-  kind: GroupDto["kind"];
-  status: GroupDto["status"];
-  createdAt: string;
-  _count?: { members: number };
+  type: "SHARED" | "DISTRIBUTION";
+  memberCount: number;
+  status: "ACTIVE" | "SUSPENDED";
 }
 
-/** Shared mailboxes and distribution groups, as the Group module serves them. */
+/**
+ * Shared mailboxes and distribution addresses.
+ *
+ * This used to throw, because no Group model existed. There is still no
+ * separate one: Data Model §6.16 models both as a mailbox with a type, and
+ * the screen's own "shared mailbox / distribution only" split is exactly
+ * that distinction, so inventing a second entity would have been a parallel
+ * truth to keep in sync.
+ */
 export async function fetchGroups(): Promise<GroupDto[]> {
-  const res = await apiRequest<{ groups: ApiGroup[] }>("/groups");
+  const res = await apiRequest<{ groups: ApiSharedMailbox[] }>(
+    "/mail/admin/shared-mailboxes"
+  );
   return (res.groups ?? []).map((g) => ({
     id: g.id,
-    name: g.name,
     address: g.address,
-    kind: g.kind,
-    memberCount: g._count?.members ?? 0,
+    kind: g.type === "DISTRIBUTION" ? "DISTRIBUTION" : "SHARED",
+    memberCount: g.memberCount,
     status: g.status,
   }));
 }
 
-/** Creates a shared mailbox or distribution group. */
-export async function createGroup(input: {
+export interface GroupAssigneeDto {
+  membershipId: string;
   name: string;
+  email: string;
+  canRead: boolean;
+  canSend: boolean;
+  canManage: boolean;
+  canAssign: boolean;
+}
+
+interface ApiAssignee {
+  membershipId: string;
+  canRead: boolean;
+  canSend: boolean;
+  canManage: boolean;
+  canAssign: boolean;
+  membership: { user: { email: string; displayName: string | null } };
+}
+
+export async function fetchGroupAssignees(mailboxId: string): Promise<GroupAssigneeDto[]> {
+  const res = await apiRequest<{ assignees: ApiAssignee[] }>(
+    `/mail/admin/shared-mailboxes/${mailboxId}/assignees`
+  );
+  return (res.assignees ?? []).map((a) => ({
+    membershipId: a.membershipId,
+    name: personName(a.membership.user),
+    email: a.membership.user.email,
+    canRead: a.canRead,
+    canSend: a.canSend,
+    canManage: a.canManage,
+    canAssign: a.canAssign,
+  }));
+}
+
+export async function createGroup(input: {
   address: string;
-  kind: GroupDto["kind"];
+  type: "SHARED" | "DISTRIBUTION";
 }): Promise<void> {
-  await apiRequest("/groups", { method: "POST", body: input });
+  await apiRequest("/mail/admin/shared-mailboxes", { method: "POST", body: input });
 }
 
-/** Updates a group — used for suspending/reactivating via its status. */
-export async function updateGroup(
-  groupId: string,
-  patch: { name?: string; status?: GroupDto["status"] }
+/** Grant or change one person's access. Omitted permissions default closed. */
+export async function assignToGroup(
+  mailboxId: string,
+  input: { membershipId: string } & Partial<Omit<GroupAssigneeDto, "membershipId" | "name" | "email">>
 ): Promise<void> {
-  await apiRequest(`/groups/${groupId}`, { method: "PATCH", body: patch });
+  await apiRequest(`/mail/admin/shared-mailboxes/${mailboxId}/assignees`, {
+    method: "POST",
+    body: input,
+  });
 }
 
-export async function deleteGroup(groupId: string): Promise<void> {
-  await apiRequest(`/groups/${groupId}`, { method: "DELETE" });
+export async function removeFromGroup(
+  mailboxId: string,
+  membershipId: string
+): Promise<void> {
+  await apiRequest(
+    `/mail/admin/shared-mailboxes/${mailboxId}/assignees/${membershipId}`,
+    { method: "DELETE" }
+  );
 }
 
 /** The drafted invitation letter, as the API returns it. */

@@ -72,6 +72,10 @@ export const MEMBER_NAV: NavItem[] = [
     desc: "Your account details and sign-in security."
   },
   {
+    section: "Contacts", label: "Contacts", href: "/contacts", icon: Link2, status: "live",
+    desc: "Manage your personal and team contacts."
+  },
+  {
     section: "Account", label: "Settings", href: "/settings", icon: Settings, status: "live",
     desc: "Appearance, notifications, and preferences."
   },

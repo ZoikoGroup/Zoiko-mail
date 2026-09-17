@@ -1,11 +1,12 @@
 /**
  * Type definitions for the admin workspace.
  *
- * Data fixtures have been removed — all data comes from the API via
- * admin-queries.ts, including the capability matrix and guardrails
- * (GET /permissions/matrix and GET /permissions/guardrails).
+ * Data fixtures have been removed — all data now comes from the API via
+ * admin-queries.ts. Only type definitions and the capability matrix /
+ * guardrails (which have no backend endpoint yet) remain here.
  */
 
+export type MfaMethod = "PASSKEY" | "TOTP" | "NONE";
 export type MembershipRole = "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT";
 export type MembershipStatus = "ACTIVE" | "INVITED" | "SUSPENDED" | "REMOVED";
 
@@ -13,6 +14,7 @@ export interface MemberDto {
   id: string;
   role: MembershipRole;
   status: MembershipStatus;
+  mfaMethod: MfaMethod;
   lastActiveAt: string | null;
   user: { id: string; email: string; displayName: string };
 }
@@ -62,7 +64,6 @@ export interface DomainDto {
 
 export interface GroupDto {
   id: string;
-  name: string | null;
   address: string;
   kind: "SHARED" | "DISTRIBUTION";
   memberCount: number;
@@ -78,43 +79,6 @@ export interface AuditEventDto {
   createdAtLabel: string;
 }
 
-/* ── security alerts ───────────────────────────────────────────────────── */
-
-export type SecurityAlertType =
-  | "NEW_DEVICE_LOGIN"
-  | "FAILED_LOGIN_BURST"
-  | "REFRESH_TOKEN_REUSE"
-  | "PASSWORD_CHANGED"
-  | "PASSWORD_RESET";
-
-export type AlertSeverity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-export type AlertStatus = "OPEN" | "ACKNOWLEDGED" | "RESOLVED" | "DISMISSED";
-export type AlertReviewAction = "ACKNOWLEDGE" | "RESOLVE" | "DISMISS";
-
-export interface SecurityAlertDto {
-  id: string;
-  type: SecurityAlertType;
-  severity: AlertSeverity;
-  status: AlertStatus;
-  title: string;
-  message: string;
-  actorEmail: string | null;
-  ipAddress: string | null;
-  userAgent: string | null;
-  deviceLabel: string | null;
-  resolutionNote: string | null;
-  resolvedAt: string | null;
-  createdAt: string;
-  actor: { id: string; email: string; displayName: string | null } | null;
-  resolvedBy: { id: string; email: string; displayName: string | null } | null;
-}
-
-export interface SecurityAlertListResponse {
-  counts: Partial<Record<AlertStatus, number>>;
-  openCount: number;
-  alerts: SecurityAlertDto[];
-}
-
 export interface ConnectorDto {
   id: string;
   name: string;
@@ -123,24 +87,67 @@ export interface ConnectorDto {
   status: "ACTIVE" | "REAUTH_REQUIRED" | "IDLE";
 }
 
+/** Failure counts behind the dashboard's failed-sends tile. */
+export interface DeliveryFailureSummaryDto {
+  windowHours: number;
+  failed: number;
+  /** Per-type breakdown, so the tile can say what kind of failure it saw. */
+  byType: Record<string, number>;
+}
+
 export interface DashboardDto {
-  tenant: { name: string; planCode: string; region: string; status: string };
+  /**
+   * `timezone`, not `region`. The tenant has no region column — Data Model
+   * §6.1 specifies `primary_region` and the schema does not implement it — so
+   * the subtitle used to print the timezone under the word "region". Naming
+   * the field for what it holds is what stops that recurring.
+   */
+  tenant: { name: string; planCode: string; timezone: string; status: string };
   counts: {
     people: number;
     pendingInvitations: number;
     mailboxes: number;
-    mailboxSeats: number;
+    suspendedMailboxes: number;
     connectedAccounts: number;
     connectedGmail: number;
     connectedMicrosoft: number;
     domainsVerified: number;
     domainsTotal: number;
-    failedSends24h: number;
     storageUsedGb: number;
     storageLimitGb: number;
   };
+  /**
+   * MFA state, reported rather than inferred.
+   *
+   * Counted two ways, because they answer different questions. `covered` of
+   * `total` is how much of the workspace holds a second factor; `requiredCovered`
+   * of `requiredTotal` is the only one that means compliance, since AC-002
+   * compels Owners, Admins and Support and leaves members free to decline.
+   * A workspace can be fully compliant with most of its people unenrolled,
+   * and warning on the wider number tells an Admin to chase a problem that
+   * does not exist.
+   *
+   * `supported: false` is now only produced by the fallback path, which
+   * composes the dashboard from individual reads and has no way to count.
+   */
+  mfa: {
+    supported: boolean;
+    covered: number;
+    total: number;
+    requiredCovered: number;
+    requiredTotal: number;
+  };
+  /** Null while the read is in flight or refused; the tile then shows "—". */
+  deliveryFailures: DeliveryFailureSummaryDto | null;
   recentAudit: AuditEventDto[];
   providerSync: ConnectorDto[];
+  /**
+   * Sections the server could not read. Empty on a healthy response. Present
+   * so the page can name what is missing instead of showing a confident zero.
+   */
+  degraded: string[];
+  /** True when the audit tail was withheld for lack of `audit.read`. */
+  auditWithheld: boolean;
 }
 
 export interface SupportGrantDto {
@@ -177,26 +184,104 @@ export interface GuardrailDto {
   detail: string;
 }
 
+/**
+ * The authoritative matrix. Rendered from fixtures today; once the server-side
+ * capability map exists this comes from GET /permissions/matrix, so the page can
+ * never drift from what the API actually enforces.
+ */
+export const CAPABILITY_MATRIX: CapabilityGroupDto[] = [
+  {
+    group: "Own work",
+    rows: [
+      { capability: "Read and send own mail", member: 1, admin: 1, owner: 1, support: 0 },
+      { capability: "Manage own commitments", member: 1, admin: 1, owner: 1, support: 0 },
+      { capability: "Connect own inbox", member: 1, admin: 1, owner: 1, support: 0 },
+      { capability: "Read another member's mail", member: 0, admin: 0, owner: 0, support: 0 },
+    ],
+  },
+  {
+    group: "People",
+    rows: [
+      { capability: "See the user list", member: 0, admin: 1, owner: 1, support: "Read-only" },
+      { capability: "Invite a Member", member: 0, admin: 1, owner: 1, support: 0 },
+      { capability: "Invite an Admin", member: 0, admin: 0, owner: 1, support: 0 },
+      { capability: "Invite an Owner", member: 0, admin: 0, owner: "2-person", support: 0 },
+      { capability: "Suspend or remove a Member", member: 0, admin: 1, owner: 1, support: 0 },
+      { capability: "Suspend or remove an Admin", member: 0, admin: 0, owner: 1, support: 0 },
+      { capability: "Act on an Owner", member: 0, admin: 0, owner: 1, support: 0 },
+      { capability: "Reset another person's MFA", member: 0, admin: 0, owner: "Step-up", support: 0 },
+    ],
+  },
+  {
+    group: "Workspace",
+    rows: [
+      { capability: "Read workspace settings", member: "Own", admin: 1, owner: 1, support: "Read-only" },
+      { capability: "Change workspace settings", member: 0, admin: 1, owner: 1, support: 0 },
+      { capability: "Manage mailboxes, domains, groups", member: 0, admin: 1, owner: 1, support: 0 },
+      { capability: "Set the security policy", member: 0, admin: 0, owner: 1, support: 0 },
+      { capability: "Read the audit log", member: 0, admin: 1, owner: 1, support: "Read-only" },
+    ],
+  },
+  {
+    group: "Money and liability",
+    rows: [
+      { capability: "View billing and seats", member: 0, admin: 0, owner: 1, support: 0 },
+      { capability: "Change the plan", member: 0, admin: 0, owner: 1, support: 0 },
+      { capability: "Export all workspace data", member: 0, admin: 0, owner: "Step-up", support: 0 },
+      { capability: "Transfer ownership", member: 0, admin: 0, owner: "Step-up", support: 0 },
+      { capability: "Delete the tenant", member: 0, admin: 0, owner: "Step-up", support: 0 },
+    ],
+  },
+  {
+    group: "Support",
+    rows: [
+      { capability: "Hold standing access", member: 0, admin: 0, owner: 0, support: 0 },
+      { capability: "Access a workspace", member: 0, admin: 0, owner: 0, support: "Approved grant" },
+      { capability: "End a support grant early", member: 0, admin: 1, owner: 1, support: 1 },
+    ],
+  },
+];
+
+export const GUARDRAILS: GuardrailDto[] = [
+  {
+    id: "g1",
+    title: "No granting above your own level",
+    detail:
+      "An Admin inviting an Owner is escalation by proxy. The endpoint compares the requested role against the caller's and refuses upward grants.",
+  },
+  {
+    id: "g2",
+    title: "No acting on someone senior",
+    detail:
+      "An Admin cannot suspend, demote or remove an Owner. The button is disabled and the call is rejected server-side.",
+  },
+  {
+    id: "g3",
+    title: "A workspace always keeps one Owner",
+    detail:
+      "Removing or demoting the last active Owner is refused, or the workspace becomes unadministrable and only Zoiko could rescue it.",
+  },
+  {
+    id: "g4",
+    title: "Role is read per request",
+    detail:
+      "Never cached in the session. Demote an Admin and it takes effect on their next call, not when they choose to sign out.",
+  },
+  {
+    id: "g5",
+    title: "Every query is tenant-scoped",
+    detail:
+      "An RBAC slip leaks a feature; a tenant-scoping slip leaks another company's mail. Row-level security makes a forgotten WHERE return nothing.",
+  },
+  {
+    id: "g6",
+    title: "Step-up for consequential acts",
+    detail:
+      "Transfer, export and delete re-authenticate inside a valid session. A stolen cookie must not be enough to hand over the workspace.",
+  },
+];
+
 /* ── Policies ──────────────────────────────────────────────────────────── */
-
-export interface PolicyRuleCondition {
-  field: string;
-  operator:
-    | "EQUALS"
-    | "NOT_EQUALS"
-    | "IN"
-    | "GREATER_THAN"
-    | "GREATER_THAN_OR_EQUAL"
-    | "LESS_THAN"
-    | "LESS_THAN_OR_EQUAL";
-  value: string | number | boolean | Array<string | number | boolean>;
-  effect: "ALLOW" | "DENY";
-}
-
-export interface PolicyRulesDto {
-  defaultEffect: "ALLOW" | "DENY";
-  conditions: PolicyRuleCondition[];
-}
 
 export interface PolicyToggleDto {
   key: string;
@@ -205,15 +290,6 @@ export interface PolicyToggleDto {
   enabled: boolean;
   /** Locked toggles are non-negotiable or Owner-only; refused server-side too. */
   locked: boolean;
-  /** Which policy version this toggle reads from — and writes to. */
-  policyId: string;
-  /**
-   * The leaf inside `rules` the toggle flips: "__default" for defaultEffect,
-   * "__condition:{index}" for a binary condition's effect.
-   */
-  ruleKey: string;
-  /** The policy's full rules, echoed back so a PATCH supersedes them intact. */
-  rules: PolicyRulesDto;
 }
 
 export interface PolicyGroupDto {

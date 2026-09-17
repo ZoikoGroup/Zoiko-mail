@@ -1,5 +1,6 @@
-import { Prisma, type MailFolder, type MembershipRole, type MessageStatus, type RecipientType } from "@prisma/client";
+import { Prisma, type DeliveryEventType, type MailFolder, type MembershipRole, type MessageStatus, type RecipientType } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
+import { withCrossTenant } from "../../config/tenantScope.js";
 import { env } from "../../config/env.js";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
@@ -7,10 +8,17 @@ import { auditService } from "../audit/audit.service.js";
 import { billingService } from "../billing/billing.service.js";
 import { policyService } from "../policy/policy.service.js";
 import { attachmentStorage } from "./attachment.storage.js";
-import { normalizeSubject, uniqueParticipants } from "../message/message.utils.js";
+import {
+  messageListSelect,
+  normalizeSubject,
+  toListMessage,
+  uniqueParticipants,
+} from "../message/message.utils.js";
 import { deliveryProtectionService } from "../delivery-protection/delivery-protection.service.js";
+import { sharedMailboxService } from "./shared-mailbox.service.js";
+import { participantService } from "../participant/participant.service.js";
 import { jobService } from "../job/job.service.js";
-import type { BulkMailboxActionInput, CreateDraftInput, CreateLabelInput, ListMailInput, UpdateDraftInput, UpdateLabelInput, UpdateMailboxItemInput } from "./mail.schema.js";
+import type { BulkMailboxActionInput, CreateDraftInput, CreateLabelInput, ListMailInput, UpdateDraftInput, UpdateLabelInput, UpdateMailboxItemInput, updateSignatureSchema } from "./mail.schema.js";
 
 interface MailContext {
   tenantId: string;
@@ -21,6 +29,64 @@ interface MailContext {
   requestId?: string;
   ipAddress?: string | null;
   userAgent?: string | null;
+}
+
+/**
+ * What counts as a failed send.
+ *
+ * Deliberately narrower than "did not reach the inbox". A COMPLAINED event
+ * means the message *did* arrive and the recipient objected; SUPPRESSED and
+ * RATE_LIMITED mean Zoiko itself declined to send, which is a control working
+ * rather than a delivery failing; DEFERRED is still in flight. Folding any of
+ * them in would make the dashboard tile disagree with the delivery feed one
+ * click away, which is worse than a narrower number.
+ */
+const FAILED_DELIVERY_TYPES = [
+  "FAILED",
+  "BOUNCED",
+  "REJECTED",
+  "BLOCKED",
+  "PROVIDER_ERROR",
+] as const satisfies readonly DeliveryEventType[];
+
+type FailedDeliveryType = (typeof FAILED_DELIVERY_TYPES)[number];
+
+/**
+ * Failed-send counts for one workspace over a trailing window.
+ *
+ * Module-level rather than a method so the admin dashboard aggregate can call
+ * it with a tenant id alone. Wrapping it as a method would have meant
+ * assembling a whole MailContext — user, membership, role, email — none of
+ * which this query reads, and a fabricated context is the kind of thing that
+ * later gets trusted for authorization.
+ */
+export async function deliveryFailureSummary(tenantId: string, windowHours: number) {
+  const since = new Date(Date.now() - windowHours * 3_600_000);
+
+  const grouped = await prisma.deliveryEvent.groupBy({
+    by: ["type"],
+    where: {
+      tenantId,
+      type: { in: [...FAILED_DELIVERY_TYPES] },
+      createdAt: { gte: since },
+    },
+    _count: { _all: true },
+  });
+
+  // Every failure type is present with an explicit zero, so the client never
+  // has to distinguish "no failures of this kind" from "key absent".
+  const byType = Object.fromEntries(
+    FAILED_DELIVERY_TYPES.map((type) => [type, 0])
+  ) as Record<FailedDeliveryType, number>;
+
+  let failed = 0;
+  for (const row of grouped) {
+    const count = row._count._all;
+    byType[row.type as FailedDeliveryType] = count;
+    failed += count;
+  }
+
+  return { windowHours, since: since.toISOString(), failed, byType };
 }
 
 const messageInclude = {
@@ -63,16 +129,55 @@ export class MailService {
     });
   }
 
+  /**
+   * The shared mailbox a draft was composed in, if it was, having re-checked
+   * that the caller may still send from it.
+   *
+   * Re-checked rather than trusted from the row: a draft can sit for days and
+   * §10 makes access revocation immediate, so an assignment removed in between
+   * has to stop the edit as well as the send. Returns null for an ordinary
+   * personal draft, and for anything the caller does not author — the callers
+   * scope on authorship themselves and would 404 a moment later.
+   */
+  private async resolveDraftMailbox(messageId: string, context: MailContext) {
+    const draft = await prisma.emailMessage.findFirst({
+      where: {
+        id: messageId,
+        tenantId: context.tenantId,
+        authorUserId: context.userId,
+        status: "DRAFT",
+      },
+      select: { sentAsMailboxId: true },
+    });
+    if (!draft?.sentAsMailboxId) return null;
+    return sharedMailboxService.resolveAccessibleMailbox(context, draft.sentAsMailboxId, "canSend");
+  }
+
   async createDraft(input: CreateDraftInput, context: MailContext) {
+    // Sending as a shared mailbox needs `canSend` on it. Resolved before the
+    // transaction so a refusal costs nothing, and outside it because the
+    // check reads rows this transaction has no reason to lock.
+    const sendAs = input.sendAsMailboxId
+      ? await sharedMailboxService.resolveAccessibleMailbox(
+          context,
+          input.sendAsMailboxId,
+          "canSend"
+        )
+      : null;
+
     return prisma.$transaction(async (tx) => {
-      const mailbox = await this.mailbox(context, tx);
+      const own = await this.mailbox(context, tx);
+      // The draft lives in whichever mailbox it will be sent from, so a
+      // shared draft is visible to everyone assigned to that mailbox rather
+      // than hidden in the author's own folder.
+      const mailbox = sendAs ? { id: sendAs.id } : own;
       const now = new Date();
       const thread = await tx.messageThread.create({
         data: {
           tenantId: context.tenantId,
           subjectNormalized: normalizeSubject(input.subject),
           participants: uniqueParticipants([
-            context.email,
+            sendAs?.address ?? context.email,
             ...input.recipients.to,
             ...input.recipients.cc,
             ...input.recipients.bcc,
@@ -89,6 +194,10 @@ export class MailService {
           subject: input.subject,
           textBody: input.textBody,
           htmlBody: input.htmlBody,
+          // §10: the actor is authorUserId, the mailbox is this. Both are
+          // needed to answer "who sent that, as whom".
+          sentAsMailboxId: sendAs?.id ?? null,
+          fromAddress: sendAs?.address ?? null,
           recipients: {
             create: recipientRows(input)!.map((recipient) => ({ ...recipient, tenantId: context.tenantId })),
           },
@@ -98,14 +207,42 @@ export class MailService {
         },
         include: messageInclude,
       });
+      // §6.7/§6.8: every address involved becomes a resolvable participant,
+      // and the thread's denormalised list is written from the same pass so
+      // the two cannot drift.
+      const canonical = await participantService.recordThreadParticipation(
+        {
+          tenantId: context.tenantId,
+          threadId: thread.id,
+          messageId: message.id,
+          addresses: [
+            { email: sendAs?.address ?? context.email, role: "SENDER" },
+            ...input.recipients.to.map((email) => ({ email, role: "RECIPIENT" as const })),
+            ...input.recipients.cc.map((email) => ({ email, role: "CC" as const })),
+            ...input.recipients.bcc.map((email) => ({ email, role: "BCC" as const })),
+          ],
+        },
+        tx
+      );
+      await tx.messageThread.update({
+        where: { id: thread.id, tenantId: context.tenantId },
+        data: { participants: canonical },
+      });
+
       await this.audit(tx, context, "MAIL_DRAFT_CREATED", message.id);
       return message;
     });
   }
 
   async updateDraft(messageId: string, input: UpdateDraftInput, context: MailContext) {
+    // A send-as draft sits in the shared mailbox, so it cannot be found by
+    // looking in the author's own. Authorship still scopes the edit — only
+    // the author may change their draft — and the mailbox clause asks only
+    // that the draft still be a draft somewhere.
+    const shared = await this.resolveDraftMailbox(messageId, context);
+
     return prisma.$transaction(async (tx) => {
-      const mailbox = await this.mailbox(context, tx);
+      const mailbox = shared ?? (await this.mailbox(context, tx));
       const draft = await tx.emailMessage.findFirst({
         where: {
           id: messageId,
@@ -134,11 +271,31 @@ export class MailService {
           where: { tenantId: context.tenantId, messageId },
           select: { email: true },
         });
+        // Recorded again on edit, not only at creation: a draft's recipients
+        // change while it is being written, and the thread's participant list
+        // has to describe the message as it now stands.
+        const canonical = await participantService.recordThreadParticipation(
+          {
+            tenantId: context.tenantId,
+            threadId: draft.threadId,
+            messageId: message.id,
+            addresses: [
+              // The draft's own from-address when it is being sent as a
+              // shared mailbox, otherwise the author.
+              { email: message.fromAddress ?? context.email, role: "SENDER" },
+              ...allRecipients.map((recipient) => ({
+                email: recipient.email,
+                role: "RECIPIENT" as const,
+              })),
+            ],
+          },
+          tx
+        );
         await tx.messageThread.update({
           where: { id: draft.threadId, tenantId: context.tenantId },
           data: {
             subjectNormalized: normalizeSubject(message.subject),
-            participants: uniqueParticipants([context.email, ...allRecipients.map((recipient) => recipient.email)]),
+            participants: canonical,
           },
         });
       }
@@ -178,8 +335,16 @@ export class MailService {
     return { deleted: true };
   }
 
-  private async accessibleMessage(messageId: string, context: MailContext) {
-    const mailbox = await this.mailbox(context);
+  /**
+   * A message the caller can see, in their own mailbox or in a shared one.
+   *
+   * `mailboxId` names a shared mailbox, and reading out of it needs `canRead`
+   * on it — the same check the list and detail reads make.
+   */
+  private async accessibleMessage(messageId: string, context: MailContext, mailboxId?: string) {
+    const mailbox = mailboxId
+      ? await sharedMailboxService.resolveAccessibleMailbox(context, mailboxId, "canRead")
+      : await this.mailbox(context);
     const item = await prisma.mailboxMessage.findFirst({
       where: { tenantId: context.tenantId, mailboxId: mailbox.id, messageId },
       include: { message: { include: { recipients: true, author: { select: { email: true } }, thread: { select: { participants: true } } } } },
@@ -190,21 +355,36 @@ export class MailService {
 
   async createReply(
     messageId: string,
-    input: { textBody?: string | null; htmlBody?: string | null },
+    input: { textBody?: string | null; htmlBody?: string | null; sendAsMailboxId?: string },
     replyAll: boolean,
     context: MailContext
   ) {
-    const { mailbox, message: source } = await this.accessibleMessage(messageId, context);
+    // Sending as a shared mailbox needs send on it; the source is read out of
+    // that same mailbox, which needs read. Both are asked for, because the two
+    // permissions are separable and one does not imply the other.
+    const sendAs = input.sendAsMailboxId
+      ? await sharedMailboxService.resolveAccessibleMailbox(context, input.sendAsMailboxId, "canSend")
+      : null;
+    const { mailbox, message: source } = await this.accessibleMessage(
+      messageId,
+      context,
+      input.sendAsMailboxId
+    );
     if (!source.threadId) throw new AppError("Source message has no thread", 409, ErrorCodes.CONFLICT);
-    const self = context.email.toLowerCase();
+    // The addresses that are "us" for this reply. With a send-as that includes
+    // the shared address, or reply-all would put the team mailbox in its own
+    // reply's To line.
+    const ours = new Set([context.email.toLowerCase()]);
+    if (sendAs) ours.add(sendAs.address.toLowerCase());
+    const self = (sendAs?.address ?? context.email).toLowerCase();
     const author = source.author.email.toLowerCase();
     const to = new Set<string>();
     const cc = new Set<string>();
-    if (author !== self) to.add(author);
+    if (!ours.has(author)) to.add(author);
     if (replyAll) {
       for (const recipient of source.recipients) {
         const email = recipient.email.toLowerCase();
-        if (email === self || recipient.type === "BCC") continue;
+        if (ours.has(email) || recipient.type === "BCC") continue;
         if (recipient.type === "CC") cc.add(email);
         else to.add(email);
       }
@@ -226,6 +406,9 @@ export class MailService {
           subject,
           textBody,
           htmlBody,
+          // §10, as on any other send-as draft.
+          sentAsMailboxId: sendAs?.id ?? null,
+          fromAddress: sendAs?.address ?? null,
           recipients: {
             create: [
               ...[...to].map((email) => ({ tenantId: context.tenantId, email, type: "TO" as const })),
@@ -236,19 +419,39 @@ export class MailService {
         },
         include: messageInclude,
       });
+      await participantService.recordThreadParticipation(
+        {
+          tenantId: context.tenantId,
+          threadId: source.threadId!,
+          messageId: draft.id,
+          addresses: [
+            { email: self, role: "SENDER" },
+            ...[...to].map((email) => ({ email, role: "RECIPIENT" as const })),
+            ...[...cc].map((email) => ({ email, role: "CC" as const })),
+          ],
+        },
+        tx
+      );
       await tx.messageThread.update({
         where: { id: source.threadId!, tenantId: context.tenantId },
         data: {
           messageCount: { increment: 1 },
+          // The existing addresses are carried forward rather than replaced:
+          // a reply narrows the recipient list, and the thread should still
+          // remember everyone who has been in it.
           participants: uniqueParticipants([
             ...(Array.isArray(source.thread?.participants) ? source.thread.participants.filter((value): value is string => typeof value === "string") : []),
-            context.email,
+            self,
             ...to,
             ...cc,
           ]),
         },
       });
-      await this.audit(tx, context, replyAll ? "MAIL_REPLY_ALL_DRAFT_CREATED" : "MAIL_REPLY_DRAFT_CREATED", draft.id, { sourceMessageId: source.id, threadId: source.threadId });
+      await this.audit(tx, context, replyAll ? "MAIL_REPLY_ALL_DRAFT_CREATED" : "MAIL_REPLY_DRAFT_CREATED", draft.id, {
+        sourceMessageId: source.id,
+        threadId: source.threadId,
+        sentAsMailboxId: sendAs?.id ?? null,
+      });
       return draft;
     });
   }
@@ -258,7 +461,13 @@ export class MailService {
     input: Omit<CreateDraftInput, "subject">,
     context: MailContext
   ) {
-    const { message: source } = await this.accessibleMessage(messageId, context);
+    // createDraft below does the canSend check and the §10 recording; here the
+    // only extra question is which mailbox the forwarded message is read from.
+    const { message: source } = await this.accessibleMessage(
+      messageId,
+      context,
+      input.sendAsMailboxId
+    );
     const subject = /^fwd:/i.test(source.subject) ? source.subject : `Fwd: ${source.subject}`;
     const textBody = `${input.textBody ?? ""}\n\n--- Forwarded message ---\nFrom: ${source.author.email}\nSubject: ${source.subject}\n\n${source.textBody ?? ""}`.trim();
     const draft = await this.createDraft({ ...input, subject, textBody, htmlBody: input.htmlBody ?? null }, context);
@@ -390,14 +599,28 @@ export class MailService {
     }
     await deliveryProtectionService.assertRecipientsAllowed(context.tenantId, externalEmails);
 
-    const senderMailbox = await this.mailbox(context);
+    // The mailbox the message is actually sent from. For a shared-mailbox
+    // send that is the shared mailbox, so its warm-up ladder, send caps and
+    // SENT folder are the ones used — charging a team send against the
+    // author's personal limits would let a team bypass its own cap, and the
+    // sent copy would land where their colleagues cannot see it.
+    //
+    // Re-checked here rather than trusted from the draft: a draft can sit for
+    // days, and access may have been revoked in between (§10).
+    const senderMailbox = draft.sentAsMailboxId
+      ? await sharedMailboxService.resolveAccessibleMailbox(
+          context,
+          draft.sentAsMailboxId,
+          "canSend"
+        )
+      : await this.mailbox(context);
     const warmupReserved = senderMailbox.sendSuspendedAt
       ? true
       : await deliveryProtectionService.reserveWarmup(
-          senderMailbox.id,
-          context.tenantId,
-          externalEmails.length
-        );
+        senderMailbox.id,
+        context.tenantId,
+        externalEmails.length
+      );
     if (!warmupReserved) {
       await auditService.record({
         tenantId: context.tenantId,
@@ -460,104 +683,173 @@ export class MailService {
 
     try {
       return await prisma.$transaction(async (tx) => {
-      const sentAt = new Date();
-      const recipients = await tx.messageRecipient.findMany({
-        where: { tenantId: context.tenantId, messageId },
-      });
-
-      for (const recipient of recipients) {
-        const membership = await tx.tenantMembership.findFirst({
-          where: {
-            tenantId: context.tenantId,
-            status: "ACTIVE",
-            user: { email: { equals: recipient.email, mode: "insensitive" }, status: "ACTIVE" },
-          },
-          include: { user: { select: { email: true } } },
+        const sentAt = new Date();
+        const recipients = await tx.messageRecipient.findMany({
+          where: { tenantId: context.tenantId, messageId },
         });
-        if (membership) {
-          const recipientMailbox = await this.mailbox({
-            ...context,
-            userId: membership.userId,
-            membershipId: membership.id,
-            email: membership.user.email,
-          }, tx);
-          if (recipientMailbox.id !== senderMailbox.id) {
-          await tx.mailboxMessage.upsert({
-              where: {
-                mailboxId_messageId: { mailboxId: recipientMailbox.id, messageId },
+
+        for (const recipient of recipients) {
+          const membership = await tx.tenantMembership.findFirst({
+            where: {
+              tenantId: context.tenantId,
+              status: "ACTIVE",
+              user: { email: { equals: recipient.email, mode: "insensitive" }, status: "ACTIVE" },
+            },
+            include: { user: { select: { email: true } } },
+          });
+          if (membership) {
+            const recipientMailbox = await this.mailbox({
+              ...context,
+              userId: membership.userId,
+              membershipId: membership.id,
+              email: membership.user.email,
+            }, tx);
+            if (recipientMailbox.id !== senderMailbox.id) {
+              await tx.mailboxMessage.upsert({
+                where: {
+                  mailboxId_messageId: { mailboxId: recipientMailbox.id, messageId },
+                  tenantId: context.tenantId,
+                },
+                create: { tenantId: context.tenantId, mailboxId: recipientMailbox.id, messageId, folder: "INBOX" },
+                update: { folder: "INBOX" },
+              });
+            }
+            await tx.messageRecipient.update({
+              where: { id: recipient.id, tenantId: context.tenantId },
+              data: { recipientMembershipId: membership.id, deliveryStatus: "DELIVERED" },
+            });
+            await tx.deliveryEvent.create({
+              data: {
                 tenantId: context.tenantId,
+                messageId,
+                recipientId: recipient.id,
+                type: "DELIVERED",
+                metadata: { transport: "INTERNAL" },
               },
-              create: { tenantId: context.tenantId, mailboxId: recipientMailbox.id, messageId, folder: "INBOX" },
-              update: { folder: "INBOX" },
+            });
+          } else {
+            await tx.messageRecipient.update({
+              where: { id: recipient.id, tenantId: context.tenantId },
+              data: { deliveryStatus: "QUEUED" },
+            });
+            await tx.deliveryEvent.create({
+              data: {
+                tenantId: context.tenantId,
+                messageId,
+                recipientId: recipient.id,
+                type: "QUEUED",
+                metadata: { transport: "EXTERNAL_PROVIDER_PENDING" },
+              },
             });
           }
-          await tx.messageRecipient.update({
-            where: { id: recipient.id, tenantId: context.tenantId },
-            data: { recipientMembershipId: membership.id, deliveryStatus: "DELIVERED" },
-          });
-          await tx.deliveryEvent.create({
-            data: {
-              tenantId: context.tenantId,
-              messageId,
-              recipientId: recipient.id,
-              type: "DELIVERED",
-              metadata: { transport: "INTERNAL" },
-            },
-          });
+        }
+
+        await tx.mailboxMessage.update({
+          where: {
+            mailboxId_messageId: { mailboxId: senderMailbox.id, messageId },
+            tenantId: context.tenantId,
+          },
+          data: { folder: "SENT", isRead: true },
+        });
+
+        // Decide the honest status by looking at what will actually happen.
+        // Three cases:
+        //   1. No external recipients          → SENT   (delivered in-DB above)
+        //   2. External + we enqueue SMTP      → SENDING (worker will flip to SENT)
+        //   3. External but nothing to send it → FAILED  (no silent black holes)
+        const hasExternalRecipients = await tx.messageRecipient.count({
+          where: { tenantId: context.tenantId, messageId, recipientMembershipId: null },
+        }) > 0;
+
+        const canEnqueueSmtp = env.MAIL_PROVIDER_ENABLED
+          && context.tenantId === env.MAIL_PROVIDER_TENANT_ID
+          && context.membershipId === env.MAIL_PROVIDER_MEMBERSHIP_ID;
+
+        let status: MessageStatus;
+        let scheduleLastError: string | null = null;
+        let messageSentAt: Date | null = null;
+
+        if (!hasExternalRecipients) {
+          status = "SENT";
+          messageSentAt = sentAt;
+        } else if (canEnqueueSmtp) {
+          status = "SENDING";
+          // sentAt stays null — the worker sets it on real SMTP success.
         } else {
-          await tx.messageRecipient.update({
-            where: { id: recipient.id, tenantId: context.tenantId },
-            data: { deliveryStatus: "QUEUED" },
+          // Nothing exists to carry the external half of this message.
+          //
+          // Two corrections to the original shape of this branch, which
+          // marked the whole message FAILED. It reported a message as failed
+          // when its internal recipients had demonstrably received it a few
+          // lines above, and it left those external recipients reading QUEUED
+          // — "in flight" — while the message said FAILED, so the two levels
+          // contradicted each other.
+          //
+          // Per-recipient status is the level that can tell the truth here, so
+          // the black hole is recorded there: the external recipients fail,
+          // and the message is only failed when nobody received it at all.
+          const externals = await tx.messageRecipient.findMany({
+            where: { tenantId: context.tenantId, messageId, recipientMembershipId: null },
+            select: { id: true },
           });
-          await tx.deliveryEvent.create({
-            data: {
+          const deliveredCount = await tx.messageRecipient.count({
+            where: { tenantId: context.tenantId, messageId, deliveryStatus: "DELIVERED" },
+          });
+
+          await tx.messageRecipient.updateMany({
+            where: { tenantId: context.tenantId, messageId, recipientMembershipId: null },
+            data: { deliveryStatus: "FAILED" },
+          });
+          await tx.deliveryEvent.createMany({
+            data: externals.map((recipient) => ({
               tenantId: context.tenantId,
               messageId,
               recipientId: recipient.id,
-              type: "QUEUED",
-              metadata: { transport: "EXTERNAL_PROVIDER_PENDING" },
-            },
+              type: "FAILED" as const,
+              failureCode: "EXTERNAL_DELIVERY_NOT_CONFIGURED",
+              failureReason: "External delivery is not configured for this tenant",
+            })),
+          });
+
+          status = deliveredCount > 0 ? "SENT" : "FAILED";
+          messageSentAt = deliveredCount > 0 ? sentAt : null;
+          scheduleLastError = "External delivery is not configured for this tenant";
+        }
+
+        const message = await tx.emailMessage.update({
+          where: { id: messageId, tenantId: context.tenantId },
+          data: { status, sentAt: messageSentAt, scheduledAt: null, scheduleLastError },
+          include: messageInclude,
+        });
+
+        if (message.threadId && messageSentAt) {
+          await tx.messageThread.update({
+            where: { id: message.threadId, tenantId: context.tenantId },
+            data: { lastMessageAt: messageSentAt },
           });
         }
-      }
 
-      await tx.mailboxMessage.update({
-        where: {
-          mailboxId_messageId: { mailboxId: senderMailbox.id, messageId },
-          tenantId: context.tenantId,
-        },
-        data: { folder: "SENT", isRead: true },
+        if (status === "SENDING") {
+          await jobService.enqueue({
+            tenantId: context.tenantId,
+            userId: context.userId,
+            type: "SMTP_SEND",
+            payload: { messageId },
+            idempotencyKey: `smtp-send:${messageId}`,
+          }, tx);
+        }
+
+        // await this.audit(tx, context, "MAIL_SENT", message.id, { recipientCount: recipients.length });
+        // §10: "all shared mailbox sends must capture actor_user_id and
+      // mailbox_id". The actor is already the audit actor; the mailbox has to
+      // be said explicitly, or the record cannot answer who sent that as the
+      // support address.
+      await this.audit(tx, context, "MAIL_SENT", message.id, {
+        recipientCount: recipients.length,
+        sentAsMailboxId: draft.sentAsMailboxId ?? null,
+        sentAsAddress: draft.sentAsMailboxId ? senderMailbox.address : null,
       });
-      const message = await tx.emailMessage.update({
-        where: { id: messageId, tenantId: context.tenantId },
-        data: { status: "SENT", sentAt, scheduledAt: null, scheduleLastError: null },
-        include: messageInclude,
-      });
-      if (message.threadId) {
-        await tx.messageThread.update({
-          where: { id: message.threadId, tenantId: context.tenantId },
-          data: { lastMessageAt: sentAt },
-        });
-      }
-      const hasExternalRecipients = await tx.messageRecipient.count({
-        where: { tenantId: context.tenantId, messageId, recipientMembershipId: null },
-      }) > 0;
-      if (
-        hasExternalRecipients
-        && env.MAIL_PROVIDER_ENABLED
-        && context.tenantId === env.MAIL_PROVIDER_TENANT_ID
-        && context.membershipId === env.MAIL_PROVIDER_MEMBERSHIP_ID
-      ) {
-        await jobService.enqueue({
-          tenantId: context.tenantId,
-          userId: context.userId,
-          type: "SMTP_SEND",
-          payload: { messageId },
-          idempotencyKey: `smtp-send:${messageId}`,
-        }, tx);
-      }
-      await this.audit(tx, context, "MAIL_SENT", message.id, { recipientCount: recipients.length });
-      return message;
+        return message;
       });
     } catch (error) {
       await prisma.deliveryEvent.createMany({
@@ -575,82 +867,85 @@ export class MailService {
   }
 
   async processDueScheduled(limit = 25) {
-    const due = await prisma.emailMessage.findMany({
-      where: { status: "SCHEDULED", scheduledAt: { lte: new Date() } },
-      select: { id: true, tenantId: true, authorUserId: true },
-      orderBy: { scheduledAt: "asc" },
-      take: Math.min(Math.max(limit, 1), 100),
-    });
-    let sent = 0;
-    let failed = 0;
-    for (const candidate of due) {
-      const claimed = await prisma.emailMessage.updateMany({
-        where: {
-          id: candidate.id,
-          tenantId: candidate.tenantId,
-          status: "SCHEDULED",
-          scheduledAt: { lte: new Date() },
-        },
-        data: { status: "SENDING", scheduleAttempts: { increment: 1 } },
+    // The scheduler sweeps due messages across every workspace (AC-004).
+    return withCrossTenant(async () => {
+      const due = await prisma.emailMessage.findMany({
+        where: { status: "SCHEDULED", scheduledAt: { lte: new Date() } },
+        select: { id: true, tenantId: true, authorUserId: true },
+        orderBy: { scheduledAt: "asc" },
+        take: Math.min(Math.max(limit, 1), 100),
       });
-      if (claimed.count === 0) continue;
+      let sent = 0;
+      let failed = 0;
+      for (const candidate of due) {
+        const claimed = await prisma.emailMessage.updateMany({
+          where: {
+            id: candidate.id,
+            tenantId: candidate.tenantId,
+            status: "SCHEDULED",
+            scheduledAt: { lte: new Date() },
+          },
+          data: { status: "SENDING", scheduleAttempts: { increment: 1 } },
+        });
+        if (claimed.count === 0) continue;
 
-      const membership = await prisma.tenantMembership.findFirst({
-        where: {
+        const membership = await prisma.tenantMembership.findFirst({
+          where: {
+            tenantId: candidate.tenantId,
+            userId: candidate.authorUserId,
+            status: "ACTIVE",
+            tenant: { status: "ACTIVE" },
+            user: { status: "ACTIVE" },
+          },
+          include: { user: { select: { email: true } } },
+        });
+        if (!membership) {
+          await prisma.emailMessage.update({
+            where: { id: candidate.id, tenantId: candidate.tenantId },
+            data: { status: "FAILED", scheduleLastError: "Sender membership is inactive" },
+          });
+          failed += 1;
+          continue;
+        }
+
+        const workerContext: MailContext = {
           tenantId: candidate.tenantId,
           userId: candidate.authorUserId,
-          status: "ACTIVE",
-          tenant: { status: "ACTIVE" },
-          user: { status: "ACTIVE" },
-        },
-        include: { user: { select: { email: true } } },
-      });
-      if (!membership) {
-        await prisma.emailMessage.update({
-          where: { id: candidate.id, tenantId: candidate.tenantId },
-          data: { status: "FAILED", scheduleLastError: "Sender membership is inactive" },
-        });
-        failed += 1;
-        continue;
+          membershipId: membership.id,
+          role: membership.role,
+          email: membership.user.email,
+        };
+        try {
+          await this.deliver(candidate.id, workerContext, ["SENDING"]);
+          sent += 1;
+        } catch (error) {
+          const current = await prisma.emailMessage.findFirst({
+            where: { id: candidate.id, tenantId: candidate.tenantId },
+            select: { scheduleAttempts: true },
+          });
+          const terminal = (current?.scheduleAttempts ?? env.MAIL_SCHEDULE_MAX_ATTEMPTS) >= env.MAIL_SCHEDULE_MAX_ATTEMPTS;
+          const message = error instanceof Error ? error.message.slice(0, 1000) : "Scheduled send failed";
+          await prisma.emailMessage.update({
+            where: { id: candidate.id, tenantId: candidate.tenantId },
+            data: {
+              status: terminal ? "FAILED" : "SCHEDULED",
+              scheduledAt: terminal ? null : new Date(Date.now() + 30_000),
+              scheduleLastError: message,
+            },
+          });
+          await auditService.record({
+            tenantId: candidate.tenantId,
+            actorUserId: candidate.authorUserId,
+            eventType: terminal ? "MAIL_SCHEDULE_FAILED" : "MAIL_SCHEDULE_RETRY",
+            targetType: "EmailMessage",
+            targetId: candidate.id,
+            metadata: { error: message, attempt: current?.scheduleAttempts ?? null },
+          });
+          failed += 1;
+        }
       }
-
-      const workerContext: MailContext = {
-        tenantId: candidate.tenantId,
-        userId: candidate.authorUserId,
-        membershipId: membership.id,
-        role: membership.role,
-        email: membership.user.email,
-      };
-      try {
-        await this.deliver(candidate.id, workerContext, ["SENDING"]);
-        sent += 1;
-      } catch (error) {
-        const current = await prisma.emailMessage.findFirst({
-          where: { id: candidate.id, tenantId: candidate.tenantId },
-          select: { scheduleAttempts: true },
-        });
-        const terminal = (current?.scheduleAttempts ?? env.MAIL_SCHEDULE_MAX_ATTEMPTS) >= env.MAIL_SCHEDULE_MAX_ATTEMPTS;
-        const message = error instanceof Error ? error.message.slice(0, 1000) : "Scheduled send failed";
-        await prisma.emailMessage.update({
-          where: { id: candidate.id, tenantId: candidate.tenantId },
-          data: {
-            status: terminal ? "FAILED" : "SCHEDULED",
-            scheduledAt: terminal ? null : new Date(Date.now() + 30_000),
-            scheduleLastError: message,
-          },
-        });
-        await auditService.record({
-          tenantId: candidate.tenantId,
-          actorUserId: candidate.authorUserId,
-          eventType: terminal ? "MAIL_SCHEDULE_FAILED" : "MAIL_SCHEDULE_RETRY",
-          targetType: "EmailMessage",
-          targetId: candidate.id,
-          metadata: { error: message, attempt: current?.scheduleAttempts ?? null },
-        });
-        failed += 1;
-      }
-    }
-    return { claimed: due.length, sent, failed };
+      return { claimed: due.length, sent, failed };
+    });
   }
 
   async listDeliveryEvents(messageId: string, context: MailContext) {
@@ -716,6 +1011,22 @@ export class MailService {
     }));
   }
 
+  /**
+   * Failed-send counts over a trailing window, for the admin dashboard tile.
+   *
+   * A count rather than a page of rows, for two reasons. The tile needs one
+   * number, and the feed above caps at 200 — so counting rows client-side
+   * would silently under-report the moment a workspace had more failures than
+   * the page size, which is exactly when the number matters most.
+   *
+   * `byType` is returned alongside the total so the tile can explain itself
+   * without a second call: "3 bounced, 1 rejected" is actionable where a bare
+   * 4 is not.
+   */
+  adminDeliveryFailureSummary(input: { windowHours: number }, context: MailContext) {
+    return deliveryFailureSummary(context.tenantId, input.windowHours);
+  }
+
   async updateSendingStatus(
     mailboxId: string,
     input: { suspended: boolean; reason?: string },
@@ -757,7 +1068,13 @@ export class MailService {
   }
 
   async list(filters: ListMailInput, context: MailContext) {
-    const mailbox = await this.mailbox(context);
+    // No mailboxId means the caller's own mailbox, which is what every
+    // existing caller gets. With one, the caller must hold read on that
+    // shared mailbox — a tenant role does not substitute for the
+    // assignment (Security §9, §10).
+    const mailbox = filters.mailboxId
+      ? await sharedMailboxService.resolveAccessibleMailbox(context, filters.mailboxId, "canRead")
+      : await this.mailbox(context);
     const where = {
       tenantId: context.tenantId,
       mailboxId: mailbox.id,
@@ -767,23 +1084,46 @@ export class MailService {
       ...(filters.labelId ? {
         labels: { some: { tenantId: context.tenantId, labelId: filters.labelId } },
       } : {}),
-      ...(filters.q ? {
+      ...(filters.q || filters.from || filters.to || filters.hasAttachment || filters.dateAfter || filters.dateBefore ? {
         message: {
-          OR: [
-            { subject: { contains: filters.q, mode: "insensitive" as const } },
-            { textBody: { contains: filters.q, mode: "insensitive" as const } },
-            { fromAddress: { contains: filters.q, mode: "insensitive" as const } },
-            { fromName: { contains: filters.q, mode: "insensitive" as const } },
-            { recipients: { some: { email: { contains: filters.q, mode: "insensitive" as const } } } },
-          ],
+          ...(filters.q ? {
+            OR: [
+              { subject: { contains: filters.q, mode: "insensitive" as const } },
+              { textBody: { contains: filters.q, mode: "insensitive" as const } },
+              { fromAddress: { contains: filters.q, mode: "insensitive" as const } },
+              { fromName: { contains: filters.q, mode: "insensitive" as const } },
+              { recipients: { some: { email: { contains: filters.q, mode: "insensitive" as const } } } },
+            ],
+          } : {}),
+          ...(filters.from ? {
+            OR: [
+              { fromAddress: { contains: filters.from, mode: "insensitive" as const } },
+              { fromName: { contains: filters.from, mode: "insensitive" as const } },
+            ],
+          } : {}),
+          ...(filters.to ? {
+            recipients: { some: { email: { contains: filters.to, mode: "insensitive" as const } } },
+          } : {}),
+          ...(filters.hasAttachment ? {
+            attachments: { some: {} },
+          } : {}),
+          ...(filters.dateAfter || filters.dateBefore ? {
+            createdAt: {
+              ...(filters.dateAfter ? { gte: filters.dateAfter } : {}),
+              ...(filters.dateBefore ? { lte: filters.dateBefore } : {}),
+            },
+          } : {}),
         },
       } : {}),
     };
     const [items, total] = await prisma.$transaction([
       prisma.mailboxMessage.findMany({
         where,
+        // Metadata and a snippet, never the body — API §9 / AC-011. The
+        // reading pane gets its content from `get()` below, which is a
+        // detail-by-id read and permitted to return it.
         include: {
-          message: { include: messageInclude },
+          message: { select: messageListSelect },
           labels: { include: { label: true }, orderBy: { label: { name: "asc" } } },
         },
         orderBy: { createdAt: "desc" },
@@ -796,12 +1136,7 @@ export class MailService {
       items: items.map((item) => ({
         ...item,
         labels: item.labels.map((entry) => entry.label),
-        message: {
-          ...item.message,
-          recipients: item.message.authorUserId === context.userId
-            ? item.message.recipients
-            : item.message.recipients.filter((recipient) => recipient.type !== "BCC"),
-        },
+        message: toListMessage(item.message, context.userId),
       })),
       pagination: { ...filters, total, totalPages: Math.ceil(total / filters.limit) },
     };
@@ -829,8 +1164,12 @@ export class MailService {
     return { counts };
   }
 
-  async get(messageId: string, context: MailContext) {
-    const mailbox = await this.mailbox(context);
+  async get(messageId: string, context: MailContext, mailboxId?: string) {
+    // list() already accepts a shared mailbox; without the same option here a
+    // shared message could be listed and never opened.
+    const mailbox = mailboxId
+      ? await sharedMailboxService.resolveAccessibleMailbox(context, mailboxId, "canRead")
+      : await this.mailbox(context);
     const item = await prisma.mailboxMessage.findFirst({
       where: { tenantId: context.tenantId, mailboxId: mailbox.id, messageId },
       include: {
@@ -906,12 +1245,12 @@ export class MailService {
 
     const data: Prisma.MailboxMessageUpdateManyMutationInput =
       input.action === "MARK_READ" ? { isRead: true }
-      : input.action === "MARK_UNREAD" ? { isRead: false }
-      : input.action === "STAR" ? { isStarred: true }
-      : input.action === "UNSTAR" ? { isStarred: false }
-      : input.action === "ARCHIVE" ? { folder: "ARCHIVE" }
-      : input.action === "TRASH" ? { folder: "TRASH" }
-      : { folder: "INBOX" };
+        : input.action === "MARK_UNREAD" ? { isRead: false }
+          : input.action === "STAR" ? { isStarred: true }
+            : input.action === "UNSTAR" ? { isStarred: false }
+              : input.action === "ARCHIVE" ? { folder: "ARCHIVE" }
+                : input.action === "TRASH" ? { folder: "TRASH" }
+                  : { folder: "INBOX" };
 
     return prisma.$transaction(async (tx) => {
       const result = await tx.mailboxMessage.updateMany({
@@ -1129,7 +1468,12 @@ export class MailService {
   }
 
   async addAttachment(messageId: string, file: Express.Multer.File, context: MailContext) {
-    const mailbox = await this.mailbox(context);
+    // Storage is charged to the mailbox holding the draft, which for a
+    // send-as draft is the shared one. Charging the author's quota for a team
+    // attachment would bill the wrong mailbox and let a team route around its
+    // own limit.
+    const shared = await this.resolveDraftMailbox(messageId, context);
+    const mailbox = shared ?? (await this.mailbox(context));
     const draft = await prisma.emailMessage.findFirst({
       where: {
         id: messageId,
@@ -1141,7 +1485,14 @@ export class MailService {
       select: { id: true },
     });
     if (!draft) throw new AppError("Draft not found", 404, ErrorCodes.NOT_FOUND);
-    if (mailbox.storageUsed + BigInt(file.size) > mailbox.storageLimit) {
+    // Read separately rather than carried on the resolved mailbox: these are
+    // BigInt columns, and the resolver's result is handed to callers that
+    // serialise it.
+    const quota = await prisma.mailbox.findUniqueOrThrow({
+      where: { id: mailbox.id },
+      select: { storageUsed: true, storageLimit: true },
+    });
+    if (quota.storageUsed + BigInt(file.size) > quota.storageLimit) {
       throw new AppError("Mailbox storage quota exceeded", 413, ErrorCodes.VALIDATION_ERROR);
     }
 
@@ -1200,7 +1551,7 @@ export class MailService {
     });
     if (!attachment) throw new AppError("Attachment not found", 404, ErrorCodes.NOT_FOUND);
     if (attachment.scanStatus === "BLOCKED" ||
-        (attachment.message.quarantinedAt && attachment.message.authorUserId !== context.userId)) {
+      (attachment.message.quarantinedAt && attachment.message.authorUserId !== context.userId)) {
       throw new AppError("Attachment is blocked by security controls", 403, ErrorCodes.FORBIDDEN);
     }
     return {
@@ -1240,6 +1591,48 @@ export class MailService {
   }
 
   // ─── Admin: List all tenant mailboxes ────────────────────────────────────────
+
+  /**
+   * The mailboxes this caller may compose from — their own, plus any shared
+   * mailbox they hold `canSend` on.
+   *
+   * A member-level read, unlike the admin listings below: compose needs it to
+   * offer a From picker, and it must not name shared mailboxes the caller
+   * cannot actually send from, which would turn the picker into a directory of
+   * the workspace's team addresses.
+   */
+  async listSendableMailboxes(context: MailContext) {
+    const own = await this.mailbox(context);
+    const shared = await prisma.mailboxAccess.findMany({
+      where: { tenantId: context.tenantId, membershipId: context.membershipId, canSend: true },
+      select: {
+        mailbox: { select: { id: true, address: true, type: true, sendSuspendedAt: true } },
+      },
+      orderBy: { mailbox: { address: "asc" } },
+    });
+
+    // Suspended mailboxes are listed but flagged, so the reason a send is
+    // refused is visible before it is attempted rather than the entry simply
+    // being absent.
+    return {
+      mailboxes: [
+        {
+          id: own.id,
+          address: own.address,
+          type: own.type,
+          shared: false,
+          sendSuspended: own.sendSuspendedAt !== null,
+        },
+        ...shared.map((row) => ({
+          id: row.mailbox.id,
+          address: row.mailbox.address,
+          type: row.mailbox.type,
+          shared: true,
+          sendSuspended: row.mailbox.sendSuspendedAt !== null,
+        })),
+      ],
+    };
+  }
 
   async listAllMailboxes(tenantId: string) {
     const mailboxes = await prisma.mailbox.findMany({
@@ -1317,12 +1710,15 @@ export class MailService {
   async adminUpdateMailbox(
     tenantId: string,
     mailboxId: string,
-    input: { storageLimit?: number; customWarmupCap?: number | null },
+    input: { storageLimit?: number; customWarmupCap?: number | null; aiEnabled?: boolean },
     context: MailContext
   ) {
     const existing = await prisma.mailbox.findFirst({
       where: { id: mailboxId, tenantId },
-      select: { id: true, address: true, storageLimit: true, customWarmupCap: true, storageUsed: true },
+      select: {
+        id: true, address: true, storageLimit: true, customWarmupCap: true,
+        storageUsed: true, aiEnabled: true,
+      },
     });
     if (!existing) throw new AppError("Mailbox not found", 404, ErrorCodes.NOT_FOUND);
 
@@ -1341,6 +1737,7 @@ export class MailService {
       data: {
         ...(input.storageLimit !== undefined ? { storageLimit: BigInt(input.storageLimit) } : {}),
         ...(input.customWarmupCap !== undefined ? { customWarmupCap: input.customWarmupCap } : {}),
+        ...(input.aiEnabled !== undefined ? { aiEnabled: input.aiEnabled } : {}),
       },
       include: {
         membership: {
@@ -1363,10 +1760,12 @@ export class MailService {
         before: {
           storageLimit: Number(existing.storageLimit),
           customWarmupCap: existing.customWarmupCap,
+          aiEnabled: existing.aiEnabled,
         },
         after: {
           storageLimit: Number(mailbox.storageLimit),
           customWarmupCap: mailbox.customWarmupCap,
+          aiEnabled: mailbox.aiEnabled,
         },
       },
     });
@@ -1429,6 +1828,33 @@ export class MailService {
       userAgent: context.userAgent,
       metadata,
     }, tx);
+  }
+
+  // ─── Add these methods to MailService class in mail.service.ts ───────────────
+
+  async getSignature(context: MailContext) {
+    const mailbox = await this.mailbox(context);
+    return { signature: mailbox.signature ?? null };
+  }
+
+  async updateSignature(signature: string | null, context: MailContext) {
+    const mailbox = await this.mailbox(context);
+    const updated = await prisma.mailbox.update({
+      where: { id: mailbox.id },
+      data: { signature },
+      select: { id: true, signature: true },
+    });
+    await auditService.record({
+      tenantId: context.tenantId,
+      actorUserId: context.userId,
+      eventType: "MAILBOX_SIGNATURE_UPDATED",
+      targetType: "Mailbox",
+      targetId: mailbox.id,
+      requestId: context.requestId,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+    });
+    return { signature: updated.signature ?? null };
   }
 }
 

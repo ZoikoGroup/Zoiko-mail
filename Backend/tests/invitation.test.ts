@@ -4,7 +4,7 @@ import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
 import { hashToken } from "../src/common/utils/tokenHash.js";
 import bcrypt from "bcrypt";
-import { authHeader, registerUser } from "./helpers.js";
+import { authHeader, completeMfa, loginUser, registerUser } from "./helpers.js";
 
 const app = createApp();
 
@@ -165,13 +165,19 @@ describe("Membership invitations", () => {
       .send({ tenantName: "Should Not Exist", planCode: "starter" })
       .expect(409);
 
-    // 5. …and joining issues a full session under the invited role.
+    // 5. …and joining an Admin seat stops at the MFA gate, because AC-002
+    //    requires a second factor before an Admin holds a session. Enrolling
+    //    from the challenge completes the sign-in the invitation earned.
     const joined = await request(app)
       .post("/api/v1/auth/join-workspace")
       .set(authHeader(verified.body.data.pendingToken))
       .send({ membershipId })
       .expect(201);
-    const session = joined.body.data;
+    expect(joined.body.data.state).toBe("MFA_ENROLLMENT_REQUIRED");
+    const session = (await completeMfa(app, joined.body.data)).session as {
+      membership: { role: string };
+      tenant: { id: string };
+    };
     expect(session.membership.role).toBe("ADMIN");
     expect(session.tenant.id).toBe(owner.tenantId);
 
@@ -182,13 +188,10 @@ describe("Membership invitations", () => {
     expect(user?.status).toBe("ACTIVE");
 
     // 6. Login resolves straight into the joined workspace.
-    const login = await request(app)
-      .post("/api/v1/auth/login")
-      .send({ email: invitedEmail, password })
-      .expect(200);
-    expect(login.body.data.state).toBe("SIGNED_IN");
-    expect(login.body.data.membership.role).toBe("ADMIN");
-    expect(login.body.data.tenant.id).toBe(owner.tenantId);
+    const login = await loginUser(app, invitedEmail, password);
+    expect(login.state).toBe("SIGNED_IN");
+    expect(login.membership.role).toBe("ADMIN");
+    expect(login.tenant.id).toBe(owner.tenantId);
 
     // Joining twice fails cleanly (invitation already consumed).
     await request(app)

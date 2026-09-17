@@ -22,6 +22,9 @@ import {
   replyAll as replyAllApi,
   forward as forwardApi,
   fetchUnreadCounts,
+  uploadAttachment,
+  listSendableMailboxes,
+  type SendableMailbox,
   type ListMailParams,
   type ListMailResponse,
   type MailItem,
@@ -30,6 +33,8 @@ import {
   listThreads,
   getThread,
   type ListThreadsParams,
+  getSignature,
+  updateSignature,
 } from "./mail-api";
 
 const listKey = (params: ListMailParams) =>
@@ -189,6 +194,24 @@ export interface ComposerPayload {
   textBody: string;
   action: "send" | "draft" | "schedule";
   scheduledAt?: string; // ISO, required when action === "schedule"
+  files?: File[]; // attachments to upload after draft creation
+  /** Compose as a shared mailbox; omitted means the caller's own address. */
+  sendAsMailboxId?: string;
+}
+
+/**
+ * The From options for the composer.
+ *
+ * Long staleTime: an assignment changing mid-composition is rare, and the
+ * server re-checks send permission on both the draft and the send, so a stale
+ * list cannot turn into an unauthorised send — only into a refusal.
+ */
+export function useSendableMailboxes() {
+  return useQuery<{ mailboxes: SendableMailbox[] }>({
+    queryKey: ["mail", "send-as"],
+    queryFn: listSendableMailboxes,
+    staleTime: 5 * 60 * 1000,
+  });
 }
 
 export interface ComposerResult {
@@ -213,19 +236,34 @@ export function useComposerSubmit() {
           subject: p.subject ?? "",
           textBody: p.textBody,
           recipients: p.recipients ?? { to: [], cc: [], bcc: [] },
+          sendAsMailboxId: p.sendAsMailboxId,
         });
       } else if (p.mode === "reply") {
-        draft = await replyApi(p.sourceId as string, { textBody: p.textBody });
+        draft = await replyApi(p.sourceId as string, {
+          textBody: p.textBody,
+          sendAsMailboxId: p.sendAsMailboxId,
+        });
       } else if (p.mode === "replyAll") {
-        draft = await replyAllApi(p.sourceId as string, { textBody: p.textBody });
+        draft = await replyAllApi(p.sourceId as string, {
+          textBody: p.textBody,
+          sendAsMailboxId: p.sendAsMailboxId,
+        });
       } else {
         draft = await forwardApi(p.sourceId as string, {
           recipients: p.recipients as Recipients,
           textBody: p.textBody,
+          sendAsMailboxId: p.sendAsMailboxId,
         });
       }
 
       const draftId = draft.messageId ?? draft.id;
+
+      // 1.5) upload attachments if any
+      if (p.files && p.files.length > 0) {
+        for (const file of p.files) {
+          await uploadAttachment(draftId, file);
+        }
+      }
 
       // 2) act on it
       if (p.action === "draft") {
@@ -283,3 +321,20 @@ export function useThread(threadId: string | null) {
     staleTime: 15_000,
   });
 }
+
+export function useSignature() {
+  return useQuery({
+    queryKey: ["mail", "signature"],
+    queryFn: getSignature,
+    staleTime: 5 * 60 * 1000, // 5 min — signature doesn't change often
+  });
+}
+ 
+export function useUpdateSignature() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (signature: string | null) => updateSignature(signature),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["mail", "signature"] }),
+  });
+}
+ 

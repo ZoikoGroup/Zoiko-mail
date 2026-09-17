@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
-import { authHeader, registerUser } from "./helpers.js";
+import { authHeader, registerUser, loginUser } from "./helpers.js";
 import { prisma } from "../src/config/prisma.js";
 
 const app = createApp();
@@ -12,9 +12,8 @@ describe("Temporary audited SUPPORT access", () => {
     const support = await registerUser(app, { email: "support-agent@zoiko.test" });
     const added = await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
       .send({ email: support.email, role: "SUPPORT" }).expect(201);
-    const login = await request(app).post("/api/v1/auth/login")
-      .send({ email: support.email, password: support.password, tenantId: owner.tenantId }).expect(200);
-    const token = login.body.data.session?.accessToken ?? login.body.data.accessToken;
+    const login = await loginUser(app, support.email, support.password, owner.tenantId);
+    const token = login.accessToken;
 
     await request(app).get("/api/v1/support/diagnostics").set(authHeader(token)).expect(403);
     await request(app).get("/api/v1/messages").set(authHeader(token)).expect(403);
@@ -39,9 +38,8 @@ describe("Temporary audited SUPPORT access", () => {
     const support = await registerUser(app, { email: "expired-agent@zoiko.test" });
     const added = await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
       .send({ email: support.email, role: "SUPPORT" }).expect(201);
-    const login = await request(app).post("/api/v1/auth/login")
-      .send({ email: support.email, password: support.password, tenantId: owner.tenantId }).expect(200);
-    const supportToken = login.body.data.session?.accessToken ?? login.body.data.accessToken;
+    const login = await loginUser(app, support.email, support.password, owner.tenantId);
+    const supportToken = login.accessToken;
     const grant = await prisma.supportAccessGrant.create({ data: { tenantId: owner.tenantId, supportMembershipId: added.body.data.id, approvedByUserId: owner.userId, reason: "Expired test access grant", scopes: ["TENANT_DIAGNOSTICS"], expiresAt: new Date(Date.now() - 1000) } });
     await request(app).get("/api/v1/support/diagnostics").set(authHeader(supportToken))
       .set("x-support-grant-id", grant.id).expect(403);
@@ -68,14 +66,12 @@ describe("Temporary audited SUPPORT access", () => {
     expect(Array.isArray(ownerOverview.body.data.grants)).toBe(true);
     expect(ownerOverview.body.data.team[0]).toMatchObject({ email: support.email });
 
-    const adminLogin = await request(app).post("/api/v1/auth/login")
-      .send({ email: admin.email, password: admin.password, tenantId: owner.tenantId }).expect(200);
-    const adminToken = adminLogin.body.data.session?.accessToken ?? adminLogin.body.data.accessToken;
+    const adminLogin = await loginUser(app, admin.email, admin.password, owner.tenantId);
+    const adminToken = adminLogin.accessToken;
     await request(app).get("/api/v1/support/overview").set(authHeader(adminToken)).expect(200);
 
-    const supportLogin = await request(app).post("/api/v1/auth/login")
-      .send({ email: support.email, password: support.password, tenantId: owner.tenantId }).expect(200);
-    const supportToken = supportLogin.body.data.session?.accessToken ?? supportLogin.body.data.accessToken;
+    const supportLogin = await loginUser(app, support.email, support.password, owner.tenantId);
+    const supportToken = supportLogin.accessToken;
     const supportOverview = await request(app).get("/api/v1/support/overview")
       .set(authHeader(supportToken)).expect(200);
     expect(supportOverview.body.data.stats.members).toBe(3);
@@ -96,9 +92,8 @@ describe("Temporary audited SUPPORT access", () => {
     const grant = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
       .send({ supportMembershipId: added.body.data.id, reason: "Investigate admin revoke flow", expiresInMinutes: 30, scopes: ["TENANT_DIAGNOSTICS"] }).expect(201);
 
-    const adminLogin = await request(app).post("/api/v1/auth/login")
-      .send({ email: admin.email, password: admin.password, tenantId: owner.tenantId }).expect(200);
-    const adminToken = adminLogin.body.data.session?.accessToken ?? adminLogin.body.data.accessToken;
+    const adminLogin = await loginUser(app, admin.email, admin.password, owner.tenantId);
+    const adminToken = adminLogin.accessToken;
 
     await request(app).delete(`/api/v1/support/access-grants/${grant.body.data.id}`)
       .set(authHeader(adminToken)).expect(200);
@@ -118,9 +113,8 @@ describe("Temporary audited SUPPORT access", () => {
     const grant = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
       .send({ supportMembershipId: added.body.data.id, reason: "Investigate member revoke denial", expiresInMinutes: 30, scopes: ["TENANT_DIAGNOSTICS"] }).expect(201);
 
-    const memberLogin = await request(app).post("/api/v1/auth/login")
-      .send({ email: member.email, password: member.password, tenantId: owner.tenantId }).expect(200);
-    const memberToken = memberLogin.body.data.session?.accessToken ?? memberLogin.body.data.accessToken;
+    const memberLogin = await loginUser(app, member.email, member.password, owner.tenantId);
+    const memberToken = memberLogin.accessToken;
 
     await request(app).delete(`/api/v1/support/access-grants/${grant.body.data.id}`)
       .set(authHeader(memberToken)).expect(403);
