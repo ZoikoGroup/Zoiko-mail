@@ -383,6 +383,7 @@ export class ConnectorService {
       await auditService.record({
         tenantId: account.tenantId,
         eventType: "PROVIDER_EVENT_RECEIVED",
+            actorType: "PROVIDER",
         targetType: "ProviderEvent",
         targetId: created.id,
         requestId,
@@ -849,6 +850,7 @@ export class ConnectorService {
         tenantId,
         actorUserId: userId,
         eventType: "PROVIDER_EVENT_REPLAYED",
+            actorType: "PROVIDER",
         targetType: "ProviderEvent",
         targetId: event.id,
         requestId,
@@ -940,6 +942,7 @@ export class ConnectorService {
           await auditService.record({
             tenantId: event.tenantId,
             eventType: "PROVIDER_EVENT_PROCESSED",
+            actorType: "PROVIDER",
             targetType: "ProviderEvent",
             targetId: event.id,
             requestId: event.requestId,
@@ -971,6 +974,7 @@ export class ConnectorService {
             await auditService.record({
               tenantId: event.tenantId,
               eventType: "PROVIDER_EVENT_DEAD_LETTERED",
+            actorType: "PROVIDER",
               targetType: "ProviderEvent",
               targetId: event.id,
               requestId: event.requestId,

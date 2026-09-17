@@ -12,6 +12,12 @@ import {
   useSetMailboxAi,
 } from "@/lib/admin-hooks";
 import { useCan } from "@/lib/admin-capabilities";
+import { StepUpDialog, useStepUp } from "@/components/admin/StepUpDialog";
+import {
+  CreateMailboxDialog,
+  DeleteMailboxDialog,
+  SendingDialog,
+} from "@/components/admin/MailboxDialogs";
 import {
   Card,
   InlineEmpty,
@@ -20,7 +26,6 @@ import {
   Notice,
   PageHeader,
   Pill,
-  StaticNote,
   Table,
   TableWrap,
   Td,
@@ -31,28 +36,56 @@ export default function AdminMailboxesPage() {
   const can = useCan();
   const { data: mailboxes, isLoading, error } = useMailboxes();
   const setAi = useSetMailboxAi();
+  // Enabling AI on a mailbox is step-up (RBAC §2); restricting it is not, so
+  // the safe direction stays one click.
+  const stepUp = useStepUp();
   const canManage = can("workspace.mailboxes.manage");
   const [openId, setOpenId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  /** The mailbox whose sending or deletion is being decided, and which. */
+  const [acting, setActing] = useState<{ id: string; kind: "sending" | "delete" } | null>(
+    null
+  );
+  const actingOn = mailboxes?.find((m) => m.id === acting?.id) ?? null;
   const suspended = mailboxes?.filter((m) => m.status === "SUSPENDED") ?? [];
 
   return (
     <>
+      <StepUpDialog {...stepUp.dialog} />
+
+      {creating && (
+        <CreateMailboxDialog
+          existing={mailboxes ?? []}
+          onClose={() => setCreating(false)}
+        />
+      )}
+      {actingOn && acting?.kind === "sending" && (
+        <SendingDialog mailbox={actingOn} onClose={() => setActing(null)} />
+      )}
+      {actingOn && acting?.kind === "delete" && (
+        <DeleteMailboxDialog mailbox={actingOn} onClose={() => setActing(null)} />
+      )}
+
       <PageHeader
         title="Mailboxes"
         subtitle="Provider-backed hosted mailboxes under acme.test and zoikomail.com"
         action={
           canManage ? (
-            <button type="button" className="zoiko-btn pri">
+            <button
+              type="button"
+              className="zoiko-btn pri"
+              onClick={() => setCreating(true)}
+            >
               Create mailbox
             </button>
           ) : undefined
         }
       />
 
-      <StaticNote>
+      <Notice tone="info">
         Shared mailboxes live on the Groups screen, where assignments and their
-        read/send/manage/assign permissions are managed
-      </StaticNote>
+        read, send, manage and assign permissions are set.
+      </Notice>
 
       {setAi.isError && (
         <Notice tone="crit">
@@ -118,10 +151,15 @@ export default function AdminMailboxesPage() {
                             : "Requires workspace.mailboxes.manage"
                         }
                         onClick={() =>
-                          setAi.mutate({
-                            mailboxId: mailbox.id,
-                            aiEnabled: !mailbox.aiEnabled,
-                          })
+                          void stepUp.attempt(
+                            `Allowing AI to process ${mailbox.address}`,
+                            (stepUpToken) =>
+                              setAi.mutateAsync({
+                                mailboxId: mailbox.id,
+                                aiEnabled: !mailbox.aiEnabled,
+                                stepUpToken,
+                              })
+                          )
                         }
                         className="cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
                       >
@@ -136,14 +174,40 @@ export default function AdminMailboxesPage() {
                       </Pill>
                     </Td>
                     <Td nowrap>
-                      <button
-                        type="button"
-                        className="zoiko-btn sm"
-                        disabled={!canManage}
-                        onClick={() => setOpenId(openId === mailbox.id ? null : mailbox.id)}
-                      >
-                        {openId === mailbox.id ? "Close" : "Manage"}
-                      </button>
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          className="zoiko-btn sm"
+                          disabled={!canManage}
+                          onClick={() => setOpenId(openId === mailbox.id ? null : mailbox.id)}
+                        >
+                          {openId === mailbox.id ? "Close" : "Manage"}
+                        </button>
+                        {canManage && (
+                          <>
+                            {/* The incident lever: the audit spec's response to
+                                a compromise signal is "suspend sending, revoke
+                                sessions, require MFA reset". Receiving is
+                                untouched, so replies still arrive. */}
+                            <button
+                              type="button"
+                              className="zoiko-btn sm"
+                              onClick={() =>
+                                setActing({ id: mailbox.id, kind: "sending" })
+                              }
+                            >
+                              {mailbox.status === "SUSPENDED" ? "Resume" : "Stop sending"}
+                            </button>
+                            <button
+                              type="button"
+                              className="zoiko-btn crit sm"
+                              onClick={() => setActing({ id: mailbox.id, kind: "delete" })}
+                            >
+                              Delete
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </Td>
                   </tr>
                 ))}

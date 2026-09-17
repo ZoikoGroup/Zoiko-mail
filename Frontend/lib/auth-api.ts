@@ -370,6 +370,21 @@ export async function confirmMfaEnrolment(code: string): Promise<{ recoveryCodes
   });
 }
 
+/**
+ * Turn the second factor off.
+ *
+ * Requires a current code, because someone who has walked up to an unlocked
+ * screen must not be able to remove the control that would have stopped them.
+ * The server refuses outright for an account whose role requires MFA (AC-002),
+ * which is why the settings screen does not offer this to a privileged user.
+ */
+export async function disableMfa(code: string): Promise<{ disabled: boolean }> {
+  return apiRequest<{ disabled: boolean }>("/auth/mfa/disable", {
+    method: "POST",
+    body: { code },
+  });
+}
+
 export async function regenerateMfaRecoveryCodes(
   code: string
 ): Promise<{ recoveryCodes: string[] }> {
@@ -432,7 +447,17 @@ export async function joinWorkspace(
     }
   );
 
-  setTokens(data.accessToken, data.refreshToken);
+  // The join response is { state, session: { accessToken, ... } } — it is NOT
+  // flattened the way /auth/login is, so reading data.accessToken off the top
+  // level got undefined and stored the string "undefined" as the session. It
+  // read as signed in, so the join redirected to the workspace, and there the
+  // shell asked /auth/me with `Bearer undefined`: an admin joiner bounced
+  // straight back to sign-in, a member joiner sat on a spinner. Both had done
+  // everything right, and neither symptom pointed here.
+  //
+  // applyAuthTokens is the helper that already copes with every shape the API
+  // uses; createWorkspace beside it has always called it.
+  applyAuthTokens(data as unknown as AuthResponse);
 
   return data;
 }
@@ -454,4 +479,22 @@ export async function resetPassword(
     body: input,
     auth: false,
   });
+}
+
+/**
+ * Re-enter your password to authorise one high-risk action — AC-003.
+ *
+ * Deliberately not stored anywhere. The point of step-up is freshness: an
+ * access token proves who you are for hours, and RBAC §2 wants evidence that
+ * the person at the keyboard is still the account holder *at action time*.
+ * Keeping the result would turn it into a second long-lived credential and
+ * undo the control.
+ */
+export async function requestStepUp(password: string): Promise<string> {
+  const data = await apiRequest<{ stepUpToken: string; expiresIn: string }>(
+    "/auth/step-up",
+    { method: "POST", body: { password } }
+  );
+  if (!data?.stepUpToken) throw new Error("The server did not return a step-up token.");
+  return data.stepUpToken;
 }

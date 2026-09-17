@@ -1,6 +1,6 @@
 "use client";
 
-import { useConnectors, useSyncErrors } from "@/lib/admin-hooks";
+import { useConnectors, useReplayDeadLetter, useSyncErrors } from "@/lib/admin-hooks";
 import { useCan } from "@/lib/admin-capabilities";
 import {
   Card,
@@ -8,9 +8,9 @@ import {
   InlineError,
   LoadingRows,
   PageHeader,
+  Notice,
   Pill,
   Row,
-  StaticNote,
   type Tone,
 } from "@/components/admin/ui";
 
@@ -24,6 +24,7 @@ export default function AdminProviderSyncPage() {
   const can = useCan();
   const { data: connectors, isLoading, error } = useConnectors();
   const { data: syncErrors } = useSyncErrors();
+  const replay = useReplayDeadLetter();
 
   return (
     <>
@@ -36,10 +37,6 @@ export default function AdminProviderSyncPage() {
           </span>
         }
       />
-
-      <StaticNote>
-        Backend is complete — GET /connectors/health and /connectors/dead-letter
-      </StaticNote>
 
       <Card title="Connections">
         {error ? (
@@ -70,6 +67,10 @@ export default function AdminProviderSyncPage() {
         )}
       </Card>
 
+      {replay.error ? (
+        <Notice tone="warn">Could not replay that event. {replay.error.message}</Notice>
+      ) : null}
+
       <Card
         title="Recent sync errors"
         badge={
@@ -89,14 +90,22 @@ export default function AdminProviderSyncPage() {
               right={
                 <>
                   <span className="font-mono-num text-[10.5px] text-[var(--ink3)]">{item.ago}</span>
-                  {/* Re-auth needs the member's own OAuth consent, so this hands
-                      off rather than attempting it on their behalf. */}
+                  {/* Replay re-queues a dead-lettered provider event. Dead-letter
+                      is where an event lands after its retry budget is spent, so
+                      without this a transient provider failure is permanent and
+                      the mail that event carried never arrives. */}
                   <button
                     type="button"
                     className="zoiko-btn sm"
-                    disabled={!can("workspace.settings.write")}
+                    disabled={!can("workspace.settings.write") || replay.isPending}
+                    title={
+                      can("workspace.settings.write")
+                        ? undefined
+                        : "Replaying a provider event needs workspace.settings.write"
+                    }
+                    onClick={() => replay.mutate(item.id)}
                   >
-                    {item.action}
+                    {replay.isPending && replay.variables === item.id ? "Replaying…" : item.action}
                   </button>
                 </>
               }

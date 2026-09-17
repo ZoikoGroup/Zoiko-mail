@@ -36,7 +36,21 @@ const SPEC_ADMIN_CAPABILITIES: Capability[] = [
   "workspace.mailboxes.manage",
   "workspace.domains.manage",
   "workspace.groups.manage",
+  // §2 marks these Step-up. They are separate capabilities rather than a
+  // STEP_UP kind on the "manage" rows above, because the matrix wants a fresh
+  // password to *remove* a domain and not to add one.
+  "workspace.domains.remove",
+  "workspace.mailboxes.delete",
+  "workspace.mailboxes.sending",
+  // §2 "Rotate provider credentials" (Step-up) and "Disconnect connected
+  // account" (Tenant scope) and "Delegate mailbox access" (If policy).
+  "connector.credentials.rotate",
+  "connector.tenant.disconnect",
+  "mailbox.delegate",
   "policy.write",
+  // §2 "Change AI policy" and "Enable AI on restricted mailbox": both Step-up.
+  "policy.ai.write",
+  "mailbox.ai.enable",
   // §2 "View audit log": Admin = Limited. Held, then scoped in the service.
   "audit.read",
   // §2 "Request export": Admin = "By policy" + Step-up.
@@ -296,8 +310,8 @@ describe("vocabulary integrity", () => {
     expect(orphans).toEqual([]);
   });
 
-  it("declares twenty-eight capabilities", () => {
-    expect(CAPABILITIES).toHaveLength(28);
-    expect(new Set(CAPABILITIES).size).toBe(28);
+  it("declares thirty-seven capabilities", () => {
+    expect(CAPABILITIES).toHaveLength(37);
+    expect(new Set(CAPABILITIES).size).toBe(37);
   });
 });

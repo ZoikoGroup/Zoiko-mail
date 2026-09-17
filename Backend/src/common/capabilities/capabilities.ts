@@ -32,7 +32,22 @@ export const CAPABILITIES = [
   "workspace.mailboxes.manage",
   "workspace.domains.manage",
   "workspace.groups.manage",
+  // Split out of the "manage" capabilities above rather than folded into
+  // them, because RBAC §2 requires step-up on the destructive half only.
+  // Marking workspace.domains.manage STEP_UP would have demanded a fresh
+  // password to *add* a domain, which turns a routine action into a ritual
+  // and teaches people to re-authenticate without reading why.
+  "workspace.domains.remove",
+  "workspace.mailboxes.delete",
+  "workspace.mailboxes.sending",
+  "connector.credentials.rotate",
+  "connector.tenant.disconnect",
+  "mailbox.delegate",
   "policy.write",
+  // "Change AI policy" and "Enable AI on restricted mailbox" are both
+  // step-up in RBAC §2, and both are narrower than policy.write.
+  "policy.ai.write",
+  "mailbox.ai.enable",
   "policy.security.write",
   "audit.read",
   // Money and liability.
@@ -44,6 +59,10 @@ export const CAPABILITIES = [
   // Support.
   "support.standing",
   "support.workspace.access",
+  // Security §5 lists "support access grant" among the high-risk actions that
+  // require step-up. Granting a stranger access to a tenant is exactly that,
+  // and the route gated on a bare role.
+  "support.grant.create",
   "support.grant.end",
 ] as const;
 

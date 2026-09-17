@@ -206,10 +206,33 @@ model RefreshToken {
   @@map("refresh_tokens")
 }
 
+/// Audit §6.2 requires actor_type as a stable enumerated field. Without it the
+/// only distinction the data supported was "had an actor or did not", so the
+/// admin audit screen inferred user-vs-system and its Admin, Support and AI
+/// filters could never match anything.
+enum AuditActorType {
+  USER
+  ADMIN
+  SUPPORT
+  SYSTEM
+  PROVIDER
+  AI_WORKER
+
+  @@map("audit_actor_type")
+}
+
 model AuditEvent {
   id          String   @id @default(uuid()) @db.Uuid
   tenantId    String   @map("tenant_id") @db.Uuid
   actorUserId String?  @map("actor_user_id") @db.Uuid
+  /// Audit §6.2. Nullable only for rows written before the column existed.
+  ///
+  /// Not defaulted to SYSTEM and not backfilled: audit_events is append-only
+  /// at the database, and the trigger has no break-glass path for UPDATE at
+  /// all. Rewriting history to tidy a display value would mean weakening the
+  /// one property that makes this table evidence. A historical row honestly
+  /// records "not captured"; every new row carries a real actor type.
+  actorType   AuditActorType? @map("actor_type")
   eventType   String   @map("event_type")
   targetType  String?  @map("target_type")
   targetId    String?  @map("target_id")
@@ -217,12 +240,19 @@ model AuditEvent {
   ipAddress   String?  @map("ip_address")
   userAgent   String?  @map("user_agent")
   metadata    Json?
+  /// Audit §6.2: "Required for material policy or permission changes."
+  /// A hash rather than the values, so the trail proves a change happened and
+  /// what it changed from, without copying policy content into a second place
+  /// that then has to be governed and deleted on its own schedule.
+  beforeHash  String?  @map("before_hash")
+  afterHash   String?  @map("after_hash")
   createdAt   DateTime @default(now()) @map("created_at")
   actor       AppUser? @relation("AuditActor", fields: [actorUserId], references: [id])
   tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, createdAt])
   @@index([eventType])
+  @@index([tenantId, actorType, createdAt])
   @@map("audit_events")
 }
 

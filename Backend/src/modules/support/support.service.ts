@@ -187,14 +187,16 @@ export class SupportService {
     if (!membership) throw new AppError("Active SUPPORT membership not found", 404, ErrorCodes.NOT_FOUND);
     await prisma.supportAccessGrant.updateMany({ where: { tenantId, supportMembershipId: membership.id, revokedAt: null, expiresAt: { gt: new Date() } }, data: { revokedAt: new Date() } });
     const grant = await prisma.supportAccessGrant.create({ data: { tenantId, supportMembershipId: membership.id, approvedByUserId: userId, reason: input.reason, scopes: input.scopes, expiresAt: new Date(Date.now() + input.expiresInMinutes * 60_000) } });
-    await auditService.record({ tenantId, actorUserId: userId, eventType: "SUPPORT_ACCESS_GRANTED", targetType: "SupportAccessGrant", targetId: grant.id, metadata: { scopes: grant.scopes, expiresAt: grant.expiresAt.toISOString(), reason: grant.reason } });
+    await auditService.record({ tenantId, actorUserId: userId, eventType: "SUPPORT_ACCESS_GRANTED",
+      actorType: "SUPPORT", targetType: "SupportAccessGrant", targetId: grant.id, metadata: { scopes: grant.scopes, expiresAt: grant.expiresAt.toISOString(), reason: grant.reason } });
     return grant;
   }
   async revoke(id: string, tenantId: string, userId: string) {
     const grant = await prisma.supportAccessGrant.findFirst({ where: { id, tenantId, revokedAt: null } });
     if (!grant) throw new AppError("Active support grant not found", 404, ErrorCodes.NOT_FOUND);
     const updated = await prisma.supportAccessGrant.update({ where: { id: grant.id, tenantId }, data: { revokedAt: new Date() } });
-    await auditService.record({ tenantId, actorUserId: userId, eventType: "SUPPORT_ACCESS_REVOKED", targetType: "SupportAccessGrant", targetId: id });
+    await auditService.record({ tenantId, actorUserId: userId, eventType: "SUPPORT_ACCESS_REVOKED",
+      actorType: "SUPPORT", targetType: "SupportAccessGrant", targetId: id });
     return updated;
   }
   async diagnostics(grantId: string | undefined, tenantId: string, membershipId: string, userId: string) {
@@ -213,7 +215,8 @@ export class SupportService {
     if (grant.scopes.includes("DNS_DIAGNOSTICS")) result.domains = await prisma.mailDomain.findMany({ where: { tenantId }, select: { id: true, domainName: true, verificationStatus: true, mxStatus: true, spfStatus: true, dkimStatus: true, dmarcStatus: true, lastCheckedAt: true } });
     if (grant.scopes.includes("DELIVERY_DIAGNOSTICS")) result.delivery = await prisma.deliveryEvent.groupBy({ by: ["type"], where: { tenantId, createdAt: { gte: new Date(Date.now() - 86_400_000) } }, _count: true });
     if (grant.scopes.includes("AUDIT_READ")) result.audit = await prisma.auditEvent.findMany({ where: { tenantId }, select: { id: true, eventType: true, targetType: true, targetId: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 50 });
-    await auditService.record({ tenantId, actorUserId: userId, eventType: "SUPPORT_DIAGNOSTICS_ACCESSED", targetType: "SupportAccessGrant", targetId: grant.id, metadata: { scopes: grant.scopes } });
+    await auditService.record({ tenantId, actorUserId: userId, eventType: "SUPPORT_DIAGNOSTICS_ACCESSED",
+      actorType: "SUPPORT", targetType: "SupportAccessGrant", targetId: grant.id, metadata: { scopes: grant.scopes } });
     return result;
   }
 
@@ -931,6 +934,7 @@ export class SupportService {
       tenantId: grant.tenantId,
       actorUserId: caller.userId,
       eventType: "SUPPORT_ACCESS_REVOKED",
+      actorType: "SUPPORT",
       targetType: "SupportAccessGrant",
       targetId: grant.id,
       metadata: { revokedByRole: "SUPPORT", source: "support-console" },
@@ -1072,6 +1076,7 @@ export class SupportService {
       tenantId,
       actorUserId: userId,
       eventType: "SUPPORT_DIAGNOSTICS_ACCESSED",
+      actorType: "SUPPORT",
       targetType: "SupportAccessGrant",
       targetId: grant.id,
       metadata: { scopes: grant.scopes, source: "support-console" },

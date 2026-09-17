@@ -1,7 +1,18 @@
 "use client";
 
-import { useDomains } from "@/lib/admin-hooks";
-import type { DnsRecordDto, DomainDto } from "@/lib/admin-api";
+import { useState } from "react";
+import {
+  useActivateDomain,
+  useAddDomain,
+  useDomainChecks,
+  useDomains,
+  useRecheckDomain,
+  useRemoveDomain,
+} from "@/lib/admin-hooks";
+import { useCan } from "@/lib/admin-capabilities";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { StepUpDialog, useStepUp } from "@/components/admin/StepUpDialog";
+import type { DnsRecordDto, DomainCheckDto, DomainDto } from "@/lib/admin-api";
 import {
   Card,
   InlineEmpty,
@@ -24,12 +35,95 @@ const DNS_TONE: Record<DnsRecordDto["status"], Tone> = {
   PENDING: "warn",
 };
 
+/** Something plausible enough to be worth sending to the server. */
+const DOMAIN_PATTERN = /^(?=.{1,253}$)(?!-)(?:[a-z0-9-]+\.)+[a-z]{2,63}$/;
+
 export default function AdminDomainsPage() {
+  const can = useCan();
   const { data: domains, isLoading, error } = useDomains();
+  const canManage = can("workspace.domains.manage");
+
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [nameError, setNameError] = useState<string | null>(null);
+  const add = useAddDomain();
+
+  const submit = () => {
+    const candidate = name.trim().toLowerCase();
+    setNameError(null);
+    if (!DOMAIN_PATTERN.test(candidate)) {
+      // The server applies the same rule; checking here means a typo is a
+      // message under the field rather than a failed request.
+      setNameError("Enter a domain like acme.com — no scheme, no path.");
+      return;
+    }
+    add.mutate(candidate, {
+      onSuccess: () => {
+        setName("");
+        setAdding(false);
+      },
+    });
+  };
 
   return (
     <>
-      <PageHeader title="Domains" subtitle="Custom-domain verification and deliverability" />
+      <PageHeader
+        title="Domains"
+        subtitle="Custom-domain verification and deliverability"
+        action={
+          canManage ? (
+            <button
+              type="button"
+              className="zoiko-btn pri"
+              onClick={() => setAdding((open) => !open)}
+            >
+              {adding ? "Cancel" : "Add domain"}
+            </button>
+          ) : undefined
+        }
+      />
+
+      {adding && (
+        <Card title="Add a domain" padded>
+          <div className="max-w-[440px]">
+            <label
+              htmlFor="domain-name"
+              className="font-mono-num mb-1 block text-[9.5px] uppercase tracking-[0.1em] text-[var(--ink3)]"
+            >
+              Domain name
+            </label>
+            <input
+              id="domain-name"
+              value={name}
+              placeholder="acme.com"
+              disabled={add.isPending}
+              onChange={(event) => setName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") submit();
+              }}
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--s2)] px-3 py-2 text-[12.6px] text-[var(--ink)] placeholder:text-[var(--ink3)]"
+            />
+            {nameError && (
+              <p className="mt-1.5 text-[11.5px] text-[var(--crit)]">{nameError}</p>
+            )}
+            {add.error && (
+              <p className="mt-1.5 text-[11.5px] text-[var(--crit)]">{add.error.message}</p>
+            )}
+            <p className="mt-2 text-[11.5px] text-[var(--ink3)]">
+              Adding it issues an ownership token. Nothing sends from the domain until the
+              DNS checks pass.
+            </p>
+            <button
+              type="button"
+              className="zoiko-btn pri sm mt-3"
+              disabled={add.isPending}
+              onClick={submit}
+            >
+              {add.isPending ? "Adding…" : "Add domain"}
+            </button>
+          </div>
+        </Card>
+      )}
 
       {error ? (
         <Card>
@@ -44,16 +138,39 @@ export default function AdminDomainsPage() {
           <InlineEmpty title="No domains yet" hint="Add a domain to send from your own address." />
         </Card>
       ) : (
-        domains.map((domain) => <DomainBlock key={domain.id} domain={domain} />)
+        domains.map((domain) => (
+          <DomainBlock key={domain.id} domain={domain} canManage={canManage} />
+        ))
       )}
     </>
   );
 }
 
-function DomainBlock({ domain }: { domain: DomainDto }) {
+function DomainBlock({ domain, canManage }: { domain: DomainDto; canManage: boolean }) {
+  const recheck = useRecheckDomain();
+  const activate = useActivateDomain();
+  const remove = useRemoveDomain();
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  // Removing a domain is step-up (RBAC §2). The server refuses without a
+  // fresh token and says so; this turns that into a prompt.
+  const stepUp = useStepUp();
+
   const status = (value: DnsRecordDto["status"]) =>
     value === "VALID" ? "Pass" : value === "PENDING" ? "Pending" : "Fail";
   const tone = (value: DnsRecordDto["status"]) => DNS_TONE[value];
+
+  // The same four the server insists on before it will enable sending. Checked
+  // here only to decide what to offer — the refusal itself is the server's,
+  // and it comes back naming whichever check failed.
+  const readyToSend =
+    domain.verificationStatus === "VERIFIED" &&
+    domain.spfStatus === "VALID" &&
+    domain.dkimStatus === "VALID" &&
+    domain.dmarcStatus === "VALID";
+
+  const busy = recheck.isPending || activate.isPending || remove.isPending;
+  const failure = recheck.error ?? activate.error ?? remove.error;
 
   return (
     <>
@@ -62,6 +179,8 @@ function DomainBlock({ domain }: { domain: DomainDto }) {
         badge={
           domain.type === "ZOIKO" ? (
             <Pill tone="accent">Zoiko-owned</Pill>
+          ) : domain.sendingEnabled ? (
+            <Pill tone="ok">Sending</Pill>
           ) : (
             <Pill tone={domain.verificationStatus === "VERIFIED" ? "ok" : "warn"}>
               {domain.verificationStatus === "VERIFIED" ? "Verified" : "Pending"}
@@ -69,11 +188,62 @@ function DomainBlock({ domain }: { domain: DomainDto }) {
           )
         }
         action={
-          <span className="font-mono-num text-[10.5px] text-[var(--ink3)]">
-            checked {domain.lastCheckedAt}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="font-mono-num text-[10.5px] text-[var(--ink3)]">
+              checked {domain.lastCheckedAt}
+            </span>
+            {canManage && domain.type === "CUSTOM" && (
+              <>
+                <button
+                  type="button"
+                  className="zoiko-btn sm"
+                  disabled={busy}
+                  onClick={() => recheck.mutate(domain.id)}
+                >
+                  {recheck.isPending ? "Checking…" : "Re-check now"}
+                </button>
+                {!domain.sendingEnabled && (
+                  <button
+                    type="button"
+                    className="zoiko-btn pri sm"
+                    disabled={busy || !readyToSend}
+                    title={
+                      readyToSend
+                        ? undefined
+                        : "Ownership, SPF, DKIM and DMARC must all pass first"
+                    }
+                    onClick={() => activate.mutate(domain.id)}
+                  >
+                    {activate.isPending ? "Enabling…" : "Enable sending"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="zoiko-btn sm"
+                  onClick={() => setShowHistory((open) => !open)}
+                >
+                  {showHistory ? "Hide history" : "History"}
+                </button>
+                <button
+                  type="button"
+                  className="zoiko-btn crit sm"
+                  disabled={busy || domain.sendingEnabled}
+                  title={
+                    domain.sendingEnabled
+                      ? "Turn off sending before removing the domain"
+                      : undefined
+                  }
+                  onClick={() => setConfirmRemove(true)}
+                >
+                  Remove
+                </button>
+              </>
+            )}
+          </div>
         }
       >
+        {failure && <Notice tone="warn">{failure.message}</Notice>}
+
         <Row title="MX records" detail="Inbound routing" right={<Pill tone={tone(domain.mxStatus)}>{status(domain.mxStatus)}</Pill>} />
         <Row title="SPF" detail="Authorises sending infrastructure" right={<Pill tone={tone(domain.spfStatus)}>{status(domain.spfStatus)}</Pill>} />
         <Row title="DKIM" detail="Cryptographic message signing" right={<Pill tone={tone(domain.dkimStatus)}>{status(domain.dkimStatus)}</Pill>} />
@@ -83,13 +253,14 @@ function DomainBlock({ domain }: { domain: DomainDto }) {
         )}
       </Card>
 
+      {showHistory && <CheckHistory domainId={domain.id} />}
+
       {/* Status alone is not actionable — support needs the exact records to
           hand a customer. PRD §13.2 and the DNS runbook both require this. */}
       {domain.records.length > 0 && (
         <Card
           title="Required DNS records"
           badge={<Pill tone="accent">{`${domain.records.length} records`}</Pill>}
-          action={<button type="button" className="zoiko-btn sm">Re-check now</button>}
         >
           <TableWrap>
             <Table>
@@ -140,6 +311,85 @@ function DomainBlock({ domain }: { domain: DomainDto }) {
           the TXT record above, then re-check — DNS changes can take up to an hour to propagate.
         </Notice>
       )}
+
+      <StepUpDialog {...stepUp.dialog} />
+
+      <ConfirmDialog
+        open={confirmRemove}
+        onClose={() => setConfirmRemove(false)}
+        onConfirm={() => {
+          setConfirmRemove(false);
+          void stepUp.attempt(`Removing ${domain.domainName}`, (stepUpToken) =>
+            remove.mutateAsync({ domainId: domain.id, stepUpToken })
+          );
+        }}
+        title={`Remove ${domain.domainName}?`}
+        message="The domain and its check history are deleted. Mailboxes on this domain stop resolving, and adding it back issues a new ownership token that has to be published again."
+        confirmLabel="Remove domain"
+        loading={remove.isPending}
+      />
     </>
+  );
+}
+
+/**
+ * What the previous checks said.
+ *
+ * The domain row carries only the latest result, which answers "is it failing"
+ * and not "since when" — and that distinction is what separates DNS that has
+ * not propagated yet from a record that was never published.
+ */
+function CheckHistory({ domainId }: { domainId: string }) {
+  const { data: checks, isLoading, error } = useDomainChecks(domainId);
+
+  const label = (value: DnsRecordDto["status"] | DomainCheckDto["verificationStatus"]) =>
+    value === "VALID" || value === "VERIFIED" ? "Pass" : value === "PENDING" ? "Pending" : "Fail";
+  const tone = (value: DnsRecordDto["status"] | DomainCheckDto["verificationStatus"]) =>
+    value === "VALID" || value === "VERIFIED" ? "ok" : value === "PENDING" ? "warn" : "crit";
+
+  return (
+    <Card title="Check history" badge={checks ? <Pill tone="nu">{`${checks.length}`}</Pill> : undefined}>
+      {error ? (
+        <InlineError message={error.message} />
+      ) : isLoading || !checks ? (
+        <LoadingRows rows={3} />
+      ) : checks.length === 0 ? (
+        <InlineEmpty
+          title="No checks recorded yet"
+          hint="Re-check now runs one and records the result here."
+        />
+      ) : (
+        <TableWrap>
+          <Table>
+            <thead>
+              <tr>
+                <Th>When</Th>
+                <Th>Ownership</Th>
+                <Th>MX</Th>
+                <Th>SPF</Th>
+                <Th>DKIM</Th>
+                <Th>DMARC</Th>
+                <Th>Resolver errors</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {checks.map((check) => (
+                <tr key={check.id}>
+                  <Td mono muted nowrap>{check.checkedAt}</Td>
+                  <Td><Pill tone={tone(check.verificationStatus)}>{label(check.verificationStatus)}</Pill></Td>
+                  <Td><Pill tone={tone(check.mxStatus)}>{label(check.mxStatus)}</Pill></Td>
+                  <Td><Pill tone={tone(check.spfStatus)}>{label(check.spfStatus)}</Pill></Td>
+                  <Td><Pill tone={tone(check.dkimStatus)}>{label(check.dkimStatus)}</Pill></Td>
+                  <Td><Pill tone={tone(check.dmarcStatus)}>{label(check.dmarcStatus)}</Pill></Td>
+                  <Td muted>
+                    {check.errors.length === 0 ? "—" : check.errors.join(" · ")}
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </TableWrap>
+      )}
+    </Card>
   );
 }

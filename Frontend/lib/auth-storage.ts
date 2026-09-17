@@ -25,8 +25,21 @@ export function getRefreshToken(): string | null {
 export function getPlatformToken(): string | null {
   return hasWindow() ? window.localStorage.getItem(PLATFORM_KEY) : null;
 }
+/**
+ * Store a session.
+ *
+ * A falsy access token stores nothing rather than `String(undefined)`. The
+ * type says this cannot happen, but the type is only as good as the response
+ * shape a caller reads it out of, and when one read the wrong field the
+ * literal string "undefined" went into localStorage — truthy, so isLoggedIn()
+ * reported a session and every request went out as `Bearer undefined`. The
+ * console then either bounced to sign-in or sat on a spinner, neither of
+ * which points at the missing token. Refusing the write makes that failure
+ * read as "not signed in", which is what it is.
+ */
 export function setTokens(accessToken: string, refreshToken?: string): void {
   if (!hasWindow()) return;
+  if (!accessToken) return;
   window.localStorage.setItem(ACCESS_KEY, accessToken);
   if (refreshToken) window.localStorage.setItem(REFRESH_KEY, refreshToken);
 }

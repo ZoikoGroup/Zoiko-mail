@@ -4,7 +4,7 @@ export { asyncHandler } from "./asyncHandler.js";
 export { errorHandler, notFoundHandler } from "./errorHandler.js";
 export { requestIdMiddleware } from "./requestId.js";
 export { crossTenantScope, requireRole, tenantContext } from "./tenantContext.js";
-export { requireCapability, capabilityContext } from "./requireCapability.js";
+export { requireCapability, requireCapabilityWhen, capabilityContext } from "./requireCapability.js";
 export { requireSupportAccess } from "./requireSupportAccess.js";
 export { idempotency, purgeExpiredIdempotencyRecords } from "./idempotency.js";
 export { validate } from "./validate.js";

@@ -10,6 +10,20 @@ const rules = {
   conditions: [{ field: "recipient.external", operator: "EQUALS", value: true, effect: "DENY" }],
 };
 
+/**
+ * A fresh step-up token. Security §5 marks "AI sending policy change" among
+ * the high-risk actions, so an AI policy write takes one; the other policy
+ * types do not, which is why only the AI calls below carry the header.
+ */
+async function stepUp(accessToken: string): Promise<string> {
+  const response = await request(app)
+    .post("/api/v1/auth/step-up")
+    .set(authHeader(accessToken))
+    .send({ password: "Password123!" })
+    .expect(200);
+  return response.body.data.stepUpToken as string;
+}
+
 describe("Tenant policy module", () => {
   it("creates versions, activates one version, and evaluates deterministically", async () => {
     // Each workspace is bootstrapped with default SENDING and AI policies at
@@ -44,6 +58,7 @@ describe("Tenant policy module", () => {
     const first = await registerUser(app, { email: "policy-boundary-one@zoiko.test" });
     const second = await registerUser(app, { email: "policy-boundary-two@zoiko.test" });
     const policy = await request(app).post("/api/v1/policies").set(authHeader(first.accessToken))
+      .set("x-step-up-token", await stepUp(first.accessToken))
       .send({ type: "AI", name: "AI policy", rules }).expect(201);
 
     await request(app).get(`/api/v1/policies/${policy.body.data.id}`)

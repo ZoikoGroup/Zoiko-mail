@@ -12,7 +12,6 @@ import {
   Notice,
   PageHeader,
   Pill,
-  StaticNote,
   Table,
   TableWrap,
   Th,
@@ -30,10 +29,6 @@ export default function AdminPermissionsPage() {
         title="Roles & permissions"
         subtitle="The authoritative specification. In code this is a permission map that roles point at."
       />
-
-      <StaticNote>
-        Rendered from GET /permissions/matrix once the capability map lands, so it cannot drift
-      </StaticNote>
 
       <Notice tone="info">
         <b className="text-[var(--ai)]">Code checks permissions, never roles.</b> Scattering{" "}

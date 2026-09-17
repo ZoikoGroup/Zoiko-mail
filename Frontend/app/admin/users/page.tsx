@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useWorkspacePeople } from "@/lib/admin-hooks";
+import { ManageMemberDialog } from "@/components/admin/ManageMemberDialog";
 import { useCan } from "@/lib/admin-capabilities";
 import type { MemberDto, MfaMethod, MembershipRole } from "@/lib/admin-api";
 import {
@@ -11,7 +13,6 @@ import {
   Notice,
   PageHeader,
   Pill,
-  StaticNote,
   Table,
   TableWrap,
   Td,
@@ -35,9 +36,14 @@ const MFA_LABEL: Record<MfaMethod, { label: string; tone: Tone }> = {
 export default function AdminUsersPage() {
   const can = useCan();
   const { data: people, isLoading, error } = useWorkspacePeople();
+  const [managing, setManaging] = useState<MemberDto | null>(null);
 
   return (
     <>
+      {managing ? (
+        <ManageMemberDialog person={managing} onClose={() => setManaging(null)} />
+      ) : null}
+
       <PageHeader
         title="Users"
         subtitle="Every person with a membership in this workspace"
@@ -50,14 +56,9 @@ export default function AdminUsersPage() {
         }
       />
 
-      <StaticNote>
-        GET /membership/members returns every membership — this screen filters INVITED and SUPPORT
-      </StaticNote>
-
       <Card
         title={people ? `${people.length} people` : "People"}
         badge={people ? <Pill tone="nu">{`Showing ${people.length}`}</Pill> : undefined}
-        action={<button type="button" className="zoiko-btn sm">Export</button>}
       >
         {error ? (
           <InlineError message={error.message} />
@@ -79,7 +80,12 @@ export default function AdminUsersPage() {
               </thead>
               <tbody>
                 {people.map((person) => (
-                  <PersonRow key={person.id} person={person} can={can} />
+                  <PersonRow
+                    key={person.id}
+                    person={person}
+                    can={can}
+                    onManage={() => setManaging(person)}
+                  />
                 ))}
               </tbody>
             </Table>
@@ -98,9 +104,11 @@ export default function AdminUsersPage() {
 function PersonRow({
   person,
   can,
+  onManage,
 }: {
   person: MemberDto;
   can: (capability: "people.owner.manage" | "people.admin.manage" | "people.member.manage") => boolean;
+  onManage: () => void;
 }) {
   const mfa = MFA_LABEL[person.mfaMethod];
 
@@ -135,6 +143,7 @@ function PersonRow({
           className="zoiko-btn sm"
           disabled={!manageable}
           title={manageable ? undefined : "Admins cannot act on an Owner"}
+          onClick={onManage}
         >
           Manage
         </button>

@@ -2,6 +2,7 @@
 
 import { AppShell } from "@/components/shell/AppShell";
 import { ChangePasswordForm } from "@/components/auth";
+import { MfaSettings } from "@/components/account/MfaSettings";
 import { Avatar, RoleBadge } from "@/components/home/HomeBits";
 import { useMe } from "@/lib/auth-hooks";
 import type { MeResponse } from "@/lib/auth-api";
@@ -49,14 +50,10 @@ export default function AccountPage() {
         </h2>
 
         <div className="zoiko-card mt-3 divide-y divide-[var(--border)]">
-          <SecurityRow
-            icon={ShieldCheck}
-            title="Two-factor authentication"
-            desc="Add a second step at sign-in for extra protection."
-            status="Not configured"
-            actionLabel="Set up"
-            soon
-          />
+          {/* Reads the account's real state and can change it. It used to be a
+              SecurityRow hardcoded to "Not configured" behind a disabled
+              button, which told an enrolled Owner they had no second factor. */}
+          <MfaSettings />
           <SecurityRow
             icon={Fingerprint}
             title="ZoikoID"

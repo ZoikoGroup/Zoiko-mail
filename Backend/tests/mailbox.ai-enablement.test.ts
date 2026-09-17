@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
-import { authHeader, registerUser } from "./helpers.js";
+import { authHeader, registerUser, stepUpHeader } from "./helpers.js";
 import { prisma } from "../src/config/prisma.js";
 import { aiService } from "../src/modules/ai/ai.service.js";
 
@@ -80,10 +80,15 @@ describe("per-mailbox AI enablement", () => {
     const mailboxId = await mailboxFor(owner);
     const messageId = await threadFor(owner);
 
-    const toggle = (aiEnabled: boolean) =>
+    // Enabling is step-up (RBAC §2); restricting is deliberately not, so the
+    // control that protects a mailbox stays easier to reach than the one that
+    // exposes it. The header is harmless on the way down and required on the
+    // way back up.
+    const toggle = async (aiEnabled: boolean) =>
       request(app)
         .patch(`/api/v1/mail/admin/mailboxes/${mailboxId}`)
         .set(authHeader(owner.accessToken))
+        .set(await stepUpHeader(app, owner.accessToken))
         .send({ aiEnabled })
         .expect(200);
 

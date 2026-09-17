@@ -114,6 +114,9 @@ export async function tenantContext(
     role: acting,
     membershipRole: membership.role,
     workspace,
+    // AC-001: carried from the token so audit can attribute an event to one
+    // sign-in, not just to a person.
+    sessionId: req.auth?.sessionId ?? null,
     tenant: membership.tenant,
     user: membership.user,
   };

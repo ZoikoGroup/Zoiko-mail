@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
-import { authHeader, registerUser, type RegisteredUser, loginUser, platformSignIn } from "./helpers.js";
+import { authHeader, registerUser, stepUpHeader, type RegisteredUser, loginUser, platformSignIn } from "./helpers.js";
 import { prisma } from "../src/config/prisma.js";
 
 const app = createApp();
@@ -121,8 +121,10 @@ describe("Platform support console", () => {
     const agentB = await setupSupport(owner, "pc-agentB@zoiko.test");
 
     const grantA = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
+      .set(await stepUpHeader(app, owner.accessToken))
       .send({ supportMembershipId: agentA.membership.id, reason: "Investigate delivery failure A", expiresInMinutes: 30, scopes: ["DELIVERY_DIAGNOSTICS"] }).expect(201);
     const grantB = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
+      .set(await stepUpHeader(app, owner.accessToken))
       .send({ supportMembershipId: agentB.membership.id, reason: "Investigate delivery failure B", expiresInMinutes: 30, scopes: ["DELIVERY_DIAGNOSTICS"] }).expect(201);
 
     // A tenant-scoped SUPPORT seat cannot reach the platform console at all
@@ -152,6 +154,7 @@ describe("Platform support console", () => {
     await request(app).get("/api/v1/support/platform/diagnostics").set(authHeader(staffToken)).expect(403);
 
     const grant = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
+      .set(await stepUpHeader(app, owner.accessToken))
       .send({ supportMembershipId: agent.membership.id, reason: "Investigate tenant configuration failure", expiresInMinutes: 30, scopes: ["TENANT_DIAGNOSTICS", "AUDIT_READ"] }).expect(201);
 
     const ok = await request(app).get(`/api/v1/support/platform/diagnostics?grantId=${grant.body.data.id}`)
@@ -205,6 +208,7 @@ describe("Platform support console", () => {
     const owner = await registerUser(app, { email: "pc-staff-owner@zoiko.test", tenantName: "Staff Grants Tenant" });
     const agent = await setupSupport(owner, "pc-staff-agent@zoiko.test");
     const grant = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
+      .set(await stepUpHeader(app, owner.accessToken))
       .send({ supportMembershipId: agent.membership.id, reason: "Investigate staff revoke denial", expiresInMinutes: 30, scopes: ["DELIVERY_DIAGNOSTICS"] }).expect(201);
 
     const staff = await registerUser(app, { email: "pc-staff-support@zoiko.test" });
