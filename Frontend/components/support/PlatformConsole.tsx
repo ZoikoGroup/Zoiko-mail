@@ -2,12 +2,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ApiError, apiRequest } from "@/lib/api-client";
+import { ApiError } from "@/lib/api-client";
 import {
   clearTokens,
   getPlatformToken,
   isLoggedIn,
-  setPlatformToken,
   setSignOutNotice,
 } from "@/lib/auth-storage";
 // import { useLogout } from "@/lib/auth-hooks";
@@ -19,7 +18,7 @@ import {
   fetchPlatformDomainDetail,
   fetchPlatformMailboxDetail,
   fetchPlatformOverview,
-  fetchTenantOverview,
+  fetchPlatformTenantOverview,
   listPlatformAudit,
   listPlatformDeliveryEvents,
   listPlatformGrants,
@@ -48,9 +47,11 @@ import {
   type TenantOverview,
 } from "@/lib/support-api";
 import { supportStyles } from "@/components/support/support-styles";
+import TicketsPage from "@/components/support/TicketsPage";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { AccessDenied } from "@/components/ui/AccessDenied";
 import {
+  AlarmClock,
   AlertCircle,
   AlertTriangle,
   Ban,
@@ -58,6 +59,7 @@ import {
   Boxes,
   Building2,
   Cog,
+  Flame,
   Globe,
   KeyRound,
   Link2,
@@ -68,15 +70,17 @@ import {
   Server,
   ShieldAlert,
   ShieldCheck,
+  Ticket,
   Users,
   XCircle,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-type PageId = "overview" | "tenants" | "mailboxes" | "domains" | "suppressions" | "provider-events" | "delivery-events" | "jobs" | "audit" | "grants";
+type PageId = "overview" | "tenants" | "mailboxes" | "domains" | "suppressions" | "provider-events" | "delivery-events" | "jobs" | "audit" | "grants" | "tickets";
 
 const PAGES: Array<{ id: PageId; label: string; icon: string }> = [
   { id: "overview", label: "Support Overview", icon: "◈" },
+  { id: "tickets", label: "Tickets", icon: "✎" },
   { id: "tenants", label: "Tenants", icon: "▣" },
   { id: "mailboxes", label: "Mailboxes", icon: "✉" },
   { id: "domains", label: "Domains", icon: "⊞" },
@@ -245,12 +249,15 @@ function Pill({ status }: { status: string | null | undefined }) {
 function OverviewPage({
   data,
   onOpenTenant,
+  onOpenTickets,
 }: {
   data: PlatformOverview | null;
   onOpenTenant: (tenantId: string) => void;
+  onOpenTickets: () => void;
 }) {
   if (!data) return null;
   const s = data.stats;
+  const ts = data.ticketStats;
   const stats: Array<{ label: string; val: string | number; tone: string; sub: string; icon?: LucideIcon }> = [
     { label: "Active Tenants", val: s.activeTenants, tone: "", sub: "across the platform", icon: Building2 },
     { label: "Members", val: s.tenantMembers, tone: "", sub: "tenant users", icon: Users },
@@ -261,6 +268,9 @@ function OverviewPage({
     { label: "Sync Failures 24h", val: s.syncFailures24h, tone: s.syncFailures24h > 0 ? "warn" : "ok", sub: "provider webhook errors", icon: AlertTriangle },
     { label: "Failed Jobs", val: s.failedJobs, tone: s.failedJobs > 0 ? "crit" : "ok", sub: "exhausted retries", icon: XCircle },
     { label: "Retry Jobs", val: s.retryJobs, tone: s.retryJobs > 0 ? "warn" : "ok", sub: "scheduled to retry", icon: RotateCw },
+    { label: "Open Tickets", val: ts.open, tone: ts.open > 0 ? "" : "ok", sub: "not resolved or closed", icon: Ticket },
+    { label: "Overdue SLA", val: ts.overdue, tone: ts.overdue > 0 ? "crit" : "ok", sub: "breached response time", icon: AlarmClock },
+    { label: "Urgent Tickets", val: ts.urgent, tone: ts.urgent > 0 ? "crit" : "ok", sub: "URGENT severity open", icon: Flame },
   ];
 
   return (
@@ -741,7 +751,7 @@ function TenantsPage({
     setDomainDetail(null);
     setMailboxDetail(null);
     try {
-      const res = await fetchTenantOverview(tenantId);
+      const res = await fetchPlatformTenantOverview(tenantId);
       setDetail(res);
     } catch (e) {
       setDetailError(apiErrorMessage(e));
@@ -1692,17 +1702,6 @@ export default function PlatformConsole() {
   const me = isPlatform ? undefined : meQuery.data;
   const meLoading = isPlatform ? false : meQuery.isLoading;
 
-  // TEMP(dev-only): teammates can't easily obtain a staff platform token yet,
-  // so on localhost in development we auto-login the seeded support account
-  // and store ONLY the platform token (tenant sessions stay untouched).
-  // TODO: remove this bypass once the staff login flow is sorted.
-  const [devBypass, setDevBypass] = useState(false);
-  // True once the dev-bypass / staff-token resolution above has finished. We
-  // keep the loading gate up until then so non-staff tenant roles don't see a
-  // "You have no access" flash while the bypass is about to promote them to
-  // the staff console.
-  const [bypassSettled, setBypassSettled] = useState(false);
-
   useEffect(() => {
     setMounted(true);
     setIsPlatform(!!getPlatformToken());
@@ -1720,39 +1719,19 @@ export default function PlatformConsole() {
     }
   }, []);
 
+  // Staff sign in through the ordinary login page: the backend answers
+  // STAFF_CONSOLE users with a platform token (stored by login()), so by the
+  // time this mounts the session is either already platform-scoped or a
+  // tenant session. The only async work left is loading the overview and, for
+  // someone with no session at all, getting them to the sign-in form.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!getPlatformToken()) {
-        const host = window.location.hostname;
-        const isLocalDev =
-          process.env.NODE_ENV === "development" &&
-          (host === "localhost" || host === "127.0.0.1");
-        if (isLocalDev) {
-          setDevBypass(true);
-          try {
-            const data = await apiRequest<any>("/auth/login", {
-              method: "POST",
-              body: { email: "jordan@zoikosupport.test", password: "Password123!" },
-              auth: false,
-            });
-            const src = data?.session ?? data?.tokens ?? data ?? {};
-            const platformToken = src?.platformToken ?? data?.platformToken;
-            if (platformToken) {
-              setPlatformToken(platformToken);
-              setIsPlatform(true);
-            }
-          } catch {
-            // fall through — the isLoggedIn() check below redirects to /login
-          }
-        }
-      }
       if (cancelled) return;
       if (!isLoggedIn()) {
         router.replace("/login");
         return;
       }
-      setBypassSettled(true);
       loadOverview();
     })();
     return () => {
@@ -1846,7 +1825,7 @@ export default function PlatformConsole() {
   // user has staff platform access OR the tenant SUPPORT role. Without this,
   // a member briefly sees the console UI before the guard redirects them.
   // Staff platform users skip this because their access doesn't depend on /auth/me.
-  if (!isPlatform && (meLoading || !me || !bypassSettled)) {
+  if (!isPlatform && (meLoading || !me)) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-sm">Loading…</div>
@@ -1858,7 +1837,7 @@ export default function PlatformConsole() {
   // }
 
   // Loading gate change:
-  if (!isPlatform && me && me.membership.role !== "SUPPORT" && bypassSettled) {
+  if (!isPlatform && me && me.membership.role !== "SUPPORT") {
     return <AccessDenied role={me.membership.role} dashboard="support" />;
   }
 
@@ -2023,8 +2002,9 @@ export default function PlatformConsole() {
             ) : overviewError ? (
               <LoadErr error={overviewError} onRetry={loadOverview} />
             ) : (
-              <OverviewPage data={overview} onOpenTenant={openTenant} />
+              <OverviewPage data={overview} onOpenTenant={openTenant} onOpenTickets={() => setPage("tickets")} />
             ))}
+          {page === "tickets" && <TicketsPage />}
           {page === "tenants" && (
             <TenantsPage
               initialOpenTenant={pendingTenant}

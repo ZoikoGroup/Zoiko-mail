@@ -7,6 +7,7 @@ import {
   UsersRound,
   KeyRound,
   ShieldCheck,
+  ShieldAlert,
   RefreshCw,
   FileText,
   Bell,
