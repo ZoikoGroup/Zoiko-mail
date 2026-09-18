@@ -3,11 +3,9 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 
-import { API_BASE } from "@/lib/config";
-import { resolveWorkspaceHref } from "@/lib/workspace";
-import { setTokens } from "@/lib/auth-storage";
+import { useJoinWorkspace } from "@/lib/auth-hooks";
 
 // Copy for each state we handle. Add more entries here later without
 // creating new files or routes.
@@ -52,12 +50,20 @@ const STATE_CONFIG: Record<
   },
 };
 
-/** Workspace invitation as stashed by the login flow (useLogin). */
+/**
+ * Workspace invitation as stashed by the login flow (useLogin).
+ *
+ * These are the server's WorkspaceOption objects verbatim, so the workspace
+ * is `name` — `tenantName` is what the acceptance card used to read, and it
+ * has never been a field on this payload, so every card rendered a blank
+ * title where the workspace name belongs. The optional alias stays because
+ * a session stashed before this shipped is still in someone's tab.
+ */
 interface StashedInvitation {
   membershipId: string;
-  tenantId: string;
-  tenantName: string;
   role: string;
+  name?: string;
+  tenantName?: string;
 }
 
 const SUPPORT_EMAIL = "support@zoiko.com";
@@ -93,7 +99,6 @@ function useInvitationStash() {
 
 function AuthStatusInner() {
   const params = useSearchParams();
-  const router = useRouter();
   const state = params.get("state") ?? "";
   const workspace = params.get("workspace") ?? "";
   const invitations = params.get("invitations") ?? "";
@@ -102,37 +107,48 @@ function AuthStatusInner() {
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [acceptError, setAcceptError] = useState<string | null>(null);
 
+  /**
+   * Accept, through the same hook the sign-up flow uses.
+   *
+   * This was a hand-rolled fetch that read `json.data.accessToken` and
+   * `json.data.membership.role`. The endpoint answers
+   * `{ state, session: { accessToken, membership, ... } }`, so both were
+   * undefined: no session was stored, and an admin invitee was routed by
+   * `resolveWorkspaceHref(undefined)` — which falls back to the member home.
+   * They landed one workspace short of where they were invited, holding no
+   * token, and the guard there sent them to the sign-in page. Nothing about
+   * the symptom pointed at this line.
+   *
+   * The identical mistake existed in lib/auth-api's joinWorkspace, which is
+   * the tell: two hand-written readers of one response shape, both wrong the
+   * same way. Sharing the hook is the fix that stops it coming back — it also
+   * brings the MFA and suspended-account states, which this copy dropped on
+   * the floor by assuming every join ends signed in.
+   */
+  const join = useJoinWorkspace();
+
   const handleAccept = useCallback(
-    async (invitation: StashedInvitation) => {
+    (invitation: StashedInvitation) => {
       if (!inviteStash || acceptingId) return;
       setAcceptingId(invitation.membershipId);
       setAcceptError(null);
-      try {
-        const res = await fetch(`${API_BASE}/auth/join-workspace`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${inviteStash.token}`,
+      join.mutate(
+        { token: inviteStash.token, membershipId: invitation.membershipId },
+        {
+          onSuccess: () => {
+            sessionStorage.removeItem("zoiko.invite_pending_token");
+            sessionStorage.removeItem("zoiko.invite_pending_list");
           },
-          body: JSON.stringify({ membershipId: invitation.membershipId }),
-        });
-        const json = await res.json();
-        if (!res.ok || !json.success) {
-          throw new Error(json?.error?.message ?? "Failed to accept the invitation");
+          onError: (e) => {
+            setAcceptError(
+              e instanceof Error ? e.message : "Failed to accept the invitation"
+            );
+            setAcceptingId(null);
+          },
         }
-        const session = json.data;
-        if (session.accessToken) {
-          setTokens(session.accessToken, session.refreshToken);
-        }
-        sessionStorage.removeItem("zoiko.invite_pending_token");
-        sessionStorage.removeItem("zoiko.invite_pending_list");
-        router.replace(resolveWorkspaceHref(session.membership?.role));
-      } catch (e) {
-        setAcceptError(e instanceof Error ? e.message : "Failed to accept the invitation");
-        setAcceptingId(null);
-      }
+      );
     },
-    [inviteStash, acceptingId, router]
+    [inviteStash, acceptingId, join]
   );
 
   const config = STATE_CONFIG[state];
@@ -199,7 +215,7 @@ function AuthStatusInner() {
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-slate-900 dark:text-white">
-                    {invitation.tenantName}
+                    {invitation.name ?? invitation.tenantName}
                   </p>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
                     Invited as {invitation.role.toLowerCase()}

@@ -79,26 +79,12 @@ export class ActionService {
       .then((rows) => rows.map(withParticipantSummaries));
   }
 
-  async get(id: string, tenantId: string, userId: string) {
-    const action = await prisma.commitment.findFirst({ where: { id, tenantId, ownerUserId: userId } });
-    if (!action) throw new AppError("Commitment not found", 404, ErrorCodes.NOT_FOUND);
-    return action;
-  }
-
   async update(id: string, input: Update, tenantId: string, userId: string) {
     const action = await prisma.commitment.findFirst({ where: { id, tenantId, ownerUserId: userId } });
     if (!action) throw new AppError("Commitment not found", 404, ErrorCodes.NOT_FOUND);
     const updated = await prisma.commitment.update({ where: { id: action.id, tenantId }, data: { status: input.status, snoozedUntil: input.status === "SNOOZED" ? new Date(input.snoozedUntil!) : null }, include: commitmentParticipants });
     await auditService.record({ tenantId, actorUserId: userId, eventType: "COMMITMENT_STATUS_CHANGED", targetType: "Commitment", targetId: id, metadata: { status: input.status } });
     return withParticipantSummaries(updated);
-  }
-
-  async remove(id: string, tenantId: string, userId: string) {
-    const action = await prisma.commitment.findFirst({ where: { id, tenantId, OR: [{ ownerUserId: userId }, { createdByUserId: userId }] } });
-    if (!action) throw new AppError("Commitment not found", 404, ErrorCodes.NOT_FOUND);
-    const removed = await prisma.commitment.delete({ where: { id: action.id, tenantId } });
-    await auditService.record({ tenantId, actorUserId: userId, eventType: "COMMITMENT_DELETED", targetType: "Commitment", targetId: id });
-    return removed;
   }
 }
 export const actionService = new ActionService();

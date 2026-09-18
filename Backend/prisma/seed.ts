@@ -44,30 +44,6 @@ function fixtureId(group: string, index: number): string {
 const ago = (ms: number) => new Date(Date.now() - ms);
 const ahead = (ms: number) => new Date(Date.now() + ms);
 
-const comment = (
-  authorLocal: string,
-  type: "TENANT" | "STAFF",
-  body: string,
-  at: number,
-  internal = false,
-) => ({ authorLocal, type, body, at, internal });
-
-interface TicketSeedSpec {
-  subject: string;
-  description: string;
-  category: "DELIVERY" | "DOMAIN" | "BILLING" | "ACCOUNT" | "SECURITY" | "OTHER";
-  severity: "LOW" | "MEDIUM" | "HIGH" | "URGENT";
-  status: "OPEN" | "IN_PROGRESS" | "WAITING_TENANT" | "RESOLVED" | "CLOSED";
-  openedByLocal: string;
-  openedByType: "TENANT" | "STAFF";
-  assignedToStaff?: boolean;
-  createdAgo: number;
-  slaDueIn: number;
-  resolvedAgo?: number;
-  closedAgo?: number;
-  comments: ReturnType<typeof comment>[];
-}
-
 interface PersonSpec {
   name: string;
   local: string;
@@ -111,19 +87,6 @@ const CONNECTORS: Array<{ local: string; provider: "GMAIL" | "MICROSOFT_365"; st
   { local: "sam", provider: "GMAIL", status: "REAUTH_REQUIRED" },
   { local: "ivy", provider: "MICROSOFT_365", status: "ACTIVE" },
   { local: "leo", provider: "MICROSOFT_365", status: "ACTIVE" },
-];
-
-/** 4 mail groups: 2 shared mailboxes, 2 distribution lists. */
-const GROUPS: Array<{
-  local: string;
-  kind: "SHARED" | "DISTRIBUTION";
-  name: string;
-  members: string[];
-}> = [
-  { local: "billing", kind: "SHARED", name: "Billing Team", members: ["alex", "helena", "priya"] },
-  { local: "support", kind: "SHARED", name: "Customer Support", members: ["devon", "mia", "noah", "ruby"] },
-  { local: "engineering", kind: "DISTRIBUTION", name: "Engineering", members: ["sam", "ivy", "leo", "zara", "felix"] },
-  { local: "all-staff", kind: "DISTRIBUTION", name: "All Staff", members: PEOPLE.map((p) => p.local) },
 ];
 
 async function resetAcmeFixture(): Promise<void> {
@@ -348,7 +311,6 @@ async function main(): Promise<void> {
             ? ["https://www.googleapis.com/auth/gmail.readonly"]
             : ["Mail.Read", "User.Read"],
         status: connector.status,
-        isOrgLevel: false,
         lastSyncedAt: needsReauth ? ago(1 * DAY) : ago(4 * MINUTE),
         lastErrorCode: needsReauth ? "oauth_token_expired" : null,
       },
@@ -368,128 +330,6 @@ async function main(): Promise<void> {
       createdAt: ago(1 * HOUR + 13 * MINUTE),
     },
   });
-
-  // ── Support tickets ───────────────────────────────────────────────────
-  // A spread of states and severities so the support console renders the
-  // whole lifecycle: one overdue URGENT (SLA breached), one waiting on the
-  // tenant, one in progress, two open (one support-created), one resolved,
-  // one closed.
-  const ticketSpecs: TicketSeedSpec[] = [
-    {
-      subject: "Outbound mail bouncing since last night",
-      description: "We started receiving hard bounces for outbound mail around 21:00. A few messages to Microsoft recipients bounced with 550 5.1.1; Gmail recipients are fine. We suspect a blacklist entry we were not notified about.",
-      category: "DELIVERY", severity: "HIGH", status: "IN_PROGRESS",
-      openedByLocal: "alex", openedByType: "TENANT", assignedToStaff: true,
-      createdAgo: 6 * HOUR, slaDueIn: 2 * HOUR,
-      comments: [
-        comment("jordan", "STAFF", "Checking our sending reputation and the bounce logs now. I can see the 550 5.1.1 events you mean; I'll pull the exact provider response.", 5 * HOUR + 24 * MINUTE),
-        comment("jordan", "STAFF", "Reputation check is clean on our side. Contacting the recipient provider about their allowlist process.", 4 * HOUR + 50 * MINUTE, true),
-      ],
-    },
-    {
-      subject: "Cannot sign in from a new work laptop",
-      description: "My account is locked out when I sign in from my new work laptop — it keeps asking for a verification code I never receive. The mailbox is priya@acme.test.",
-      category: "ACCOUNT", severity: "URGENT", status: "WAITING_TENANT",
-      openedByLocal: "priya", openedByType: "TENANT", assignedToStaff: true,
-      createdAgo: 9 * HOUR, slaDueIn: -5 * HOUR,
-      comments: [
-        comment("jordan", "STAFF", "Delivering the one-time code to priya@acme.test works on the account side. Asked the tenant to confirm whether they ever receive OTP emails to a personal address.", 7 * HOUR, true),
-      ],
-    },
-    {
-      subject: "SPF record question before we switch MX",
-      description: "We are planning to switch our MX records to Zoiko next week. Our SPF currently uses hardfail (-all). Will that interfere with receiving mail? Do we need to add your include before or after the switch?",
-      category: "DOMAIN", severity: "LOW", status: "OPEN",
-      openedByLocal: "devon", openedByType: "TENANT", assignedToStaff: false,
-      createdAgo: 3 * HOUR, slaDueIn: 69 * HOUR,
-      comments: [],
-    },
-    {
-      subject: "Double charge on this month's invoice",
-      description: "Invoice ZM-2026-0617 was billed twice on the same day. I'd like one of the payments refunded to the card on file.",
-      category: "BILLING", severity: "MEDIUM", status: "RESOLVED",
-      openedByLocal: "helena", openedByType: "TENANT",
-      createdAgo: 2 * DAY, slaDueIn: 22 * HOUR, resolvedAgo: 1 * DAY,
-      comments: [
-        comment("jordan", "STAFF", "I can see the duplicate charge. We've refunded the second payment; it should appear on your card in 3–5 business days.", 1 * DAY),
-        comment("jordan", "STAFF", "Refund issued via Stripe; idempotency key charged-dup-2026-0617.", 1 * DAY, true),
-      ],
-    },
-    {
-      subject: "Request: shared billing mailbox",
-      description: "Please create a shared mailbox billing@acme.test for the finance team, with access for Alex, Helena and Priya.",
-      category: "OTHER", severity: "LOW", status: "CLOSED",
-      openedByLocal: "alex", openedByType: "TENANT",
-      createdAgo: 4 * DAY, slaDueIn: 68 * HOUR, resolvedAgo: 3 * DAY, closedAgo: 3 * DAY,
-      comments: [
-        comment("jordan", "STAFF", "Done — billing@acme.test is provisioned and the three members have access.", 3 * DAY),
-      ],
-    },
-    {
-      subject: "Investigate Gmail sync lag for acme.test",
-      description: "Routine support-initiated case: Gmail sync for the connector on sam@acme.test is around 45 minutes behind. Investigating watch health before the tenant notices.",
-      category: "DELIVERY", severity: "MEDIUM", status: "OPEN",
-      openedByLocal: "jordan", openedByType: "STAFF", assignedToStaff: true,
-      createdAgo: 1 * HOUR, slaDueIn: 23 * HOUR,
-      comments: [],
-    },
-  ];
-
-  const accountOf = (local: string) => (local === "jordan" ? supportUser.id : userByLocal.get(local)!);
-  for (const [tt, spec] of ticketSpecs.entries()) {
-    const lastActivityAt = spec.comments.length
-      ? Math.min(...spec.comments.map((c) => c.at))
-      : spec.createdAgo;
-    await prisma.supportTicket.create({
-      data: {
-        id: fixtureId("ticket", tt),
-        tenantId: tenant.id,
-        subject: spec.subject,
-        description: spec.description,
-        category: spec.category,
-        severity: spec.severity,
-        status: spec.status,
-        openedByUserId: accountOf(spec.openedByLocal),
-        openedByType: spec.openedByType,
-        assignedStaffId: spec.assignedToStaff ? supportUser.id : null,
-        slaDueAt: ahead(spec.slaDueIn),
-        resolvedAt: spec.resolvedAgo !== undefined ? ago(spec.resolvedAgo) : null,
-        closedAt: spec.closedAgo !== undefined ? ago(spec.closedAgo) : null,
-        createdAt: ago(spec.createdAgo),
-        updatedAt: ago(lastActivityAt),
-        comments: {
-          create: spec.comments.map((c) => ({
-            authorUserId: accountOf(c.authorLocal),
-            authorType: c.type,
-            body: c.body,
-            internal: c.internal,
-            createdAt: ago(c.at),
-            updatedAt: ago(c.at),
-          })),
-        },
-      },
-    });
-  }
-
-  // ── Mail groups: shared mailboxes and distribution lists ─────────────
-  for (const [index, group] of GROUPS.entries()) {
-    const groupId = fixtureId("group", index);
-    await prisma.mailGroup.create({
-      data: {
-        id: groupId,
-        tenantId: tenant.id,
-        name: group.name,
-        address: `${group.local}@zoikomail.test`,
-        kind: group.kind,
-        status: group.local === "engineering" ? "SUSPENDED" : "ACTIVE",
-        members: {
-          create: group.members.map((local) => ({
-            membershipId: membershipByLocal.get(local)!,
-          })),
-        },
-      },
-    });
-  }
 
   // ── Policies ──────────────────────────────────────────────────────────
   const policyCommon = { tenantId: tenant.id, createdByUserId: userByLocal.get("alex")! };
@@ -766,7 +606,7 @@ async function main(): Promise<void> {
   }
 
   // ── Report ────────────────────────────────────────────────────────────
-  const [people, invited, mailboxes, domains, connectors, audits, notes, policies, groups, tickets, ticketComments] = await Promise.all([
+  const [people, invited, mailboxes, domains, connectors, audits, notes, policies] = await Promise.all([
     prisma.tenantMembership.count({ where: { tenantId: tenant.id, status: "ACTIVE", role: { not: "SUPPORT" } } }),
     prisma.tenantMembership.count({ where: { tenantId: tenant.id, status: "INVITED" } }),
     prisma.mailbox.count({ where: { tenantId: tenant.id } }),
@@ -775,9 +615,6 @@ async function main(): Promise<void> {
     prisma.auditEvent.count({ where: { tenantId: tenant.id } }),
     prisma.notification.count({ where: { tenantId: tenant.id } }),
     prisma.tenantPolicy.count({ where: { tenantId: tenant.id, status: "ACTIVE" } }),
-    prisma.mailGroup.count({ where: { tenantId: tenant.id } }),
-    prisma.supportTicket.count({ where: { tenantId: tenant.id } }),
-    prisma.supportTicketComment.count({ where: { ticket: { tenantId: tenant.id } } }),
   ]);
 
   console.log(`\nSeed completed — ${tenant.name} (${tenant.id})\n`);
@@ -790,8 +627,6 @@ async function main(): Promise<void> {
   console.log(`  notifications          ${notes}/4`);
   console.log(`  active support grants  1  expires in ~2h47m`);
   console.log(`  active policies        ${policies}  (AI, SENDING, RETENTION, ABUSE)`);
-  console.log(`  groups                 ${groups}/4  (2 shared, 1 distribution, 1 suspended)`);
-  console.log(`  support tickets        ${tickets}/6  (${ticketComments} replies, 1 overdue SLA)`);
   console.log("\n  Logins — password for every seeded user: Password123!");
   console.log("    owner   alex@acme.test");
   console.log("    owner   helena@acme.test");
@@ -801,6 +636,7 @@ async function main(): Promise<void> {
   console.log("  Not seeded — the schema cannot express it yet:");
   console.log("    MFA coverage (12/14)   needs AppUser.mfaEnabled       roadmap item 16");
   console.log("    shared mailboxes       Mailbox.membershipId is unique  item 78");
+  console.log("    groups (4)             no MailGroup model              item 86");
   console.log("    failed sends (3)       needs an EmailMessage graph     item 80\n");
 }
 

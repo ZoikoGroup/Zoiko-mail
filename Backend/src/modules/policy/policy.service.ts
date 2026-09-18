@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { MembershipRole, PolicyStatus, PolicyType, Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../common/errors/AppError.js";
@@ -32,6 +33,32 @@ function matches(actual: unknown, operator: PolicyRules["conditions"][number]["o
   return actual <= expected;
 }
 
+/**
+ * A stable fingerprint of a rule set, for the before/after columns.
+ *
+ * Keys are sorted so that two rule sets which differ only in property order
+ * hash the same — otherwise re-saving an unchanged policy would look like a
+ * material change, and a trail that cries wolf stops being read.
+ *
+ * A hash rather than the values themselves: it proves what changed without
+ * copying policy content into a second store that would then need its own
+ * governance and its own deletion schedule.
+ */
+function hashRules(value: unknown): string {
+  const canonical = (input: unknown): unknown => {
+    if (Array.isArray(input)) return input.map(canonical);
+    if (input && typeof input === "object") {
+      return Object.fromEntries(
+        Object.entries(input as Record<string, unknown>)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, child]) => [key, canonical(child)])
+      );
+    }
+    return input;
+  };
+  return createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
+}
+
 export class PolicyService {
   async list(tenantId: string, filters: { type?: PolicyType; status?: PolicyStatus }) {
     return prisma.tenantPolicy.findMany({
@@ -52,6 +79,13 @@ export class PolicyService {
         where: { tenantId: context.tenantId, type: input.type },
         _max: { version: true },
       });
+      // What was in force before this version, for the before/after hashes.
+      // A policy is superseded rather than edited, so "before" is the active
+      // version of the same type — which may be nothing at all on the first.
+      const superseded = await tx.tenantPolicy.findFirst({
+        where: { tenantId: context.tenantId, type: input.type, status: "ACTIVE" },
+        select: { rules: true },
+      });
       const policy = await tx.tenantPolicy.create({
         data: {
           tenantId: context.tenantId,
@@ -63,7 +97,14 @@ export class PolicyService {
           createdByUserId: context.userId,
         },
       });
-      await this.audit(tx, context, "POLICY_CREATED", policy.id, { type: policy.type, version: policy.version });
+      await this.audit(
+        tx,
+        context,
+        "POLICY_CREATED",
+        policy.id,
+        { type: policy.type, version: policy.version },
+        { before: superseded?.rules ?? null, after: input.rules }
+      );
       return policy;
     });
   }
@@ -86,72 +127,6 @@ export class PolicyService {
       });
       await this.audit(tx, context, "POLICY_ACTIVATED", policy.id, { type: policy.type, version: policy.version });
       return policy;
-    });
-  }
-
-  /**
-   * Updating a policy supersedes rather than overwrites: a new DRAFT version
-   * is created from the target's contents plus the changes, so the audit trail
-   * preserves what every earlier version said. Activate the new version to make
-   * it live.
-   */
-  async update(policyId: string, input: { name?: string; description?: string | null; rules?: PolicyRules }, context: Context) {
-    return prisma.$transaction(async (tx) => {
-      const target = await tx.tenantPolicy.findFirst({
-        where: { id: policyId, tenantId: context.tenantId },
-      });
-      if (!target) throw new AppError("Policy not found", 404, ErrorCodes.NOT_FOUND);
-      const latest = await tx.tenantPolicy.aggregate({
-        where: { tenantId: context.tenantId, type: target.type },
-        _max: { version: true },
-      });
-      const policy = await tx.tenantPolicy.create({
-        data: {
-          tenantId: context.tenantId,
-          type: target.type,
-          name: input.name ?? target.name,
-          description: input.description !== undefined ? input.description : target.description,
-          version: (latest._max.version ?? 0) + 1,
-          rules: (input.rules ?? target.rules) as Prisma.InputJsonValue,
-          createdByUserId: context.userId,
-        },
-      });
-      await this.audit(tx, context, "POLICY_UPDATED", policy.id, { type: policy.type, version: policy.version, basedOn: target.version });
-      return policy;
-    });
-  }
-
-  async deactivate(policyId: string, context: Context) {
-    return prisma.$transaction(async (tx) => {
-      const target = await tx.tenantPolicy.findFirst({
-        where: { id: policyId, tenantId: context.tenantId },
-      });
-      if (!target) throw new AppError("Policy not found", 404, ErrorCodes.NOT_FOUND);
-      if (target.status === "DRAFT") {
-        throw new AppError("A draft policy has never been activated", 409, ErrorCodes.CONFLICT);
-      }
-      if (target.status === "ARCHIVED") return target;
-      const policy = await tx.tenantPolicy.update({
-        where: { id: target.id },
-        data: { status: "ARCHIVED" },
-      });
-      await this.audit(tx, context, "POLICY_DEACTIVATED", policy.id, { type: policy.type, version: policy.version });
-      return policy;
-    });
-  }
-
-  async remove(policyId: string, context: Context) {
-    return prisma.$transaction(async (tx) => {
-      const target = await tx.tenantPolicy.findFirst({
-        where: { id: policyId, tenantId: context.tenantId },
-      });
-      if (!target) throw new AppError("Policy not found", 404, ErrorCodes.NOT_FOUND);
-      if (target.status === "ACTIVE") {
-        throw new AppError("Deactivate the active policy before deleting it", 409, ErrorCodes.CONFLICT);
-      }
-      const removed = await tx.tenantPolicy.delete({ where: { id: target.id } });
-      await this.audit(tx, context, "POLICY_DELETED", target.id, { type: target.type, version: target.version });
-      return removed;
     });
   }
 
@@ -179,10 +154,20 @@ export class PolicyService {
     };
   }
 
-  private async audit(tx: Prisma.TransactionClient, context: Context, eventType: string, targetId: string, metadata: Prisma.InputJsonValue) {
+  private async audit(
+    tx: Prisma.TransactionClient,
+    context: Context,
+    eventType: string,
+    targetId: string,
+    metadata: Prisma.InputJsonValue,
+    change?: { before: unknown; after: unknown }
+  ) {
     await auditService.record({
       tenantId: context.tenantId,
       actorUserId: context.userId,
+      // Every route into this service sits behind policy.write, which only an
+      // Owner or Admin holds (Audit §6.2).
+      actorType: "ADMIN",
       eventType,
       targetType: "TenantPolicy",
       targetId,
@@ -190,6 +175,10 @@ export class PolicyService {
       ipAddress: context.ipAddress,
       userAgent: context.userAgent,
       metadata,
+      // Audit §6.2: required for material policy changes. A policy change is
+      // the definition of one.
+      beforeHash: change ? hashRules(change.before) : null,
+      afterHash: change ? hashRules(change.after) : null,
     }, tx);
   }
 }

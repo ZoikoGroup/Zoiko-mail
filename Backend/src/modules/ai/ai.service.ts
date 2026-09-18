@@ -47,7 +47,8 @@ export class AIService {
     );
     if (decision.effect === "DENY") throw new AppError(`AI processing denied by tenant policy (${decision.reason})`, 403, ErrorCodes.FORBIDDEN);
     const action = await prisma.aIAction.create({ data: { tenantId: context.tenantId, createdByUserId: context.userId, actionType: input.actionType, messageId: input.messageId, threadId: input.threadId, inputHash: inputHash(context.tenantId, input.actionType, input.messageId, input.threadId) } });
-    await auditService.record({ tenantId: context.tenantId, actorUserId: context.userId, eventType: "AI_ACTION_REQUESTED", targetType: "AIAction", targetId: action.id });
+    await auditService.record({ tenantId: context.tenantId, actorUserId: context.userId, eventType: "AI_ACTION_REQUESTED",
+        actorType: "AI_WORKER", targetType: "AIAction", targetId: action.id });
     return action;
   }
 
@@ -58,19 +59,12 @@ export class AIService {
     });
   }
 
-  async remove(id: string, tenantId: string, userId: string) {
-    const action = await prisma.aIAction.findFirst({ where: { id, tenantId, createdByUserId: userId } });
-    if (!action) throw new AppError("AI action not found", 404, ErrorCodes.NOT_FOUND);
-    const removed = await prisma.aIAction.delete({ where: { id: action.id, tenantId } });
-    await auditService.record({ tenantId, actorUserId: userId, eventType: "AI_ACTION_DELETED", targetType: "AIAction", targetId: id });
-    return removed;
-  }
-
   async complete(id: string, input: { output: Prisma.InputJsonValue; confidenceScore: number; sourceExcerpt: string }, tenantId: string, userId: string) {
     const action = await prisma.aIAction.findFirst({ where: { id, tenantId, status: "PENDING" } });
     if (!action) throw new AppError("Pending AI action not found", 404, ErrorCodes.NOT_FOUND);
     const updated = await prisma.aIAction.update({ where: { id: action.id, tenantId }, data: { ...input, status: "COMPLETED" } });
-    await auditService.record({ tenantId, actorUserId: userId, eventType: "AI_ACTION_COMPLETED", targetType: "AIAction", targetId: id });
+    await auditService.record({ tenantId, actorUserId: userId, eventType: "AI_ACTION_COMPLETED",
+        actorType: "AI_WORKER", targetType: "AIAction", targetId: id });
     return updated;
   }
 
@@ -163,6 +157,7 @@ export class AIService {
         tenantId,
         actorUserId,
         eventType: "AI_EXTRACTION_SKIPPED",
+        actorType: "AI_WORKER",
         targetType: "Mailbox",
         targetId: mailbox.id,
         metadata: { messageId: message.id, reason: "MAILBOX_AI_DISABLED" },
@@ -231,6 +226,7 @@ export class AIService {
       tenantId,
       actorUserId,
       eventType: "AI_EXTRACTION_COMPLETED",
+        actorType: "AI_WORKER",
       targetType: "BackgroundJob",
       targetId: jobId,
       metadata: { messageId, provider: aiProvider.name, extracted: created, alreadyPresent },
@@ -393,6 +389,7 @@ export class AIService {
         tenantId,
         actorUserId,
         eventType: "AI_DRAFT_GENERATED",
+        actorType: "AI_WORKER",
         targetType: "BackgroundJob",
         targetId: jobId,
         metadata: { aiActionId, messageId: email.id, provider: aiProvider.name },

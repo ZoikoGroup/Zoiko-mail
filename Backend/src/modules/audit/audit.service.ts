@@ -1,9 +1,17 @@
-import type { Prisma } from "@prisma/client";
+import type { AuditActorType, Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 
 export interface RecordAuditEventInput {
   tenantId: string;
   actorUserId?: string | null;
+  /**
+   * Audit §6.2. Omit it and the event is classified from what is knowable:
+   * a human actor is USER, and no actor at all is SYSTEM. A caller that knows
+   * better — the AI worker, the support path, a provider callback — says so,
+   * because those three are exactly the ones an investigator filters on and
+   * exactly the ones the shape of the row cannot reveal.
+   */
+  actorType?: AuditActorType;
   eventType: string;
   targetType?: string | null;
   targetId?: string | null;
@@ -11,12 +19,30 @@ export interface RecordAuditEventInput {
   ipAddress?: string | null;
   userAgent?: string | null;
   metadata?: Prisma.InputJsonValue;
+  /**
+   * Audit §6.2: required for material policy or permission changes. A hash
+   * rather than the values, so the trail proves what changed without copying
+   * policy content into a second store that then needs its own governance and
+   * its own deletion schedule.
+   */
+  beforeHash?: string | null;
+  afterHash?: string | null;
 }
 
-export interface AuditEventFilters {
+export interface AuditExportFilters {
+  eventType?: string;
+  eventTypePrefix?: string[];
+  actorType?: "USER" | "ADMIN" | "SUPPORT" | "SYSTEM" | "PROVIDER" | "AI_WORKER";
+  actorUserId?: string;
+  targetType?: string;
+  targetId?: string;
+  from?: string;
+  to?: string;
+}
+
+export interface AuditEventFilters extends AuditExportFilters {
   page: number;
   limit: number;
-  eventType?: string;
   actorUserId?: string;
   targetType?: string;
   targetId?: string;
@@ -76,6 +102,57 @@ export function auditScopeFor(
   };
 }
 
+
+/**
+ * The row filter for a reader, shared by `list` and `exportRows`.
+ *
+ * Extracted because the export must return exactly what the screen would show
+ * with the same filters. Two copies of this clause would eventually disagree,
+ * and the direction that matters is an export widening past the scope — an
+ * Admin downloading the billing events the screen withholds from them.
+ */
+
+/** One exported row: the event plus the actor columns the CSV names. */
+const auditExportInclude = {
+  actor: { select: { id: true, email: true, displayName: true } },
+} satisfies Prisma.AuditEventInclude;
+
+type AuditExportRow = Prisma.AuditEventGetPayload<{
+  include: typeof auditExportInclude;
+}>;
+
+export function auditWhere(
+  tenantId: string,
+  filters: AuditExportFilters,
+  readerRole?: AuditReaderRole | null
+): Prisma.AuditEventWhereInput {
+  const scope = auditScopeFor(readerRole);
+  const prefixes = filters.eventTypePrefix ?? [];
+  return {
+    tenantId,
+    eventType: filters.eventType,
+    actorType: filters.actorType,
+    // OR-ed with each other, AND-ed with everything else — a category is a set
+    // of prefixes, and narrowing by category must not widen anything.
+    ...(prefixes.length
+      ? { OR: prefixes.map((prefix) => ({ eventType: { startsWith: prefix } })) }
+      : {}),
+    actorUserId: filters.actorUserId,
+    targetType: filters.targetType,
+    targetId: filters.targetId,
+    createdAt:
+      filters.from || filters.to
+        ? {
+            ...(filters.from ? { gte: new Date(filters.from) } : {}),
+            ...(filters.to ? { lte: new Date(filters.to) } : {}),
+          }
+        : undefined,
+    // Applied after the caller's filters so an explicit eventType filter
+    // cannot be used to reach past the scope.
+    ...(scope ?? {}),
+  };
+}
+
 export function redactMetadata(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redactMetadata);
   if (value && typeof value === "object") {
@@ -98,6 +175,7 @@ export class AuditService {
       data: {
         tenantId: input.tenantId,
         actorUserId: input.actorUserId ?? null,
+        actorType: input.actorType ?? (input.actorUserId ? "USER" : "SYSTEM"),
         eventType: input.eventType,
         targetType: input.targetType ?? null,
         targetId: input.targetId ?? null,
@@ -105,6 +183,8 @@ export class AuditService {
         ipAddress: input.ipAddress ?? null,
         userAgent: input.userAgent ?? null,
         metadata: input.metadata ?? undefined,
+        beforeHash: input.beforeHash ?? null,
+        afterHash: input.afterHash ?? null,
       },
     });
   }
@@ -114,24 +194,7 @@ export class AuditService {
     filters: AuditEventFilters,
     readerRole?: AuditReaderRole | null
   ) {
-    const scope = auditScopeFor(readerRole);
-    const where: Prisma.AuditEventWhereInput = {
-      tenantId,
-      eventType: filters.eventType,
-      actorUserId: filters.actorUserId,
-      targetType: filters.targetType,
-      targetId: filters.targetId,
-      createdAt:
-        filters.from || filters.to
-          ? {
-              ...(filters.from ? { gte: new Date(filters.from) } : {}),
-              ...(filters.to ? { lte: new Date(filters.to) } : {}),
-            }
-          : undefined,
-      // Applied after the caller's filters so an explicit eventType filter
-      // cannot be used to reach past the scope.
-      ...(scope ?? {}),
-    };
+    const where = auditWhere(tenantId, filters, readerRole);
 
     const [events, total] = await prisma.$transaction([
       prisma.auditEvent.findMany({
@@ -158,6 +221,59 @@ export class AuditService {
         totalPages: Math.ceil(total / filters.limit),
       },
     };
+  }
+
+  /**
+   * Every row matching the filters, in batches, oldest-last like the screen.
+   *
+   * A generator rather than one findMany because an audit log has no natural
+   * ceiling: a year of a busy tenant is a lot of rows, and materialising them
+   * to build a string would decide how much memory the process needs based on
+   * how long the workspace has existed. Batches keep that flat however large
+   * the answer is.
+   *
+   * Keyset pagination, not skip/take. With skip, a row written while the
+   * export is running shifts every later page by one and the download silently
+   * repeats or drops rows. Ordering by (createdAt desc, id desc) and carrying
+   * the last pair forward is stable under concurrent writes, which an audit
+   * log has by definition — this very export records one.
+   */
+  async *exportRows(
+    tenantId: string,
+    filters: AuditExportFilters,
+    readerRole?: AuditReaderRole | null,
+    batchSize = 500
+  ) {
+    const where = auditWhere(tenantId, filters, readerRole);
+    let cursor: { createdAt: Date; id: string } | null = null;
+
+    for (;;) {
+      const page: AuditExportRow[] = await prisma.auditEvent.findMany({
+        where: cursor
+          ? {
+              AND: [
+                where,
+                {
+                  OR: [
+                    { createdAt: { lt: cursor.createdAt } },
+                    { createdAt: cursor.createdAt, id: { lt: cursor.id } },
+                  ],
+                },
+              ],
+            }
+          : where,
+        include: auditExportInclude,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: batchSize,
+      });
+
+      if (page.length === 0) return;
+      yield page.map((event) => ({ ...event, metadata: redactMetadata(event.metadata) }));
+      if (page.length < batchSize) return;
+
+      const last: AuditExportRow = page[page.length - 1]!;
+      cursor = { createdAt: last.createdAt, id: last.id };
+    }
   }
 
   async getById(

@@ -107,27 +107,6 @@ export class DeliveryProtectionService {
     return { ...mailbox, dailyCap: cap, bounceRate, complaintRate };
   }
 
-  async setWarmupCap(tenantId: string, mailboxId: string, cap: number | null, userId: string) {
-    const mailbox = await prisma.mailbox.findFirst({ where: { id: mailboxId, tenantId }, select: { id: true } });
-    if (!mailbox) throw new AppError("Mailbox not found", 404, ErrorCodes.NOT_FOUND);
-    const updated = await prisma.mailbox.update({
-      where: { id: mailboxId, tenantId },
-      data: { customWarmupCap: cap },
-      select: {
-        id: true, address: true, warmupStage: true, warmupStageStartedAt: true,
-        warmupDailyCount: true, warmupDailyStartedAt: true, customWarmupCap: true,
-        externalSentCount: true, bounceCount: true, complaintCount: true,
-        sendSuspendedAt: true, sendSuspensionReason: true,
-      },
-    });
-    await auditService.record({
-      tenantId, actorUserId: userId, eventType: "MAILBOX_WARMUP_CAP_SET",
-      targetType: "Mailbox", targetId: mailboxId,
-      metadata: { customWarmupCap: cap },
-    });
-    return updated;
-  }
-
   async evaluateWarmup(tenantId: string, mailboxId: string, userId: string) {
     const status = await this.warmupStatus(tenantId, mailboxId);
     if (status.warmupStage >= 3) {

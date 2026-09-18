@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 interface ModalProps {
@@ -14,6 +14,7 @@ interface ModalProps {
 
 export function Modal({ open, onClose, title, children, footer, size = "md" }: ModalProps) {
   const backdropRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
 
   useEffect(() => {
     if (!open) return;
@@ -39,13 +40,23 @@ export function Modal({ open, onClose, title, children, footer, size = "md" }: M
         className="absolute inset-0 bg-black/50"
         onClick={onClose}
       />
+      {/* A dialog has to say it is one. Without role/aria-modal a screen
+          reader announces this as ordinary page content sitting behind
+          nothing, and assistive navigation walks straight past it into the
+          page underneath — which is still there, just visually covered. */}
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
         className={`relative w-full ${widthClass} rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--sh3)]`}
       >
         <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
-          <h2 className="text-base font-semibold text-[var(--ink)]">{title}</h2>
+          <h2 id={titleId} className="text-base font-semibold text-[var(--ink)]">
+            {title}
+          </h2>
           <button
             onClick={onClose}
+            aria-label="Close"
             className="rounded-md p-1 text-[var(--ink3)] hover:bg-[var(--s2)] hover:text-[var(--ink2)]"
           >
             <X className="h-4 w-4" />

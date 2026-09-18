@@ -12,13 +12,35 @@ import {
 //   error   -> { success: false, error: { code, message }, requestId }
 // This client unwraps `data` on success and throws a typed error otherwise.
 
+/**
+ * What a capability refusal tells the caller, from the server's
+ * `error.details`. A bare boolean makes every denial look the same, so the UI
+ * can only grey a control out; these turn "refused" into a next step.
+ */
+export interface CapabilityDenial {
+    capability?: string;
+    reason?: string;
+    heldBy?: string[];
+    requiresStepUp?: boolean;
+    requiresSecondApprover?: boolean;
+    requiresSupportGrant?: boolean;
+}
+
 export class ApiError extends Error {
     status: number;
     code?: string;
-    constructor(status: number, message: string, code?: string) {
+    /** Present on a 403 from requireCapability; absent otherwise. */
+    details?: CapabilityDenial;
+    constructor(status: number, message: string, code?: string, details?: CapabilityDenial) {
         super(message);
         this.status = status;
         this.code = code;
+        this.details = details;
+    }
+
+    /** True when re-authenticating would turn this refusal into a success. */
+    get needsStepUp(): boolean {
+        return this.status === 403 && this.details?.requiresStepUp === true;
     }
 }
 
@@ -44,6 +66,8 @@ interface RequestOptions {
     _retried?: boolean;
     tenantId?: string | null;
     accessToken?: string | null;
+    /** A fresh step-up token, for the actions RBAC §2 marks Step-up. */
+    stepUpToken?: string | null;
 }
 
 // Single-flight refresh: if many calls 401 at once, we refresh only once.
@@ -91,6 +115,7 @@ export async function apiRequest<T = unknown>(
         _retried = false,
         tenantId,
         accessToken,
+        stepUpToken,
     } = opts;
 
     const headers: Record<string, string> = {
@@ -112,6 +137,10 @@ export async function apiRequest<T = unknown>(
         if (token) headers["Authorization"] = `Bearer ${token}`;
     }
     if (tenantId) headers["X-Zoiko-Tenant-ID"] = tenantId;
+    // Proof the caller re-entered their password just now (AC-003). Passed per
+    // call rather than stored: the point is freshness, so it must not become a
+    // second, longer-lived credential sitting in the client.
+    if (stepUpToken) headers["x-step-up-token"] = stepUpToken;
 
     let res: Response;
     try {
@@ -173,8 +202,75 @@ export async function apiRequest<T = unknown>(
 
     if (!res.ok) {
         const message = json?.error?.message ?? `Request failed (${res.status})`;
-        throw new ApiError(res.status, message, json?.error?.code);
+        throw new ApiError(res.status, message, json?.error?.code, json?.error?.details);
     }
     // unwrap { success, data } -> data
     return (json?.data ?? json) as T;
+}
+
+/**
+ * Fetch a file rather than a JSON envelope, and hand the browser the download.
+ *
+ * `apiRequest` always parses the response as JSON and unwraps `data`, so it
+ * cannot carry a CSV. This keeps the same base URL and bearer token, reads the
+ * body as a blob, and saves it under the filename the server chose in
+ * Content-Disposition.
+ *
+ * A failure still arrives as JSON — the error envelope — so the body is read
+ * as text first when the response is not ok, and the usual ApiError is thrown.
+ * Without that, a refused export would save a file containing the error.
+ */
+export async function apiDownload(
+    path: string,
+    fallbackFilename: string
+): Promise<void> {
+    const headers: Record<string, string> = {};
+    const token = getAccessToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    let res: Response;
+    try {
+        res = await fetch(`${API_BASE}${path}`, { method: "GET", headers });
+    } catch {
+        throw new ApiError(
+            0,
+            "Unable to reach Zoiko Mail. Please make sure the backend server is running and try again.",
+            "NETWORK_ERROR"
+        );
+    }
+
+    if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        let message = `Request failed (${res.status})`;
+        let code: string | undefined;
+        try {
+            const parsed = JSON.parse(text);
+            message = parsed?.error?.message ?? message;
+            code = parsed?.error?.code;
+        } catch {
+            // A non-JSON error body; the status is all there is to report.
+        }
+        throw new ApiError(res.status, message, code);
+    }
+
+    // Prefer the server's filename: it carries the date stamp, and letting the
+    // caller name the file would let the two drift.
+    const disposition = res.headers.get("Content-Disposition") ?? "";
+    const match = /filename="?([^";]+)"?/i.exec(disposition);
+    const filename = match?.[1] ?? fallbackFilename;
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    try {
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+    } finally {
+        // Revoked on the next tick: revoking synchronously can cancel the
+        // download in some browsers before it has read the blob.
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+    }
 }

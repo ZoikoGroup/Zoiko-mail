@@ -52,6 +52,7 @@ model Tenant {
   idempotencyRecords  IdempotencyRecord[]
   participants        Participant[]
   threadParticipants  ThreadParticipant[]
+  tickets             SupportTicket[]
 
   @@map("tenants")
 }
@@ -110,6 +111,9 @@ model AppUser {
   idempotencyRecords      IdempotencyRecord[]    @relation("IdempotencyActor")
   mfaRecoveryCodes        MfaRecoveryCode[]
   participantIdentities   Participant[]          @relation("ParticipantIdentity")
+  openedTickets           SupportTicket[]        @relation("TicketOpenedBy")
+  assignedTickets         SupportTicket[]        @relation("TicketAssignedStaff")
+  ticketComments          SupportTicketComment[]
   @@map("app_users")
 }
 
@@ -206,10 +210,33 @@ model RefreshToken {
   @@map("refresh_tokens")
 }
 
+/// Audit §6.2 requires actor_type as a stable enumerated field. Without it the
+/// only distinction the data supported was "had an actor or did not", so the
+/// admin audit screen inferred user-vs-system and its Admin, Support and AI
+/// filters could never match anything.
+enum AuditActorType {
+  USER
+  ADMIN
+  SUPPORT
+  SYSTEM
+  PROVIDER
+  AI_WORKER
+
+  @@map("audit_actor_type")
+}
+
 model AuditEvent {
   id          String   @id @default(uuid()) @db.Uuid
   tenantId    String   @map("tenant_id") @db.Uuid
   actorUserId String?  @map("actor_user_id") @db.Uuid
+  /// Audit §6.2. Nullable only for rows written before the column existed.
+  ///
+  /// Not defaulted to SYSTEM and not backfilled: audit_events is append-only
+  /// at the database, and the trigger has no break-glass path for UPDATE at
+  /// all. Rewriting history to tidy a display value would mean weakening the
+  /// one property that makes this table evidence. A historical row honestly
+  /// records "not captured"; every new row carries a real actor type.
+  actorType   AuditActorType? @map("actor_type")
   eventType   String   @map("event_type")
   targetType  String?  @map("target_type")
   targetId    String?  @map("target_id")
@@ -217,12 +244,19 @@ model AuditEvent {
   ipAddress   String?  @map("ip_address")
   userAgent   String?  @map("user_agent")
   metadata    Json?
+  /// Audit §6.2: "Required for material policy or permission changes."
+  /// A hash rather than the values, so the trail proves a change happened and
+  /// what it changed from, without copying policy content into a second place
+  /// that then has to be governed and deleted on its own schedule.
+  beforeHash  String?  @map("before_hash")
+  afterHash   String?  @map("after_hash")
   createdAt   DateTime @default(now()) @map("created_at")
   actor       AppUser? @relation("AuditActor", fields: [actorUserId], references: [id])
   tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, createdAt])
   @@index([eventType])
+  @@index([tenantId, actorType, createdAt])
   @@map("audit_events")
 }
 
@@ -1006,6 +1040,59 @@ model SupportAccessGrant {
   @@map("support_access_grants")
 }
 
+/**
+ * A support ticket / case.
+ * Tenants open tickets from the app (openedByType TENANT) and Zoiko support
+ * staff can open them on a tenant's behalf from the platform console
+ * (openedByType STAFF). Ticket comments are the two-way conversation; staff
+ * may mark a comment internal so only staff see it. Assignment tracks which
+ * staff member owns the case.
+ */
+model SupportTicket {
+  id              String         @id @default(uuid()) @db.Uuid
+  tenantId        String         @map("tenant_id") @db.Uuid
+  ticketNumber    Int            @default(autoincrement()) @map("ticket_number")
+  subject         String
+  description     String
+  category        TicketCategory @default(OTHER)
+  severity        TicketSeverity @default(MEDIUM)
+  status          TicketStatus   @default(OPEN)
+  assignedStaffId String?        @map("assigned_staff_id") @db.Uuid
+  openedByUserId  String         @map("opened_by_user_id") @db.Uuid
+  openedByType    String         @map("opened_by_type")
+  slaDueAt        DateTime?      @map("sla_due_at")
+  resolvedAt      DateTime?      @map("resolved_at")
+  closedAt        DateTime?      @map("closed_at")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  openedBy      AppUser                @relation("TicketOpenedBy", fields: [openedByUserId], references: [id], onDelete: Cascade)
+  assignedStaff AppUser?               @relation("TicketAssignedStaff", fields: [assignedStaffId], references: [id], onDelete: SetNull)
+  comments      SupportTicketComment[]
+
+  @@index([tenantId, status, updatedAt])
+  @@index([assignedStaffId])
+  @@map("support_tickets")
+}
+
+model SupportTicketComment {
+  id           String   @id @default(uuid()) @db.Uuid
+  ticketId     String   @map("ticket_id") @db.Uuid
+  authorUserId String   @map("author_user_id") @db.Uuid
+  authorType   String   @map("author_type")
+  body         String
+  internal     Boolean  @default(false)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author AppUser       @relation(fields: [authorUserId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt])
+  @@map("support_ticket_comments")
+}
+
 model TenantDeletionReceipt {
   id                  String   @id @default(uuid()) @db.Uuid
   tenantId            String   @map("tenant_id") @db.Uuid
@@ -1344,6 +1431,30 @@ enum SupportScope {
   DNS_DIAGNOSTICS
   DELIVERY_DIAGNOSTICS
   AUDIT_READ
+}
+
+enum TicketCategory {
+  DELIVERY
+  DOMAIN
+  BILLING
+  ACCOUNT
+  SECURITY
+  OTHER
+}
+
+enum TicketSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_TENANT
+  RESOLVED
+  CLOSED
 }
 
 enum ConnectorProvider {

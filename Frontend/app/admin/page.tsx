@@ -12,7 +12,6 @@ import {
   Pill,
   Row,
   StatTile,
-  StaticNote,
 } from "@/components/admin/ui";
 
 export default function AdminDashboardPage() {
@@ -97,11 +96,6 @@ export default function AdminDashboardPage() {
           ) : undefined
         }
       />
-
-      <StaticNote>
-        One read — GET /admin/dashboard — with each section resolved separately,
-        so a failing subsystem costs one tile rather than the page
-      </StaticNote>
 
       {/*
         A section the server could not read. Said out loud, because the tiles

@@ -21,5 +21,4 @@ notificationRouter.post("/digests", validate(z.object({ idempotencyKey: z.string
   });
   sendSuccess(res, 202, job, req.requestId);
 }));
-notificationRouter.post("/read-all", asyncHandler(async (req, res) => { sendSuccess(res, 200, await notificationService.markAllRead(req.tenantContext!.tenantId, req.tenantContext!.userId), req.requestId); }));
 notificationRouter.patch("/:notificationId/read", validate(z.object({ notificationId: z.string().uuid() }), "params"), asyncHandler(async (req, res) => { sendSuccess(res, 200, await notificationService.markRead(String(req.params.notificationId), req.tenantContext!.tenantId, req.tenantContext!.userId), req.requestId); }));

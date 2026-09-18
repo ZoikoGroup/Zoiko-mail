@@ -6,9 +6,3 @@ export const createIntegrationSchema = z.object({
   sourceId: z.string().uuid(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
-export const integrationLinkIdSchema = z.object({ linkId: z.string().uuid() });
-export const updateIntegrationSchema = z.object({
-  externalRef: z.string().trim().max(500).nullable().optional(),
-  status: z.enum(["PENDING", "LINKED", "FAILED", "REMOVED"]).optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-});

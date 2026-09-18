@@ -12,7 +12,6 @@ export const createConnectedAccountSchema = z.object({
   providerAccountId: z.string().trim().min(1).max(255),
   email: z.string().trim().toLowerCase().email().max(320),
   scopes: z.array(z.string().trim().min(1).max(200)).min(1).max(10),
-  isOrgLevel: z.boolean().optional(),
 }).superRefine((value, context) => {
   const approved = allowedScopes[value.provider];
   value.scopes.forEach((scope, index) => {
@@ -33,9 +32,6 @@ export const createConnectedAccountSchema = z.object({
       path: ["scopes"],
       message: `Required read-only scope ${required} is missing`,
     });
-  }
-  if (value.isOrgLevel) {
-    // Org-level validation will happen in the service layer
   }
 });
 

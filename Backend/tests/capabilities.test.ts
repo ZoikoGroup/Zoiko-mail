@@ -36,13 +36,23 @@ const SPEC_ADMIN_CAPABILITIES: Capability[] = [
   "workspace.mailboxes.manage",
   "workspace.domains.manage",
   "workspace.groups.manage",
+  // §2 marks these Step-up. They are separate capabilities rather than a
+  // STEP_UP kind on the "manage" rows above, because the matrix wants a fresh
+  // password to *remove* a domain and not to add one.
+  "workspace.domains.remove",
+  "workspace.mailboxes.delete",
+  "workspace.mailboxes.sending",
+  // §2 "Rotate provider credentials" (Step-up) and "Disconnect connected
+  // account" (Tenant scope) and "Delegate mailbox access" (If policy).
+  "connector.credentials.rotate",
+  "connector.tenant.disconnect",
+  "mailbox.delegate",
   "policy.write",
+  // §2 "Change AI policy" and "Enable AI on restricted mailbox": both Step-up.
+  "policy.ai.write",
+  "mailbox.ai.enable",
   // §2 "View audit log": Admin = Limited. Held, then scoped in the service.
   "audit.read",
-  // Phase 4 security alerts: read + review both held so an Admin can run the
-  // alert inbox; the Owner resolves the ones that go furthest.
-  "security-alert.read",
-  "security-alert.review",
   // §2 "Request export": Admin = "By policy" + Step-up.
   "data.export",
   "support.grant.end",
@@ -123,6 +133,7 @@ describe("capability matrix — Security §7.2 step 6", () => {
       "tenant.ownership.transfer",
       "tenant.delete",
       "policy.security.write",
+      "people.mfa.reset",
       "people.owner.manage",
       "people.invite.owner",
       "mail.other.read",
@@ -200,6 +211,24 @@ describe("capability resolution defaults to denial", () => {
 });
 
 describe("conditional resolver kinds", () => {
+  it("holds people.mfa.reset behind step-up for an Owner", () => {
+    // The step-up path is asserted here on a capability the Owner genuinely
+    // holds. `mail.other.read` used to serve this purpose, which was the bug:
+    // it made an Owner's access to private mail look like a re-auth away.
+    const pending = resolveCapability("people.mfa.reset", activeOwner);
+    expect(pending.kind).toBe("STEP_UP");
+    expect(pending.allowed).toBe(false);
+    expect(pending.requiresStepUp).toBe(true);
+    expect(pending.reason).toBe("REQUIRES_STEP_UP");
+
+    const satisfied = resolveCapability("people.mfa.reset", {
+      ...activeOwner,
+      stepUpSatisfied: true,
+    });
+    expect(satisfied.allowed).toBe(true);
+    expect(satisfied.reason).toBe("ALLOWED");
+  });
+
   it("holds destructive tenant capabilities behind a second approver", () => {
     for (const capability of ["tenant.delete", "tenant.ownership.transfer"]) {
       const alone = resolveCapability(capability, activeOwner);
@@ -281,8 +310,8 @@ describe("vocabulary integrity", () => {
     expect(orphans).toEqual([]);
   });
 
-  it("declares twenty-nine capabilities", () => {
-    expect(CAPABILITIES).toHaveLength(29);
-    expect(new Set(CAPABILITIES).size).toBe(29);
+  it("declares thirty-seven capabilities", () => {
+    expect(CAPABILITIES).toHaveLength(37);
+    expect(new Set(CAPABILITIES).size).toBe(37);
   });
 });

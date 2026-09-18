@@ -12,10 +12,10 @@ export type WorkspaceScope = "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT";
  * Where each workspace lives.
  *
  * SUPPORT means a tenant member holding the support role, and it lands on the
- * full support console at /support with every section (Overview, Tenants,
- * Provider Events, Delivery Events, Jobs, Audit, Tickets, Grants, …) visible.
- * Staff sign in with a platform token that carries no workspace scope at all,
- * so they reach /support the same way.
+ * support dashboard at /support — the tenant-scoped console, limited to their
+ * own workspace. Zoiko staff sign in with a platform token that carries no
+ * workspace scope at all, and reach the fleet-wide support console at the
+ * same route.
  */
 export const WORKSPACE_HREF: Record<WorkspaceScope, string> = {
   OWNER: "/owner",

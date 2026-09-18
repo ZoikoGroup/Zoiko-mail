@@ -41,10 +41,6 @@ import {
   cancelLifecycleRequest,
   approveDeletion,
   confirmDeletion,
-  getOwnershipTransfers,
-  initiateOwnershipTransfer,
-  approveOwnershipTransfer,
-  cancelOwnershipTransfer,
   type InviteMemberInput,
   type UpdateMemberInput,
   type AddDomainInput,
@@ -400,47 +396,5 @@ export function useConfirmDeletion() {
     mutationFn: ({ requestId, data }: { requestId: string; data: { confirmation: string; tenantName: string } }) =>
       confirmDeletion(requestId, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "lifecycle"] }),
-  });
-}
-
-// ─── Ownership transfer ───────────────────────────────────────────────────────
-
-export function useOwnershipTransfers() {
-  return useQuery({
-    queryKey: ["owner", "ownership-transfers"],
-    queryFn: getOwnershipTransfers,
-    staleTime: 15_000,
-  });
-}
-
-export function useInitiateOwnershipTransfer() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (targetMembershipId: string) => initiateOwnershipTransfer(targetMembershipId),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["owner", "ownership-transfers"] });
-      qc.invalidateQueries({ queryKey: ["owner", "members"] });
-    },
-  });
-}
-
-export function useApproveOwnershipTransfer() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (transferId: string) => approveOwnershipTransfer(transferId),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["owner", "ownership-transfers"] });
-      qc.invalidateQueries({ queryKey: ["owner", "members"] });
-      qc.invalidateQueries({ queryKey: ["auth", "me"] });
-      qc.invalidateQueries({ queryKey: ["me"] });
-    },
-  });
-}
-
-export function useCancelOwnershipTransfer() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (transferId: string) => cancelOwnershipTransfer(transferId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "ownership-transfers"] }),
   });
 }

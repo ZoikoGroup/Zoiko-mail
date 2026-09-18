@@ -187,14 +187,16 @@ export class SupportService {
     if (!membership) throw new AppError("Active SUPPORT membership not found", 404, ErrorCodes.NOT_FOUND);
     await prisma.supportAccessGrant.updateMany({ where: { tenantId, supportMembershipId: membership.id, revokedAt: null, expiresAt: { gt: new Date() } }, data: { revokedAt: new Date() } });
     const grant = await prisma.supportAccessGrant.create({ data: { tenantId, supportMembershipId: membership.id, approvedByUserId: userId, reason: input.reason, scopes: input.scopes, expiresAt: new Date(Date.now() + input.expiresInMinutes * 60_000) } });
-    await auditService.record({ tenantId, actorUserId: userId, eventType: "SUPPORT_ACCESS_GRANTED", targetType: "SupportAccessGrant", targetId: grant.id, metadata: { scopes: grant.scopes, expiresAt: grant.expiresAt.toISOString(), reason: grant.reason } });
+    await auditService.record({ tenantId, actorUserId: userId, eventType: "SUPPORT_ACCESS_GRANTED",
+      actorType: "SUPPORT", targetType: "SupportAccessGrant", targetId: grant.id, metadata: { scopes: grant.scopes, expiresAt: grant.expiresAt.toISOString(), reason: grant.reason } });
     return grant;
   }
   async revoke(id: string, tenantId: string, userId: string) {
     const grant = await prisma.supportAccessGrant.findFirst({ where: { id, tenantId, revokedAt: null } });
     if (!grant) throw new AppError("Active support grant not found", 404, ErrorCodes.NOT_FOUND);
     const updated = await prisma.supportAccessGrant.update({ where: { id: grant.id, tenantId }, data: { revokedAt: new Date() } });
-    await auditService.record({ tenantId, actorUserId: userId, eventType: "SUPPORT_ACCESS_REVOKED", targetType: "SupportAccessGrant", targetId: id });
+    await auditService.record({ tenantId, actorUserId: userId, eventType: "SUPPORT_ACCESS_REVOKED",
+      actorType: "SUPPORT", targetType: "SupportAccessGrant", targetId: id });
     return updated;
   }
   async diagnostics(grantId: string | undefined, tenantId: string, membershipId: string, userId: string) {
@@ -213,7 +215,8 @@ export class SupportService {
     if (grant.scopes.includes("DNS_DIAGNOSTICS")) result.domains = await prisma.mailDomain.findMany({ where: { tenantId }, select: { id: true, domainName: true, verificationStatus: true, mxStatus: true, spfStatus: true, dkimStatus: true, dmarcStatus: true, lastCheckedAt: true } });
     if (grant.scopes.includes("DELIVERY_DIAGNOSTICS")) result.delivery = await prisma.deliveryEvent.groupBy({ by: ["type"], where: { tenantId, createdAt: { gte: new Date(Date.now() - 86_400_000) } }, _count: true });
     if (grant.scopes.includes("AUDIT_READ")) result.audit = await prisma.auditEvent.findMany({ where: { tenantId }, select: { id: true, eventType: true, targetType: true, targetId: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 50 });
-    await auditService.record({ tenantId, actorUserId: userId, eventType: "SUPPORT_DIAGNOSTICS_ACCESSED", targetType: "SupportAccessGrant", targetId: grant.id, metadata: { scopes: grant.scopes } });
+    await auditService.record({ tenantId, actorUserId: userId, eventType: "SUPPORT_DIAGNOSTICS_ACCESSED",
+      actorType: "SUPPORT", targetType: "SupportAccessGrant", targetId: grant.id, metadata: { scopes: grant.scopes } });
     return result;
   }
 
@@ -286,24 +289,6 @@ export class SupportService {
         }),
       ]);
 
-    const [openTickets, overdueTickets, urgentTickets, ticketsByStatus, recentTickets] = await Promise.all([
-        prisma.supportTicket.count({ where: { status: { notIn: ["RESOLVED", "CLOSED"] } } }),
-        prisma.supportTicket.count({ where: { slaDueAt: { lt: new Date() }, status: { notIn: ["RESOLVED", "CLOSED"] } } }),
-        prisma.supportTicket.count({ where: { severity: "URGENT", status: { notIn: ["RESOLVED", "CLOSED"] } } }),
-        prisma.supportTicket.groupBy({ by: ["status"], _count: true }),
-        prisma.supportTicket.findMany({
-          orderBy: { updatedAt: "desc" },
-          take: 8,
-          select: {
-            id: true, ticketNumber: true, subject: true, category: true, severity: true, status: true,
-            updatedAt: true, slaDueAt: true,
-            tenant: { select: { id: true, name: true } },
-            assignedStaff: { select: { id: true, displayName: true } },
-            openedBy: { select: { id: true, email: true, displayName: true } },
-          },
-        }),
-      ]);
-
     const issues = [
       ...failedMessages.map((m) => ({
         id: m.id, kind: "message" as const,
@@ -373,26 +358,6 @@ export class SupportService {
         failedJobs,
         retryJobs,
       },
-      ticketStats: {
-        open: openTickets,
-        overdue: overdueTickets,
-        urgent: urgentTickets,
-        byStatus: Object.fromEntries(ticketsByStatus.map((r) => [r.status, r._count])),
-      },
-      recentTickets: recentTickets.map((t) => ({
-        id: t.id,
-        ticketNumber: t.ticketNumber,
-        subject: t.subject,
-        tenantId: t.tenant.id,
-        tenantName: t.tenant.name,
-        category: t.category,
-        severity: t.severity,
-        status: t.status,
-        assignedStaff: t.assignedStaff ? { id: t.assignedStaff.id, name: t.assignedStaff.displayName } : null,
-        slaDueAt: t.slaDueAt,
-        slaOverdue: t.slaDueAt ? t.slaDueAt.getTime() < Date.now() && t.status !== "RESOLVED" && t.status !== "CLOSED" : false,
-        updatedAt: t.updatedAt,
-      })),
       providerHealth: {
         byProvider: byProvider.map((r) => ({ provider: r.provider, count: r._count._all })),
         byStatus: byStatus.map((r) => ({ status: r.status, count: r._count._all })),
@@ -440,17 +405,24 @@ export class SupportService {
     }));
   }
 
-  async searchMailboxes(query: string, limit = 50) {
+  async searchMailboxes(query: string, limit = 50, tenantId?: string) {
     const q = query.trim();
     const where: Prisma.MailboxWhereInput = q
       ? {
-          OR: [
-            { address: { contains: q, mode: "insensitive" } },
-            { tenant: { name: { contains: q, mode: "insensitive" } } },
-            { membership: { user: { email: { contains: q, mode: "insensitive" } } } },
+          AND: [
+            ...(tenantId ? [{ tenantId }] : []),
+            {
+              OR: [
+                { address: { contains: q, mode: "insensitive" } },
+                { tenant: { name: { contains: q, mode: "insensitive" } } },
+                { membership: { user: { email: { contains: q, mode: "insensitive" } } } },
+              ],
+            },
           ],
         }
-      : {};
+      : tenantId
+        ? { tenantId }
+        : {};
 
     const mailboxes = await prisma.mailbox.findMany({
       where,
@@ -481,16 +453,23 @@ export class SupportService {
     }));
   }
 
-  async searchDomains(query: string, limit = 50) {
+  async searchDomains(query: string, limit = 50, tenantId?: string) {
     const q = query.trim();
     const where: Prisma.MailDomainWhereInput = q
       ? {
-          OR: [
-            { domainName: { contains: q, mode: "insensitive" } },
-            { tenant: { name: { contains: q, mode: "insensitive" } } },
+          AND: [
+            ...(tenantId ? [{ tenantId }] : []),
+            {
+              OR: [
+                { domainName: { contains: q, mode: "insensitive" } },
+                { tenant: { name: { contains: q, mode: "insensitive" } } },
+              ],
+            },
           ],
         }
-      : {};
+      : tenantId
+        ? { tenantId }
+        : {};
 
     const domains = await prisma.mailDomain.findMany({
       where,
@@ -969,6 +948,7 @@ export class SupportService {
       tenantId: grant.tenantId,
       actorUserId: caller.userId,
       eventType: "SUPPORT_ACCESS_REVOKED",
+      actorType: "SUPPORT",
       targetType: "SupportAccessGrant",
       targetId: grant.id,
       metadata: { revokedByRole: "SUPPORT", source: "support-console" },
@@ -1110,6 +1090,7 @@ export class SupportService {
       tenantId,
       actorUserId: userId,
       eventType: "SUPPORT_DIAGNOSTICS_ACCESSED",
+      actorType: "SUPPORT",
       targetType: "SupportAccessGrant",
       targetId: grant.id,
       metadata: { scopes: grant.scopes, source: "support-console" },

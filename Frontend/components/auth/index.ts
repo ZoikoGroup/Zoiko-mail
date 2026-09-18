@@ -16,6 +16,5 @@ export { default as CreateWorkspaceForm } from "./forms/CreateWorkspaceForm";
 export { default as JoinWorkspaceForm } from "./forms/JoinWorkspaceForm";
 export { default as ForgotPasswordForm } from "./forms/ForgotPasswordForm";
 export { default as ResetPasswordForm } from "./forms/ResetPasswordForm";
-export { default as ActiveSessions } from "./ActiveSessions";
 export { default as PasswordRequirements } from "./PasswordRequirements";
 export type { AuthStep } from "./types";

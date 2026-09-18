@@ -39,18 +39,28 @@ const OWNER: RoleMatrix = {
   "people.member.manage": "ALLOW",
   "people.admin.manage": "ALLOW",
   "people.owner.manage": "ALLOW",
+  "people.mfa.reset": "STEP_UP",
   // Workspace.
   "workspace.settings.read": "ALLOW",
   "workspace.settings.write": "ALLOW",
   "workspace.mailboxes.manage": "ALLOW",
   "workspace.domains.manage": "ALLOW",
   "workspace.groups.manage": "ALLOW",
+  // RBAC §2 marks these Step-up for Owner and Admin alike: destructive, or
+  // outward-facing, or a change to what the assistant may do unsupervised.
+  "workspace.domains.remove": "STEP_UP",
+  "workspace.mailboxes.delete": "STEP_UP",
+  // Suspending sending is reversible and is the "suspend-first" half of the
+  // deletion flow, so it is not itself step-up.
+  "workspace.mailboxes.sending": "ALLOW",
+  "connector.credentials.rotate": "STEP_UP",
+  "connector.tenant.disconnect": "ALLOW",
+  "mailbox.delegate": "ALLOW",
   "policy.write": "ALLOW",
+  "policy.ai.write": "STEP_UP",
+  "mailbox.ai.enable": "STEP_UP",
   "policy.security.write": "ALLOW",
   "audit.read": "ALLOW",
-  // Phase 4: the owner is accountable for the workspace's posture.
-  "security-alert.read": "ALLOW",
-  "security-alert.review": "ALLOW",
   // Money and liability.
   "billing.read": "ALLOW",
   "billing.plan.write": "ALLOW",
@@ -59,6 +69,12 @@ const OWNER: RoleMatrix = {
   "tenant.ownership.transfer": "TWO_PERSON",
   "tenant.delete": "TWO_PERSON",
   // Support.
+  // §11.1 step 3: the Owner authorises support access, and §5 lists granting
+  // it beside tenant deletion and domain removal. Letting someone outside the
+  // tenant in is not a routine administrative act, so it takes a fresh
+  // password. Withheld from Admin entirely — the matrix gives Admin the
+  // ability to *end* a grant, never to start one.
+  "support.grant.create": "STEP_UP",
   "support.grant.end": "ALLOW",
 };
 
@@ -92,15 +108,27 @@ const ADMIN: RoleMatrix = {
   "workspace.mailboxes.manage": "ALLOW",
   "workspace.domains.manage": "ALLOW",
   "workspace.groups.manage": "ALLOW",
+  // The step-up half of the manage capabilities above. These were the gap:
+  // the actions shipped against workspace.domains.manage and
+  // workspace.mailboxes.manage, which are ALLOW, so removing a domain or
+  // changing AI policy needed no fresh authentication at all.
+  "workspace.domains.remove": "STEP_UP",
+  "workspace.mailboxes.delete": "STEP_UP",
+  "workspace.mailboxes.sending": "ALLOW",
+  // §2 "Rotate provider credentials": Admin = "If policy" + Step-up, and
+  // §2 "Delegate mailbox access": Admin = "If policy". The policy half is
+  // evaluation step 8 and belongs to the policy gate, not to the matrix.
+  "connector.credentials.rotate": "STEP_UP",
+  // §2 "Disconnect connected account": Admin = "Tenant scope".
+  "connector.tenant.disconnect": "ALLOW",
+  "mailbox.delegate": "ALLOW",
   "policy.write": "ALLOW",
+  "policy.ai.write": "STEP_UP",
+  "mailbox.ai.enable": "STEP_UP",
   // §2 "View audit log": Admin = Limited. The capability is held; the scoping
   // lives in the audit service, which withholds the Owner-reserved
   // governance categories. See ADMIN_AUDIT_EXCLUDED_PREFIXES.
   "audit.read": "ALLOW",
-  // Phase 4: bounded operator investigates; Owner resolves the ones that go
-  // all the way. Read and review are both held so an Admin can run the inbox.
-  "security-alert.read": "ALLOW",
-  "security-alert.review": "ALLOW",
   // §2 "Request export": Admin = "By policy" + Step-up. Step-up is expressed
   // here; the policy half is evaluation step 8 and belongs to the policy gate,
   // not to the matrix.

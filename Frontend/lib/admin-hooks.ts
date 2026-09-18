@@ -17,10 +17,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchActiveSupportGrant,
   fetchAuditEvents,
+  exportAuditEvents,
   fetchCommitments,
   fetchConnectors,
   fetchDashboard,
   fetchDomains,
+  fetchDomainChecks,
+  addDomain,
+  recheckDomain,
+  activateDomain,
+  removeDomain,
   fetchGroups,
   fetchGroupAssignees,
   createGroup,
@@ -31,12 +37,21 @@ import {
   sendInvitation,
   updateWorkspaceSettings,
   fetchMailboxes,
+  createMailbox,
+  deleteMailbox,
+  setMailboxSending,
   fetchMembers,
   fetchNotifications,
-  fetchPolicyGroups,
+  fetchPolicies,
+  savePolicyRules,
   fetchSettings,
   fetchSyncErrors,
   setMailboxAi,
+  updateMember,
+  removeMember,
+  cancelInvitation,
+  markNotificationRead,
+  replayDeadLetter,
   fetchMailboxRouting,
   createAlias,
   deleteAlias,
@@ -44,11 +59,14 @@ import {
   deleteForwarding,
 } from "./admin-queries";
 import type {
+  AuditPage,
+  AuditQuery,
   GroupAssigneeDto,
   MailboxRoutingDto,
   InvitationDraftInput,
   WorkspaceSettingsPatch,
 } from "./admin-queries";
+import { useUnreadCounts } from "./mail-hooks";
 import { CAPABILITY_MATRIX, GUARDRAILS } from "./admin-api";
 import type {
   AuditEventDto,
@@ -57,13 +75,16 @@ import type {
   ConnectorDto,
   DashboardDto,
   DomainDto,
+  DomainCheckDto,
   GroupDto,
   GuardrailDto,
   InvitationDto,
   MailboxDto,
   MemberDto,
+  MembershipRole,
   NotificationDto,
-  PolicyGroupDto,
+  PolicyDto,
+  PolicyConditionDto,
   SettingsDto,
   SupportGrantDto,
   SyncErrorDto,
@@ -128,8 +149,15 @@ export function useMailboxes(): QueryLike<MailboxDto[]> {
 export function useSetMailboxAi() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ mailboxId, aiEnabled }: { mailboxId: string; aiEnabled: boolean }) =>
-      setMailboxAi(mailboxId, aiEnabled),
+    mutationFn: ({
+      mailboxId,
+      aiEnabled,
+      stepUpToken,
+    }: {
+      mailboxId: string;
+      aiEnabled: boolean;
+      stepUpToken?: string;
+    }) => setMailboxAi(mailboxId, aiEnabled, stepUpToken),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["mailboxes"] }),
   });
 }
@@ -245,10 +273,35 @@ export function useRemoveFromGroup() {
   );
 }
 
-export function useAuditEvents(): QueryLike<AuditEventDto[]> {
+/**
+ * One page of the audit log, filtered by the server.
+ *
+ * The query is part of the key, so changing a category or a date range is a
+ * new read rather than a re-filter of what happened to be in memory.
+ * `placeholderData` keeps the previous page on screen while the next one
+ * loads, so paging does not blink through an empty table.
+ */
+export function useAuditEvents(query: AuditQuery = {}): QueryLike<AuditPage> {
   return shape(
-    useQuery({ queryKey: ["audit"], queryFn: () => fetchAuditEvents(50), ...LIVE })
+    useQuery({
+      queryKey: ["audit", query],
+      queryFn: () => fetchAuditEvents(query),
+      placeholderData: (previous) => previous,
+      ...LIVE,
+    })
   );
+}
+
+/**
+ * Download the audit log.
+ *
+ * A mutation rather than a query: it is an action with a side effect the
+ * server records, and it should run when asked rather than when a key changes.
+ */
+export function useExportAuditEvents() {
+  return useMutation({
+    mutationFn: (query: AuditQuery) => exportAuditEvents(query),
+  });
 }
 
 export function useConnectors(): QueryLike<ConnectorDto[]> {
@@ -263,8 +316,8 @@ export function useSyncErrors(): QueryLike<SyncErrorDto[]> {
   );
 }
 
-export function usePolicyGroups(): QueryLike<PolicyGroupDto[]> {
-  return shape(useQuery({ queryKey: ["policies"], queryFn: fetchPolicyGroups, ...LIVE }));
+export function usePolicies(): QueryLike<PolicyDto[]> {
+  return shape(useQuery({ queryKey: ["policies"], queryFn: fetchPolicies, ...LIVE }));
 }
 
 export function useNotifications(): QueryLike<NotificationDto[]> {
@@ -333,6 +386,8 @@ export function useAdminNavCounts(): Partial<Record<string, number>> {
   const domains = useDomains();
   const notifications = useNotifications();
   const commitments = useCommitments();
+  const groups = useGroups();
+  const unread = useUnreadCounts();
 
   const counts: Partial<Record<string, number>> = {};
   if (people.data) counts["/admin/users"] = people.data.length;
@@ -343,6 +398,10 @@ export function useAdminNavCounts(): Partial<Record<string, number>> {
     counts["/admin/notifications"] = notifications.data.filter((n) => !n.readAt).length;
   }
   if (commitments.data) counts["/admin/commitments"] = commitments.data.length;
+  if (groups.data) counts["/admin/groups"] = groups.data.length;
+  // The rail badge on a mailbox means unread, not total — the same thing the
+  // member shell counts, so an Admin reading their own inbox sees one number.
+  if (unread.data) counts["/admin/inbox"] = unread.data.INBOX ?? 0;
   return counts;
 }
 
@@ -393,8 +452,11 @@ export function useSendInvitation() {
     onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["invitations"] }),
-        // The roster shows invited people too, so it is stale as well.
-        qc.invalidateQueries({ queryKey: ["people"] }),
+        // The roster shows invited people too, so it is stale as well. Keyed
+        // ["members"] to match useMembers — ["people"] is the name of the
+        // derived hook, not of any query, so invalidating it refreshed nothing
+        // and a new invitation did not appear until the poll came round.
+        qc.invalidateQueries({ queryKey: ["members"] }),
       ]);
     },
   });
@@ -420,4 +482,229 @@ export function useUpdateWorkspaceSettings() {
       ]);
     },
   });
+}
+
+/* ── acting on people ──────────────────────────────────────────────────── */
+
+/**
+ * Invalidate everything a membership change can move.
+ *
+ * A role change, a suspension and a removal all alter the roster, the pending
+ * invitations derived from it, and the rail badges counted off both. Listing
+ * them once keeps the three mutations below from drifting apart.
+ */
+function invalidatePeople(qc: ReturnType<typeof useQueryClient>) {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: ["members"] }),
+    qc.invalidateQueries({ queryKey: ["invitations"] }),
+  ]);
+}
+
+export function useUpdateMember() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      membershipId,
+      patch,
+    }: {
+      membershipId: string;
+      patch: { role?: MembershipRole; status?: "ACTIVE" | "SUSPENDED" };
+    }) => updateMember(membershipId, patch),
+    onSuccess: () => invalidatePeople(qc),
+  });
+}
+
+export function useRemoveMember() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (membershipId: string) => removeMember(membershipId),
+    onSuccess: () => invalidatePeople(qc),
+  });
+}
+
+export function useCancelInvitation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (membershipId: string) => cancelInvitation(membershipId),
+    onSuccess: () => invalidatePeople(qc),
+  });
+}
+
+/* ── notifications ─────────────────────────────────────────────────────── */
+
+export function useMarkNotificationRead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (notificationId: string) => markNotificationRead(notificationId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
+  });
+}
+
+/**
+ * Mark every unread notification read.
+ *
+ * There is no bulk endpoint, so this fans out — and uses `allSettled` rather
+ * than `all` so one failure does not discard the ones that succeeded. The
+ * refetch afterwards is what tells the truth about which actually landed,
+ * rather than the screen assuming all of them did.
+ */
+export function useMarkAllNotificationsRead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (notificationIds: string[]) => {
+      const results = await Promise.allSettled(
+        notificationIds.map((id) => markNotificationRead(id))
+      );
+      const failed = results.filter((r) => r.status === "rejected").length;
+      if (failed > 0) {
+        throw new Error(
+          failed === notificationIds.length
+            ? "Could not mark them read."
+            : `Marked ${notificationIds.length - failed} of ${notificationIds.length} read.`
+        );
+      }
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
+  });
+}
+
+/* ── provider events ───────────────────────────────────────────────────── */
+
+export function useReplayDeadLetter() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (eventId: string) => replayDeadLetter(eventId),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["sync-errors"] }),
+        // A replayed event can bring its account back out of DEGRADED.
+        qc.invalidateQueries({ queryKey: ["connectors"] }),
+      ]);
+    },
+  });
+}
+
+/* ── domains ───────────────────────────────────────────────────────────── */
+
+/**
+ * Every domain write moves the same two things: the domain list, and the
+ * dashboard tile that counts verified domains off it.
+ */
+function useDomainMutation<TInput>(fn: (input: TInput) => Promise<void>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["domains"] }),
+        qc.invalidateQueries({ queryKey: ["admin-dashboard"] }),
+      ]);
+    },
+  });
+}
+
+export function useAddDomain() {
+  return useDomainMutation((domainName: string) => addDomain(domainName));
+}
+
+export function useRecheckDomain() {
+  return useDomainMutation((domainId: string) => recheckDomain(domainId));
+}
+
+export function useActivateDomain() {
+  return useDomainMutation((domainId: string) => activateDomain(domainId));
+}
+
+export function useRemoveDomain() {
+  return useDomainMutation(
+    ({ domainId, stepUpToken }: { domainId: string; stepUpToken?: string }) =>
+      removeDomain(domainId, stepUpToken)
+  );
+}
+
+/* ── policies ──────────────────────────────────────────────────────────── */
+
+/**
+ * Save a policy's rules.
+ *
+ * Supersedes rather than edits, which is what the model does: a new version is
+ * created and activated, and the previous one is archived. The screen reflects
+ * that by refetching rather than by assuming the change landed.
+ */
+export function useSavePolicyRules() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      policy,
+      rules,
+      stepUpToken,
+    }: {
+      policy: PolicyDto;
+      rules: {
+        defaultEffect: PolicyDto["defaultEffect"];
+        conditions: PolicyConditionDto[];
+      };
+      stepUpToken?: string;
+    }) => savePolicyRules(policy, rules, stepUpToken),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["policies"] }),
+  });
+}
+
+/**
+ * Past DNS checks for one domain, fetched only when the history is opened.
+ *
+ * `enabled` keeps a workspace with a dozen domains from issuing a dozen reads
+ * nobody asked for; the history is a detail somebody expands, not part of the
+ * list.
+ */
+export function useDomainChecks(domainId: string | null): QueryLike<DomainCheckDto[]> {
+  return shape(
+    useQuery({
+      queryKey: ["domain-checks", domainId],
+      queryFn: () => fetchDomainChecks(domainId as string),
+      enabled: Boolean(domainId),
+      ...LIVE,
+    })
+  );
+}
+
+/* ── mailbox lifecycle ─────────────────────────────────────────────────── */
+
+/** Every mailbox write moves the list and the dashboard tile counted off it. */
+function useMailboxMutation<TInput>(fn: (input: TInput) => Promise<void>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["mailboxes"] }),
+        qc.invalidateQueries({ queryKey: ["admin-dashboard"] }),
+      ]);
+    },
+  });
+}
+
+export function useCreateMailbox() {
+  return useMailboxMutation((membershipId: string) => createMailbox(membershipId));
+}
+
+export function useDeleteMailbox() {
+  return useMailboxMutation(
+    ({ mailboxId, stepUpToken }: { mailboxId: string; stepUpToken?: string }) =>
+      deleteMailbox(mailboxId, stepUpToken)
+  );
+}
+
+export function useSetMailboxSending() {
+  return useMailboxMutation(
+    ({
+      mailboxId,
+      suspended,
+      reason,
+    }: {
+      mailboxId: string;
+      suspended: boolean;
+      reason?: string;
+    }) => setMailboxSending(mailboxId, { suspended, reason })
+  );
 }

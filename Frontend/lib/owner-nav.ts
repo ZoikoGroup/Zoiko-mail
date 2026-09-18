@@ -48,10 +48,8 @@ export const OWNER_NAV: OwnerNavItem[] = [
   { section: "Organization", label: "Subscription & Billing", href: "/owner/billing", icon: CreditCard, ownerOnly: true },
 
   { section: "Security", label: "Audit Logs", href: "/owner/audit-logs", icon: FileText, ownerOnly: true },
-  { section: "Security", label: "Security Alerts", href: "/owner/security-alerts", icon: ShieldAlert, ownerOnly: true },
   { section: "Security", label: "Policies", href: "/owner/policies", icon: ShieldCheck, ownerOnly: true },
   { section: "Security", label: "Suppressions", href: "/owner/suppressions", icon: Ban, ownerOnly: true },
-  { section: "Security", label: "Ownership Transfer", href: "/owner/ownership-transfer", icon: KeyRound, ownerOnly: true },
 
   { section: "Data Management", label: "Export Data", href: "/owner/export-data", icon: Download, ownerOnly: true },
   { section: "Data Management", label: "Deletion Requests", href: "/owner/deletion-requests", icon: Trash2, ownerOnly: true },

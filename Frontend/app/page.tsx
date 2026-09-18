@@ -29,7 +29,14 @@ export default function DashboardPage() {
   useEffect(() => {
     if (isError) {
       const apiError = error as { status?: number; code?: string } | null;
-      if (apiError?.status === 401 || apiError?.code === "SESSION_SUPERSEDED") {
+      if (
+        apiError?.status === 401 ||
+        apiError?.code === "SESSION_SUPERSEDED" ||
+        // Backend unreachable: the token cannot be validated, so there is
+        // nothing to render the dashboard from. Go back to sign-in instead of
+        // sitting on "Loading your workspace…" forever.
+        apiError?.status === 0
+      ) {
         clearTokens();
         router.replace("/login");
       }

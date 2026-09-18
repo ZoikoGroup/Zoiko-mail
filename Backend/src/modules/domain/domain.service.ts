@@ -51,7 +51,8 @@ export class DomainService {
       const domain = await prisma.mailDomain.create({
         data: { tenantId, domainName, verificationToken: `zoiko-mail-verification=${randomBytes(24).toString("hex")}` },
       });
-      await auditService.record({ tenantId, actorUserId: userId, eventType: "DOMAIN_ADDED", targetType: "MailDomain", targetId: domain.id });
+      await auditService.record({ tenantId, actorUserId: userId, eventType: "DOMAIN_ADDED",
+        actorType: "ADMIN", targetType: "MailDomain", targetId: domain.id });
       return domain;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -106,6 +107,7 @@ export class DomainService {
       });
       await auditService.record({
         tenantId, actorUserId: userId, eventType: "DOMAIN_DNS_CHECKED",
+        actorType: "ADMIN",
         targetType: "MailDomain", targetId: domain.id,
         metadata: { readyForSending: ready },
       }, tx);
@@ -147,6 +149,7 @@ export class DomainService {
       });
       await auditService.record({
         tenantId, actorUserId: userId, eventType: "DOMAIN_SENDING_ACTIVATED",
+        actorType: "ADMIN",
         targetType: "MailDomain", targetId: domain.id,
       }, tx);
       return activated;
@@ -167,6 +170,7 @@ export class DomainService {
       await tx.mailDomain.delete({ where: { id: domain.id } });
       await auditService.record({
         tenantId, actorUserId: userId, eventType: "DOMAIN_REMOVED",
+        actorType: "ADMIN",
         targetType: "MailDomain", targetId: domain.id,
         metadata: { domainName: domain.domainName },
       }, tx);

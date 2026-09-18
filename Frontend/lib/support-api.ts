@@ -169,6 +169,196 @@ export async function revokeSupportAccessGrant(grantId: string): Promise<Support
 }
 
 // ---------------------------------------------------------------------------
+// Tenant-scoped support console (SUPPORT/OWNER/ADMIN roles). Uses the
+// tenant-scoped access token. All list endpoints are forced to the caller's
+// tenant by the backend (session-scoped tenantId).
+// ---------------------------------------------------------------------------
+
+export interface TenantMailbox {
+  id: string;
+  address: string;
+  tenantId: string;
+  memberName: string | null;
+  memberEmail: string | null;
+  suspended: boolean;
+  suspensionReason: string | null;
+  createdAt: string;
+  mailboxType: string;
+  connectedAccounts: Array<{
+    id: string;
+    provider: string;
+    email: string;
+    status: string;
+    lastSyncedAt: string | null;
+    lastErrorCode: string | null;
+  }>;
+}
+
+export interface TenantDomain {
+  id: string;
+  domainName: string;
+  verificationStatus: string;
+  mxStatus: string;
+  spfStatus: string;
+  dkimStatus: string;
+  dmarcStatus: string;
+  lastCheckedAt: string | null;
+  sendingEnabled: boolean;
+  activatedAt: string | null;
+}
+
+export interface TenantProviderEvent {
+  id: string;
+  providerEventId: string | null;
+  tenantId: string;
+  provider: string;
+  accountEmail: string;
+  accountStatus: string;
+  eventType: string;
+  processingStatus: string;
+  errorCode: string | null;
+  attempts: number;
+  maxAttempts: number;
+  receivedAt: string;
+  processedAt: string | null;
+}
+
+export interface TenantDeliveryEvent {
+  id: string;
+  type: string;
+  tenantId: string;
+  failureCode: string | null;
+  failureReason: string | null;
+  providerEventId: string | null;
+  createdAt: string;
+  message: {
+    subject: string | null;
+    fromAddress: string | null;
+    fromName: string | null;
+    providerMessageId: string | null;
+    status: string;
+    createdAt: string;
+    recipients: Array<{ email: string; type: string; deliveryStatus: string }>;
+  } | null;
+}
+
+export interface TenantJob {
+  id: string;
+  type: string;
+  tenantId: string;
+  status: string;
+  attempts: number;
+  maxAttempts: number;
+  runAt: string;
+  lockedAt: string | null;
+  completedAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TenantSuppression {
+  id: string;
+  tenantId: string;
+  emailHash: string;
+  reason: string;
+  active: boolean;
+  sourceEventId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TenantAuditEvent {
+  id: string;
+  eventType: string;
+  actor: { id: string; email: string; displayName: string } | null;
+  actorRole: string | null;
+  tenantId: string;
+  resource: string | null;
+  reason: string | null;
+  result: string | null;
+  requestId: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  metadata: unknown;
+  createdAt: string;
+}
+
+export interface TenantOverviewData {
+  tenant: {
+    id: string;
+    name: string;
+    status: string;
+    planCode: string;
+    timezone: string | null;
+    createdAt: string;
+    updatedAt: string;
+    _count: Record<string, number>;
+  };
+  members: Array<Record<string, unknown>>;
+  mailboxes: Array<Record<string, unknown>>;
+  domains: Array<Record<string, unknown>>;
+  connectedAccounts: Array<Record<string, unknown>>;
+  providerEvents: Array<Record<string, unknown>>;
+  deliveryEvents: Array<Record<string, unknown>>;
+  jobs: Array<Record<string, unknown>>;
+  audit: Array<Record<string, unknown>>;
+  grants: SupportAccessGrant[];
+  suppressions: TenantSuppression[];
+}
+
+export async function fetchTenantSupportOverview(): Promise<TenantOverviewData> {
+  return apiRequest<TenantOverviewData>("/support/tenant");
+}
+
+export async function fetchTenantMailboxes(q = "", limit = 50): Promise<{ mailboxes: TenantMailbox[] }> {
+  return apiRequest<{ mailboxes: TenantMailbox[] }>(`/support/mailboxes?q=${encodeURIComponent(q)}&limit=${limit}`);
+}
+
+export async function fetchTenantDomains(q = "", limit = 50): Promise<{ domains: TenantDomain[] }> {
+  return apiRequest<{ domains: TenantDomain[] }>(`/support/domains?q=${encodeURIComponent(q)}&limit=${limit}`);
+}
+
+export interface TenantListParams {
+  provider?: string;
+  status?: string;
+  type?: string;
+  q?: string;
+  limit?: number;
+}
+
+function tenantListQueryString(params: TenantListParams): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      search.set(key, String(value));
+    }
+  }
+  const query = search.toString();
+  return query ? `?${query}` : "";
+}
+
+export async function listTenantProviderEvents(params: TenantListParams = {}): Promise<{ events: TenantProviderEvent[] }> {
+  return apiRequest<{ events: TenantProviderEvent[] }>(`/support/provider-events${tenantListQueryString(params)}`);
+}
+
+export async function listTenantDeliveryEvents(params: TenantListParams = {}): Promise<{ events: TenantDeliveryEvent[] }> {
+  return apiRequest<{ events: TenantDeliveryEvent[] }>(`/support/delivery-events${tenantListQueryString(params)}`);
+}
+
+export async function listTenantJobs(params: TenantListParams = {}): Promise<{ jobs: TenantJob[] }> {
+  return apiRequest<{ jobs: TenantJob[] }>(`/support/jobs${tenantListQueryString(params)}`);
+}
+
+export async function listTenantSuppressions(params: TenantListParams = {}): Promise<{ suppressions: TenantSuppression[] }> {
+  return apiRequest<{ suppressions: TenantSuppression[] }>(`/support/suppressions${tenantListQueryString(params)}`);
+}
+
+export async function listTenantAudit(params: TenantListParams = {}): Promise<{ events: TenantAuditEvent[] }> {
+  return apiRequest<{ events: TenantAuditEvent[] }>(`/support/audit${tenantListQueryString(params)}`);
+}
+
+// ---------------------------------------------------------------------------
 // Platform support console (staff). Sends the platform token when present,
 // otherwise falls back to the tenant-scoped access token — the backend's
 // authenticateStaff accepts either.
@@ -482,7 +672,7 @@ export function searchPlatformTenants(q = "", limit = 50): Promise<{ tenants: Pl
   return platformRequest<{ tenants: PlatformTenant[] }>(`/support/platform/tenants${listQueryString({ q, limit })}`);
 }
 
-export function fetchTenantOverview(tenantId: string): Promise<TenantOverview> {
+export function fetchPlatformTenantOverview(tenantId: string): Promise<TenantOverview> {
   return platformRequest<TenantOverview>(`/support/platform/tenants/${encodeURIComponent(tenantId)}`);
 }
 
@@ -539,8 +729,9 @@ export function fetchPlatformDiagnostics(grantId: string): Promise<SupportDiagno
 }
 
 // ---------------------------------------------------------------------------
-// Support tickets. Tenant members talk to /support/tickets; staff use the
-// platform console routes under /support/platform/tickets.
+// Support tickets. Staff use the platform console routes under
+// /support/platform/tickets. (The tenant-side ticket UI is archived; the
+// tenant ticket routes were removed from the backend.)
 // ---------------------------------------------------------------------------
 
 export type TicketCategory = "DELIVERY" | "DOMAIN" | "BILLING" | "ACCOUNT" | "SECURITY" | "OTHER";
@@ -633,23 +824,4 @@ export function commentPlatformTicket(ticketId: string, body: string, internal: 
 
 export function listPlatformStaff(): Promise<{ staff: TicketAuthor[] }> {
   return platformRequest<{ staff: TicketAuthor[] }>("/support/platform/tickets/staff");
-}
-
-export function listTenantTickets(params: Pick<TicketListParams, "status" | "q" | "limit"> = {}): Promise<{ tickets: SupportTicket[]; ticketCounts: Record<string, number> }> {
-  return apiRequest<{ tickets: SupportTicket[]; ticketCounts: Record<string, number> }>(`/support/tickets${listQueryString(params)}`);
-}
-
-export function getTenantTicket(ticketId: string): Promise<SupportTicket> {
-  return apiRequest<SupportTicket>(`/support/tickets/${encodeURIComponent(ticketId)}`);
-}
-
-export function createTenantTicket(input: CreateTicketInput): Promise<SupportTicket> {
-  return apiRequest<SupportTicket>("/support/tickets", { method: "POST", body: input });
-}
-
-export function commentTenantTicket(ticketId: string, body: string): Promise<TicketComment> {
-  return apiRequest<TicketComment>(`/support/tickets/${encodeURIComponent(ticketId)}/comments`, {
-    method: "POST",
-    body: { body },
-  });
 }

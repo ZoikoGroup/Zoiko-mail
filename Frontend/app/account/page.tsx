@@ -1,17 +1,16 @@
 "use client";
 
 import { AppShell } from "@/components/shell/AppShell";
-import Link from "next/link";
-import { ChangePasswordForm, SetPasswordForm, ActiveSessions } from "@/components/auth";
+import { ChangePasswordForm } from "@/components/auth";
+import { MfaSettings } from "@/components/account/MfaSettings";
 import { Avatar, RoleBadge } from "@/components/home/HomeBits";
 import { useMe } from "@/lib/auth-hooks";
 import type { MeResponse } from "@/lib/auth-api";
-import { KeyRound, ShieldCheck, Fingerprint, LifeBuoy, MonitorSmartphone } from "lucide-react";
+import { KeyRound, ShieldCheck, Fingerprint } from "lucide-react";
 
 export default function AccountPage() {
   const { data } = useMe();
   const me = data as MeResponse | undefined;
-  const hasPassword = me?.hasPassword ?? false;
 
   return (
     <AppShell>
@@ -51,14 +50,10 @@ export default function AccountPage() {
         </h2>
 
         <div className="zoiko-card mt-3 divide-y divide-[var(--border)]">
-          <SecurityRow
-            icon={ShieldCheck}
-            title="Two-factor authentication"
-            desc="Add a second step at sign-in for extra protection."
-            status="Not configured"
-            actionLabel="Set up"
-            soon
-          />
+          {/* Reads the account's real state and can change it. It used to be a
+              SecurityRow hardcoded to "Not configured" behind a disabled
+              button, which told an enrolled Owner they had no second factor. */}
+          <MfaSettings />
           <SecurityRow
             icon={Fingerprint}
             title="ZoikoID"
@@ -74,44 +69,7 @@ export default function AccountPage() {
           <KeyRound className="h-3.5 w-3.5" /> Password
         </h2>
         <div className="zoiko-card mt-3 p-6">
-          {hasPassword ? (
-            <ChangePasswordForm />
-          ) : (
-            <>
-              <p className="mb-4 text-sm text-[var(--ink3)]">
-                This account was created with Google and has no password set.
-                Set a password to enable email/password sign-in.
-              </p>
-              <SetPasswordForm isInitialSet />
-            </>
-          )}
-        </div>
-
-        {/* Active sessions */}
-        <h2 className="font-mono-num mt-10 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
-          <MonitorSmartphone className="h-3.5 w-3.5" /> Active sessions
-        </h2>
-        <div className="zoiko-card mt-3 p-6">
-          <ActiveSessions />
-        </div>
-
-        {/* Support */}
-        <h2 className="font-mono-num mt-10 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
-          <LifeBuoy className="h-3.5 w-3.5" /> Support
-        </h2>
-        <div className="zoiko-card mt-3 flex items-center gap-4 p-5">
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--s3)] text-[var(--ink2)]">
-            <LifeBuoy className="h-5 w-5" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <span className="text-sm font-medium text-[var(--ink)]">Help &amp; support</span>
-            <p className="mt-0.5 text-xs text-[var(--ink3)]">
-              Report a problem and track your conversations with the Zoiko support team.
-            </p>
-          </div>
-          <Link href="/report-issue" className="zoiko-btn sm shrink-0">
-            Open
-          </Link>
+          <ChangePasswordForm />
         </div>
       </div>
     </AppShell>

@@ -14,10 +14,5 @@ export class NotificationService {
     if (!item) throw new AppError("Notification not found", 404, ErrorCodes.NOT_FOUND);
     return prisma.notification.update({ where: { id: item.id, tenantId }, data: { readAt: item.readAt ?? new Date() } });
   }
-
-  async markAllRead(tenantId: string, userId: string) {
-    const result = await prisma.notification.updateMany({ where: { tenantId, userId, readAt: null }, data: { readAt: new Date() } });
-    return { updated: result.count };
-  }
 }
 export const notificationService = new NotificationService();

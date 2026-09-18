@@ -6,5 +6,4 @@ export const createSuppressionSchema = z.object({
 });
 export const suppressionIdSchema = z.object({ suppressionId: z.string().uuid() });
 export const warmupMailboxSchema = z.object({ mailboxId: z.string().uuid() });
-export const setWarmupCapSchema = z.object({ cap: z.number().int().min(1).max(1000).nullable() });
 

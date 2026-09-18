@@ -51,6 +51,11 @@ export function createApp() {
         .map((origin) => origin.trim())
         .filter(Boolean),
       credentials: true,
+      // Content-Disposition is not a CORS-safelisted response header, so
+      // without this the browser hides it from the page and a download falls
+      // back to a generic name. The API and the web app are separate origins,
+      // which is what makes this necessary rather than optional.
+      exposedHeaders: ["Content-Disposition"],
     })
   );
   // Stripe webhook must receive the raw, unparsed request body so the

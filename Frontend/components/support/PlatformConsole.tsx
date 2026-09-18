@@ -18,7 +18,7 @@ import {
   fetchPlatformDomainDetail,
   fetchPlatformMailboxDetail,
   fetchPlatformOverview,
-  fetchTenantOverview,
+  fetchPlatformTenantOverview,
   listPlatformAudit,
   listPlatformDeliveryEvents,
   listPlatformGrants,
@@ -751,7 +751,7 @@ function TenantsPage({
     setDomainDetail(null);
     setMailboxDetail(null);
     try {
-      const res = await fetchTenantOverview(tenantId);
+      const res = await fetchPlatformTenantOverview(tenantId);
       setDetail(res);
     } catch (e) {
       setDetailError(apiErrorMessage(e));

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
-import { authHeader, loginUser, registerUser } from "./helpers.js";
+import { authHeader, loginUser, registerUser, stepUpHeader } from "./helpers.js";
 import { prisma } from "../src/config/prisma.js";
 import { env } from "../src/config/env.js";
 import { mailService } from "../src/modules/mail/mail.service.js";
@@ -579,6 +579,7 @@ describe("Mail module", () => {
       await request(app)
         .delete(`/api/v1/mail/admin/mailboxes/${createRes.body.data.id}`)
         .set(authHeader(owner.accessToken))
+        .set(await stepUpHeader(app, owner.accessToken))
         .expect(200);
 
       // Verify it's gone from the list
@@ -595,6 +596,7 @@ describe("Mail module", () => {
       await request(app)
         .delete(`/api/v1/mail/admin/mailboxes/${fakeId}`)
         .set(authHeader(owner.accessToken))
+        .set(await stepUpHeader(app, owner.accessToken))
         .expect(404);
     });
   });

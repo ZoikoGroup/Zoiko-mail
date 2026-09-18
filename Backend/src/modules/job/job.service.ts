@@ -24,38 +24,6 @@ export class JobService {
     if (!job) throw new AppError("Job not found", 404, ErrorCodes.NOT_FOUND);
     return job;
   }
-
-  async cancel(id: string, tenantId: string, userId: string) {
-    const job = await this.get(id, tenantId);
-    if (job.status !== "PENDING" && job.status !== "RETRY") {
-      throw new AppError("Only a queued or retrying job can be cancelled", 409, ErrorCodes.CONFLICT);
-    }
-    const cancelled = await prisma.backgroundJob.update({
-      where: { id, tenantId },
-      data: { status: "CANCELLED", lockedAt: null },
-    });
-    await auditService.record({
-      tenantId, actorUserId: userId, eventType: "BACKGROUND_JOB_CANCELLED",
-      targetType: "BackgroundJob", targetId: id, metadata: { type: job.type },
-    });
-    return cancelled;
-  }
-
-  async retry(id: string, tenantId: string, userId: string) {
-    const job = await this.get(id, tenantId);
-    if (job.status !== "FAILED" && job.status !== "CANCELLED") {
-      throw new AppError("Only a failed or cancelled job can be retried", 409, ErrorCodes.CONFLICT);
-    }
-    const retried = await prisma.backgroundJob.update({
-      where: { id, tenantId },
-      data: { status: "PENDING", attempts: 0, runAt: new Date(), lockedAt: null, lastError: null },
-    });
-    await auditService.record({
-      tenantId, actorUserId: userId, eventType: "BACKGROUND_JOB_RETRIED",
-      targetType: "BackgroundJob", targetId: id, metadata: { type: job.type },
-    });
-    return retried;
-  }
   async claim() {
     const rows = await prisma.$queryRaw<Array<{ id: string }>>`
       UPDATE "background_jobs" SET "status"='RUNNING',"locked_at"=CURRENT_TIMESTAMP,

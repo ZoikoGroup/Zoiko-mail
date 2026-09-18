@@ -91,6 +91,9 @@ export function authenticate(
       platformRole: decoded.platformRole ?? "NONE",
       // Guaranteed present by isAccessTokenPayload above.
       workspace: decoded.workspace as WorkspaceScope,
+      // Null rather than refused for a token minted before session ids were
+      // carried: refusing would sign every active user out to add a field.
+      sessionId: decoded.sid ?? null,
       type: decoded.type,
     };
 

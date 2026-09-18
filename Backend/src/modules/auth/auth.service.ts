@@ -142,7 +142,8 @@ export const GOOGLE_WORKSPACE_SCOPE: WorkspaceScope = "MEMBER";
 
 function buildAccessToken(
   membership: MembershipWithRelations,
-  workspace: WorkspaceScope
+  workspace: WorkspaceScope,
+  sessionId: string
 ): string {
   const payload: AccessTokenPayload = {
     sub: membership.userId,
@@ -151,6 +152,9 @@ function buildAccessToken(
     role: membership.role,
     platformRole: membership.user.platformRole,
     workspace,
+    // AC-001. The refresh token's jti, so both halves of the pair name the
+    // same session and an audit row can be tied to one sign-in.
+    sid: sessionId,
     type: "access",
   };
 
@@ -161,13 +165,19 @@ function buildAccessToken(
 
 function buildRefreshToken(
   membership: MembershipWithRelations,
-  workspace: WorkspaceScope
+  workspace: WorkspaceScope,
+  continueSessionId?: string
 ): {
   token: string;
   jti: string;
+  sessionId: string;
   expiresAt: Date;
 } {
   const jti = uuidv4();
+  // A rotation continues the session it replaced. Only a fresh sign-in starts
+  // a new one, which is what makes "everything that happened in this session"
+  // a question the audit log can answer.
+  const sessionId = continueSessionId ?? jti;
   const payload: RefreshTokenPayload = {
     sub: membership.userId,
     tenantId: membership.tenantId,
@@ -176,6 +186,7 @@ function buildRefreshToken(
     // Carried so a refresh renews the same console rather than re-deriving
     // it from the role, which would promote a MEMBER-scoped Google session.
     workspace,
+    sid: sessionId,
     type: "refresh",
     jti,
   };
@@ -188,7 +199,7 @@ function buildRefreshToken(
     Date.now() + parseDurationToMs(env.JWT_REFRESH_EXPIRES_IN)
   );
 
-  return { token, jti, expiresAt };
+  return { token, jti, sessionId, expiresAt };
 }
 
 /**
@@ -446,10 +457,13 @@ async function releaseActiveWorkspace(
 async function issueSession(
   membership: MembershipWithRelations,
   workspace: WorkspaceScope,
-  tx: Prisma.TransactionClient | typeof prisma = prisma
+  tx: Prisma.TransactionClient | typeof prisma = prisma,
+  continueSessionId?: string
 ): Promise<AuthSessionResponse> {
-  const accessToken = buildAccessToken(membership, workspace);
-  const refresh = buildRefreshToken(membership, workspace);
+  // The refresh token is minted first because it decides the session id,
+  // which the access token then carries (AC-001).
+  const refresh = buildRefreshToken(membership, workspace, continueSessionId);
+  const accessToken = buildAccessToken(membership, workspace, refresh.sessionId);
 
   await persistRefreshToken(membership, refresh.token, refresh.expiresAt, tx);
   // After the new token is stored, so a failure here cannot leave the account
@@ -758,7 +772,21 @@ export class AuthService {
       }
       // Same activation rule as createWorkspace: verifying the OTP plus a
       // successful join promotes a pending account to ACTIVE.
-      if (user.status === "PENDING_VERIFICATION") {
+      //
+      // INVITED belongs here as much as PENDING_VERIFICATION, and leaving it
+      // out was a live defect rather than a tidy-up. createInvitation writes
+      // an INVITED placeholder for an invitee with no account, so an account
+      // reaching this line is far more likely to be INVITED than PENDING —
+      // and every one of them left here with an ACTIVE membership, a valid
+      // session, and an AppUser that tenantContext refuses on the very next
+      // request as "User account is disabled". The workspace was unusable
+      // from the moment it was joined.
+      //
+      // membership.service.acceptInvitation, the other half of this pair,
+      // has always promoted INVITED and says why: accepting proves control
+      // of the address. That reasoning does not change with the route taken
+      // to accept, so the two agree now.
+      if (user.status === "PENDING_VERIFICATION" || user.status === "INVITED") {
         await tx.appUser.update({
           where: { id: userId },
           data: {
@@ -1774,7 +1802,11 @@ export class AuthService {
       const nextSession = await issueSession(
         membership,
         payload.workspace ?? workspaceScopeForRole(membership.role),
-        tx
+        tx,
+        // Continue the same session across the rotation. A token minted
+        // before session ids existed has no sid, and seeds one from its own
+        // jti rather than being refused.
+        payload.sid ?? payload.jti
       );
       await auditService.record(
         {

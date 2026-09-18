@@ -42,9 +42,7 @@ const blockBody = z.object({
 });
 const scheduleBody = z.object({ scheduledFor: z.coerce.date() });
 const confirmDeletionBody = z.object({
-  // The frontend sends the organization name typed into the confirm dialog;
-  // the security control is the `tenantName` match below, not this field.
-  confirmation: z.string().trim().min(1).max(200),
+  confirmation: z.literal("DELETE_TENANT_PERMANENTLY"),
   tenantName: z.string().trim().min(1).max(200),
 });
 /**

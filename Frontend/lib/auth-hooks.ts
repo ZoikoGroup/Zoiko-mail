@@ -17,9 +17,11 @@ import {
   joinWorkspace,
   forgotPassword,
   resetPassword,
-  getSessions,
-  revokeSession,
-  getPasswordPolicy,
+  fetchMfaStatus,
+  beginMfaEnrolment,
+  confirmMfaEnrolment,
+  regenerateMfaRecoveryCodes,
+  disableMfa,
 
   type LoginInput,
   type RegisterInput,
@@ -312,36 +314,6 @@ export function useChangePassword() {
   });
 }
 
-// Phase 3 session management: "where am I signed in" for the account page.
-export function useSessions() {
-  return useQuery({
-    queryKey: ["sessions"],
-    queryFn: getSessions,
-    enabled: isLoggedIn() && !getPlatformToken(),
-    staleTime: 30_000,
-  });
-}
-
-export function useRevokeSession() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (sessionId: string) => revokeSession(sessionId),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["sessions"] });
-    },
-  });
-}
-
-// The password ruleset, cached app-wide so the register, reset and change
-// forms all render the same requirements without refetching per keystroke.
-export function usePasswordPolicy() {
-  return useQuery({
-    queryKey: ["password-policy"],
-    queryFn: getPasswordPolicy,
-    staleTime: Infinity,
-  });
-}
-
 export function useLogout() {
   const qc = useQueryClient();
   const router = useRouter();
@@ -363,6 +335,65 @@ export function useLogoutAll() {
     onSettled: () => {
       qc.clear();
       router.replace("/login");
+    },
+  });
+}
+
+/* ── second factor, from the account screen ────────────────────────────── */
+//
+// Distinct from the challenge flow in app/verify-mfa: that one runs with an
+// `mfaToken` for an account with no session yet, blocking a sign-in. These
+// run with an ordinary session, for someone managing their own account.
+
+export function useMfaStatus() {
+  return useQuery({
+    queryKey: ["mfa-status"],
+    queryFn: fetchMfaStatus,
+    enabled: isLoggedIn() && !getPlatformToken(),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
+
+/** Issue a secret. Not enrolled until a code proves the authenticator holds it. */
+export function useBeginMfaEnrolment() {
+  return useMutation({ mutationFn: () => beginMfaEnrolment() });
+}
+
+export function useConfirmMfaEnrolment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (code: string) => confirmMfaEnrolment(code),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["mfa-status"] }),
+        // The admin dashboard counts enrolled privileged accounts (AC-002).
+        qc.invalidateQueries({ queryKey: ["admin-dashboard"] }),
+        qc.invalidateQueries({ queryKey: ["members"] }),
+      ]);
+    },
+  });
+}
+
+export function useRegenerateMfaRecoveryCodes() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (code: string) => regenerateMfaRecoveryCodes(code),
+    // The remaining count changes, and the old codes stop working.
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["mfa-status"] }),
+  });
+}
+
+export function useDisableMfa() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (code: string) => disableMfa(code),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["mfa-status"] }),
+        qc.invalidateQueries({ queryKey: ["admin-dashboard"] }),
+        qc.invalidateQueries({ queryKey: ["members"] }),
+      ]);
     },
   });
 }

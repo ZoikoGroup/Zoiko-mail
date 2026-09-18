@@ -1,12 +1,12 @@
 "use client";
 
-import { usePasswordPolicy } from "@/lib/auth-hooks";
+import { PASSWORD_POLICY } from "@/lib/password-policy";
 import { Check, X } from "lucide-react";
 
 /**
- * Renders the password rules straight from the server's /auth/password-policy
- * endpoint, so the form never drifts from what the backend enforces. Each rule
- * lights up green as the candidate satisfies it.
+ * Renders the password rules the backend enforces, mirrored locally (see
+ * lib/password-policy.ts). Each rule lights up green as the candidate
+ * satisfies it.
  */
 export default function PasswordRequirements({
   password,
@@ -15,23 +15,20 @@ export default function PasswordRequirements({
   password: string;
   className?: string;
 }) {
-  const { data: policy } = usePasswordPolicy();
-  if (!policy) return null;
-
-  const classCount = policy.classes.filter(({ test }) =>
+  const classCount = PASSWORD_POLICY.classes.filter(({ test }) =>
     new RegExp(`[${test}]`).test(password)
   ).length;
 
   const rules: Array<{ id: string; label: string; ok: boolean }> = [
     {
       id: "length",
-      label: `At least ${policy.minLength} characters`,
-      ok: password.length >= policy.minLength,
+      label: `At least ${PASSWORD_POLICY.minLength} characters`,
+      ok: password.length >= PASSWORD_POLICY.minLength,
     },
     {
       id: "classes",
-      label: `Mix of ${policy.minClasses}+ character types`,
-      ok: classCount >= policy.minClasses,
+      label: `Mix of ${PASSWORD_POLICY.minClasses}+ character types`,
+      ok: classCount >= PASSWORD_POLICY.minClasses,
     },
     {
       id: "repeats",

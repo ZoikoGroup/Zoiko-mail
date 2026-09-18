@@ -116,11 +116,11 @@ describe("Background jobs and data lifecycle", () => {
     expect((await jobService.processNext()).processed).toBe(false);
     await request(app).post(`/api/v1/lifecycle/${deletion.body.data.id}/confirm-deletion`)
       .set(authHeader(owner.accessToken))
-      .send({ confirmation: "Permanent Deletion Tenant", tenantName: "Wrong name" }).expect(400);
+      .send({ confirmation: "DELETE_TENANT_PERMANENTLY", tenantName: "Wrong name" }).expect(400);
     await request(app).post(`/api/v1/lifecycle/${deletion.body.data.id}/confirm-deletion`)
       .set(authHeader(owner.accessToken))
       .send({
-        confirmation: "Permanent Deletion Tenant",
+        confirmation: "DELETE_TENANT_PERMANENTLY",
         tenantName: "Permanent Deletion Tenant",
       }).expect(202);
 

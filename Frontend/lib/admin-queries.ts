@@ -15,7 +15,7 @@
  *     one — a fabricated MFA method or last-seen time is worse than an honest
  *     blank, because it reads as real.
  */
-import { ApiError, apiRequest } from "./api-client";
+import { ApiError, apiDownload, apiRequest } from "./api-client";
 import type {
   AuditEventDto,
   CommitmentDto,
@@ -23,12 +23,15 @@ import type {
   DashboardDto,
   DeliveryFailureSummaryDto,
   DomainDto,
+  DomainCheckDto,
   GroupDto,
   InvitationDto,
   MailboxDto,
   MemberDto,
+  MembershipRole,
   NotificationDto,
-  PolicyGroupDto,
+  PolicyDto,
+  PolicyConditionDto,
   SettingsDto,
   SupportGrantDto,
   SyncErrorDto,
@@ -116,7 +119,9 @@ export async function fetchInvitations(): Promise<InvitationDto[]> {
       // The membership row records no inviter and no expiry. Both are real
       // gaps; blank is the truthful rendering until the columns exist.
       invitedByName: null,
-      createdAt: m.createdAt,
+      // The row reads "sent {createdAt}", so a relative time rather than the
+      // raw ISO string the API returns.
+      createdAt: ago(m.createdAt),
       expiresAt: "",
     }));
 }
@@ -125,6 +130,7 @@ export async function fetchInvitations(): Promise<InvitationDto[]> {
 
 interface ApiMailbox {
   id: string;
+  membershipId: string | null;
   address: string;
   storageUsed: number | string;
   storageLimit: number | string;
@@ -141,6 +147,7 @@ export async function fetchMailboxes(): Promise<MailboxDto[]> {
   const rows = Array.isArray(res) ? res : (res.mailboxes ?? []);
   return rows.map((m) => ({
     id: m.id,
+    membershipId: m.membershipId ?? null,
     address: m.address,
     // Real now. Anything without a single owning membership is shared as far
     // as this screen is concerned; the Groups screen draws the finer
@@ -163,10 +170,60 @@ export async function fetchMailboxes(): Promise<MailboxDto[]> {
  * intent. Audited server-side with the old and new value, because §14.1
  * requires mailbox-level AI enablement to leave evidence.
  */
-export async function setMailboxAi(mailboxId: string, aiEnabled: boolean): Promise<void> {
+export async function setMailboxAi(
+  mailboxId: string,
+  aiEnabled: boolean,
+  stepUpToken?: string
+): Promise<void> {
   await apiRequest(`/mail/admin/mailboxes/${mailboxId}`, {
     method: "PATCH",
     body: { aiEnabled },
+    // Only enabling is step-up (RBAC §2). Restricting a mailbox is the safe
+    // direction and stays one click.
+    stepUpToken,
+  });
+}
+
+/**
+ * Provision a mailbox for a member who has none.
+ *
+ * Takes a membership rather than an address: the server names the mailbox
+ * after the member's own email, so the two cannot drift apart and an admin
+ * cannot create `dana@acme.com` for somebody who is not Dana.
+ */
+export async function createMailbox(membershipId: string): Promise<void> {
+  await apiRequest("/mail/admin/mailboxes", {
+    method: "POST",
+    body: { membershipId },
+  });
+}
+
+/** Remove a mailbox. Step-up per RBAC §2; suspend first and offer an export. */
+export async function deleteMailbox(
+  mailboxId: string,
+  stepUpToken?: string
+): Promise<void> {
+  await apiRequest(`/mail/admin/mailboxes/${mailboxId}`, {
+    method: "DELETE",
+    stepUpToken,
+  });
+}
+
+/**
+ * Stop or resume sending from one mailbox.
+ *
+ * A reason is required when suspending and the server enforces that — this is
+ * the lever an admin pulls during an abuse or compromise incident, and an
+ * unexplained suspension is not much use to whoever picks the incident up
+ * next.
+ */
+export async function setMailboxSending(
+  mailboxId: string,
+  input: { suspended: boolean; reason?: string }
+): Promise<void> {
+  await apiRequest(`/mail/admin/mailboxes/${mailboxId}/sending`, {
+    method: "PATCH",
+    body: input,
   });
 }
 
@@ -253,7 +310,7 @@ export async function fetchDomains(): Promise<DomainDto[]> {
     spfStatus: d.spfStatus,
     dkimStatus: d.dkimStatus,
     dmarcStatus: d.dmarcStatus,
-    lastCheckedAt: ago(d.lastCheckedAt),
+    lastCheckedAt: d.lastCheckedAt ? ago(d.lastCheckedAt) : "never",
     sendingEnabled: d.sendingEnabled,
     warmupNote: null,
     // The API returns aggregate per-record *statuses* but not the record
@@ -273,11 +330,24 @@ export async function fetchDomains(): Promise<DomainDto[]> {
   }));
 }
 
+interface ApiDomainCheck {
+  id: string;
+  checkedAt: string;
+  verificationStatus: DomainCheckDto["verificationStatus"];
+  mxStatus: DomainCheckDto["mxStatus"];
+  spfStatus: DomainCheckDto["spfStatus"];
+  dkimStatus: DomainCheckDto["dkimStatus"];
+  dmarcStatus: DomainCheckDto["dmarcStatus"];
+  errorDetails: Record<string, unknown> | null;
+}
+
 /* ── audit ─────────────────────────────────────────────────────────────── */
 
 interface ApiAuditEvent {
   id: string;
   eventType: string;
+  /** Audit §6.2. Null only on rows written before the column existed. */
+  actorType: string | null;
   targetType: string | null;
   targetId: string | null;
   createdAt: string;
@@ -292,9 +362,13 @@ function toAuditEvent(e: ApiAuditEvent): AuditEventDto {
     id: e.id,
     eventType: e.eventType,
     actorName: e.actor ? personName(e.actor) : "System",
-    // The row records no actor_type (Audit §6.2 asks for one); infer the only
-    // distinction the data supports — a human actor, or the system.
-    actorType: e.actor ? "user" : "system",
+    // The server records actor_type now (Audit §6.2). The fallback is for rows
+    // written before the column existed, which genuinely did not capture it —
+    // inferring from whether there is an actor is all those rows support, and
+    // it is what this line used to do for *every* row. That is why the Admin,
+    // Support and AI filters could never match anything.
+    actorType: (e.actorType?.toLowerCase() as AuditEventDto["actorType"]) ??
+      (e.actor ? "user" : "system"),
     targetLabel: e.targetType
       ? `${e.targetType}${e.targetId ? ` · ${e.targetId.slice(0, 8)}` : ""}`
       : "—",
@@ -302,11 +376,80 @@ function toAuditEvent(e: ApiAuditEvent): AuditEventDto {
   };
 }
 
-export async function fetchAuditEvents(limit = 50): Promise<AuditEventDto[]> {
-  const res = await apiRequest<{ events: ApiAuditEvent[] }>(
-    `/audit/events?limit=${limit}`
+/**
+ * What the audit screen can ask the server for.
+ *
+ * All of it goes over the wire. The screen used to read a fixed 50 rows and
+ * filter them in the browser, so a category or a date range answered from the
+ * newest 50 events and reported an empty result with total confidence when
+ * the matching rows were older than that.
+ */
+export interface AuditQuery {
+  page?: number;
+  limit?: number;
+  /** Event-type prefixes, OR-ed. A category is a set of them, not one type. */
+  eventTypePrefix?: string[];
+  /** Audit §6.2's actor type — who acted, as opposed to what happened. */
+  actorType?: "USER" | "ADMIN" | "SUPPORT" | "SYSTEM" | "PROVIDER" | "AI_WORKER";
+  /** ISO instants; the server refuses a range that ends before it starts. */
+  from?: string;
+  to?: string;
+}
+
+export interface AuditPage {
+  events: AuditEventDto[];
+  pagination: { page: number; limit: number; total: number; totalPages: number };
+}
+
+function auditSearchParams(query: AuditQuery): URLSearchParams {
+  const params = new URLSearchParams();
+  if (query.page) params.set("page", String(query.page));
+  if (query.limit) params.set("limit", String(query.limit));
+  // Repeated rather than joined: the server reads them as a list, and a comma
+  // would become part of one prefix.
+  for (const prefix of query.eventTypePrefix ?? []) {
+    params.append("eventTypePrefix", prefix);
+  }
+  if (query.actorType) params.set("actorType", query.actorType);
+  if (query.from) params.set("from", query.from);
+  if (query.to) params.set("to", query.to);
+  return params;
+}
+
+export async function fetchAuditEvents(query: AuditQuery = {}): Promise<AuditPage> {
+  const params = auditSearchParams({ limit: 25, page: 1, ...query });
+  const res = await apiRequest<{
+    events: ApiAuditEvent[];
+    pagination?: AuditPage["pagination"];
+  }>(`/audit/events?${params.toString()}`);
+
+  const events = (res.events ?? []).map(toAuditEvent);
+  return {
+    events,
+    // A server that sends no pagination block still gets a truthful one rather
+    // than a fabricated total: what came back is all that is known to exist.
+    pagination: res.pagination ?? {
+      page: query.page ?? 1,
+      limit: query.limit ?? 25,
+      total: events.length,
+      totalPages: 1,
+    },
+  };
+}
+
+/**
+ * Download every row the current filters match, not the page on screen.
+ *
+ * Page and limit are deliberately dropped: an export that paginated would be
+ * the defect it exists to fix.
+ */
+export async function exportAuditEvents(query: AuditQuery = {}): Promise<void> {
+  const params = auditSearchParams({ ...query, page: undefined, limit: undefined });
+  const suffix = params.toString();
+  await apiDownload(
+    `/audit/events/export${suffix ? `?${suffix}` : ""}`,
+    "audit-log.csv"
   );
-  return (res.events ?? []).map(toAuditEvent);
 }
 
 /* ── connectors ────────────────────────────────────────────────────────── */
@@ -500,7 +643,7 @@ async function composeDashboard(windowHours: number): Promise<DashboardDto> {
       fetchMailboxes(),
       fetchDomains(),
       fetchConnectors(),
-      fetchAuditEvents(6),
+      fetchAuditEvents({ limit: 6 }),
       fetchDeliveryFailures(windowHours),
     ]);
 
@@ -522,7 +665,11 @@ async function composeDashboard(windowHours: number): Promise<DashboardDto> {
   const boxes = settled("mailboxes", mailboxes, []);
   const doms = settled("domains", domains, []);
   const conns = settled("connectors", connectors, []);
-  const events = settled("audit", audit, []);
+  // The dashboard wants the rows, not the page metadata.
+  const events = settled<AuditPage>("audit", audit, {
+    events: [],
+    pagination: { page: 1, limit: 6, total: 0, totalPages: 0 },
+  }).events;
   const deliveryFailures = asFailureSummary(
     settled<DeliveryFailureSummaryDto | null>("deliveryFailures", failures, null)
   );
@@ -579,42 +726,123 @@ interface ApiPolicy {
   rules: Record<string, unknown> | null;
 }
 
-export async function fetchPolicyGroups(): Promise<PolicyGroupDto[]> {
+/** Render a condition value, which may be a scalar or a list. */
+function conditionValue(value: unknown): string {
+  if (Array.isArray(value)) return value.map((entry) => String(entry)).join(", ");
+  return String(value);
+}
+
+/**
+ * The policy in force for each type.
+ *
+ * One ACTIVE version per type is the contract; the newest is the fallback so a
+ * tenant whose policies are all still DRAFT shows something truthful rather
+ * than an empty screen.
+ */
+export async function fetchPolicies(): Promise<PolicyDto[]> {
   const res = await apiRequest<{ policies: ApiPolicy[] }>("/policies");
+
   const byType: Record<string, ApiPolicy[]> = {};
-  for (const p of res.policies ?? []) {
-    byType[p.type] = [...(byType[p.type] ?? []), p];
+  for (const policy of res.policies ?? []) {
+    byType[policy.type] = [...(byType[policy.type] ?? []), policy];
   }
 
-  return Object.entries(byType).map(([type, policies]) => {
-    // One active version per type is the contract; fall back to the newest.
-    const active =
-      policies.find((p: ApiPolicy) => p.status === "ACTIVE") ??
-      [...policies].sort((a: ApiPolicy, b: ApiPolicy) => b.version - a.version)[0];
-    const rules = (active?.rules ?? {}) as Record<string, unknown>;
+  return Object.values(byType)
+    .map((policies) => {
+      const current =
+        policies.find((policy) => policy.status === "ACTIVE") ??
+        [...policies].sort((a, b) => b.version - a.version)[0]!;
+      const rules = (current.rules ?? {}) as {
+        defaultEffect?: string;
+        conditions?: Array<{
+          field: string;
+          operator: string;
+          value: unknown;
+          effect: string;
+        }>;
+      };
 
-    const group: PolicyGroupDto = {
-      group: active?.name ?? type,
-      // SECURITY policy is Owner-only: the matrix withholds
-      // `policy.security.write` from an Admin, so the group is shown but
-      // marked out of reach rather than hidden.
-      restriction:
-        type === "SECURITY" ? "Owner only — requires policy.security.write" : null,
-      toggles: Object.entries(rules)
-        .filter(([, value]) => typeof value === "boolean")
-        .map(([key, value]) => ({
-          key,
-          // Turn camelCase rule keys into readable labels.
-          label: key.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase()),
-          detail: `${type} policy · version ${active?.version ?? 1}`,
-          enabled: value as boolean,
-          // Whether an Admin may flip a given rule is evaluation step 8, which
-          // is not wired yet. Shown as editable; the server refuses if not.
-          locked: type === "SECURITY",
+      return {
+        id: current.id,
+        type: current.type as PolicyDto["type"],
+        name: current.name,
+        description: current.description,
+        version: current.version,
+        status: current.status as PolicyDto["status"],
+        // DENY is the safe reading of a policy that does not say: the engine
+        // fails closed, so the screen must not imply otherwise.
+        defaultEffect: (rules.defaultEffect === "ALLOW" ? "ALLOW" : "DENY") as PolicyDto["defaultEffect"],
+        conditions: (rules.conditions ?? []).map((condition) => ({
+          field: condition.field,
+          operator: condition.operator,
+          value: conditionValue(condition.value),
+          effect: condition.effect === "ALLOW" ? ("ALLOW" as const) : ("DENY" as const),
         })),
-    };
-    return group;
+      };
+    })
+    .sort((a, b) => a.type.localeCompare(b.type));
+}
+
+/**
+ * Save a policy's rules as a new, active version.
+ *
+ * Two calls, because a policy is versioned rather than edited: creating
+ * supersedes, activating retires the previous version. Doing both here means
+ * the screen cannot leave a new version sitting in DRAFT while showing it as
+ * in force.
+ *
+ * The whole rule set is sent every time. Sending only what changed would drop
+ * the conditions, which is the difference between narrowing a policy and
+ * removing it.
+ */
+export async function savePolicyRules(
+  policy: PolicyDto,
+  rules: { defaultEffect: PolicyDto["defaultEffect"]; conditions: PolicyConditionDto[] },
+  stepUpToken?: string
+): Promise<void> {
+  const created = await apiRequest<{ id: string }>("/policies", {
+    method: "POST",
+    // An AI policy write is step-up (RBAC §2); the other types are not, and
+    // the server decides which by reading the type off this body.
+    stepUpToken,
+    body: {
+      type: policy.type,
+      name: policy.name,
+      description: policy.description,
+      rules: {
+        defaultEffect: rules.defaultEffect,
+        conditions: rules.conditions.map((condition) => ({
+          field: condition.field,
+          operator: condition.operator,
+          // A list operator takes a list; everything else takes one value.
+          // Sending a comma-joined string to IN would make one condition that
+          // matches a literal containing commas, which silently never fires.
+          value:
+            condition.operator === "IN"
+              ? condition.value.split(",").map((entry) => entry.trim()).filter(Boolean)
+              : coerceScalar(condition.value),
+          effect: condition.effect,
+        })),
+      },
+    },
   });
+  if (!created?.id) throw new Error("The server did not return the new policy version.");
+  await apiRequest(`/policies/${created.id}/activate`, { method: "POST" });
+}
+
+/**
+ * Turn a typed value back into the scalar the rule schema accepts.
+ *
+ * Conditions are compared against real context values, so "true" typed into a
+ * text box has to reach the server as a boolean or `mailbox.eligible EQUALS
+ * true` never matches anything.
+ */
+function coerceScalar(value: string): string | number | boolean {
+  const trimmed = value.trim();
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+  if (trimmed !== "" && Number.isFinite(Number(trimmed))) return Number(trimmed);
+  return trimmed;
 }
 
 /* ── notifications ─────────────────────────────────────────────────────── */
@@ -926,4 +1154,129 @@ export async function updateWorkspaceSettings(
   if (Object.keys(body).length === 0) return;
 
   await apiRequest("/tenants/current", { method: "PATCH", body });
+}
+
+/* ── acting on a membership — §6.3 ─────────────────────────────────────── */
+
+/**
+ * Change a member's role or suspend them.
+ *
+ * The admin boundary is not enforced here. `people.member.manage` is the
+ * floor the route checks; the service then refuses an Admin acting on an
+ * Owner by looking at the target row. The screen hides what it knows it
+ * cannot do, but hiding a control is not access control — the refusal that
+ * matters is the server's.
+ */
+export async function updateMember(
+  membershipId: string,
+  patch: { role?: MembershipRole; status?: "ACTIVE" | "SUSPENDED" }
+): Promise<void> {
+  await apiRequest(`/membership/members/${membershipId}`, {
+    method: "PATCH",
+    body: patch,
+  });
+}
+
+/** Remove someone from the workspace. The account survives; the membership does not. */
+export async function removeMember(membershipId: string): Promise<void> {
+  await apiRequest(`/membership/members/${membershipId}`, { method: "DELETE" });
+}
+
+/**
+ * Revoke a pending invitation.
+ *
+ * An invitation *is* a membership in INVITED status, so this addresses it by
+ * membership id — the same id the roster uses.
+ */
+export async function cancelInvitation(membershipId: string): Promise<void> {
+  await apiRequest(`/membership/invitations/${membershipId}`, { method: "DELETE" });
+}
+
+/* ── notifications ─────────────────────────────────────────────────────── */
+
+/** Mark one notification read. Returns nothing the screen needs; the list is refetched. */
+export async function markNotificationRead(notificationId: string): Promise<void> {
+  await apiRequest(`/notifications/${notificationId}/read`, { method: "PATCH" });
+}
+
+/* ── provider events ───────────────────────────────────────────────────── */
+
+/**
+ * Re-queue a dead-lettered provider event.
+ *
+ * Dead-lettering is what happens after the retry budget is spent, so this is
+ * the only way back: without it a transient provider failure is permanent,
+ * and the mail that event carried never lands.
+ */
+export async function replayDeadLetter(eventId: string): Promise<void> {
+  await apiRequest(`/connectors/dead-letter/${eventId}/replay`, { method: "POST" });
+}
+
+/* ── domains — §6.11 ───────────────────────────────────────────────────── */
+
+/**
+ * Add a custom domain.
+ *
+ * Returns nothing the caller needs: the list is refetched, and the
+ * verification token the server generates arrives with it.
+ */
+export async function addDomain(domainName: string): Promise<void> {
+  await apiRequest("/domains", { method: "POST", body: { domainName } });
+}
+
+/**
+ * Re-run the DNS checks now.
+ *
+ * The server resolves TXT, MX, DKIM and DMARC live and records the result as a
+ * check row, so this is a write rather than a read — it is what "Re-check now"
+ * has always meant, and the button that said it was wired to nothing.
+ */
+export async function recheckDomain(domainId: string): Promise<void> {
+  await apiRequest(`/domains/${domainId}/diagnostics`, { method: "POST" });
+}
+
+/**
+ * Turn on sending for a verified domain.
+ *
+ * The server refuses with a 409 naming the failing checks unless ownership,
+ * SPF, DKIM and DMARC all pass, so the screen does not need to decide
+ * eligibility — it shows the refusal.
+ */
+export async function activateDomain(domainId: string): Promise<void> {
+  await apiRequest(`/domains/${domainId}/activate`, { method: "POST" });
+}
+
+/** Remove a domain. Refused by the server while it is active for sending. */
+export async function removeDomain(
+  domainId: string,
+  stepUpToken?: string
+): Promise<void> {
+  await apiRequest(`/domains/${domainId}`, { method: "DELETE", stepUpToken });
+}
+
+/**
+ * The check history for one domain.
+ *
+ * The domain row holds only the most recent result, so it cannot say whether a
+ * failure is minutes or weeks old — which is the difference between "DNS has
+ * not propagated yet" and "this was never published".
+ */
+export async function fetchDomainChecks(domainId: string): Promise<DomainCheckDto[]> {
+  const res = await apiRequest<{ checks: ApiDomainCheck[] }>(
+    `/domains/${domainId}/checks`
+  );
+  return (res.checks ?? []).map((check) => ({
+    id: check.id,
+    checkedAt: ago(check.checkedAt),
+    verificationStatus: check.verificationStatus,
+    mxStatus: check.mxStatus,
+    spfStatus: check.spfStatus,
+    dkimStatus: check.dkimStatus,
+    dmarcStatus: check.dmarcStatus,
+    // errorDetails is keyed by record type — { dkim: "NXDOMAIN" } — so the
+    // resolver's own message is shown rather than restated as a red pill.
+    errors: Object.entries(check.errorDetails ?? {}).map(
+      ([record, message]) => `${record.toUpperCase()}: ${String(message)}`
+    ),
+  }));
 }

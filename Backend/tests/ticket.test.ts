@@ -1,203 +1,330 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
-import { authHeader, loginUser, registerUser } from "./helpers.js";
+import { authHeader, registerUser, loginUser, platformSignIn } from "./helpers.js";
 import { prisma } from "../src/config/prisma.js";
 
 const app = createApp();
 
-async function staffPlatformToken(email: string): Promise<{ token: string; userId: string }> {
-  const staff = await registerUser(app, { email });
-  await prisma.appUser.update({ where: { id: staff.userId }, data: { platformRole: "SUPER_ADMIN" } });
-  const login = await request(app).post("/api/v1/auth/login")
-    .send({ email: staff.email, password: staff.password })
-    .expect(200);
-  return { token: login.body.data.platformToken as string, userId: staff.userId };
-}
+describe("Ticket module (restored)", () => {
+  it("tenant member can create, list, view, and comment on tickets; MEMBER sees only own", async () => {
+    const owner = await registerUser(app, { email: "ticket-owner@zoiko.test", tenantName: "Ticket Tenant" });
+    const admin = await registerUser(app, { email: "ticket-admin@zoiko.test" });
+    const support = await registerUser(app, { email: "ticket-support@zoiko.test" });
+    const member = await registerUser(app, { email: "ticket-member@zoiko.test" });
 
-describe("Support tickets", () => {
-  it("lets a tenant member open a ticket and keeps it private from other members", async () => {
-    const owner = await registerUser(app, { email: `tk-owner-${Date.now()}@zoiko.test`, tenantName: "Ticket Tenant" });
-    const member = await registerUser(app, { email: `tk-member-${Date.now()}@zoiko.test` });
-    await request(app).post("/api/v1/membership/members")
-      .set(authHeader(owner.accessToken))
-      .send({ email: member.email, role: "MEMBER" })
+    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+      .send({ email: admin.email, role: "ADMIN" }).expect(201);
+    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+      .send({ email: support.email, role: "SUPPORT" }).expect(201);
+    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+      .send({ email: member.email, role: "MEMBER" }).expect(201);
+
+    const adminLogin = await loginUser(app, admin.email, admin.password, owner.tenantId);
+    const supportLogin = await loginUser(app, support.email, support.password, owner.tenantId);
+    const memberLogin = await loginUser(app, member.email, member.password, owner.tenantId);
+
+    // MEMBER creates a ticket
+    const createRes = await request(app).post("/api/v1/support/tickets")
+      .set(authHeader(memberLogin.accessToken))
+      .send({ subject: "Delivery failure for order #123", description: "Emails to customer@example.com bouncing with 550.", category: "DELIVERY", severity: "HIGH" })
       .expect(201);
-    const memberSession = await loginUser(app, member.email, member.password, owner.tenantId);
+    const ticketId = createRes.body.data.id;
+    expect(typeof createRes.body.data.ticketNumber).toBe("number");
+    expect(createRes.body.data.ticketNumber).toBeGreaterThan(0);
+    expect(createRes.body.data.status).toBe("OPEN");
+    expect(createRes.body.data.openedByType).toBe("TENANT");
 
-    const created = await request(app).post("/api/v1/support/tickets")
-      .set(authHeader(memberSession.accessToken))
-      .send({ subject: "Outbound mail delayed", description: "Messages are stuck in the queue for hours.", category: "DELIVERY", severity: "HIGH" })
-      .expect(201);
-    const ticketId = created.body.data.id;
-    expect(created.body.data.status).toBe("OPEN");
-    expect(created.body.data.openedByType).toBe("TENANT");
-    expect(created.body.data.slaDueAt).toBeTruthy();
-
-    // The opener sees it.
-    const list = await request(app).get("/api/v1/support/tickets")
-      .set(authHeader(memberSession.accessToken)).expect(200);
-    expect(list.body.data.tickets.map((t: any) => t.id)).toContain(ticketId);
-
-    // A different MEMBER does not.
-    const other = await registerUser(app, { email: `tk-other-${Date.now()}@zoiko.test` });
-    await request(app).post("/api/v1/membership/members")
-      .set(authHeader(owner.accessToken))
-      .send({ email: other.email, role: "MEMBER" })
-      .expect(201);
-    const otherSession = await loginUser(app, other.email, other.password, owner.tenantId);
-    const otherList = await request(app).get("/api/v1/support/tickets")
-      .set(authHeader(otherSession.accessToken)).expect(200);
-    expect(otherList.body.data.tickets.map((t: any) => t.id)).not.toContain(ticketId);
-    await request(app).get(`/api/v1/support/tickets/${ticketId}`)
-      .set(authHeader(otherSession.accessToken)).expect(403);
-
-    // The opener replies to their own ticket.
-    await request(app).post(`/api/v1/support/tickets/${ticketId}/comments`)
-      .set(authHeader(memberSession.accessToken))
-      .send({ body: "Adding the affected mailbox address." })
-      .expect(201);
-
-    // The OWNER sees every tenant ticket.
+    // OWNER lists — should see the ticket
     const ownerList = await request(app).get("/api/v1/support/tickets")
-      .set(authHeader(owner.accessToken)).expect(200);
-    expect(ownerList.body.data.tickets.map((t: any) => t.id)).toContain(ticketId);
-  });
-
-  it("runs the staff workflow: list, assign, triage, comment internal, resolve", async () => {
-    const owner = await registerUser(app, { email: `tk-owner2-${Date.now()}@zoiko.test`, tenantName: "Ticket Staff Tenant" });
-    const { token, userId: staffId } = await staffPlatformToken(`tk-staff-${Date.now()}@zoiko.test`);
-
-    const created = await request(app).post("/api/v1/support/platform/tickets")
-      .set(authHeader(token))
-      .send({ tenantId: owner.tenantId, subject: "Cannot verify domain", description: "DNS check keeps failing for our primary domain.", category: "DOMAIN", severity: "MEDIUM" })
-      .expect(201);
-    const ticketId = created.body.data.id;
-    expect(created.body.data.openedByType).toBe("STAFF");
-
-    const listed = await request(app).get("/api/v1/support/platform/tickets?q=Cannot verify domain")
-      .set(authHeader(token)).expect(200);
-    expect(listed.body.data.tickets.map((t: any) => t.id)).toContain(ticketId);
-
-    const staffList = await request(app).get("/api/v1/support/platform/tickets/staff")
-      .set(authHeader(token)).expect(200);
-    expect(staffList.body.data.staff.some((s: any) => s.id === staffId)).toBe(true);
-
-    const updated = await request(app).patch(`/api/v1/support/platform/tickets/${ticketId}`)
-      .set(authHeader(token))
-      .send({ status: "IN_PROGRESS", severity: "URGENT", assignedStaffId: staffId })
-      .expect(200);
-    expect(updated.body.data.status).toBe("IN_PROGRESS");
-    expect(updated.body.data.severity).toBe("URGENT");
-    expect(updated.body.data.assignedStaff?.id).toBe(staffId);
-
-    await request(app).post(`/api/v1/support/platform/tickets/${ticketId}/comments`)
-      .set(authHeader(token))
-      .send({ body: "Internal: domain is pending registrar propagation.", internal: true })
-      .expect(201);
-
-    const detailStaff = await request(app).get(`/api/v1/support/platform/tickets/${ticketId}`)
-      .set(authHeader(token)).expect(200);
-    expect(detailStaff.body.data.comments).toHaveLength(1);
-    expect(detailStaff.body.data.comments[0].internal).toBe(true);
-
-    const resolved = await request(app).patch(`/api/v1/support/platform/tickets/${ticketId}`)
-      .set(authHeader(token))
-      .send({ status: "RESOLVED" })
-      .expect(200);
-    expect(resolved.body.data.status).toBe("RESOLVED");
-    expect(resolved.body.data.resolvedAt).toBeTruthy();
-  });
-
-  it("hides internal staff notes from the tenant view", async () => {
-    const owner = await registerUser(app, { email: `tk-owner3-${Date.now()}@zoiko.test`, tenantName: "Ticket Privacy Tenant" });
-    const { token } = await staffPlatformToken(`tk-staff3-${Date.now()}@zoiko.test`);
-
-    const created = await request(app).post("/api/v1/support/tickets")
       .set(authHeader(owner.accessToken))
-      .send({ subject: "Question about billing", description: "We were charged twice this month.", category: "BILLING", severity: "LOW" })
-      .expect(201);
-    const ticketId = created.body.data.id;
-
-    await request(app).post(`/api/v1/support/platform/tickets/${ticketId}/comments`)
-      .set(authHeader(token))
-      .send({ body: "Internal: refund issued, do not surface the ledger note.", internal: true })
-      .expect(201);
-    await request(app).post(`/api/v1/support/platform/tickets/${ticketId}/comments`)
-      .set(authHeader(token))
-      .send({ body: "A refund has been issued.", internal: false })
-      .expect(201);
-
-    const tenantView = await request(app).get(`/api/v1/support/tickets/${ticketId}`)
-      .set(authHeader(owner.accessToken)).expect(200);
-    expect(tenantView.body.data.comments).toHaveLength(1);
-    expect(tenantView.body.data.comments[0].internal).toBe(false);
-    expect(tenantView.body.data.comments[0].body).toBe("A refund has been issued.");
-  });
-
-  it("allows a tenant-scoped SUPPORT membership to read the platform ticket list", async () => {
-    const owner = await registerUser(app, { email: `tk-owner4-${Date.now()}@zoiko.test`, tenantName: "Ticket Gate Tenant" });
-    const support = await registerUser(app, { email: `tk-support-${Date.now()}@zoiko.test` });
-    await request(app).post("/api/v1/membership/members")
-      .set(authHeader(owner.accessToken))
-      .send({ email: support.email, role: "SUPPORT" })
-      .expect(201);
-    const session = await loginUser(app, support.email, support.password, owner.tenantId);
-
-    const res = await request(app).get("/api/v1/support/platform/tickets")
-      .set(authHeader(session.accessToken)).expect(200);
-    expect(Array.isArray(res.body.data.tickets)).toBe(true);
-  });
-
-  it("auto-reopens a WAITING_TENANT ticket when the tenant replies", async () => {
-    const owner = await registerUser(app, { email: `tk-auto-${Date.now()}@zoiko.test`, tenantName: "Auto Reopen Tenant" });
-    const member = await registerUser(app, { email: `tk-auto-m-${Date.now()}@zoiko.test` });
-    await request(app).post("/api/v1/membership/members")
-      .set(authHeader(owner.accessToken))
-      .send({ email: member.email, role: "MEMBER" })
-      .expect(201);
-    const memberSession = await loginUser(app, member.email, member.password, owner.tenantId);
-    const { token } = await staffPlatformToken(`tk-auto-s-${Date.now()}@zoiko.test`);
-
-    const created = await request(app).post("/api/v1/support/tickets")
-      .set(authHeader(memberSession.accessToken))
-      .send({ subject: "Waiting on us", description: "We are waiting to confirm details from our side.", category: "OTHER", severity: "LOW" })
-      .expect(201);
-    const ticketId = created.body.data.id;
-
-    await request(app).patch(`/api/v1/support/platform/tickets/${ticketId}`)
-      .set(authHeader(token))
-      .send({ status: "WAITING_TENANT" })
       .expect(200);
+    expect(ownerList.body.data.tickets.some((t: { id: string }) => t.id === ticketId)).toBe(true);
+    expect(ownerList.body.data.ticketCounts.OPEN).toBeGreaterThanOrEqual(1);
 
+    // ADMIN lists — should see the ticket
+    const adminList = await request(app).get("/api/v1/support/tickets")
+      .set(authHeader(adminLogin.accessToken))
+      .expect(200);
+    expect(adminList.body.data.tickets.some((t: { id: string }) => t.id === ticketId)).toBe(true);
+
+    // SUPPORT lists — should see the ticket
+    const supportList = await request(app).get("/api/v1/support/tickets")
+      .set(authHeader(supportLogin.accessToken))
+      .expect(200);
+    expect(supportList.body.data.tickets.some((t: { id: string }) => t.id === ticketId)).toBe(true);
+
+    // MEMBER lists — should see ONLY their own ticket
+    const memberList = await request(app).get("/api/v1/support/tickets")
+      .set(authHeader(memberLogin.accessToken))
+      .expect(200);
+    expect(memberList.body.data.tickets.every((t: { openedBy: { id: string } }) => t.openedBy.id === member.userId)).toBe(true);
+  });
+
+  it("MEMBER cannot view another member's ticket (403), but OWNER/ADMIN/SUPPORT can", async () => {
+    const owner = await registerUser(app, { email: "ticket-vis-owner@zoiko.test", tenantName: "Vis Tenant" });
+    const memberA = await registerUser(app, { email: "ticket-vis-a@zoiko.test" });
+    const memberB = await registerUser(app, { email: "ticket-vis-b@zoiko.test" });
+    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+      .send({ email: memberA.email, role: "MEMBER" }).expect(201);
+    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+      .send({ email: memberB.email, role: "MEMBER" }).expect(201);
+    const memberALogin = await loginUser(app, memberA.email, memberA.password, owner.tenantId);
+    const memberBLogin = await loginUser(app, memberB.email, memberB.password, owner.tenantId);
+
+    // Member A creates ticket
+    const createA = await request(app).post("/api/v1/support/tickets")
+      .set(authHeader(memberALogin.accessToken))
+      .send({ subject: "A's issue", description: "Detailed description for A's ticket", category: "OTHER", severity: "LOW" })
+      .expect(201);
+    const ticketId = createA.body.data.id;
+
+    // Member B tries to view — 403
+    await request(app).get(`/api/v1/support/tickets/${ticketId}`)
+      .set(authHeader(memberBLogin.accessToken))
+      .expect(403);
+
+    // Owner can view
+    const ownerView = await request(app).get(`/api/v1/support/tickets/${ticketId}`)
+      .set(authHeader(owner.accessToken))
+      .expect(200);
+    expect(ownerView.body.data.id).toBe(ticketId);
+
+    // Member A can view own
+    await request(app).get(`/api/v1/support/tickets/${ticketId}`)
+      .set(authHeader(memberALogin.accessToken))
+      .expect(200);
+  });
+
+  it("tenant member can comment on own ticket; MEMBER cannot comment on other's ticket", async () => {
+    const owner = await registerUser(app, { email: "ticket-comm-owner@zoiko.test", tenantName: "Comm Tenant" });
+    const memberA = await registerUser(app, { email: "ticket-comm-a@zoiko.test" });
+    const memberB = await registerUser(app, { email: "ticket-comm-b@zoiko.test" });
+    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+      .send({ email: memberA.email, role: "MEMBER" }).expect(201);
+    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+      .send({ email: memberB.email, role: "MEMBER" }).expect(201);
+    const memberALogin = await loginUser(app, memberA.email, memberA.password, owner.tenantId);
+    const memberBLogin = await loginUser(app, memberB.email, memberB.password, owner.tenantId);
+
+    const createA = await request(app).post("/api/v1/support/tickets")
+      .set(authHeader(memberALogin.accessToken))
+      .send({ subject: "Comment test", description: "Desc for comment test", category: "OTHER", severity: "LOW" })
+      .expect(201);
+    const ticketId = createA.body.data.id;
+
+    // Member B tries to comment — 403
     await request(app).post(`/api/v1/support/tickets/${ticketId}/comments`)
-      .set(authHeader(memberSession.accessToken))
-      .send({ body: "We confirm the account details are correct." })
-      .expect(201);
+      .set(authHeader(memberBLogin.accessToken))
+      .send({ body: "B trying to comment" })
+      .expect(403);
 
-    const detail = await request(app).get(`/api/v1/support/platform/tickets/${ticketId}`)
-      .set(authHeader(token)).expect(200);
-    expect(detail.body.data.status).toBe("IN_PROGRESS");
+    // Member A comments — 201
+    const commentRes = await request(app).post(`/api/v1/support/tickets/${ticketId}/comments`)
+      .set(authHeader(memberALogin.accessToken))
+      .send({ body: "A adding more details" })
+      .expect(201);
+    expect(commentRes.body.data.body).toBe("A adding more details");
+    expect(commentRes.body.data.authorType).toBe("TENANT");
+
+    // Owner can comment
+    const ownerComment = await request(app).post(`/api/v1/support/tickets/${ticketId}/comments`)
+      .set(authHeader(owner.accessToken))
+      .send({ body: "Owner checking in" })
+      .expect(201);
+    expect(ownerComment.body.data.authorType).toBe("TENANT"); // owner commenting as tenant member
   });
 
-  it("flags overdue SLAs and filters the platform list", async () => {
-    const owner = await registerUser(app, { email: `tk-sla-${Date.now()}@zoiko.test`, tenantName: "SLA Tenant" });
-    const { token } = await staffPlatformToken(`tk-sla-s-${Date.now()}@zoiko.test`);
+  it("staff platform console can list all tickets, filter by assigned=me, update status/severity/assignee, add internal comments", async () => {
+    // Register two tenants
+    const ownerA = await registerUser(app, { email: "staff-ticket-ownerA@zoiko.test", tenantName: "Tenant A" });
+    const ownerB = await registerUser(app, { email: "staff-ticket-ownerB@zoiko.test", tenantName: "Tenant B" });
 
-    const created = await request(app).post("/api/v1/support/platform/tickets")
-      .set(authHeader(token))
-      .send({ tenantId: owner.tenantId, subject: "SLA breached demo", description: "Ticket whose SLA we will let expire.", category: "OTHER", severity: "URGENT" })
+    // Create staff SUPPORT
+    const staff1 = await registerUser(app, { email: "staff1@zoiko.test" });
+    await prisma.appUser.update({ where: { id: staff1.userId }, data: { platformRole: "SUPPORT" } });
+    const staff1Token = await platformSignIn(app, staff1.email, staff1.password, staff1.mfaSecret);
+    expect(staff1Token).toBeTruthy();
+
+    // Create SUPER_ADMIN staff
+    const staff2 = await registerUser(app, { email: "staff2@zoiko.test" });
+    await prisma.appUser.update({ where: { id: staff2.userId }, data: { platformRole: "SUPER_ADMIN" } });
+    const staff2Token = await platformSignIn(app, staff2.email, staff2.password, staff2.mfaSecret);
+
+    // Staff1 creates a ticket for tenant A
+    const create1 = await request(app).post("/api/v1/support/platform/tickets")
+      .set(authHeader(staff1Token))
+      .send({ tenantId: ownerA.tenantId, subject: "Staff-created for A", description: "Platform staff opened", category: "SECURITY", severity: "URGENT" })
       .expect(201);
-    const ticketId = created.body.data.id;
+    const ticket1Id = create1.body.data.id;
 
-    await prisma.supportTicket.update({ where: { id: ticketId }, data: { slaDueAt: new Date(Date.now() - 60_000) } });
+    // Staff2 creates a ticket for tenant B
+    const create2 = await request(app).post("/api/v1/support/platform/tickets")
+      .set(authHeader(staff2Token))
+      .send({ tenantId: ownerB.tenantId, subject: "Staff-created for B", description: "Platform staff opened", category: "BILLING", severity: "HIGH" })
+      .expect(201);
+    const ticket2Id = create2.body.data.id;
 
-    const detail = await request(app).get(`/api/v1/support/platform/tickets/${ticketId}`)
-      .set(authHeader(token)).expect(200);
-    expect(detail.body.data.slaOverdue).toBe(true);
+    // Platform list all (no filters) — both tickets visible
+    const allList = await request(app).get("/api/v1/support/platform/tickets")
+      .set(authHeader(staff1Token))
+      .expect(200);
+    expect(allList.body.data.tickets.length).toBeGreaterThanOrEqual(2);
 
-    const overdue = await request(app).get("/api/v1/support/platform/tickets?overdue=true")
-      .set(authHeader(token)).expect(200);
-    expect(overdue.body.data.tickets.map((t: any) => t.id)).toContain(ticketId);
+    // Filter by tenantId
+    const filteredA = await request(app).get(`/api/v1/support/platform/tickets?tenantId=${ownerA.tenantId}`)
+      .set(authHeader(staff1Token))
+      .expect(200);
+    expect(filteredA.body.data.tickets.every((t: { tenantId: string }) => t.tenantId === ownerA.tenantId)).toBe(true);
+
+    // Filter assigned=me for staff1
+    const myTickets = await request(app).get("/api/v1/support/platform/tickets?assigned=me")
+      .set(authHeader(staff1Token))
+      .expect(200);
+    // ticket1 created by staff1 but not assigned; ticket2 by staff2
+    // listPlatformMine should show tickets assigned to staff1
+    expect(myTickets.body.data.tickets.every((t: { assignedStaff: { id: string } | null }) => t.assignedStaff?.id === staff1.userId)).toBe(true);
+
+    // Update ticket1: assign to staff1, change status
+    const updateRes = await request(app).patch(`/api/v1/support/platform/tickets/${ticket1Id}`)
+      .set(authHeader(staff1Token))
+      .send({ assignedStaffId: staff1.userId, status: "IN_PROGRESS", severity: "HIGH" })
+      .expect(200);
+    expect(updateRes.body.data.assignedStaff?.id).toBe(staff1.userId);
+    expect(updateRes.body.data.status).toBe("IN_PROGRESS");
+    expect(updateRes.body.data.severity).toBe("HIGH");
+
+    // Now assigned=me should include ticket1
+    const myTickets2 = await request(app).get("/api/v1/support/platform/tickets?assigned=me")
+      .set(authHeader(staff1Token))
+      .expect(200);
+    expect(myTickets2.body.data.tickets.some((t: { id: string }) => t.id === ticket1Id)).toBe(true);
+
+    // Staff comment (internal)
+    const internalComment = await request(app).post(`/api/v1/support/platform/tickets/${ticket1Id}/comments`)
+      .set(authHeader(staff1Token))
+      .send({ body: "Investigating SPF/DKIM alignment", internal: true })
+      .expect(201);
+    expect(internalComment.body.data.internal).toBe(true);
+    expect(internalComment.body.data.authorType).toBe("STAFF");
+
+    // Staff comment (public)
+    const publicComment = await request(app).post(`/api/v1/support/platform/tickets/${ticket1Id}/comments`)
+      .set(authHeader(staff1Token))
+      .send({ body: "We are looking into this" })
+      .expect(201);
+    expect(publicComment.body.data.internal).toBe(false);
+
+    // GET /support/platform/tickets/staff returns staff list
+    const staffList = await request(app).get("/api/v1/support/platform/tickets/staff")
+      .set(authHeader(staff1Token))
+      .expect(200);
+    expect(Array.isArray(staffList.body.data.staff)).toBe(true);
+    expect(staffList.body.data.staff.some((s: { id: string }) => s.id === staff1.userId)).toBe(true);
+  });
+
+  it("staff cannot assign to non-staff user (400)", async () => {
+    const owner = await registerUser(app, { email: "assign-owner@zoiko.test", tenantName: "Assign Tenant" });
+    const member = await registerUser(app, { email: "assign-member@zoiko.test" });
+    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+      .send({ email: member.email, role: "MEMBER" }).expect(201);
+    const staff = await registerUser(app, { email: "assign-staff@zoiko.test" });
+    await prisma.appUser.update({ where: { id: staff.userId }, data: { platformRole: "SUPPORT" } });
+    const staffToken = await platformSignIn(app, staff.email, staff.password, staff.mfaSecret);
+
+    const create = await request(app).post("/api/v1/support/platform/tickets")
+      .set(authHeader(staffToken))
+      .send({ tenantId: owner.tenantId, subject: "Assign test", description: "Test assign", category: "OTHER", severity: "LOW" })
+      .expect(201);
+    const ticketId = create.body.data.id;
+
+    // Try to assign to member (not staff) -> 400
+    await request(app).patch(`/api/v1/support/platform/tickets/${ticketId}`)
+      .set(authHeader(staffToken))
+      .send({ assignedStaffId: member.userId })
+      .expect(400);
+  });
+
+  it("unauthenticated requests to ticket endpoints return 401", async () => {
+    await request(app).get("/api/v1/support/tickets").expect(401);
+    await request(app).post("/api/v1/support/tickets").send({ subject: "x", description: "y", category: "OTHER", severity: "LOW" }).expect(401);
+    await request(app).get("/api/v1/support/platform/tickets").expect(401);
+    await request(app).post("/api/v1/support/platform/tickets").send({ tenantId: "00000000-0000-4000-8000-000000000001", subject: "x", description: "y", category: "OTHER", severity: "LOW" }).expect(401);
+  });
+
+  it("tenant member cannot access staff platform ticket endpoints (403)", async () => {
+    const owner = await registerUser(app, { email: "cross-owner@zoiko.test", tenantName: "Cross Tenant" });
+    const support = await registerUser(app, { email: "cross-support@zoiko.test" });
+    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+      .send({ email: support.email, role: "SUPPORT" }).expect(201);
+    const supportLogin = await loginUser(app, support.email, support.password, owner.tenantId);
+
+    // Tenant-scoped SUPPORT membership token cannot reach platform console
+    await request(app).get("/api/v1/support/platform/tickets")
+      .set(authHeader(supportLogin.accessToken))
+      .expect(403);
+    await request(app).post("/api/v1/support/platform/tickets")
+      .set(authHeader(supportLogin.accessToken))
+      .send({ tenantId: owner.tenantId, subject: "x", description: "y", category: "OTHER", severity: "LOW" })
+      .expect(403);
+  });
+
+  it("cross-tenant isolation: member of tenant A cannot view tenant B's ticket", async () => {
+    const ownerA = await registerUser(app, { email: "cross-ticket-ownerA@zoiko.test", tenantName: "Tenant A" });
+    const ownerB = await registerUser(app, { email: "cross-ticket-ownerB@zoiko.test", tenantName: "Tenant B" });
+    const memberA = await registerUser(app, { email: "cross-ticket-memberA@zoiko.test" });
+    await request(app).post("/api/v1/membership/members").set(authHeader(ownerA.accessToken))
+      .send({ email: memberA.email, role: "MEMBER" }).expect(201);
+    const memberALogin = await loginUser(app, memberA.email, memberA.password, ownerA.tenantId);
+
+    // Owner B creates a ticket via staff platform (or owner via tenant route)
+    const staff = await registerUser(app, { email: "cross-staff@zoiko.test" });
+    await prisma.appUser.update({ where: { id: staff.userId }, data: { platformRole: "SUPPORT" } });
+    const staffToken = await platformSignIn(app, staff.email, staff.password, staff.mfaSecret);
+    const createB = await request(app).post("/api/v1/support/platform/tickets")
+      .set(authHeader(staffToken))
+      .send({ tenantId: ownerB.tenantId, subject: "B's ticket", description: "Secret details here", category: "SECURITY", severity: "HIGH" })
+      .expect(201);
+    const ticketId = createB.body.data.id;
+
+    // Member A tries to list — should see 0 (session is tenant A)
+    const listA = await request(app).get("/api/v1/support/tickets")
+      .set(authHeader(memberALogin.accessToken))
+      .expect(200);
+    expect(listA.body.data.tickets.find((t: { id: string }) => t.id === ticketId)).toBeUndefined();
+
+    // Member A tries to GET — 404 (not found in their tenant)
+    await request(app).get(`/api/v1/support/tickets/${ticketId}`)
+      .set(authHeader(memberALogin.accessToken))
+      .expect(404);
+  });
+
+  it("commenting on closed ticket returns 409 conflict", async () => {
+    const owner = await registerUser(app, { email: "closed-owner@zoiko.test", tenantName: "Closed Tenant" });
+    const member = await registerUser(app, { email: "closed-member@zoiko.test" });
+    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+      .send({ email: member.email, role: "MEMBER" }).expect(201);
+    const memberLogin = await loginUser(app, member.email, member.password, owner.tenantId);
+
+    const create = await request(app).post("/api/v1/support/tickets")
+      .set(authHeader(memberLogin.accessToken))
+      .send({ subject: "Will close", description: "Then comment", category: "OTHER", severity: "LOW" })
+      .expect(201);
+    const ticketId = create.body.data.id;
+
+    // Close the ticket via staff platform
+    const staff = await registerUser(app, { email: "closed-staff@zoiko.test" });
+    await prisma.appUser.update({ where: { id: staff.userId }, data: { platformRole: "SUPPORT" } });
+    const staffToken = await platformSignIn(app, staff.email, staff.password, staff.mfaSecret);
+    await request(app).patch(`/api/v1/support/platform/tickets/${ticketId}`)
+      .set(authHeader(staffToken))
+      .send({ status: "CLOSED" })
+      .expect(200);
+
+    // Try to comment — 409
+    await request(app).post(`/api/v1/support/tickets/${ticketId}/comments`)
+      .set(authHeader(memberLogin.accessToken))
+      .send({ body: "Too late" })
+      .expect(409);
   });
 });

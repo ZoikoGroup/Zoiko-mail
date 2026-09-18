@@ -23,12 +23,6 @@ export const createPolicySchema = z.object({
   rules: policyRulesSchema,
 });
 
-export const updatePolicySchema = z.object({
-  name: z.string().trim().min(1).max(120).optional(),
-  description: z.string().trim().max(500).nullable().optional(),
-  rules: policyRulesSchema.optional(),
-});
-
 export const policyIdParamsSchema = z.object({ policyId: z.string().uuid() });
 export const listPoliciesSchema = z.object({
   type: policyTypeSchema.optional(),
