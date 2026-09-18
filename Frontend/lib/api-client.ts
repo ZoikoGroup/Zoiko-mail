@@ -26,21 +26,77 @@ export interface CapabilityDenial {
     requiresSupportGrant?: boolean;
 }
 
+/**
+ * One rejected field, from the server's `error.details` on a 400.
+ *
+ * `path` is the dotted field name the validator objected to, so a form can put
+ * the message next to the input that caused it instead of showing the bare
+ * word "Validation failed" — which names neither the field nor the rule and
+ * leaves the only fix as guessing.
+ */
+export interface ValidationIssue {
+    path: string;
+    message: string;
+}
+
 export class ApiError extends Error {
     status: number;
     code?: string;
-    /** Present on a 403 from requireCapability; absent otherwise. */
-    details?: CapabilityDenial;
-    constructor(status: number, message: string, code?: string, details?: CapabilityDenial) {
+    /**
+     * A capability refusal on a 403, or the rejected fields on a 400. The
+     * server has always sent both; the client used to type only the first and
+     * threw the other away.
+     */
+    details?: CapabilityDenial | ValidationIssue[];
+    constructor(
+        status: number,
+        message: string,
+        code?: string,
+        details?: CapabilityDenial | ValidationIssue[]
+    ) {
         super(message);
         this.status = status;
         this.code = code;
         this.details = details;
     }
 
+    /** The capability shape, when that is what `details` holds. */
+    private get denial(): CapabilityDenial | undefined {
+        return Array.isArray(this.details) ? undefined : this.details;
+    }
+
     /** True when re-authenticating would turn this refusal into a success. */
     get needsStepUp(): boolean {
-        return this.status === 403 && this.details?.requiresStepUp === true;
+        return this.status === 403 && this.denial?.requiresStepUp === true;
+    }
+
+    /** The fields a 400 rejected, empty when the failure was not per-field. */
+    get validationIssues(): ValidationIssue[] {
+        return Array.isArray(this.details) ? this.details : [];
+    }
+
+    /**
+     * The clearest sentence available for this failure.
+     *
+     * Prefers the field-level reason, because "Enter a valid domain name" is
+     * actionable and "Validation failed" is not.
+     *
+     * The `path` is deliberately left out. It names a database column
+     * (`allowedDomains.0`), not anything on screen, so showing it asks the
+     * reader to map internals onto a form. Callers that want to place the
+     * message against its input read `validationIssues` and do that mapping
+     * themselves.
+     */
+    get readableMessage(): string {
+        const issues = this.validationIssues;
+        if (issues.length === 0) return this.message;
+        // filter rather than spreading a Set: this file is compiled without
+        // downlevelIteration, so the spread does not typecheck here.
+        const seen: string[] = [];
+        for (const issue of issues) {
+            if (!seen.includes(issue.message)) seen.push(issue.message);
+        }
+        return seen.join(" ");
     }
 }
 

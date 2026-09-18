@@ -38,10 +38,25 @@ export function LoadingRows({ rows = 4 }: { rows?: number }) {
   );
 }
 
-export function InlineError({ message, onRetry }: { message: string; onRetry?: () => void }) {
+/**
+ * `title` because this component is used for writes as well as reads, and the
+ * heading was hardcoded to "Could not load this". A rejected save therefore
+ * told the person the screen had failed to *load* — so the natural conclusion
+ * was that the page was broken rather than that one field was wrong. Reads
+ * keep the old wording by default; a caller that is saving says so.
+ */
+export function InlineError({
+  message,
+  onRetry,
+  title = "Could not load this",
+}: {
+  message: string;
+  onRetry?: () => void;
+  title?: string;
+}) {
   return (
     <div className="px-4 py-8 text-center">
-      <div className="text-[13px] font-semibold text-[var(--crit)]">Could not load this</div>
+      <div className="text-[13px] font-semibold text-[var(--crit)]">{title}</div>
       <p className="mx-auto mt-1 max-w-[46ch] text-[12px] text-[var(--ink3)]">{message}</p>
       {onRetry && (
         <button type="button" onClick={onRetry} className="zoiko-btn sm mt-3">
