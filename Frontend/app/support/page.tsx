@@ -20,7 +20,7 @@ export default function PlatformConsolePage() {
   // platform token and aren't authenticated staff, bounce to login.
   useEffect(() => {
     if (me && me.membership?.role === "SUPPORT") {
-      router.replace("/tenant-support");
+      router.replace("/support");
       return;
     }
     if (!getPlatformToken() && !isLoading && !me) {

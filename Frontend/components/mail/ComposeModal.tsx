@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { X, Send, Save, Clock, Loader2, AlertCircle, CheckCircle2, Paperclip } from "lucide-react";
 import { useComposerSubmit, type ComposerMode, useSignature, useSendableMailboxes } from "@/lib/mail-hooks";
 import type { MailItem, Recipients } from "@/lib/mail-api";
+import { RecipientInput } from "@/components/mail/RecipientInput";
 
 function parseEmails(raw: string): string[] {
   return raw
@@ -62,8 +63,10 @@ export function ComposeModal({
   const ownAddress = options.find((mailbox) => !mailbox.shared)?.address;
 
   const [sendAsMailboxId, setSendAsMailboxId] = useState("");
-  const [to, setTo] = useState("");
-  const [cc, setCc] = useState("");
+  // const [to, setTo] = useState("");
+  // const [cc, setCc] = useState("");
+  const [to, setTo] = useState<string[]>([]);
+  const [cc, setCc] = useState<string[]>([]);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [files, setFiles] = useState<File[]>([]);
@@ -75,8 +78,10 @@ export function ComposeModal({
   // Reset the form whenever the composer opens for a new context.
   useEffect(() => {
     if (!open) return;
-    setTo("");
-    setCc("");
+    // setTo("");
+    // setCc("");
+    setTo([]);
+    setCc([]);
     // setBody("");
     const sig = sigData?.signature;
     setBody(sig ? `\n\n--\n${sig}` : "");
@@ -115,14 +120,22 @@ export function ComposeModal({
   const run = (action: "send" | "draft" | "schedule") => {
     setNotice(null);
 
+    // let recipients: Recipients | undefined;
+    // if (needsRecipients) {
+    //   const toList = parseEmails(to);
+    //   if (toList.length === 0) {
+    //     setNotice({ kind: "err", text: "Add at least one recipient." });
+    //     return;
+    //   }
+    //   recipients = { to: toList, cc: parseEmails(cc), bcc: [] };
+    // }
     let recipients: Recipients | undefined;
     if (needsRecipients) {
-      const toList = parseEmails(to);
-      if (toList.length === 0) {
+      if (to.length === 0) {
         setNotice({ kind: "err", text: "Add at least one recipient." });
         return;
       }
-      recipients = { to: toList, cc: parseEmails(cc), bcc: [] };
+      recipients = { to, cc, bcc: [] };
     }
 
     if (action === "schedule" && !scheduledAt) {
@@ -217,8 +230,10 @@ export function ComposeModal({
 
           {needsRecipients && (
             <>
-              <input className={field} placeholder="To (comma-separated)" value={to} onChange={(e) => setTo(e.target.value)} />
-              <input className={field} placeholder="Cc (optional)" value={cc} onChange={(e) => setCc(e.target.value)} />
+              {/* <input className={field} placeholder="To (comma-separated)" value={to} onChange={(e) => setTo(e.target.value)} />
+              <input className={field} placeholder="Cc (optional)" value={cc} onChange={(e) => setCc(e.target.value)} /> */}
+              <RecipientInput value={to} onChange={setTo} placeholder="To" autoFocus />
+              <RecipientInput value={cc} onChange={setCc} placeholder="Cc (optional)" />
             </>
           )}
 
@@ -274,10 +289,10 @@ export function ComposeModal({
           {notice && (
             <div
               className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${notice.kind === "err"
-                  ? "border-[var(--crit)]/30 bg-[var(--crit-soft)] text-[var(--crit)]"
-                  : notice.kind === "gate"
-                    ? "border-[var(--warn)]/30 bg-[var(--warn-soft)] text-[var(--warn)]"
-                    : "border-[var(--ok)]/30 bg-[var(--ok-soft)] text-[var(--ok)]"
+                ? "border-[var(--crit)]/30 bg-[var(--crit-soft)] text-[var(--crit)]"
+                : notice.kind === "gate"
+                  ? "border-[var(--warn)]/30 bg-[var(--warn-soft)] text-[var(--warn)]"
+                  : "border-[var(--ok)]/30 bg-[var(--ok-soft)] text-[var(--ok)]"
                 }`}
             >
               {notice.kind === "err" ? (
