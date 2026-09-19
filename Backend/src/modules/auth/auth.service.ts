@@ -370,6 +370,49 @@ export function verifyStepUpToken(
   }
 }
 
+/**
+ * The last gate before a second factor turns into a session.
+ *
+ * Both MFA completion paths need it and only one had it. Verifying an existing
+ * authenticator refused a non-ACTIVE account; enrolling a new one checked the
+ * membership and never looked at the account, so the same person could sign in
+ * by enrolling and then be refused ever after by the path they would use next
+ * time. An admin invited before joinWorkspace learned to promote INVITED
+ * accounts hit exactly that: in once, then "This account cannot sign in"
+ * forever, with a working password and a working authenticator.
+ *
+ * The permissive half was the wrong half, so the strict check now covers both.
+ *
+ * The message names the status. By this point the caller has proved a password
+ * and a second factor, so they are the account holder and telling them why
+ * costs nothing — while "cannot sign in" with no reason cost a day of
+ * guessing. Each status also says who can resolve it, because none of them is
+ * something the person reading it can fix alone.
+ */
+function assertAccountCanSignIn(
+  user: { status: string } | null
+): asserts user is NonNullable<typeof user> {
+  if (!user) {
+    throw new AppError("Account not found", 401, ErrorCodes.UNAUTHORIZED);
+  }
+  if (user.status === "ACTIVE") return;
+
+  const REASON: Record<string, string> = {
+    INVITED:
+      "This account has not finished accepting its invitation. Ask a workspace administrator to remove and re-invite you.",
+    PENDING_VERIFICATION:
+      "This account has not verified its email address yet. Sign in again to be sent a new code.",
+    SUSPENDED:
+      "This account is suspended. A workspace owner or administrator can restore it.",
+    DISABLED: "This account has been disabled and can no longer sign in.",
+  };
+  throw new AppError(
+    REASON[user.status] ?? `This account cannot sign in (status: ${user.status}).`,
+    403,
+    ErrorCodes.FORBIDDEN
+  );
+}
+
 function toWorkspaceOption(m: MembershipWithRelations): WorkspaceOption {
   return {
     id: m.tenant.id,
@@ -1539,9 +1582,7 @@ export class AuthService {
     await mfaService.verifyChallenge(payload.sub, code, context);
 
     const user = await prisma.appUser.findUnique({ where: { id: payload.sub } });
-    if (!user || user.status !== "ACTIVE") {
-      throw new AppError("This account cannot sign in", 403, ErrorCodes.FORBIDDEN);
-    }
+    assertAccountCanSignIn(user);
 
     if (payload.intent.kind === "platform") {
       const platform = buildPlatformToken(user.id, payload.intent.platformRole);
@@ -1618,6 +1659,10 @@ export class AuthService {
     // completes from the same act rather than asking for a second code
     // seconds later.
     const user = await prisma.appUser.findUniqueOrThrow({ where: { id: payload.sub } });
+    // The check the verify path has always had. Without it, enrolling was a
+    // way into a workspace that verifying would refuse.
+    assertAccountCanSignIn(user);
+
     if (payload.intent.kind === "platform") {
       const platform = buildPlatformToken(user.id, payload.intent.platformRole);
       return {

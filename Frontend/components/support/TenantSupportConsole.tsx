@@ -28,6 +28,7 @@ import {
   type TenantOverviewData,
   type TenantListParams,
 } from "@/lib/support-api";
+import { useLiveRefresh } from "@/lib/support-hooks";
 import { supportStyles } from "@/components/support/support-styles";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import {
@@ -190,6 +191,13 @@ function useList<T>(
   }, [fetchFn, key, params, tick]);
 
   const reload = useCallback(() => setTick((t) => t + 1), []);
+
+  // Runbook §5 sets a fifteen-minute initial response for a P0, which a
+  // screen that only loads once cannot support: the operator would have to
+  // keep pressing refresh to find out anything had happened. Every list in
+  // this console keeps itself current, and pauses while the tab is hidden.
+  useLiveRefresh(reload);
+
   return { params, setParams, rows, loading, error, reload };
 }
 
@@ -258,6 +266,11 @@ export default function TenantSupportConsole() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // A grant ends by itself. An expiry only noticed on reload is one the
+  // screen misreports for as long as the tab stays open, and §7 wants the
+  // expiry to be the control rather than a note about one.
+  useLiveRefresh(() => void loadOverview(), 60_000);
 
   useEffect(() => {
     void loadOverview();

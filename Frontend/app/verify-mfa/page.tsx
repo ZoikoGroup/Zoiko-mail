@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import {
@@ -58,22 +58,38 @@ export default function VerifyMfaPage() {
 
   // Fetch the secret as soon as we know enrolment is what is needed, so the
   // screen shows something to scan rather than a button that fetches one.
+  //
+  // Exactly once per token, and the ref is the whole mechanism.
+  //
+  // Beginning enrolment is not a read: the server mints a new secret and
+  // stores it against the account, so asking twice replaces the first secret
+  // with a second. StrictMode double-invokes effects in development, which
+  // made that the normal case — two requests, two secrets, the stored one
+  // decided by whichever finished last and the displayed one by whichever
+  // resolved last. When those disagreed, the key on screen was not the key
+  // the server would check, and every code typed from it came back "That code
+  // is not valid" while being perfectly correct.
+  //
+  // There is deliberately no cancelled flag alongside the ref. A
+  // cleanup-time cancel combined with a single-fire guard leaves the one
+  // request's response unhandled, which is how /accept-invitation once parked
+  // on "Loading..." for ever. A late setState after unmount is a harmless
+  // no-op; a dropped response is not.
+  const enrolmentStartedFor = useRef<string | null>(null);
+
   useEffect(() => {
-    if (phase !== "enrol" || !token || offer) return;
-    let cancelled = false;
+    if (phase !== "enrol" || !token) return;
+    if (enrolmentStartedFor.current === token) return;
+    enrolmentStartedFor.current = token;
+
     beginMfaEnrolmentFromChallenge(token)
-      .then((next) => {
-        if (!cancelled) setOffer(next);
-      })
+      .then(setOffer)
       .catch((err: unknown) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Could not start enrolment.");
-        }
+        // Let a failed attempt be retried rather than wedging the screen.
+        enrolmentStartedFor.current = null;
+        setError(err instanceof Error ? err.message : "Could not start enrolment.");
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [phase, token, offer]);
+  }, [phase, token]);
 
   const clearStash = () => {
     for (const key of ["mfa_token", "mfa_state", "mfa_email", "mfa_reason"]) {

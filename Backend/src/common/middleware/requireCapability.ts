@@ -3,6 +3,7 @@ import { AppError } from "../errors/AppError.js";
 import { ErrorCodes } from "../errors/errorCodes.js";
 import { resolveCapability, type CapabilityContext } from "../capabilities/index.js";
 import { verifyStepUpToken } from "../../modules/auth/auth.service.js";
+import { prisma } from "../../config/prisma.js";
 
 /**
  * Capability enforcement — Security §7.2, evaluation step 6.
@@ -28,11 +29,22 @@ import { verifyStepUpToken } from "../../modules/auth/auth.service.js";
  * nothing could clear, so no route could be gated on one without locking out
  * the people who legitimately held it.
  *
- * Second-approver identity and support-grant state are still unsatisfied
- * here. They are reported honestly rather than assumed, so a TWO_PERSON
- * capability (tenant deletion, ownership transfer) still resolves closed.
+ * Support-grant state is real too. It was hardcoded false, which made every
+ * GRANT capability resolve closed no matter what the workspace owner had
+ * approved — so `support.standing`, `support.workspace.access` and
+ * `mail.other.read` were unusable by construction, and the one path the matrix
+ * opens to a Support member led nowhere. Runbook §7 wants that path to exist
+ * and to be time-bound; it can only be both if the grant is actually read.
+ *
+ * The lookup is skipped for every role that holds no GRANT capability, which
+ * is every role but SUPPORT, so the common request pays nothing for it.
+ *
+ * Second-approver identity is still unsatisfied here. It is reported honestly
+ * rather than assumed, so a TWO_PERSON capability (tenant deletion, ownership
+ * transfer) still resolves closed — there is no approval workflow behind it
+ * yet, and pretending otherwise would be worse than refusing.
  */
-function contextFrom(req: Request): CapabilityContext {
+async function contextFrom(req: Request): Promise<CapabilityContext> {
   const tenant = req.tenantContext;
   return {
     role: tenant?.role ?? null,
@@ -45,18 +57,74 @@ function contextFrom(req: Request): CapabilityContext {
       ? verifyStepUpToken(req.header("x-step-up-token"), tenant.userId, tenant.tenantId)
       : false,
     secondApproverUserId: null,
-    hasActiveSupportGrant: false,
+    hasActiveSupportGrant: tenant ? await hasLiveGrant(tenant) : false,
   };
 }
 
+/**
+ * An unrevoked, unexpired grant for this member in this workspace.
+ *
+ * Only SUPPORT holds a GRANT capability, so no other role is worth a query.
+ * Checked per request rather than cached: the point of an expiry is that it
+ * takes effect on its own, and the point of a revocation is that it takes
+ * effect at once.
+ */
+async function hasLiveGrant(tenant: {
+  role: string;
+  tenantId: string;
+  membershipId: string;
+}): Promise<boolean> {
+  if (tenant.role !== "SUPPORT") return false;
+  const grant = await prisma.supportAccessGrant.findFirst({
+    where: {
+      tenantId: tenant.tenantId,
+      supportMembershipId: tenant.membershipId,
+      revokedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+    select: { id: true },
+  });
+  return grant !== null;
+}
+
+
+/**
+ * What to tell the person, rather than what to tell the developer.
+ *
+ * "This action requires the support.console.read capability" names an
+ * internal identifier and no next step. The resolver already says *why* it
+ * refused, so the refusal can say what would clear it — which for a Support
+ * seat is somebody else approving a grant, not anything they can do
+ * themselves. The capability name stays in `details` for the console to gate
+ * on; it just stops being the sentence a human reads.
+ */
+function denialMessage(capability: string, reason: string): string {
+  switch (reason) {
+    case "REQUIRES_SUPPORT_GRANT":
+      return "This workspace needs an approved support access grant. Ask the workspace owner to approve one, and note that it expires on its own.";
+    case "REQUIRES_STEP_UP":
+      return "Confirm your password to continue — this action needs a fresh sign-in.";
+    case "REQUIRES_SECOND_APPROVER":
+      return "This action needs a second approver before it can run.";
+    default:
+      return `This action requires the ${capability} capability`;
+  }
+}
+
 export function requireCapability(capability: string) {
-  return (req: Request, _res: Response, next: NextFunction): void => {
+  return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
     if (!req.tenantContext) {
       next(new AppError("Tenant context required", 403, ErrorCodes.FORBIDDEN));
       return;
     }
 
-    const decision = resolveCapability(capability, contextFrom(req));
+    let decision;
+    try {
+      decision = resolveCapability(capability, await contextFrom(req));
+    } catch (error) {
+      next(error);
+      return;
+    }
     if (decision.allowed) {
       next();
       return;
@@ -64,7 +132,7 @@ export function requireCapability(capability: string) {
 
     next(
       new AppError(
-        `This action requires the ${capability} capability`,
+        denialMessage(capability, decision.reason),
         403,
         ErrorCodes.FORBIDDEN,
         {
@@ -98,7 +166,7 @@ export function requireCapability(capability: string) {
 export function requireCapabilityWhen(
   pick: (req: Request) => string | null
 ) {
-  return (req: Request, _res: Response, next: NextFunction): void => {
+  return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
     const capability = pick(req);
     if (!capability) {
       next();
@@ -110,7 +178,13 @@ export function requireCapabilityWhen(
       return;
     }
 
-    const decision = resolveCapability(capability, contextFrom(req));
+    let decision;
+    try {
+      decision = resolveCapability(capability, await contextFrom(req));
+    } catch (error) {
+      next(error);
+      return;
+    }
     if (decision.allowed) {
       next();
       return;
@@ -118,7 +192,7 @@ export function requireCapabilityWhen(
 
     next(
       new AppError(
-        `This action requires the ${capability} capability`,
+        denialMessage(capability, decision.reason),
         403,
         ErrorCodes.FORBIDDEN,
         {
@@ -134,7 +208,12 @@ export function requireCapabilityWhen(
   };
 }
 
-/** The resolver context for the current request, for services that need it. */
-export function capabilityContext(req: Request): CapabilityContext {
+/**
+ * The resolver context for the current request, for services that need it.
+ *
+ * Async since the support-grant lookup became real — a caller that wants the
+ * same decision the middleware makes has to wait for the same inputs.
+ */
+export function capabilityContext(req: Request): Promise<CapabilityContext> {
   return contextFrom(req);
 }

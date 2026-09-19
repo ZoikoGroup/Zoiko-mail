@@ -244,6 +244,13 @@ export interface TenantContextData {
   };
 }
 
+/** Set by requireTenantGrant; read by the support access log. */
+export interface SupportGrantContext {
+  id: string | null;
+  ticketId: string | null;
+  breakGlass: boolean;
+}
+
 declare global {
   namespace Express {
     interface Request {
@@ -252,6 +259,13 @@ declare global {
       platformAuth?: PlatformAuthContext;
       tenantContext?: TenantContextData;
       staffAuth?: StaffAuthContext;
+      /**
+       * The support access grant this request is being served under, set by
+       * requireTenantGrant. `id` is null only for a SUPER_ADMIN break-glass
+       * read, which the access log records as such so §7's "reviewed after
+       * use" has something to review.
+       */
+      supportGrant?: SupportGrantContext;
     }
   }
 }

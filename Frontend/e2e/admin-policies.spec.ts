@@ -129,7 +129,15 @@ async function openPolicies(
   await expect(page).toHaveURL(/\/admin$/, { timeout: 60_000 });
 
   await page.goto("/admin/policies");
-  await expect(page.getByRole("heading", { name: "Policies" })).toBeVisible();
+  // Same 60s budget as the sign-in redirect above, and for the same reason:
+  // the heading cannot appear until /admin/policies has compiled, and a cold
+  // route under a full-suite run takes tens of seconds by itself. On the
+  // default 15s this failed once in a full run and passed three times in
+  // isolation — the worst way for a test to be wrong, because it teaches
+  // people to re-run rather than read.
+  await expect(page.getByRole("heading", { name: "Policies" })).toBeVisible({
+    timeout: 60_000,
+  });
   return calls;
 }
 

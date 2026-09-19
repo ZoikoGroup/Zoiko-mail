@@ -122,10 +122,10 @@ describe("Platform support console", () => {
 
     const grantA = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
       .set(await stepUpHeader(app, owner.accessToken))
-      .send({ supportMembershipId: agentA.membership.id, reason: "Investigate delivery failure A", expiresInMinutes: 30, scopes: ["DELIVERY_DIAGNOSTICS"] }).expect(201);
+      .send({ supportMembershipId: agentA.membership.id, reason: "INC-3301 investigate delivery failure A", expiresInMinutes: 30, scopes: ["DELIVERY_DIAGNOSTICS"] }).expect(201);
     const grantB = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
       .set(await stepUpHeader(app, owner.accessToken))
-      .send({ supportMembershipId: agentB.membership.id, reason: "Investigate delivery failure B", expiresInMinutes: 30, scopes: ["DELIVERY_DIAGNOSTICS"] }).expect(201);
+      .send({ supportMembershipId: agentB.membership.id, reason: "INC-3302 investigate delivery failure B", expiresInMinutes: 30, scopes: ["DELIVERY_DIAGNOSTICS"] }).expect(201);
 
     // A tenant-scoped SUPPORT seat cannot reach the platform console at all
     // (403 from requireSupportAccess), no matter whose grant it targets.
@@ -155,7 +155,7 @@ describe("Platform support console", () => {
 
     const grant = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
       .set(await stepUpHeader(app, owner.accessToken))
-      .send({ supportMembershipId: agent.membership.id, reason: "Investigate tenant configuration failure", expiresInMinutes: 30, scopes: ["TENANT_DIAGNOSTICS", "AUDIT_READ"] }).expect(201);
+      .send({ supportMembershipId: agent.membership.id, reason: "INC-3303 investigate tenant configuration failure", expiresInMinutes: 30, scopes: ["TENANT_DIAGNOSTICS", "AUDIT_READ"] }).expect(201);
 
     const ok = await request(app).get(`/api/v1/support/platform/diagnostics?grantId=${grant.body.data.id}`)
       .set(authHeader(staffToken)).expect(200);
@@ -209,7 +209,7 @@ describe("Platform support console", () => {
     const agent = await setupSupport(owner, "pc-staff-agent@zoiko.test");
     const grant = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
       .set(await stepUpHeader(app, owner.accessToken))
-      .send({ supportMembershipId: agent.membership.id, reason: "Investigate staff revoke denial", expiresInMinutes: 30, scopes: ["DELIVERY_DIAGNOSTICS"] }).expect(201);
+      .send({ supportMembershipId: agent.membership.id, reason: "INC-3304 investigate staff revoke denial", expiresInMinutes: 30, scopes: ["DELIVERY_DIAGNOSTICS"] }).expect(201);
 
     const staff = await registerUser(app, { email: "pc-staff-support@zoiko.test" });
     await prisma.appUser.update({ where: { id: staff.userId }, data: { platformRole: "SUPPORT" } });

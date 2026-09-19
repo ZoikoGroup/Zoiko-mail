@@ -3,17 +3,10 @@ import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
+// Response targets live in sla.ts because two of the four are counted in
+// business time, which is a calendar problem rather than a ticket one.
+import { slaFor, SEVERITY_RESPONSE_TARGET } from "./sla.js";
 
-const SLA_HOURS: Record<TicketSeverity, number> = {
-  LOW: 72,
-  MEDIUM: 24,
-  HIGH: 8,
-  URGENT: 4,
-};
-
-function slaFor(severity: TicketSeverity, from = new Date()): Date {
-  return new Date(from.getTime() + SLA_HOURS[severity] * 3_600_000);
-}
 
 interface TenantCaller {
   kind: "tenant";
@@ -327,6 +320,11 @@ function serializeTicket(
       ? { id: ticket.assignedStaff.id, email: ticket.assignedStaff.email, displayName: ticket.assignedStaff.displayName }
       : null,
     slaDueAt: ticket.slaDueAt,
+    // The target in the runbook's own words, so a queue can show "15 minutes"
+    // beside a due time instead of leaving the reader to infer the promise
+    // from the clock. Derived rather than stored: changing §5 should change
+    // what every open ticket claims, not only the ones raised afterwards.
+    slaTarget: SEVERITY_RESPONSE_TARGET[ticket.severity],
     resolvedAt: ticket.resolvedAt,
     closedAt: ticket.closedAt,
     createdAt: ticket.createdAt,

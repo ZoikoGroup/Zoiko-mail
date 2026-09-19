@@ -39,7 +39,7 @@ dashboardRouter.get(
       // Owner and Admin hold `audit.read` today, so this is not a live
       // divergence, but the aggregate must not become the one place where a
       // capability check is skipped because it happened to be redundant.
-      canReadAudit: can("audit.read", capabilityContext(req)),
+      canReadAudit: can("audit.read", await capabilityContext(req)),
     });
     sendSuccess(res, 200, summary, req.requestId);
   })
