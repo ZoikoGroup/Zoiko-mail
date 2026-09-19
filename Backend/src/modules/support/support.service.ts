@@ -405,17 +405,24 @@ export class SupportService {
     }));
   }
 
-  async searchMailboxes(query: string, limit = 50) {
+  async searchMailboxes(query: string, limit = 50, tenantId?: string) {
     const q = query.trim();
     const where: Prisma.MailboxWhereInput = q
       ? {
-          OR: [
-            { address: { contains: q, mode: "insensitive" } },
-            { tenant: { name: { contains: q, mode: "insensitive" } } },
-            { membership: { user: { email: { contains: q, mode: "insensitive" } } } },
+          AND: [
+            ...(tenantId ? [{ tenantId }] : []),
+            {
+              OR: [
+                { address: { contains: q, mode: "insensitive" } },
+                { tenant: { name: { contains: q, mode: "insensitive" } } },
+                { membership: { user: { email: { contains: q, mode: "insensitive" } } } },
+              ],
+            },
           ],
         }
-      : {};
+      : tenantId
+        ? { tenantId }
+        : {};
 
     const mailboxes = await prisma.mailbox.findMany({
       where,
@@ -446,16 +453,23 @@ export class SupportService {
     }));
   }
 
-  async searchDomains(query: string, limit = 50) {
+  async searchDomains(query: string, limit = 50, tenantId?: string) {
     const q = query.trim();
     const where: Prisma.MailDomainWhereInput = q
       ? {
-          OR: [
-            { domainName: { contains: q, mode: "insensitive" } },
-            { tenant: { name: { contains: q, mode: "insensitive" } } },
+          AND: [
+            ...(tenantId ? [{ tenantId }] : []),
+            {
+              OR: [
+                { domainName: { contains: q, mode: "insensitive" } },
+                { tenant: { name: { contains: q, mode: "insensitive" } } },
+              ],
+            },
           ],
         }
-      : {};
+      : tenantId
+        ? { tenantId }
+        : {};
 
     const domains = await prisma.mailDomain.findMany({
       where,

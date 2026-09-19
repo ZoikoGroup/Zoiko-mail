@@ -6,38 +6,85 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ConnectedAccountsTable } from "@/components/owner/connected-accounts/ConnectedAccountsTable";
 import { useConnectors } from "@/lib/owner-hooks";
 import { useGoogleAuth, useMicrosoftAuth } from "@/lib/connectors-hooks";
-import { Link2, Loader2, AlertCircle } from "lucide-react";
+import { useCreateConnector } from "@/lib/connectors-hooks";
+import type { CreateConnectorInput } from "@/lib/connectors-api";
+import { Link2, Loader2, AlertCircle, Check, ExternalLink } from "lucide-react";
 
 export default function OwnerConnectedAccountsPage() {
   const { data: connectors = [], isLoading } = useConnectors();
   const googleAuth = useGoogleAuth();
   const microsoftAuth = useMicrosoftAuth();
+  const createConnector = useCreateConnector();
   const [authError, setAuthError] = useState<string | null>(null);
+  const [showConnectDialog, setShowConnectDialog] = useState<{ provider: "GMAIL" | "MICROSOFT_365" } | null>(null);
+  const [connectionType, setConnectionType] = useState<"personal" | "org">("org");
 
   const handleConnectGoogle = () => {
     setAuthError(null);
-    googleAuth.mutate(undefined, {
+    setConnectionType("org");
+    setShowConnectDialog({ provider: "GMAIL" });
+  };
+
+  const handleConnectMicrosoft = () => {
+    setAuthError(null);
+    setConnectionType("org");
+    setShowConnectDialog({ provider: "MICROSOFT_365" });
+  };
+
+  const handleDialogConnect = () => {
+    if (!showConnectDialog) return;
+    const provider = showConnectDialog.provider;
+    setAuthError(null);
+
+    const scopes = provider === "GMAIL"
+      ? ["https://www.googleapis.com/auth/gmail.readonly"]
+      : ["Mail.Read"];
+
+    const input: CreateConnectorInput = {
+      provider,
+      providerAccountId: "", // Will be filled by OAuth callback
+      email: "", // Will be filled by OAuth callback
+      scopes,
+      isOrgLevel: connectionType === "org",
+    };
+
+    createConnector.mutate(input, {
       onSuccess: (data) => {
-        window.location.href = data.url;
+        setShowConnectDialog(null);
+        setConnectionType("org");
+        // For OAuth providers, we need to redirect to the auth URL
+        if (provider === "GMAIL") {
+          googleAuth.mutate(undefined, {
+            onSuccess: (authData) => {
+              window.location.href = authData.url;
+            },
+            onError: (err: any) => {
+              const msg = err?.message || "Failed to start Google OAuth.";
+              setAuthError(msg);
+            },
+          });
+        } else {
+          microsoftAuth.mutate(undefined, {
+            onSuccess: (authData) => {
+              window.location.href = authData.url;
+            },
+            onError: (err: any) => {
+              const msg = err?.message || "Failed to start Microsoft OAuth.";
+              setAuthError(msg);
+            },
+          });
+        }
       },
       onError: (err: any) => {
-        const msg = err?.message || "Failed to start Google OAuth. Make sure GOOGLE_CLIENT_ID is configured in the backend .env.";
+        const msg = err?.message || `Failed to create ${provider} connection.`;
         setAuthError(msg);
       },
     });
   };
 
-  const handleConnectMicrosoft = () => {
-    setAuthError(null);
-    microsoftAuth.mutate(undefined, {
-      onSuccess: (data) => {
-        window.location.href = data.url;
-      },
-      onError: (err: any) => {
-        const msg = err?.message || "Failed to start Microsoft OAuth. Make sure Microsoft 365 credentials are configured in the backend .env.";
-        setAuthError(msg);
-      },
-    });
+  const handleCloseDialog = () => {
+    setShowConnectDialog(null);
+    setConnectionType("org");
   };
 
   return (
@@ -88,9 +135,85 @@ export default function OwnerConnectedAccountsPage() {
             <a href="/connected-accounts" className="text-[var(--accent)] hover:underline">
               personal connected accounts page
             </a>.
-            Organization-level OAuth connection is coming soon.
+            Organization-level connections can be created by Owners and Admins.
           </p>
         </div>
+
+        {/* Connect Dialog */}
+        {showConnectDialog && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-xl">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-semibold text-[var(--ink)]">
+                  Connect {showConnectDialog.provider === "GMAIL" ? "Gmail" : "Microsoft 365"} Account
+                </h2>
+                <button
+                  onClick={handleCloseDialog}
+                  className="text-[var(--ink3)] hover:text-[var(--ink)]"
+                  aria-label="Close"
+                >
+                  <ExternalLink className="h-5 w-5" />
+                </button>
+              </div>
+
+              <p className="mb-5 text-sm text-[var(--ink2)]">How do you want to connect {showConnectDialog.provider === "GMAIL" ? "Gmail" : "Microsoft 365"}?</p>
+
+              <div className="space-y-3 mb-5">
+                <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-[var(--border)] bg-[var(--s2)] p-3 hover:border-[var(--accent)] transition-colors">
+                  <input
+                    type="radio"
+                    name="connectionType"
+                    value="personal"
+                    checked={connectionType === "personal"}
+                    onChange={() => setConnectionType("personal")}
+                    className="mt-1 h-4 w-4 text-[var(--accent)] border-[var(--border)] focus:ring-[var(--accent)]"
+                  />
+                  <div>
+                    <div className="font-medium text-[var(--ink)]">Personal connection</div>
+                    <div className="text-sm text-[var(--ink3)]">Connect only to your account.</div>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-[var(--border)] bg-[var(--s2)] p-3 hover:border-[var(--accent)] transition-colors">
+                  <input
+                    type="radio"
+                    name="connectionType"
+                    value="org"
+                    checked={connectionType === "org"}
+                    onChange={() => setConnectionType("org")}
+                    className="mt-1 h-4 w-4 text-[var(--accent)] border-[var(--border)] focus:ring-[var(--accent)]"
+                  />
+                  <div>
+                    <div className="font-medium text-[var(--ink)]">Organization connection</div>
+                    <div className="text-sm text-[var(--ink3)]">Make this connection available for your organization/workspace. Owner/Admin permissions required.</div>
+                  </div>
+                </label>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={handleCloseDialog}
+                  className="flex-1 zoiko-btn"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDialogConnect}
+                  disabled={createConnector.isPending || googleAuth.isPending || microsoftAuth.isPending}
+                  className="flex-1 zoiko-btn pri"
+                >
+                  {createConnector.isPending ? (
+                    <Loader2 className="mx-auto h-4 w-4 animate-spin" />
+                  ) : (
+                    `Connect ${showConnectDialog.provider === "GMAIL" ? "Gmail" : "Microsoft 365"}`
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </ProtectedRoute>
   );

@@ -100,7 +100,7 @@ export const supportStyles = `
 .support-workspace .pagehd h1 { font-family: var(--ed); font-weight: 400; font-size: 23px; letter-spacing: -0.015em; margin: 0 0 3px; }
 .support-workspace .pagehd p { margin: 0; color: var(--ink3); font-size: 12.4px; }
 .support-workspace .pagehd .sp { margin-left: auto; display: flex; gap: 8px; }
-.support-workspace .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; margin-bottom: 20px; }
+.support-workspace .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 11px; margin-bottom: 20px; }
 .support-workspace .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 11px; padding: 13px 15px; box-shadow: var(--sh1); }
 .support-workspace .stat .lbl { font-family: var(--mo); font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink3); }
 .support-workspace .stat .stt { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

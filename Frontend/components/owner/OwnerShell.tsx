@@ -87,8 +87,14 @@ export function OwnerShell({ children }: { children: ReactNode }) {
             <Menu className="h-5 w-5" />
           </button>
 
-          <div className="min-w-0 flex-1">
-            <GlobalSearch className="hidden max-w-xs sm:block" />
+          {/* Tenant first and weighted, workspace second and quiet */}
+          <div className="flex min-w-0 flex-1 items-baseline gap-2">
+            <span className="truncate text-sm font-medium text-[var(--ink2)]">
+              {me?.tenant.name ?? ""}
+            </span>
+            <span className="font-mono-num shrink-0 text-[9px] uppercase tracking-[0.11em] text-[var(--ink3)]">
+              Owner workspace
+            </span>
           </div>
 
           <div className="flex items-center gap-2">

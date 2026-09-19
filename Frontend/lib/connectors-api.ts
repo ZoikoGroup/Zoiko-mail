@@ -29,6 +29,7 @@ export interface CreateConnectorInput {
   providerAccountId: string;
   email: string;
   scopes: string[];
+  isOrgLevel?: boolean;
 }
 
 // The backend only accepts these exact read-only scopes; we derive them from

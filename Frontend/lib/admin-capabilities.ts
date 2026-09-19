@@ -30,7 +30,6 @@ export type Capability =
   | "people.member.manage"
   | "people.admin.manage"
   | "people.owner.manage"
-  | "people.mfa.reset"
   // Workspace
   | "workspace.settings.read"
   | "workspace.settings.write"
@@ -40,6 +39,8 @@ export type Capability =
   | "policy.write"
   | "policy.security.write"
   | "audit.read"
+  | "security-alert.read"
+  | "security-alert.review"
   // Money and liability
   | "billing.read"
   | "billing.plan.write"

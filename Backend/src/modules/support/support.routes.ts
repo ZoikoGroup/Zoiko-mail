@@ -23,6 +23,82 @@ supportRouter.post("/access-grants", requireCapability("support.grant.create"), 
 supportRouter.delete("/access-grants/:grantId", requireCapability("support.grant.end"), validate(grantIdSchema,"params"), asyncHandler(async(req,res)=>{const c=req.tenantContext!;sendSuccess(res,200,await supportService.revoke(String(req.params.grantId),c.tenantId,c.userId),req.requestId);}));
 
 // ---------------------------------------------------------------------------
+// Tenant-scoped read lists for the support console.
+//
+// A workspace SUPPORT member (or an OWNER/ADMIN reading the same surface)
+// needs the same sections as the staff console — mailboxes, domains,
+// provider events, delivery events, jobs, suppressions and audit — but scoped
+// to their OWN tenant. These routes reuse the platform service functions with
+// tenantId forced from the session; the client can never pick another tenant,
+// so there is no cross-tenant read even if a caller tampers with query params.
+// ---------------------------------------------------------------------------
+
+function tenantListQuery(req: Request): {
+  provider?: string;
+  status?: string;
+  type?: string;
+  q?: string;
+  limit: number;
+} {
+  const str = (k: "provider" | "status" | "type" | "q"): string | undefined => {
+    const v = req.query[k];
+    return typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
+  };
+  const rawLimit = req.query.limit;
+  const limit = typeof rawLimit === "number"
+    ? rawLimit
+    : typeof rawLimit === "string" && rawLimit.trim() !== ""
+      ? (Number(rawLimit) || 50)
+      : 50;
+  return {
+    provider: str("provider"),
+    status: str("status"),
+    type: str("type"),
+    q: str("q"),
+    limit: Math.max(1, Math.min(Math.floor(limit), 200)),
+  };
+}
+
+supportRouter.get("/tenant", requireRole("OWNER", "ADMIN", "SUPPORT"), asyncHandler(async (req, res) => {
+  sendSuccess(res, 200, await supportService.tenantOverview(req.tenantContext!.tenantId), req.requestId);
+}));
+supportRouter.get("/mailboxes", requireRole("OWNER", "ADMIN", "SUPPORT"), validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
+  const c = req.tenantContext!;
+  const q = tenantListQuery(req).q ?? "";
+  sendSuccess(res, 200, { mailboxes: await supportService.searchMailboxes(q, tenantListQuery(req).limit, c.tenantId) }, req.requestId);
+}));
+supportRouter.get("/domains", requireRole("OWNER", "ADMIN", "SUPPORT"), validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
+  const c = req.tenantContext!;
+  const q = tenantListQuery(req).q ?? "";
+  sendSuccess(res, 200, { domains: await supportService.searchDomains(q, tenantListQuery(req).limit, c.tenantId) }, req.requestId);
+}));
+supportRouter.get("/provider-events", requireRole("OWNER", "ADMIN", "SUPPORT"), validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
+  const c = req.tenantContext!;
+  const f = tenantListQuery(req);
+  sendSuccess(res, 200, { events: await supportService.listProviderEvents({ tenantId: c.tenantId, provider: f.provider, status: f.status, q: f.q, limit: f.limit }) }, req.requestId);
+}));
+supportRouter.get("/delivery-events", requireRole("OWNER", "ADMIN", "SUPPORT"), validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
+  const c = req.tenantContext!;
+  const f = tenantListQuery(req);
+  sendSuccess(res, 200, { events: await supportService.listDeliveryEvents({ tenantId: c.tenantId, type: f.type, q: f.q, limit: f.limit }) }, req.requestId);
+}));
+supportRouter.get("/jobs", requireRole("OWNER", "ADMIN", "SUPPORT"), validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
+  const c = req.tenantContext!;
+  const f = tenantListQuery(req);
+  sendSuccess(res, 200, { jobs: await supportService.listJobs({ tenantId: c.tenantId, type: f.type, status: f.status, q: f.q, limit: f.limit }) }, req.requestId);
+}));
+supportRouter.get("/suppressions", requireRole("OWNER", "ADMIN", "SUPPORT"), validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
+  const c = req.tenantContext!;
+  const f = tenantListQuery(req);
+  sendSuccess(res, 200, { suppressions: await supportService.listSuppressions({ tenantId: c.tenantId, status: f.status, limit: f.limit }) }, req.requestId);
+}));
+supportRouter.get("/audit", requireRole("OWNER", "ADMIN", "SUPPORT"), validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
+  const c = req.tenantContext!;
+  const f = tenantListQuery(req);
+  sendSuccess(res, 200, { events: await supportService.listAudit({ tenantId: c.tenantId, q: f.q, limit: f.limit }) }, req.requestId);
+}));
+
+// ---------------------------------------------------------------------------
 // Platform support console (read-only operational investigation).
 // Mounted at /support/platform BEFORE /support so these requests never enter
 // supportRouter, which runs tenantContext (requires an ACTIVE membership and

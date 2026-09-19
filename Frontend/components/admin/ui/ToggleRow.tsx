@@ -16,12 +16,15 @@ export function ToggleRow({
   detail,
   enabled,
   locked,
+  disabled,
   onToggle,
 }: {
   label: string;
   detail: string;
   enabled: boolean;
   locked: boolean;
+  /** True while a write is in flight, so the control reads as busy. */
+  disabled?: boolean;
   onToggle?: () => void;
 }) {
   return (
@@ -35,9 +38,9 @@ export function ToggleRow({
         role="switch"
         aria-checked={enabled}
         aria-label={`${label}${locked ? " (locked)" : ""}`}
-        disabled={locked}
+        disabled={locked || disabled}
         onClick={onToggle}
-        title={locked ? "Locked — non-negotiable or Owner-only" : undefined}
+        title={locked ? "Locked — non-negotiable or Owner-only" : disabled ? "Saving…" : undefined}
         className={`zoiko-toggle ${enabled ? "on" : ""} ${locked ? "lock" : ""}`}
       >
         <i />

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { GoogleOAuthProvider } from "@react-oauth/google";
 
 import {
   AuthLayout,
@@ -17,6 +18,7 @@ import {
 import type { AuthStep } from "@/components/auth";
 import type { PendingInvitation } from "@/lib/auth-api";
 import { useCreateWorkspace } from "@/lib/auth-hooks";
+import { GOOGLE_CLIENT_ID } from "@/lib/config";
 
 export default function AuthPage() {
   useEffect(() => { document.title = "Sign In | Zoiko Mail"; }, []);
@@ -133,10 +135,16 @@ export default function AuthPage() {
   };
 
   return (
-    <AuthLayout>
-      <AuthContainer>
-        {renderStep()}
-      </AuthContainer>
-    </AuthLayout>
+    // Google's sign-in client script is only needed for the login/register
+    // forms, so the provider lives here rather than in the root layout.
+    // That keeps every other route (dashboards, support console, …) free of
+    // an extra third-party script fetch on startup.
+    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+      <AuthLayout>
+        <AuthContainer>
+          {renderStep()}
+        </AuthContainer>
+      </AuthLayout>
+    </GoogleOAuthProvider>
   );
 }

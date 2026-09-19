@@ -18,6 +18,7 @@ import {
   Activity,
   Webhook,
   Ban,
+  KeyRound,
   type LucideIcon,
 } from "lucide-react";
 
@@ -47,7 +48,6 @@ export const OWNER_NAV: OwnerNavItem[] = [
   { section: "Organization", label: "Subscription & Billing", href: "/owner/billing", icon: CreditCard, ownerOnly: true },
 
   { section: "Security", label: "Audit Logs", href: "/owner/audit-logs", icon: FileText, ownerOnly: true },
-  { section: "Security", label: "Security Alerts", href: "/owner/security-alerts", icon: ShieldAlert, ownerOnly: true },
   { section: "Security", label: "Policies", href: "/owner/policies", icon: ShieldCheck, ownerOnly: true },
   { section: "Security", label: "Suppressions", href: "/owner/suppressions", icon: Ban, ownerOnly: true },
 

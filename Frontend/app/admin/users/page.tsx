@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useWorkspacePeople } from "@/lib/admin-hooks";
 import { ManageMemberDialog } from "@/components/admin/ManageMemberDialog";
 import { useCan } from "@/lib/admin-capabilities";
-import type { MemberDto, MfaMethod, MembershipRole } from "@/lib/admin-api";
+import type { MemberDto, MembershipRole } from "@/lib/admin-api";
 import {
   Card,
   InlineError,
@@ -25,12 +25,6 @@ const ROLE_TONE: Record<MembershipRole, Tone> = {
   ADMIN: "ai",
   MEMBER: "nu",
   SUPPORT: "warn",
-};
-
-const MFA_LABEL: Record<MfaMethod, { label: string; tone: Tone }> = {
-  PASSKEY: { label: "Passkey", tone: "ok" },
-  TOTP: { label: "TOTP", tone: "warn" },
-  NONE: { label: "None", tone: "crit" },
 };
 
 export default function AdminUsersPage() {
@@ -73,7 +67,6 @@ export default function AdminUsersPage() {
                 <tr>
                   <Th>Person</Th>
                   <Th>Role</Th>
-                  <Th>MFA</Th>
                   <Th>Last active</Th>
                   <Th srOnly>Actions</Th>
                 </tr>
@@ -110,8 +103,6 @@ function PersonRow({
   can: (capability: "people.owner.manage" | "people.admin.manage" | "people.member.manage") => boolean;
   onManage: () => void;
 }) {
-  const mfa = MFA_LABEL[person.mfaMethod];
-
   // Capability, never role: acting on a senior member needs the matching grant.
   const manageable =
     person.role === "OWNER"
@@ -130,9 +121,6 @@ function PersonRow({
         <Pill tone={ROLE_TONE[person.role]}>
           {person.role.charAt(0) + person.role.slice(1).toLowerCase()}
         </Pill>
-      </Td>
-      <Td>
-        <Pill tone={mfa.tone}>{mfa.label}</Pill>
       </Td>
       <Td mono muted nowrap>
         {person.lastActiveAt ?? "—"}

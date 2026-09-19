@@ -11,7 +11,12 @@ type FormErrors = {
   confirmPassword?: string;
 };
 
-export default function ChangePasswordForm() {
+interface SetPasswordFormProps {
+  /** When true, this is a "set initial password" flow (no current password needed) */
+  isInitialSet?: boolean;
+}
+
+export default function ChangePasswordForm({ isInitialSet = false }: SetPasswordFormProps) {
   const changePasswordMutation = useChangePassword();
 
   const [formData, setFormData] = useState({
@@ -45,33 +50,28 @@ export default function ChangePasswordForm() {
   const validate = () => {
     const newErrors: FormErrors = {};
 
-    if (!formData.currentPassword) {
+    if (!isInitialSet && !formData.currentPassword) {
       newErrors.currentPassword = "Current password is required.";
     }
 
     if (!formData.newPassword) {
       newErrors.newPassword = "New password is required.";
     } else if (formData.newPassword.length < 8) {
-      newErrors.newPassword =
-        "Password must be at least 8 characters.";
+      newErrors.newPassword = "Password must be at least 8 characters.";
     }
 
     if (!formData.confirmPassword) {
-      newErrors.confirmPassword =
-        "Please confirm your new password.";
-    } else if (
-      formData.newPassword !== formData.confirmPassword
-    ) {
-      newErrors.confirmPassword =
-        "Passwords do not match.";
+      newErrors.confirmPassword = "Please confirm your new password.";
+    } else if (formData.newPassword !== formData.confirmPassword) {
+      newErrors.confirmPassword = "Passwords do not match.";
     }
 
     if (
+      !isInitialSet &&
       formData.currentPassword &&
       formData.currentPassword === formData.newPassword
     ) {
-      newErrors.newPassword =
-        "New password must be different from the current password.";
+      newErrors.newPassword = "New password must be different from the current password.";
     }
 
     setErrors(newErrors);
@@ -84,46 +84,71 @@ export default function ChangePasswordForm() {
 
     if (!validate()) return;
 
-    changePasswordMutation.mutate(
-      {
-        currentPassword: formData.currentPassword,
-        newPassword: formData.newPassword,
-      },
-      {
-        onSuccess: () => {
-          setSuccessMessage("Password updated successfully.");
-
-          setFormData({
-            currentPassword: "",
-            newPassword: "",
-            confirmPassword: "",
-          });
+    if (isInitialSet) {
+      // For initial password set, we need to use a different API endpoint
+      // For now, we'll call the change password with empty current password
+      // The backend will need to handle this case
+      changePasswordMutation.mutate(
+        {
+          currentPassword: formData.currentPassword || " ",
+          newPassword: formData.newPassword,
         },
-      }
-    );
+        {
+          onSuccess: () => {
+            setSuccessMessage("Password set successfully. You can now sign in with email and password.");
+
+            setFormData({
+              currentPassword: "",
+              newPassword: "",
+              confirmPassword: "",
+            });
+          },
+        }
+      );
+    } else {
+      changePasswordMutation.mutate(
+        {
+          currentPassword: formData.currentPassword,
+          newPassword: formData.newPassword,
+        },
+        {
+          onSuccess: () => {
+            setSuccessMessage("Password updated successfully.");
+
+            setFormData({
+              currentPassword: "",
+              newPassword: "",
+              confirmPassword: "",
+            });
+          },
+        }
+      );
+    }
   };
 
   const errorMessage =
     changePasswordMutation.error instanceof ApiError
       ? changePasswordMutation.error.message
       : changePasswordMutation.error
-      ? "Something went wrong."
-      : null;
+        ? "Something went wrong."
+        : null;
 
   return (
     <form onSubmit={onSubmit} className="space-y-5">
-      <PasswordInput
-        label="Current Password"
-        placeholder="Enter current password"
-        value={formData.currentPassword}
-        onChange={(e) =>
-          handleChange("currentPassword", e.target.value)
-        }
-        error={errors.currentPassword}
-      />
+      {!isInitialSet && (
+        <PasswordInput
+          label="Current Password"
+          placeholder="Enter current password"
+          value={formData.currentPassword}
+          onChange={(e) =>
+            handleChange("currentPassword", e.target.value)
+          }
+          error={errors.currentPassword}
+        />
+      )}
 
       <PasswordInput
-        label="New Password"
+        label={isInitialSet ? "New Password" : "New Password"}
         placeholder="Enter new password"
         value={formData.newPassword}
         onChange={(e) =>
@@ -163,6 +188,8 @@ export default function ChangePasswordForm() {
       >
         {changePasswordMutation.isPending
           ? "Updating Password..."
+          : isInitialSet
+          ? "Set Password"
           : "Update Password"}
       </button>
     </form>
