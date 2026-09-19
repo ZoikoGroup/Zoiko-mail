@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { API_BASE } from "@/lib/config";
+import { routeAuthState } from "@/lib/auth-hooks";
+import type { AuthResponse } from "@/lib/auth-api";
 import { resolveWorkspaceHref } from "@/lib/workspace";
 import { setTokens, setPlatformToken, setSignOutNotice } from "@/lib/auth-storage";
 
@@ -87,50 +89,50 @@ export default function SelectWorkspacePage() {
           return;
         }
         const data = json.data;
-        // Handle every state the backend might return after selection.
-        // Reuses the same routing logic pattern as useLogin — since all the
-        // downstream states (MEMBERSHIP_SUSPENDED, WORKSPACE_DELETING etc.)
-        // already have their auth-status pages built, we just build hrefs.
-        if (data.state === "SIGNED_IN") {
-          const session = data.session ?? data;
-          if (session.accessToken) {
-            setTokens(session.accessToken, session.refreshToken);
-          }
-          clearStash();
-          router.replace(resolveWorkspaceHref(session.membership?.role));
-        } else if (data.state === "STAFF_CONSOLE") {
-          if (data.platformToken) setPlatformToken(data.platformToken);
-          clearStash();
-          router.replace("/support");
-        } else if (
-          data.state === "MEMBERSHIP_SUSPENDED" ||
-          data.state === "WORKSPACE_SUSPENDED" ||
-          data.state === "WORKSPACE_DELETING"
-        ) {
-          const wsName = encodeURIComponent(data.workspace?.name ?? ws.name);
-          clearStash();
-          router.replace(`/auth-status?state=${data.state}&workspace=${wsName}`);
-        } else if (
-          data.state === "ACCOUNT_SUSPENDED" ||
-          data.state === "ACCOUNT_DISABLED"
-        ) {
-          clearStash();
-          router.replace(`/auth-status?state=${data.state}`);
-        } else if (data.state === "WORKSPACE_SELECTION") {
-          // Rare — user picked a tenantId that no longer resolves. Backend
-          // returned a new selection state with a new token, refresh the
-          // page's stash from the fresh response.
+
+        // Every state the server can answer with, dispatched by the helper
+        // that already knows them all.
+        //
+        // This was a hand-rolled chain covering SIGNED_IN, STAFF_CONSOLE, the
+        // suspended states and a re-selection, with everything else falling to
+        // an `else` that sent the person back to /login. MFA_REQUIRED and
+        // MFA_ENROLLMENT_REQUIRED were in that "everything else" — and they
+        // are the *normal* answer here, because picking an Owner, Admin or
+        // Support workspace is exactly what AC-002 stops for a second factor.
+        // So choosing a workspace bounced straight back to the sign-in page,
+        // which reads as "it did not redirect" rather than as a missing
+        // branch.
+        //
+        // routeAuthState handles the MFA states, the suspended ones, the
+        // staff console and SIGNED_IN, and it is what /login itself uses — so
+        // selecting a workspace now lands wherever signing directly into that
+        // workspace would.
+        if (data.state === "WORKSPACE_SELECTION") {
+          // The one state routeAuthState cannot help with: the pick did not
+          // resolve, and the fresh list belongs to this screen rather than to
+          // a new destination.
           sessionStorage.setItem("zoiko.selection_token", data.selectionToken ?? "");
           sessionStorage.setItem("zoiko.selection_workspaces", JSON.stringify(data.workspaces ?? []));
           setError("That workspace can no longer be selected. Please choose another.");
           setToken(data.selectionToken ?? null);
           setWorkspaces(data.workspaces ?? []);
           setSubmitting(false);
-        } else {
-          // Unknown state — fall back to login so user can retry.
-          clearStash();
-          router.replace("/login");
+          return;
         }
+
+        if (data.state === "SIGNED_IN") {
+          // The session is nested; older callers read it off the top level and
+          // stored nothing.
+          const session = data.session ?? data;
+          if (session.accessToken) {
+            setTokens(session.accessToken, session.refreshToken);
+          }
+        } else if (data.state === "STAFF_CONSOLE" && data.platformToken) {
+          setPlatformToken(data.platformToken);
+        }
+
+        clearStash();
+        routeAuthState(data as AuthResponse, router);
       } catch (e) {
         setError("Network error, please try again.");
         setSubmitting(false);
