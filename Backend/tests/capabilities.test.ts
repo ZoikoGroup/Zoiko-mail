@@ -56,6 +56,12 @@ const SPEC_ADMIN_CAPABILITIES: Capability[] = [
   // §2 "Request export": Admin = "By policy" + Step-up.
   "data.export",
   "support.grant.end",
+  // §2 gives Admin the support console for their own workspace. These two
+  // replaced requireRole("OWNER","ADMIN","SUPPORT") on the console routes:
+  // ALLOW here, GRANT for a Support seat, which is the distinction a role
+  // check could not make.
+  "support.console.read",
+  "support.grant.read",
 ];
 
 const activeAdmin = { role: "ADMIN" as const, membershipActive: true };
@@ -310,8 +316,8 @@ describe("vocabulary integrity", () => {
     expect(orphans).toEqual([]);
   });
 
-  it("declares thirty-seven capabilities", () => {
-    expect(CAPABILITIES).toHaveLength(37);
-    expect(new Set(CAPABILITIES).size).toBe(37);
+  it("declares thirty-nine capabilities", () => {
+    expect(CAPABILITIES).toHaveLength(39);
+    expect(new Set(CAPABILITIES).size).toBe(39);
   });
 });

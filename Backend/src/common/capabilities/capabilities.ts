@@ -64,6 +64,30 @@ export const CAPABILITIES = [
   // and the route gated on a bare role.
   "support.grant.create",
   "support.grant.end",
+  /**
+   * Reading the support console for one workspace.
+   *
+   * Held ALLOW by Owner and Admin — it is their own workspace, and the console
+   * shows them diagnostics they can already reach elsewhere. Held GRANT by
+   * Support, which is the whole point: Runbook §7 gives Zoiko support "no
+   * default right", so the same screen that is routine for an Owner is
+   * time-boxed for a Support seat and stops working when the grant expires.
+   *
+   * These routes were gated on requireRole("OWNER","ADMIN","SUPPORT"), which
+   * cannot express that difference — a role check says who you are, and the
+   * question here is what you currently hold.
+   */
+  "support.console.read",
+  /**
+   * Seeing who currently holds access to this workspace.
+   *
+   * Owner and Admin only, and deliberately not folded into
+   * `support.console.read`: that one is GRANT for Support, so reusing it would
+   * have let a granted Support member read the access list — including other
+   * people's grants. Replacing a role gate is not a reason to widen what it
+   * guarded.
+   */
+  "support.grant.read",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];

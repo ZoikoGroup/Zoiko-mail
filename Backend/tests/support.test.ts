@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
-import { authHeader, registerUser, loginUser } from "./helpers.js";
+import { authHeader, registerUser, loginUser, stepUpHeader } from "./helpers.js";
 import { prisma } from "../src/config/prisma.js";
 
 const app = createApp();
@@ -34,7 +34,7 @@ describe("Temporary audited SUPPORT access", () => {
 
     const grant = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
       .set("x-step-up-token", await stepUp(owner.accessToken))
-      .send({ supportMembershipId: added.body.data.id, reason: "Investigate tenant configuration failure", expiresInMinutes: 30, scopes: ["TENANT_DIAGNOSTICS", "AUDIT_READ"] }).expect(201);
+      .send({ supportMembershipId: added.body.data.id, reason: "INC-2201 investigate tenant configuration failure", expiresInMinutes: 30, scopes: ["TENANT_DIAGNOSTICS", "AUDIT_READ"] }).expect(201);
     const diagnostics = await request(app).get("/api/v1/support/diagnostics").set(authHeader(token))
       .set("x-support-grant-id", grant.body.data.id).expect(200);
     expect(diagnostics.body.data.tenant).toMatchObject({ id: owner.tenantId });
@@ -67,8 +67,7 @@ describe("Temporary audited SUPPORT access", () => {
 
     await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
       .send({ email: admin.email, role: "ADMIN" }).expect(201);
-    // The 201 assertion is the check; the response body is not needed here.
-    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+    const supportMember = await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
       .send({ email: support.email, role: "SUPPORT" }).expect(201);
 
     const ownerOverview = await request(app).get("/api/v1/support/overview")
@@ -87,6 +86,26 @@ describe("Temporary audited SUPPORT access", () => {
 
     const supportLogin = await loginUser(app, support.email, support.password, owner.tenantId);
     const supportToken = supportLogin.accessToken;
+
+    // The console read is GRANT for a SUPPORT seat now (Runbook §7: no
+    // default right, and an expiry on any elevated access), so the same
+    // request is refused until the owner opens the access. Asserted here
+    // rather than only in the dedicated suite, because this test is the one
+    // that used to claim a Support seat could simply read it.
+    await request(app).get("/api/v1/support/overview")
+      .set(authHeader(supportToken)).expect(403);
+
+    await request(app).post("/api/v1/support/access-grants")
+      .set(authHeader(owner.accessToken))
+      .set(await stepUpHeader(app, owner.accessToken))
+      .send({
+        supportMembershipId: supportMember.body.data.id,
+        reason: "INC-7702 reviewing the workspace overview",
+        expiresInMinutes: 30,
+        scopes: ["TENANT_DIAGNOSTICS"],
+      })
+      .expect(201);
+
     const supportOverview = await request(app).get("/api/v1/support/overview")
       .set(authHeader(supportToken)).expect(200);
     expect(supportOverview.body.data.stats.members).toBe(3);
@@ -106,7 +125,7 @@ describe("Temporary audited SUPPORT access", () => {
 
     const grant = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
       .set("x-step-up-token", await stepUp(owner.accessToken))
-      .send({ supportMembershipId: added.body.data.id, reason: "Investigate admin revoke flow", expiresInMinutes: 30, scopes: ["TENANT_DIAGNOSTICS"] }).expect(201);
+      .send({ supportMembershipId: added.body.data.id, reason: "INC-2202 investigate admin revoke flow", expiresInMinutes: 30, scopes: ["TENANT_DIAGNOSTICS"] }).expect(201);
 
     const adminLogin = await loginUser(app, admin.email, admin.password, owner.tenantId);
     const adminToken = adminLogin.accessToken;
@@ -128,7 +147,7 @@ describe("Temporary audited SUPPORT access", () => {
 
     const grant = await request(app).post("/api/v1/support/access-grants").set(authHeader(owner.accessToken))
       .set("x-step-up-token", await stepUp(owner.accessToken))
-      .send({ supportMembershipId: added.body.data.id, reason: "Investigate member revoke denial", expiresInMinutes: 30, scopes: ["TENANT_DIAGNOSTICS"] }).expect(201);
+      .send({ supportMembershipId: added.body.data.id, reason: "INC-2203 investigate member revoke denial", expiresInMinutes: 30, scopes: ["TENANT_DIAGNOSTICS"] }).expect(201);
 
     const memberLogin = await loginUser(app, member.email, member.password, owner.tenantId);
     const memberToken = memberLogin.accessToken;

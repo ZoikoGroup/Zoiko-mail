@@ -1028,6 +1028,14 @@ model SupportAccessGrant {
   supportMembershipId String           @map("support_membership_id") @db.Uuid
   approvedByUserId    String           @map("approved_by_user_id") @db.Uuid
   reason              String
+  /**
+   * The case this access was opened for — Runbook §7 "purpose-bound".
+   *
+   * Nullable because grants predate tickets and because a genuine incident
+   * may not have one yet; the service requires either this or an explicit
+   * incident reference in `reason`, so an access is never unattributable.
+   */
+  ticketId            String?          @map("ticket_id") @db.Uuid
   scopes              SupportScope[]
   expiresAt           DateTime         @map("expires_at")
   revokedAt           DateTime?        @map("revoked_at")
@@ -1035,6 +1043,7 @@ model SupportAccessGrant {
   tenant              Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   supportMembership   TenantMembership @relation(fields: [supportMembershipId], references: [id], onDelete: Cascade)
   approvedBy          AppUser          @relation("SupportApprover", fields: [approvedByUserId], references: [id], onDelete: Restrict)
+  ticket              SupportTicket?   @relation(fields: [ticketId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, supportMembershipId, expiresAt])
   @@map("support_access_grants")
@@ -1070,6 +1079,7 @@ model SupportTicket {
   openedBy      AppUser                @relation("TicketOpenedBy", fields: [openedByUserId], references: [id], onDelete: Cascade)
   assignedStaff AppUser?               @relation("TicketAssignedStaff", fields: [assignedStaffId], references: [id], onDelete: SetNull)
   comments      SupportTicketComment[]
+  accessGrants  SupportAccessGrant[]
 
   @@index([tenantId, status, updatedAt])
   @@index([assignedStaffId])

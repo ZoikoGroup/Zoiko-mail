@@ -13,6 +13,7 @@ export interface SupportAccessGrant {
   supportMembershipId: string;
   approvedByUserId: string;
   reason: string;
+  ticketId: string | null;
   scopes: SupportScope[];
   expiresAt: string;
   revokedAt: string | null;
@@ -70,6 +71,15 @@ export interface SupportDiagnosticsData {
 export interface CreateSupportGrantInput {
   supportMembershipId: string;
   reason: string;
+  /**
+   * The case this access is for — Runbook §7 "purpose-bound".
+   *
+   * Optional here and required by the server unless the reason names an
+   * incident, because a P0 can begin before anyone has raised a ticket. An
+   * access with neither is refused: what §7 forbids is one nobody can account
+   * for afterwards.
+   */
+  ticketId?: string;
   expiresInMinutes: number;
   scopes: SupportScope[];
 }
@@ -401,6 +411,7 @@ export interface PlatformOverview {
     status: TicketStatus;
     assignedStaff: { id: string; name: string } | null;
     slaDueAt: string | null;
+    slaTarget?: string;
     slaOverdue: boolean;
     updatedAt: string;
   }>;
@@ -768,6 +779,8 @@ export interface SupportTicket {
   openedByType: string;
   assignedStaff: TicketAuthor | null;
   slaDueAt: string | null;
+  /** The response target in the runbook's words — "15 minutes", "4 business hours". */
+  slaTarget?: string;
   slaOverdue: boolean;
   resolvedAt: string | null;
   closedAt: string | null;

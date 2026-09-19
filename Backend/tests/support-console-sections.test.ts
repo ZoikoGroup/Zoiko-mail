@@ -1,10 +1,36 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
-import { authHeader, registerUser, loginUser } from "./helpers.js";
+import { authHeader, registerUser, loginUser, stepUpHeader, type RegisteredUser } from "./helpers.js";
 import { prisma } from "../src/config/prisma.js";
 
 const app = createApp();
+
+/**
+ * Approve support access, the way an Owner does.
+ *
+ * These sections used to answer a SUPPORT seat with no approval at all, which
+ * is the standing access Runbook §7 refuses: "Zoiko support has no default
+ * right", and any elevated access "must have an expiry". The console read is
+ * now GRANT for SUPPORT, so the tests have to open the access before they can
+ * assert what it shows — which is the point, not an obstacle.
+ */
+async function approveSupportAccess(
+  owner: RegisteredUser,
+  supportMembershipId: string
+): Promise<void> {
+  await request(app)
+    .post("/api/v1/support/access-grants")
+    .set(authHeader(owner.accessToken))
+    .set(await stepUpHeader(app, owner.accessToken))
+    .send({
+      supportMembershipId,
+      reason: "INC-7701 reviewing the support console sections",
+      expiresInMinutes: 60,
+      scopes: ["TENANT_DIAGNOSTICS"],
+    })
+    .expect(201);
+}
 
 describe("Tenant-scoped support console sections", () => {
   it("gates list endpoints: unauthenticated 401, MEMBER 403, OWNER/ADMIN/SUPPORT 200", async () => {
@@ -15,10 +41,11 @@ describe("Tenant-scoped support console sections", () => {
 
     await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
       .send({ email: admin.email, role: "ADMIN" }).expect(201);
-    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+    const supportMember = await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
       .send({ email: support.email, role: "SUPPORT" }).expect(201);
     await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
       .send({ email: member.email, role: "MEMBER" }).expect(201);
+    await approveSupportAccess(owner, supportMember.body.data.id);
 
     const adminLogin = await loginUser(app, admin.email, admin.password, owner.tenantId);
     const supportLogin = await loginUser(app, support.email, support.password, owner.tenantId);
@@ -74,8 +101,9 @@ describe("Tenant-scoped support console sections", () => {
   it("exposes tenant overview at GET /support/tenant for OWNER/ADMIN/SUPPORT", async () => {
     const owner = await registerUser(app, { email: "tenant-over-owner@zoiko.test", tenantName: "Overview Tenant" });
     const support = await registerUser(app, { email: "tenant-over-support@zoiko.test" });
-    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+    const supportMember = await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
       .send({ email: support.email, role: "SUPPORT" }).expect(201);
+    await approveSupportAccess(owner, supportMember.body.data.id);
     const supportLogin = await loginUser(app, support.email, support.password, owner.tenantId);
 
     const ownerRes = await request(app).get("/api/v1/support/tenant")
@@ -94,8 +122,12 @@ describe("Tenant-scoped support console sections", () => {
     const ownerA = await registerUser(app, { email: "iso-ownerA@zoiko.test", tenantName: "Tenant A" });
     const ownerB = await registerUser(app, { email: "iso-ownerB@zoiko.test", tenantName: "Tenant B" });
     const supportA = await registerUser(app, { email: "iso-supportA@zoiko.test" });
-    await request(app).post("/api/v1/membership/members").set(authHeader(ownerA.accessToken))
+    const supportAMember = await request(app).post("/api/v1/membership/members").set(authHeader(ownerA.accessToken))
       .send({ email: supportA.email, role: "SUPPORT" }).expect(201);
+    // Approved for tenant A only. The isolation this test is about is now
+    // doubly enforced: the grant is per workspace, and the query is scoped to
+    // the session's tenant regardless of what the caller asks for.
+    await approveSupportAccess(ownerA, supportAMember.body.data.id);
     const supportALogin = await loginUser(app, supportA.email, supportA.password, ownerA.tenantId);
 
     // Seed data in tenant B

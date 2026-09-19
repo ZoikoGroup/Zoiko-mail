@@ -6,6 +6,14 @@ import { auditService, redactMetadata } from "../audit/audit.service.js";
 
 const DELIVERY_ISSUE_TYPES = ["FAILED", "BOUNCED", "REJECTED", "BLOCKED"] as const;
 
+/**
+ * An incident named in the reason, for the case where no ticket exists yet.
+ *
+ * Deliberately loose — the point is that a human wrote down something that can
+ * be looked up later, not that it matches one issue tracker's format.
+ */
+const NAMES_AN_INCIDENT = /\b(?:INC|INCIDENT|P0|P1|SEV[- ]?[0-3]|CASE)\b[- ]?\w*/i;
+
 export class SupportService {
   async overview(tenantId: string) {
     const since24h = new Date(Date.now() - 86_400_000);
@@ -182,13 +190,38 @@ export class SupportService {
       orderBy: { createdAt: "desc" },
     });
   }
-  async create(input: { supportMembershipId: string; reason: string; expiresInMinutes: number; scopes: SupportScope[] }, tenantId: string, userId: string) {
+  /**
+   * Open support access to this workspace.
+   *
+   * Runbook §7 wants the access attributable: "linked to a ticket, incident,
+   * or approved customer support request". A ticket id is the strong form and
+   * is verified to belong to this workspace — a grant pointing at somebody
+   * else's case is worse than no link at all. An incident reference written
+   * into the reason is the weak form, allowed because a P0 can start before
+   * anyone has raised a ticket. What is refused is the third case: an access
+   * with neither, which nobody can account for afterwards.
+   */
+  async create(input: { supportMembershipId: string; reason: string; ticketId?: string; expiresInMinutes: number; scopes: SupportScope[] }, tenantId: string, userId: string) {
     const membership = await prisma.tenantMembership.findFirst({ where: { id: input.supportMembershipId, tenantId, role: "SUPPORT", status: "ACTIVE" } });
     if (!membership) throw new AppError("Active SUPPORT membership not found", 404, ErrorCodes.NOT_FOUND);
+
+    if (input.ticketId) {
+      const ticket = await prisma.supportTicket.findFirst({ where: { id: input.ticketId, tenantId }, select: { id: true } });
+      if (!ticket) {
+        throw new AppError("That ticket does not belong to this workspace", 404, ErrorCodes.NOT_FOUND);
+      }
+    } else if (!NAMES_AN_INCIDENT.test(input.reason)) {
+      throw new AppError(
+        "Link this access to a ticket, or name the incident it is for in the reason.",
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+
     await prisma.supportAccessGrant.updateMany({ where: { tenantId, supportMembershipId: membership.id, revokedAt: null, expiresAt: { gt: new Date() } }, data: { revokedAt: new Date() } });
-    const grant = await prisma.supportAccessGrant.create({ data: { tenantId, supportMembershipId: membership.id, approvedByUserId: userId, reason: input.reason, scopes: input.scopes, expiresAt: new Date(Date.now() + input.expiresInMinutes * 60_000) } });
+    const grant = await prisma.supportAccessGrant.create({ data: { tenantId, supportMembershipId: membership.id, approvedByUserId: userId, reason: input.reason, ticketId: input.ticketId ?? null, scopes: input.scopes, expiresAt: new Date(Date.now() + input.expiresInMinutes * 60_000) } });
     await auditService.record({ tenantId, actorUserId: userId, eventType: "SUPPORT_ACCESS_GRANTED",
-      actorType: "SUPPORT", targetType: "SupportAccessGrant", targetId: grant.id, metadata: { scopes: grant.scopes, expiresAt: grant.expiresAt.toISOString(), reason: grant.reason } });
+      actorType: "SUPPORT", targetType: "SupportAccessGrant", targetId: grant.id, metadata: { scopes: grant.scopes, expiresAt: grant.expiresAt.toISOString(), reason: grant.reason, ticketId: grant.ticketId } });
     return grant;
   }
   async revoke(id: string, tenantId: string, userId: string) {

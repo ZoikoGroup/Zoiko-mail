@@ -50,7 +50,14 @@ export type Capability =
   // Support
   | "support.standing"
   | "support.workspace.access"
-  | "support.grant.end";
+  | "support.grant.end"
+  // Reading one workspace's support console: routine for Owner and Admin,
+  // time-boxed for a Support seat, which is why it is a capability rather
+  // than a role check.
+  | "support.console.read"
+  // Seeing who currently holds access. Deliberately separate from
+  // support.console.read so a granted Support member cannot read it.
+  | "support.grant.read";
 
 export interface CapabilityState {
   data: Set<Capability> | undefined;
