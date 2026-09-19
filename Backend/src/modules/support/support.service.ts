@@ -3,6 +3,7 @@ import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService, redactMetadata } from "../audit/audit.service.js";
+import { redactSubject, restrictedMessageIds } from "./redaction.js";
 
 const DELIVERY_ISSUE_TYPES = ["FAILED", "BOUNCED", "REJECTED", "BLOCKED"] as const;
 
@@ -54,7 +55,7 @@ export class SupportService {
       }),
       prisma.deliveryEvent.findMany({
         where: { tenantId, type: { in: [...DELIVERY_ISSUE_TYPES] }, createdAt: { gte: since24h } },
-        select: { id: true, type: true, failureCode: true, failureReason: true, createdAt: true, message: { select: { subject: true, fromAddress: true, fromName: true } } },
+        select: { id: true, type: true, failureCode: true, failureReason: true, createdAt: true, message: { select: { id: true, subject: true, fromAddress: true, fromName: true } } },
         orderBy: { createdAt: "desc" },
         take: 50,
       }),
@@ -84,11 +85,19 @@ export class SupportService {
       _count: true,
     });
 
+    // Runbook §7 / Data Model: a subject "may be redacted by policy for
+    // restricted mailboxes". Resolved once for the whole page rather than per
+    // row — these lists carry up to fifty messages each.
+    const restricted = await restrictedMessageIds([
+      ...failedMessages.map((m) => m.id),
+      ...failedDeliveries.map((e) => e.message?.id).filter((id): id is string => Boolean(id)),
+    ]);
+
     const issues = [
       ...failedMessages.map((msg) => ({
         id: `MSG-${msg.id.slice(0, 8)}`,
         kind: "message" as const,
-        subject: msg.subject || "(no subject)",
+        subject: redactSubject(msg.subject, msg.id, restricted) || "(no subject)",
         customer: msg.fromName || msg.fromAddress || "Unknown",
         mailbox: msg.fromAddress ?? null,
         category: "Delivery",
@@ -101,7 +110,7 @@ export class SupportService {
       ...failedDeliveries.map((ev) => ({
         id: `DLV-${ev.id.slice(0, 8)}`,
         kind: "delivery" as const,
-        subject: ev.message?.subject || "Delivery event",
+        subject: redactSubject(ev.message?.subject, ev.message?.id, restricted) || "Delivery event",
         customer: ev.message?.fromName || ev.message?.fromAddress || "Unknown",
         mailbox: ev.message?.fromAddress ?? null,
         category: "Delivery",
@@ -297,7 +306,7 @@ export class SupportService {
         }),
         prisma.deliveryEvent.findMany({
           where: { type: { in: [...DELIVERY_ISSUE_TYPES] }, createdAt: { gte: since24h } },
-          select: { id: true, type: true, failureCode: true, failureReason: true, providerEventId: true, createdAt: true, tenantId: true, message: { select: { subject: true, fromAddress: true, fromName: true, tenant: { select: { id: true, name: true } } } } },
+          select: { id: true, type: true, failureCode: true, failureReason: true, providerEventId: true, createdAt: true, tenantId: true, message: { select: { id: true, subject: true, fromAddress: true, fromName: true, tenant: { select: { id: true, name: true } } } } },
           orderBy: { createdAt: "desc" }, take: 40,
         }),
         prisma.backgroundJob.findMany({
@@ -322,19 +331,27 @@ export class SupportService {
         }),
       ]);
 
+    // The same §7 rule as the tenant console, and it matters more here: this
+    // view spans every workspace, so one restricted mailbox's subject line
+    // would be readable by any staff member browsing the platform overview.
+    const restricted = await restrictedMessageIds([
+      ...failedMessages.map((m) => m.id),
+      ...failedDeliveries.map((e) => e.message?.id).filter((id): id is string => Boolean(id)),
+    ]);
+
     const issues = [
       ...failedMessages.map((m) => ({
         id: m.id, kind: "message" as const,
         tenantId: m.tenant.id, tenantName: m.tenant.name,
         resourceType: this.issueRows.message,
-        resource: m.fromAddress ?? m.subject ?? m.id.slice(0, 8),
+        resource: m.fromAddress ?? redactSubject(m.subject, m.id, restricted) ?? m.id.slice(0, 8),
         status: "FAILED", error: m.scheduleLastError ?? null, providerEventId: null, createdAt: m.updatedAt,
       })),
       ...failedDeliveries.map((e) => ({
         id: e.id, kind: "delivery" as const,
         tenantId: e.tenantId, tenantName: e.message?.tenant?.name ?? "Unknown",
         resourceType: this.issueRows.delivery,
-        resource: `${e.message?.fromAddress ?? "unknown"} · ${e.message?.subject ?? "delivery event"}`,
+        resource: `${e.message?.fromAddress ?? "unknown"} · ${redactSubject(e.message?.subject, e.message?.id, restricted) ?? "delivery event"}`,
         status: e.type, error: e.failureReason ?? e.failureCode ?? null,
         providerEventId: e.providerEventId ?? null, createdAt: e.createdAt,
       })),
@@ -863,6 +880,7 @@ export class SupportService {
         createdAt: true,
         message: {
           select: {
+            id: true,
             subject: true,
             fromAddress: true,
             fromName: true,
@@ -878,6 +896,12 @@ export class SupportService {
       take: Math.min(input.limit ?? 50, 200),
     });
 
+    // §7: a restricted mailbox's subject is not support's to read,
+    // even on a delivery failure.
+    const restricted = await restrictedMessageIds(
+      events.map((e) => e.message?.id).filter((id): id is string => Boolean(id))
+    );
+
     return events.map((e) => ({
       id: e.id,
       type: e.type,
@@ -889,7 +913,7 @@ export class SupportService {
       createdAt: e.createdAt,
       message: e.message
         ? {
-            subject: e.message.subject,
+            subject: redactSubject(e.message.subject, e.message.id, restricted),
             fromAddress: e.message.fromAddress,
             fromName: e.message.fromName,
             providerMessageId: e.message.providerMessageId,

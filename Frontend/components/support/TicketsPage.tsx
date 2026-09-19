@@ -18,6 +18,7 @@ import {
   type TicketSeverity,
   type TicketStatus,
 } from "@/lib/support-api";
+import { useLiveRefresh } from "@/lib/support-hooks";
 import { ApiError } from "@/lib/api-client";
 
 const STATUSES: TicketStatus[] = ["OPEN", "IN_PROGRESS", "WAITING_TENANT", "RESOLVED", "CLOSED"];
@@ -127,6 +128,12 @@ export default function TicketsPage() {
       cancelled = true;
     };
   }, [params, tick]);
+
+  // The queue Runbook §5 measures. A P0 carries a fifteen-minute initial
+  // response target, which a list that only loads once cannot support —
+  // whoever is on duty would have to keep pressing refresh to discover one
+  // had arrived. Paused while the tab is hidden.
+  useLiveRefresh(() => setTick((t) => t + 1));
 
   const reload = useCallback(() => setTick((t) => t + 1), []);
 
@@ -471,6 +478,10 @@ function TicketDetail({ ticketId, onBack }: { ticketId: string; onBack: () => vo
   useEffect(() => {
     load();
   }, [load]);
+
+  // A comment added by the tenant while this is open is the other half of the
+  // conversation, and an assignment made by a colleague changes who owns it.
+  useLiveRefresh(() => void load());
 
   useEffect(() => {
     listPlatformStaff()

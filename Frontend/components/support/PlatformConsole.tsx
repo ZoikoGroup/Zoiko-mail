@@ -46,6 +46,7 @@ import {
   type SupportDiagnosticsData,
   type TenantOverview,
 } from "@/lib/support-api";
+import { useLiveRefresh } from "@/lib/support-hooks";
 import { supportStyles } from "@/components/support/support-styles";
 import TicketsPage from "@/components/support/TicketsPage";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
@@ -194,6 +195,13 @@ function useList<T>(
   }, [fetchFn, key, params, tick]);
 
   const reload = useCallback(() => setTick((t) => t + 1), []);
+
+  // Runbook §5 sets a fifteen-minute initial response for a P0, which a
+  // screen that only loads once cannot support: the operator would have to
+  // keep pressing refresh to find out anything had happened. Every list in
+  // this console keeps itself current, and pauses while the tab is hidden.
+  useLiveRefresh(reload);
+
   return { params, setParams, rows, loading, error, reload };
 }
 
@@ -1718,6 +1726,11 @@ export default function PlatformConsole() {
       setOverviewLoading(false);
     }
   }, []);
+
+  // The overview is the alert view: active grants, overdue tickets, provider
+  // health. Sixty seconds rather than thirty — it is an aggregate over every
+  // workspace, and nothing on it turns on a single event.
+  useLiveRefresh(() => void loadOverview(), 60_000);
 
   // Staff sign in through the ordinary login page: the backend answers
   // STAFF_CONSOLE users with a platform token (stored by login()), so by the
