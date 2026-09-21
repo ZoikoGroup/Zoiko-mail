@@ -1697,7 +1697,7 @@ model StripeWebhookEvent {
  * main already implements as Mailbox(type=SHARED) + MailboxAccess. Wiring
  * this up would give the platform two models for one concept. The table is
  * preserved and the ambiguity is left visible rather than resolved by
- * accident — see docs/operations/known-issues.md, KI-004.
+ * accident — see Backend/docs/operations/known-issues.md, KI-004.
  */
 model MailGroup {
   id        String            @id @default(uuid()) @db.Uuid
