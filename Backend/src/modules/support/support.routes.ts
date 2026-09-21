@@ -1,9 +1,21 @@
 import type { Request } from "express";
 import { Router } from "express";
-import { authenticate, idempotency, authenticateStaff, requireCapability, requireSupportAccess, requireTenantGrant, logSupportAccess, tenantContext, validate, crossTenantScope} from "../../common/middleware/index.js";
+import { authenticate, idempotency, authenticateStaff, requireCapability, requireRole, requireSupportAccess, requireTenantGrant, logSupportAccess, tenantContext, validate, crossTenantScope} from "../../common/middleware/index.js";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
-import { createGrantSchema, domainParamSchema, grantIdSchema, mailboxParamSchema, platformListQuerySchema, tenantParamSchema } from "./support.schema.js";
+import {
+  createGrantSchema,
+  domainParamSchema,
+  grantIdSchema,
+  mailboxParamSchema,
+  platformListQuerySchema,
+  tenantParamSchema,
+  requestAccessSchema,
+  approveRequestSchema,
+  denyRequestSchema,
+  requestIdSchema,
+  listRequestsSchema,
+} from "./support.schema.js";
 import { supportService } from "./support.service.js";
 
 export const supportRouter = Router();
@@ -58,6 +70,105 @@ function tenantListQuery(req: Request): {
     limit: Math.max(1, Math.min(Math.floor(limit), 200)),
   };
 }
+
+/* ── asking for access, and deciding on it — Runbook §7 ─────────────────
+ *
+ * The request endpoint is the one thing here a SUPPORT seat may reach with no
+ * grant, because it is how a grant comes to exist. Everything else on this
+ * router already needs `support.console.read`, which is GRANT for Support —
+ * so without this, a support member holding no grant could not ask for one.
+ *
+ * Approving carries `support.grant.create`: STEP_UP and Owner-only, matching
+ * RBAC §2 ("Approve support access: Owner Yes, Admin No"). Denying carries
+ * `support.grant.end`, which Admin holds too — refusing access is not the
+ * same decision as opening it.
+ */
+supportRouter.post(
+  "/access-requests",
+  requireRole("SUPPORT"),
+  validate(requestAccessSchema),
+  asyncHandler(async (req, res) => {
+    const c = req.tenantContext!;
+    sendSuccess(
+      res,
+      201,
+      await supportService.requestAccess(req.body, c.tenantId, c.membershipId, c.userId),
+      req.requestId
+    );
+  })
+);
+
+supportRouter.get(
+  "/access-requests",
+  requireCapability("support.grant.read"),
+  validate(listRequestsSchema, "query"),
+  asyncHandler(async (req, res) => {
+    const status = (req.query as { status?: "PENDING" | "APPROVED" | "DENIED" | "WITHDRAWN" }).status;
+    sendSuccess(
+      res,
+      200,
+      { requests: await supportService.listRequests(req.tenantContext!.tenantId, status) },
+      req.requestId
+    );
+  })
+);
+
+supportRouter.post(
+  "/access-requests/:requestId/approve",
+  requireCapability("support.grant.create"),
+  validate(requestIdSchema, "params"),
+  validate(approveRequestSchema),
+  asyncHandler(async (req, res) => {
+    const c = req.tenantContext!;
+    sendSuccess(
+      res,
+      200,
+      await supportService.approveRequest(
+        String(req.params.requestId),
+        c.tenantId,
+        c.userId,
+        (req.body as { minutes?: number }).minutes
+      ),
+      req.requestId
+    );
+  })
+);
+
+supportRouter.post(
+  "/access-requests/:requestId/deny",
+  requireCapability("support.grant.end"),
+  validate(requestIdSchema, "params"),
+  validate(denyRequestSchema),
+  asyncHandler(async (req, res) => {
+    const c = req.tenantContext!;
+    sendSuccess(
+      res,
+      200,
+      await supportService.denyRequest(
+        String(req.params.requestId),
+        c.tenantId,
+        c.userId,
+        (req.body as { note?: string }).note
+      ),
+      req.requestId
+    );
+  })
+);
+
+supportRouter.post(
+  "/access-requests/:requestId/withdraw",
+  requireRole("SUPPORT"),
+  validate(requestIdSchema, "params"),
+  asyncHandler(async (req, res) => {
+    const c = req.tenantContext!;
+    sendSuccess(
+      res,
+      200,
+      await supportService.withdrawRequest(String(req.params.requestId), c.tenantId, c.membershipId, c.userId),
+      req.requestId
+    );
+  })
+);
 
 supportRouter.get("/tenant", requireCapability("support.console.read"), asyncHandler(async (req, res) => {
   sendSuccess(res, 200, await supportService.tenantOverview(req.tenantContext!.tenantId), req.requestId);

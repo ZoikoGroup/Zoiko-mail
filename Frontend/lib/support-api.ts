@@ -838,3 +838,24 @@ export function commentPlatformTicket(ticketId: string, body: string, internal: 
 export function listPlatformStaff(): Promise<{ staff: TicketAuthor[] }> {
   return platformRequest<{ staff: TicketAuthor[] }>("/support/platform/tickets/staff");
 }
+
+/* ─── asking this workspace for access — Runbook §7 ─────────────────────── */
+
+export interface RequestAccessInput {
+  reason: string;
+  ticketId?: string;
+  scopes: SupportScope[];
+  requestedMinutes: number;
+}
+
+/**
+ * The one support call that needs no grant, because it is how the first grant
+ * comes to exist. Everything else on the tenant console is gated on
+ * `support.console.read`, which is GRANT for a Support seat.
+ */
+export async function requestSupportAccess(input: RequestAccessInput): Promise<{ id: string; status: string }> {
+  return apiRequest<{ id: string; status: string }>("/support/access-requests", {
+    method: "POST",
+    body: input,
+  });
+}

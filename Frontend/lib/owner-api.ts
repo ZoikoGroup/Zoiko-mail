@@ -733,3 +733,67 @@ export async function confirmDeletion(
 export async function downloadExport(requestId: string): Promise<Blob> {
   return apiRequest<Blob>(`/lifecycle/exports/${requestId}/download`);
 }
+
+/* ─── Support access requests — Runbook §7 ──────────────────────────────── */
+
+export type SupportScopeName =
+  | "TENANT_DIAGNOSTICS"
+  | "DNS_DIAGNOSTICS"
+  | "DELIVERY_DIAGNOSTICS"
+  | "AUDIT_READ";
+
+export type SupportRequestStatus = "PENDING" | "APPROVED" | "DENIED" | "WITHDRAWN";
+
+export interface SupportAccessRequest {
+  id: string;
+  reason: string;
+  scopes: SupportScopeName[];
+  requestedMinutes: number;
+  status: SupportRequestStatus;
+  createdAt: string;
+  decidedAt: string | null;
+  grantId: string | null;
+  supportMembership: {
+    id: string;
+    user: { id: string; email: string; displayName: string };
+  };
+  decidedBy: { id: string; email: string; displayName: string } | null;
+  ticket: { id: string; ticketNumber: number; subject: string } | null;
+}
+
+export async function fetchSupportAccessRequests(
+  status?: SupportRequestStatus
+): Promise<{ requests: SupportAccessRequest[] }> {
+  const q = status ? `?status=${status}` : "";
+  return apiRequest<{ requests: SupportAccessRequest[] }>(`/support/access-requests${q}`);
+}
+
+/**
+ * Approving is what writes the grant.
+ *
+ * Carries a step-up token because RBAC §2 marks "Approve support access"
+ * high-risk and the capability is STEP_UP for Owner — the only role that
+ * holds it. `minutes` may shorten the window the requester asked for; the
+ * server refuses to lengthen it.
+ */
+export async function approveSupportAccessRequest(
+  requestId: string,
+  stepUpToken?: string,
+  minutes?: number
+): Promise<unknown> {
+  return apiRequest(`/support/access-requests/${encodeURIComponent(requestId)}/approve`, {
+    method: "POST",
+    body: minutes ? { minutes } : {},
+    stepUpToken,
+  });
+}
+
+export async function denySupportAccessRequest(
+  requestId: string,
+  note?: string
+): Promise<unknown> {
+  return apiRequest(`/support/access-requests/${encodeURIComponent(requestId)}/deny`, {
+    method: "POST",
+    body: note ? { note } : {},
+  });
+}

@@ -233,6 +233,239 @@ export class SupportService {
       actorType: "SUPPORT", targetType: "SupportAccessGrant", targetId: grant.id, metadata: { scopes: grant.scopes, expiresAt: grant.expiresAt.toISOString(), reason: grant.reason, ticketId: grant.ticketId } });
     return grant;
   }
+  /**
+   * Support asking a workspace for access.
+   *
+   * Open to the SUPPORT seat itself and needs no grant, which is the point:
+   * this is how the first grant comes into existence. Until it existed the
+   * enforcement was real and unusable — nothing in the product could create a
+   * grant, so the only way to open access was a direct API call.
+   *
+   * The same attribution rule as approving one (Runbook §7): a ticket in this
+   * workspace, or an incident named in the reason. Asked for at request time
+   * rather than at approval, so the approver decides on a case rather than
+   * being asked to invent one.
+   */
+  async requestAccess(
+    input: { reason: string; ticketId?: string; scopes: SupportScope[]; requestedMinutes: number },
+    tenantId: string,
+    membershipId: string,
+    userId: string
+  ) {
+    await this.assertAttributable(input, tenantId);
+
+    const existing = await prisma.supportAccessRequest.findFirst({
+      where: { tenantId, supportMembershipId: membershipId, status: "PENDING" },
+      select: { id: true },
+    });
+    if (existing) {
+      throw new AppError("You already have a request waiting on this workspace.", 409, ErrorCodes.CONFLICT);
+    }
+
+    const request = await prisma.supportAccessRequest.create({
+      data: {
+        tenantId,
+        supportMembershipId: membershipId,
+        reason: input.reason,
+        ticketId: input.ticketId ?? null,
+        scopes: input.scopes,
+        requestedMinutes: input.requestedMinutes,
+      },
+    });
+
+    await auditService.record({
+      tenantId, actorUserId: userId, actorType: "SUPPORT",
+      eventType: "SUPPORT_ACCESS_REQUESTED",
+      targetType: "SupportAccessRequest", targetId: request.id,
+      metadata: {
+        scopes: request.scopes,
+        requestedMinutes: request.requestedMinutes,
+        reason: request.reason,
+        ticketId: request.ticketId,
+      },
+    });
+
+    await this.notifyApprovers(tenantId, request.reason);
+    return request;
+  }
+
+  /** Pending first, because that is the list anyone opens this screen for. */
+  async listRequests(tenantId: string, status?: "PENDING" | "APPROVED" | "DENIED" | "WITHDRAWN") {
+    return prisma.supportAccessRequest.findMany({
+      where: { tenantId, ...(status ? { status } : {}) },
+      include: {
+        supportMembership: { include: { user: { select: { id: true, email: true, displayName: true } } } },
+        decidedBy: { select: { id: true, email: true, displayName: true } },
+        ticket: { select: { id: true, ticketNumber: true, subject: true } },
+      },
+      orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+      take: 100,
+    });
+  }
+
+  /**
+   * Approve a request, which is what actually writes the grant.
+   *
+   * The approver may shorten the window but never lengthen it, and the scopes
+   * are the ones that were asked for. An approval that silently widened the
+   * request would make the request a formality rather than the thing being
+   * approved.
+   */
+  async approveRequest(
+    requestId: string,
+    tenantId: string,
+    approverUserId: string,
+    overrideMinutes?: number
+  ) {
+    const request = await prisma.supportAccessRequest.findFirst({
+      where: { id: requestId, tenantId, status: "PENDING" },
+    });
+    if (!request) throw new AppError("Pending support access request not found", 404, ErrorCodes.NOT_FOUND);
+
+    const minutes = Math.min(overrideMinutes ?? request.requestedMinutes, request.requestedMinutes);
+
+    const grant = await this.create(
+      {
+        supportMembershipId: request.supportMembershipId,
+        reason: request.reason,
+        ticketId: request.ticketId ?? undefined,
+        expiresInMinutes: minutes,
+        scopes: request.scopes,
+      },
+      tenantId,
+      approverUserId
+    );
+
+    const updated = await prisma.supportAccessRequest.update({
+      where: { id: request.id },
+      data: { status: "APPROVED", decidedByUserId: approverUserId, decidedAt: new Date(), grantId: grant.id },
+    });
+
+    await auditService.record({
+      tenantId, actorUserId: approverUserId, actorType: "SUPPORT",
+      eventType: "SUPPORT_ACCESS_REQUEST_APPROVED",
+      targetType: "SupportAccessRequest", targetId: request.id,
+      metadata: { grantId: grant.id, minutes, scopes: request.scopes },
+    });
+
+    await this.notifyRequester(request.supportMembershipId, tenantId, "approved", grant.expiresAt);
+    return { request: updated, grant };
+  }
+
+  async denyRequest(requestId: string, tenantId: string, userId: string, note?: string) {
+    const request = await prisma.supportAccessRequest.findFirst({
+      where: { id: requestId, tenantId, status: "PENDING" },
+    });
+    if (!request) throw new AppError("Pending support access request not found", 404, ErrorCodes.NOT_FOUND);
+
+    const updated = await prisma.supportAccessRequest.update({
+      where: { id: request.id },
+      data: { status: "DENIED", decidedByUserId: userId, decidedAt: new Date() },
+    });
+
+    await auditService.record({
+      tenantId, actorUserId: userId, actorType: "SUPPORT",
+      eventType: "SUPPORT_ACCESS_REQUEST_DENIED",
+      targetType: "SupportAccessRequest", targetId: request.id,
+      metadata: { note: note ?? null },
+    });
+
+    await this.notifyRequester(request.supportMembershipId, tenantId, "declined");
+    return updated;
+  }
+
+  /** The requester changing their mind, which needs nobody's approval. */
+  async withdrawRequest(requestId: string, tenantId: string, membershipId: string, userId: string) {
+    const request = await prisma.supportAccessRequest.findFirst({
+      where: { id: requestId, tenantId, supportMembershipId: membershipId, status: "PENDING" },
+    });
+    if (!request) throw new AppError("Pending support access request not found", 404, ErrorCodes.NOT_FOUND);
+
+    const updated = await prisma.supportAccessRequest.update({
+      where: { id: request.id },
+      data: { status: "WITHDRAWN", decidedAt: new Date() },
+    });
+    await auditService.record({
+      tenantId, actorUserId: userId, actorType: "SUPPORT",
+      eventType: "SUPPORT_ACCESS_REQUEST_WITHDRAWN",
+      targetType: "SupportAccessRequest", targetId: request.id,
+    });
+    return updated;
+  }
+
+  /** Runbook §7's attribution rule, shared by asking and by granting directly. */
+  private async assertAttributable(
+    input: { reason: string; ticketId?: string },
+    tenantId: string
+  ): Promise<void> {
+    if (input.ticketId) {
+      const ticket = await prisma.supportTicket.findFirst({
+        where: { id: input.ticketId, tenantId },
+        select: { id: true },
+      });
+      if (!ticket) throw new AppError("That ticket does not belong to this workspace", 404, ErrorCodes.NOT_FOUND);
+      return;
+    }
+    if (!NAMES_AN_INCIDENT.test(input.reason)) {
+      throw new AppError(
+        "Link this access to a ticket, or name the incident it is for in the reason.",
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+  }
+
+  /**
+   * Tell the people who can decide.
+   *
+   * ACTION_REQUIRED with a link, because a request that waits for somebody to
+   * happen to open a screen is a request that expires unanswered — and the
+   * support member is blocked for the whole of it.
+   */
+  private async notifyApprovers(tenantId: string, reason: string): Promise<void> {
+    const approvers = await prisma.tenantMembership.findMany({
+      where: { tenantId, status: "ACTIVE", role: { in: ["OWNER", "ADMIN"] } },
+      select: { userId: true },
+    });
+    if (approvers.length === 0) return;
+    await prisma.notification.createMany({
+      data: approvers.map((a) => ({
+        tenantId,
+        userId: a.userId,
+        type: "ACTION_REQUIRED" as const,
+        title: "Support has asked for access to this workspace",
+        body: reason.slice(0, 280),
+        linkPath: "/owner/support-access",
+      })),
+    });
+  }
+
+  private async notifyRequester(
+    supportMembershipId: string,
+    tenantId: string,
+    outcome: "approved" | "declined",
+    expiresAt?: Date
+  ): Promise<void> {
+    const membership = await prisma.tenantMembership.findUnique({
+      where: { id: supportMembershipId },
+      select: { userId: true },
+    });
+    if (!membership) return;
+    await prisma.notification.create({
+      data: {
+        tenantId,
+        userId: membership.userId,
+        type: outcome === "approved" ? "INFO" : "WARNING",
+        title: "Support access " + outcome,
+        body:
+          outcome === "approved" && expiresAt
+            ? "Your access is open until " + expiresAt.toISOString() + ". It ends on its own."
+            : "Your request for access to this workspace was not granted.",
+        linkPath: "/support",
+      },
+    });
+  }
+
   async revoke(id: string, tenantId: string, userId: string) {
     const grant = await prisma.supportAccessGrant.findFirst({ where: { id, tenantId, revokedAt: null } });
     if (!grant) throw new AppError("Active support grant not found", 404, ErrorCodes.NOT_FOUND);

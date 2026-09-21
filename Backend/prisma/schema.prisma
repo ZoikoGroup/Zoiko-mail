@@ -37,6 +37,7 @@ model Tenant {
   backgroundJobs      BackgroundJob[]
   lifecycleRequests   DataLifecycleRequest[]
   supportAccessGrants SupportAccessGrant[]
+  supportAccessRequests SupportAccessRequest[]
   mailLabels          MailLabel[]
   messageLabels       MailboxMessageLabel[]
   connectedAccounts   ConnectedAccount[]
@@ -104,6 +105,7 @@ model AppUser {
   createdJobs             BackgroundJob[]        @relation("JobCreator")
   lifecycleRequests       DataLifecycleRequest[] @relation("LifecycleRequester")
   approvedSupportGrants   SupportAccessGrant[]   @relation("SupportApprover")
+  decidedSupportRequests  SupportAccessRequest[] @relation("SupportRequestDecider")
   connectedAccounts       ConnectedAccount[]
   identities              UserIdentity[]
   usedSelectionTokens     UsedSelectionToken[]
@@ -186,6 +188,7 @@ model TenantMembership {
   mailboxAccess       MailboxAccess[]
   receivedMessages    MessageRecipient[]
   supportAccessGrants SupportAccessGrant[]
+  supportAccessRequests SupportAccessRequest[]
   connectedAccounts   ConnectedAccount[]
   contacts            Contact[]
 
@@ -1022,6 +1025,54 @@ model IdempotencyRecord {
   @@map("idempotency_records")
 }
 
+/**
+ * Support asking for access, before anyone has decided.
+ *
+ * Deliberately not a state on SupportAccessGrant. The middleware that guards
+ * every tenant read treats a grant as live when `revokedAt` is null and
+ * `expiresAt` is in the future — a pending row would satisfy both, so merely
+ * *asking* would have granted the access. Separate table, and the grant is
+ * only written when someone approves.
+ *
+ * Runbook §7: access must be "linked to a ticket, incident, or approved
+ * customer support request". This is that request.
+ */
+model SupportAccessRequest {
+  id                  String                     @id @default(uuid()) @db.Uuid
+  tenantId            String                     @map("tenant_id") @db.Uuid
+  supportMembershipId String                     @map("support_membership_id") @db.Uuid
+  reason              String
+  ticketId            String?                    @map("ticket_id") @db.Uuid
+  scopes              SupportScope[]
+  /// What the requester asked for; the approver may shorten it.
+  requestedMinutes    Int                        @map("requested_minutes")
+  status              SupportAccessRequestStatus @default(PENDING)
+  decidedByUserId     String?                    @map("decided_by_user_id") @db.Uuid
+  decidedAt           DateTime?                  @map("decided_at")
+  /// The grant this became, when it was approved.
+  grantId             String?                    @unique @map("grant_id") @db.Uuid
+  createdAt           DateTime                   @default(now()) @map("created_at")
+  updatedAt           DateTime                   @updatedAt @map("updated_at")
+
+  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supportMembership TenantMembership    @relation(fields: [supportMembershipId], references: [id], onDelete: Cascade)
+  decidedBy         AppUser?            @relation("SupportRequestDecider", fields: [decidedByUserId], references: [id], onDelete: SetNull)
+  ticket            SupportTicket?      @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  grant             SupportAccessGrant? @relation(fields: [grantId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status])
+  @@map("support_access_requests")
+}
+
+enum SupportAccessRequestStatus {
+  PENDING
+  APPROVED
+  DENIED
+  WITHDRAWN
+
+  @@map("support_access_request_status")
+}
+
 model SupportAccessGrant {
   id                  String           @id @default(uuid()) @db.Uuid
   tenantId            String           @map("tenant_id") @db.Uuid
@@ -1044,6 +1095,7 @@ model SupportAccessGrant {
   supportMembership   TenantMembership @relation(fields: [supportMembershipId], references: [id], onDelete: Cascade)
   approvedBy          AppUser          @relation("SupportApprover", fields: [approvedByUserId], references: [id], onDelete: Restrict)
   ticket              SupportTicket?   @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  request             SupportAccessRequest?
 
   @@index([tenantId, supportMembershipId, expiresAt])
   @@map("support_access_grants")
@@ -1078,8 +1130,9 @@ model SupportTicket {
   tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   openedBy      AppUser                @relation("TicketOpenedBy", fields: [openedByUserId], references: [id], onDelete: Cascade)
   assignedStaff AppUser?               @relation("TicketAssignedStaff", fields: [assignedStaffId], references: [id], onDelete: SetNull)
-  comments      SupportTicketComment[]
-  accessGrants  SupportAccessGrant[]
+  comments       SupportTicketComment[]
+  accessGrants   SupportAccessGrant[]
+  accessRequests SupportAccessRequest[]
 
   @@index([tenantId, status, updatedAt])
   @@index([assignedStaffId])

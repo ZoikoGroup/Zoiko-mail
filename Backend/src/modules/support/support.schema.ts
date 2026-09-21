@@ -18,6 +18,35 @@ export const createGrantSchema = z.object({
   scopes: z.array(z.enum(["TENANT_DIAGNOSTICS", "DNS_DIAGNOSTICS", "DELIVERY_DIAGNOSTICS", "AUDIT_READ"])).min(1),
 });
 
+/**
+ * Support asking for access — Runbook §7.
+ *
+ * Mirrors createGrantSchema rather than reusing it: the request names no
+ * membership (it is the caller's own seat) and asks for a window rather than
+ * setting one, because the approver may shorten it.
+ */
+export const requestAccessSchema = z.object({
+  reason: z.string().trim().min(10).max(500),
+  ticketId: z.string().uuid().optional(),
+  scopes: z.array(z.enum(["TENANT_DIAGNOSTICS", "DNS_DIAGNOSTICS", "DELIVERY_DIAGNOSTICS", "AUDIT_READ"])).min(1),
+  requestedMinutes: z.number().int().min(5).max(240),
+});
+
+/** The approver may shorten the window; approveRequest refuses to lengthen it. */
+export const approveRequestSchema = z.object({
+  minutes: z.number().int().min(5).max(240).optional(),
+});
+
+export const denyRequestSchema = z.object({
+  note: z.string().trim().max(500).optional(),
+});
+
+export const requestIdSchema = z.object({ requestId: z.string().uuid() });
+
+export const listRequestsSchema = z.object({
+  status: z.enum(["PENDING", "APPROVED", "DENIED", "WITHDRAWN"]).optional(),
+});
+
 export const tenantParamSchema = z.object({ tenantId: z.string().uuid() });
 export const domainParamSchema = z.object({ tenantId: z.string().uuid(), domainId: z.string().uuid() });
 export const mailboxParamSchema = z.object({ tenantId: z.string().uuid(), mailboxId: z.string().uuid() });

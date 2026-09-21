@@ -45,6 +45,9 @@ export const OWNER_NAV: OwnerNavItem[] = [
 
   { section: "Organization", label: "Organization Settings", href: "/owner/organization-settings", icon: Settings, ownerOnly: true },
   { section: "Organization", label: "Domains", href: "/owner/domains", icon: Globe, ownerOnly: true },
+  // Owner-only: RBAC §2 records "Approve support access" as Owner Yes,
+  // Admin No. An Admin can still decline a request from the same screen.
+  { section: "Organization", label: "Support Access", href: "/owner/support-access", icon: ShieldCheck, ownerOnly: true },
   { section: "Organization", label: "Subscription & Billing", href: "/owner/billing", icon: CreditCard, ownerOnly: true },
 
   { section: "Security", label: "Audit Logs", href: "/owner/audit-logs", icon: FileText, ownerOnly: true },

@@ -29,6 +29,7 @@ import {
   type TenantListParams,
 } from "@/lib/support-api";
 import { useLiveRefresh } from "@/lib/support-hooks";
+import { RequestAccessPanel } from "./RequestAccessPanel";
 import { supportStyles } from "@/components/support/support-styles";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import {
@@ -272,6 +273,11 @@ export default function TenantSupportConsole() {
   // expiry to be the control rather than a note about one.
   useLiveRefresh(() => void loadOverview(), 60_000);
 
+  // The server names the reason in the denial (requiresSupportGrant), and
+  // falls back to the message for anything that predates that detail.
+  const needsAccess =
+    Boolean(overviewError) && /support access grant|approved support/i.test(overviewError ?? "");
+
   useEffect(() => {
     void loadOverview();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -370,6 +376,18 @@ export default function TenantSupportConsole() {
               {tab === "overview" &&
                 (overviewLoading ? (
                   <Spinner />
+                ) : needsAccess ? (
+                  // Runbook §7: the console read is GRANT for a Support seat,
+                  // so no live grant means every panel 403s. Showing the way
+                  // to ask beats a screen of load errors with nothing to act
+                  // on — which is what this was until the request flow
+                  // existed at all.
+                  // No reload on success, deliberately. Asking does not grant
+                  // anything, so a refetch returns the same refusal — and it
+                  // would flip this back to the spinner, unmounting the
+                  // confirmation and showing the empty form again as though
+                  // nothing had been sent.
+                  <RequestAccessPanel />
                 ) : overviewError ? (
                   <LoadErr error={overviewError} onRetry={loadOverview} />
                 ) : (

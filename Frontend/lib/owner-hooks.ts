@@ -53,6 +53,10 @@ import {
   type ConnectorProvider,
   type RequestExportInput,
   type RequestDeletionInput,
+  fetchSupportAccessRequests,
+  approveSupportAccessRequest,
+  denySupportAccessRequest,
+  type SupportRequestStatus,
 } from "./owner-api";
 
 // ─── Members ──────────────────────────────────────────────────────────────────
@@ -396,5 +400,45 @@ export function useConfirmDeletion() {
     mutationFn: ({ requestId, data }: { requestId: string; data: { confirmation: string; tenantName: string } }) =>
       confirmDeletion(requestId, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "lifecycle"] }),
+  });
+}
+
+/* ─── Support access requests — Runbook §7 ──────────────────────────────── */
+
+/**
+ * Polled, because a request arrives while nobody is looking at this screen
+ * and a support member is blocked until it is answered.
+ */
+export function useSupportAccessRequests(status?: SupportRequestStatus) {
+  return useQuery({
+    queryKey: ["support-access-requests", status ?? "all"],
+    queryFn: () => fetchSupportAccessRequests(status),
+    staleTime: 15_000,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+  });
+}
+
+export function useApproveSupportAccess() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { requestId: string; stepUpToken?: string; minutes?: number }) =>
+      approveSupportAccessRequest(v.requestId, v.stepUpToken, v.minutes),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["support-access-requests"] });
+      // Approving writes a grant, so the grants list is stale too.
+      void qc.invalidateQueries({ queryKey: ["support-grants"] });
+    },
+  });
+}
+
+export function useDenySupportAccess() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { requestId: string; note?: string }) =>
+      denySupportAccessRequest(v.requestId, v.note),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["support-access-requests"] });
+    },
   });
 }
