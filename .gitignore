@@ -1,4 +1,7 @@
-# Local Python virtualenv. Not part of the Backend/Frontend structure and
-# not something anyone should pull down with the repo.
+# A local Python virtualenv. Nothing in this repository is Python — no
+# .py files, no requirements.txt — so it is somebody's scratch environment
+# rather than part of the build. It lives under Backend/ because the
+# repository is meant to be two folders; this pattern has no leading slash,
+# so it matches at any depth.
 venv/
 .venv/
