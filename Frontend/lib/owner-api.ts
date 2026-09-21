@@ -733,3 +733,51 @@ export async function confirmDeletion(
 export async function downloadExport(requestId: string): Promise<Blob> {
   return apiRequest<Blob>(`/lifecycle/exports/${requestId}/download`);
 }
+
+// ─── Support Access Grants ───────────────────────────────────────────────────
+
+export type SupportScopeType =
+  | "TENANT_DIAGNOSTICS"
+  | "DNS_DIAGNOSTICS"
+  | "DELIVERY_DIAGNOSTICS"
+  | "AUDIT_READ";
+
+export interface SupportGrant {
+  id: string;
+  supportMembershipId: string;
+  supportUser: { id: string; email: string; displayName: string };
+  approvedByUserId: string | null;
+  approver: { id: string; email: string; displayName: string } | null;
+  reason: string;
+  ticketId: string | null;
+  scopes: SupportScopeType[];
+  expiresAt: string;
+  revokedAt: string | null;
+  createdAt: string;
+}
+
+export interface CreateSupportGrantInput {
+  supportMembershipId: string;
+  reason: string;
+  ticketId?: string;
+  expiresInMinutes: number;
+  scopes: SupportScopeType[];
+}
+
+export async function getSupportGrants(): Promise<SupportGrant[]> {
+  const res = await apiRequest<{ grants: SupportGrant[] }>("/support/access-grants");
+  return res.grants;
+}
+
+export async function createSupportGrant(input: CreateSupportGrantInput): Promise<SupportGrant> {
+  return apiRequest<SupportGrant>("/support/access-grants", {
+    method: "POST",
+    body: input,
+  });
+}
+
+export async function revokeSupportGrant(grantId: string): Promise<SupportGrant> {
+  return apiRequest<SupportGrant>(`/support/access-grants/${grantId}`, {
+    method: "DELETE",
+  });
+}

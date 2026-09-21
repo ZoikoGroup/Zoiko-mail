@@ -14,8 +14,8 @@ export type TokenType = "access" | "refresh" | "pending" | "platform" | "selecti
  *
  * It is not the same thing as the membership role. The role is the most a
  * user could do; the scope is what this particular session is doing. A
- * Google sign-in is always issued MEMBER scope however senior the account
- * is, so reaching a console takes a deliberate sign-in.
+ * sign-in — password or Google — binds the session to the console the role
+ * implies, and a demotion narrows what an already-issued session may act in.
  */
 export type WorkspaceScope = "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT";
 
@@ -80,8 +80,8 @@ export interface RefreshTokenPayload {
   role: MembershipRole;
   /**
    * Carried so a refresh renews the same scope. Without it, refreshing would
-   * re-derive the scope from the role and quietly promote a MEMBER-scoped
-   * Google session into the owner console.
+   * re-derive the scope from the role and quietly promote a session scoped to
+   * a now-reduced role back into a console it no longer deserves.
    */
   workspace?: WorkspaceScope;
   /**
@@ -213,10 +213,9 @@ export interface TenantContextData {
   membershipId: string;
   /**
    * The authority this request actually acts with: the lesser of the
-   * membership role and the session's workspace scope. A senior account on a
-   * MEMBER-scoped session (every Google sign-in) acts as a member, and a
-   * demoted user acts as their new role rather than the one their token was
-   * minted with.
+   * membership role and the session's workspace scope. A demoted user acts
+   * as their new role rather than the one their token was minted with; a
+   * session opened in a narrower console than the seat allows stays in it.
    */
   role: MembershipRole;
   /** What the membership permits at most, before the session scope narrows it. */

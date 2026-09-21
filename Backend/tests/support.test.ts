@@ -87,13 +87,12 @@ describe("Temporary audited SUPPORT access", () => {
     const supportLogin = await loginUser(app, support.email, support.password, owner.tenantId);
     const supportToken = supportLogin.accessToken;
 
-    // The console read is GRANT for a SUPPORT seat now (Runbook §7: no
-    // default right, and an expiry on any elevated access), so the same
-    // request is refused until the owner opens the access. Asserted here
+    // The SUPPORT seat is authorized by the Owner's invitation — an active
+    // membership in this workspace — not by a separate grant. Asserted here
     // rather than only in the dedicated suite, because this test is the one
-    // that used to claim a Support seat could simply read it.
+    // that used to claim a Support seat could not read it.
     await request(app).get("/api/v1/support/overview")
-      .set(authHeader(supportToken)).expect(403);
+      .set(authHeader(supportToken)).expect(200);
 
     await request(app).post("/api/v1/support/access-grants")
       .set(authHeader(owner.accessToken))

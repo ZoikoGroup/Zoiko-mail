@@ -47,9 +47,10 @@ export const OWNER_NAV: OwnerNavItem[] = [
   { section: "Organization", label: "Domains", href: "/owner/domains", icon: Globe, ownerOnly: true },
   { section: "Organization", label: "Subscription & Billing", href: "/owner/billing", icon: CreditCard, ownerOnly: true },
 
-  { section: "Security", label: "Audit Logs", href: "/owner/audit-logs", icon: FileText, ownerOnly: true },
-  { section: "Security", label: "Policies", href: "/owner/policies", icon: ShieldCheck, ownerOnly: true },
-  { section: "Security", label: "Suppressions", href: "/owner/suppressions", icon: Ban, ownerOnly: true },
+  { section: "Security & Governance", label: "Audit Logs", href: "/owner/audit-logs", icon: FileText, ownerOnly: true },
+  { section: "Security & Governance", label: "Policies", href: "/owner/policies", icon: ShieldCheck, ownerOnly: true },
+  { section: "Security & Governance", label: "Suppressions", href: "/owner/suppressions", icon: Ban, ownerOnly: true },
+  { section: "Security & Governance", label: "Support Access", href: "/owner/support-access", icon: ShieldCheck, ownerOnly: true },
 
   { section: "Data Management", label: "Export Data", href: "/owner/export-data", icon: Download, ownerOnly: true },
   { section: "Data Management", label: "Deletion Requests", href: "/owner/deletion-requests", icon: Trash2, ownerOnly: true },

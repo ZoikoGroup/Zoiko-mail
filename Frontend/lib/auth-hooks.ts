@@ -89,9 +89,9 @@ export function routeAuthState(
     href = "/support";
   } else if (data.state === "SIGNED_IN") {
     // Routed on the workspace the server bound this session to, not on the
-    // role. They usually agree, but a Google sign-in is always MEMBER-scoped
-    // however senior the account is — routing on the role there would open
-    // the owner console, which is exactly what the scope withholds.
+    // role. They agree for a fresh sign-in — password and Google both bind
+    // to the console the role implies — and the scope is what survives a
+    // demotion, so a reduced account stays on the console it opened for.
     href = opts?.signedInHref ?? resolveWorkspaceHref(sessionWorkspace(data));
   } else if (data.state === "WORKSPACE_SELECTION") {
     if (typeof window !== "undefined") {
@@ -177,9 +177,9 @@ export function useLogin() {
  * Google sign-in.
  *
  * Routes on the workspace the backend bound the session to, exactly as a
- * password sign-in does. Not on the role: a Google sign-in is always
- * MEMBER-scoped however senior the account, so routing on the role would open
- * the owner console for an owner — the thing the scope withholds.
+ * password sign-in does. Both methods open the same console for the same
+ * account: the backend resolves the scope from the role, and the client
+ * follows the scope — never the email, localStorage or a URL.
  *
  * A user in more than one workspace resolves to WORKSPACE_SELECTION here just
  * as they would with a password, so Google cannot skip the pick or carry a

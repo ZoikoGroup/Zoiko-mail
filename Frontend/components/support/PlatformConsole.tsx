@@ -14,36 +14,27 @@ import { useLogout, useMe } from "@/lib/auth-hooks";
 import { resolveWorkspaceHref, workspaceDenialNotice } from "@/lib/workspace";
 import Image from "next/image";
 import {
-  fetchPlatformDiagnostics,
   fetchPlatformDomainDetail,
   fetchPlatformMailboxDetail,
   fetchPlatformOverview,
   fetchPlatformTenantOverview,
   listPlatformAudit,
   listPlatformDeliveryEvents,
-  listPlatformGrants,
-  listPlatformJobs,
   listPlatformProviderEvents,
   listPlatformSuppressions,
-  revokePlatformGrant,
-  searchPlatformDomains,
-  searchPlatformMailboxes,
+  listPlatformTokens,
   searchPlatformTenants,
   type PlatformAuditEvent,
   type PlatformDeliveryEvent,
-  type PlatformDomain,
   type PlatformDomainDetail,
-  type PlatformGrant,
   type PlatformIssue,
-  type PlatformJob,
   type PlatformListParams,
-  type PlatformMailbox,
   type PlatformMailboxDetail,
   type PlatformOverview,
   type PlatformProviderEvent,
   type PlatformSuppression,
   type PlatformTenant,
-  type SupportDiagnosticsData,
+  type PlatformTokenHealth,
   type TenantOverview,
 } from "@/lib/support-api";
 import { useLiveRefresh } from "@/lib/support-hooks";
@@ -77,20 +68,17 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-type PageId = "overview" | "tenants" | "mailboxes" | "domains" | "suppressions" | "provider-events" | "delivery-events" | "jobs" | "audit" | "grants" | "tickets";
+type PageId = "overview" | "tenants" | "tokens" | "suppressions" | "provider-events" | "delivery-events" | "audit" | "tickets";
 
 const PAGES: Array<{ id: PageId; label: string; icon: string }> = [
-  { id: "overview", label: "Support Overview", icon: "◈" },
-  { id: "tickets", label: "Tickets", icon: "✎" },
+  { id: "overview", label: "Workspace Overview", icon: "◈" },
   { id: "tenants", label: "Tenants", icon: "▣" },
-  { id: "mailboxes", label: "Mailboxes", icon: "✉" },
-  { id: "domains", label: "Domains", icon: "⊞" },
-  { id: "suppressions", label: "Suppressions", icon: "⊘" },
-  { id: "provider-events", label: "Provider Events", icon: "⇄" },
+  { id: "tokens", label: "Tokens", icon: "🗝" },
   { id: "delivery-events", label: "Delivery Events", icon: "✉" },
-  { id: "jobs", label: "Jobs", icon: "⚙" },
-  { id: "audit", label: "Audit", icon: "🛡" },
-  { id: "grants", label: "Support Grants", icon: "🗝" },
+  { id: "provider-events", label: "Provider Events", icon: "⇄" },
+  { id: "audit", label: "Audit Logs", icon: "🛡" },
+  { id: "suppressions", label: "Suppressions", icon: "⊘" },
+  { id: "tickets", label: "Tickets", icon: "✎" },
 ];
 
 const COUNT_ICONS: Record<string, LucideIcon> = {
@@ -1097,64 +1085,6 @@ function DeliveryEventsPage() {
   );
 }
 
-function JobsPage() {
-  const { params, setParams, rows, loading, error, reload } = useList<PlatformJob>(listPlatformJobs, "jobs");
-  const [q, setQ] = useState("");
-  const [status, setStatus] = useState("");
-  const [type, setType] = useState("");
-
-  return (
-    <div>
-      <FilterInputs
-        q={q}
-        setQ={setQ}
-        selectLabel="Status"
-        selectValue={status}
-        selectOptions={["PENDING", "RUNNING", "RETRY", "FAILED", "COMPLETED", "DEAD"]}
-        setSelectValue={setStatus}
-        extraSelectLabel="Type"
-        extraSelectValue={type}
-        extraSelectOptions={["REFRESH_TOKEN", "FULL_SYNC", "MAILBOX_SYNC", "MESSAGE_SYNC", "NOTIFY", "SUPPRESS", "RETRY_SEND"]}
-        setExtraSelectValue={setType}
-        onApply={() => setParams({ q, status, type, limit: 50 })}
-        onReset={() => {
-          setQ("");
-          setStatus("");
-          setType("");
-          setParams({ limit: 50 });
-        }}
-      />
-      <ListShell
-        loading={loading}
-        error={error}
-        onRetry={reload}
-        title="Background Jobs"
-        count={rows.length}
-        headers={["Type", "Tenant", "Status", "Attempts", "Run At", "Completed", "Last Error"]}
-        rows={rows}
-        render={(job) => (
-          <tr key={job.id}>
-            <td>
-              <span className="pill accent">{job.type}</span>
-            </td>
-            <td className="nm">{job.tenantName}</td>
-            <td>
-              <Pill status={job.status} />
-            </td>
-            <td className="mo">
-              {job.attempts}/{job.maxAttempts}
-            </td>
-            <td className="muted">{ago(job.runAt)}</td>
-            <td className="muted">{job.completedAt ? ago(job.completedAt) : "—"}</td>
-            <td className="mo muted">{job.lastError ?? "—"}</td>
-          </tr>
-        )}
-        empty="No jobs match."
-      />
-    </div>
-  );
-}
-
 function AuditPage() {
   const { params, setParams, rows, loading, error, reload } = useList<PlatformAuditEvent>(listPlatformAudit, "events");
   const [q, setQ] = useState("");
@@ -1204,216 +1134,74 @@ function AuditPage() {
   );
 }
 
-function DiagnosticsPanel({
-  diag,
-  onClose,
-}: {
-  diag: SupportDiagnosticsData | null;
-  onClose: () => void;
-}) {
-  if (!diag) return null;
-  return (
-    <div className="card">
-      <div className="hd">
-        <h2>Diagnostics · {diag.grant.reason || diag.grant.id}</h2>
-        <div className="sp">
-          <span className="pill accent">{diag.grant.scopes.join(", ")}</span>
-          <button className="btn sm" onClick={onClose}>
-            Close
-          </button>
-        </div>
-      </div>
-      {diag.tenant && (
-        <div className="bd pad">
-          <div className="kv">
-            <span>Tenant</span>
-            <span>{diag.tenant.name}</span>
-          </div>
-          <div className="kv">
-            <span>Status</span>
-            <span>
-              <Pill status={diag.tenant.status} />
-            </span>
-          </div>
-          <div className="kv">
-            <span>Members / Mailboxes</span>
-            <span>
-              {diag.tenant.activeMembers} / {diag.tenant.mailboxes}
-            </span>
-          </div>
-          <div className="kv">
-            <span>Created</span>
-            <span>{fmt(diag.tenant.createdAt)}</span>
-          </div>
-        </div>
-      )}
-      {diag.domains && diag.domains.length > 0 && (
-        <div className="bd">
-          <Table headers={["Domain", "Verification", "MX", "SPF", "DKIM", "DMARC"]}>
-            {diag.domains.map((d) => (
-              <tr key={d.id}>
-                <td className="mo nm">{d.domainName}</td>
-                <td>
-                  <Pill status={d.verificationStatus} />
-                </td>
-                <td>
-                  <Pill status={d.mxStatus} />
-                </td>
-                <td>
-                  <Pill status={d.spfStatus} />
-                </td>
-                <td>
-                  <Pill status={d.dkimStatus} />
-                </td>
-                <td>
-                  <Pill status={d.dmarcStatus} />
-                </td>
-              </tr>
-            ))}
-          </Table>
-        </div>
-      )}
-      {diag.delivery && diag.delivery.length > 0 && (
-        <div className="bd">
-          <Table headers={["Delivery type", "Count"]}>
-            {diag.delivery.map((d, i) => (
-              <tr key={i}>
-                <td>
-                  <Pill status={d.type} />
-                </td>
-                <td className="mo">{d._count}</td>
-              </tr>
-            ))}
-          </Table>
-        </div>
-      )}
-      {diag.audit && diag.audit.length > 0 && (
-        <div className="bd">
-          <Table headers={["Audit event", "Target", "When"]}>
-            {diag.audit.map((a) => (
-              <tr key={a.id}>
-                <td>
-                  <span className="pill nu">{a.eventType}</span>
-                </td>
-                <td className="mo muted">
-                  {a.targetType ? `${a.targetType} · ${shortId(a.targetId)}` : "—"}
-                </td>
-                <td className="muted">{fmt(a.createdAt)}</td>
-              </tr>
-            ))}
-          </Table>
-        </div>
-      )}
-    </div>
-  );
-}
+// ---------------------------------------------------------------------------
+// Tokens — fleet credential health. Metadata only: what each OAuth connection
+// is, who owns it, when it last synced, and when its token or webhook watch
+// expires. The secret manager holds the actual credentials; they never reach
+// this surface (see SupportService.listTokens).
+// ---------------------------------------------------------------------------
 
-function GrantsPage() {
-  const [grants, setGrants] = useState<PlatformGrant[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [diag, setDiag] = useState<SupportDiagnosticsData | null>(null);
-  const [diagLoading, setDiagLoading] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await listPlatformGrants();
-      setGrants(res.grants);
-    } catch (e) {
-      setError(apiErrorMessage(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const revoke = useCallback(
-    async (grantId: string) => {
-      try {
-        await revokePlatformGrant(grantId);
-        await load();
-      } catch (e) {
-        setError(apiErrorMessage(e));
-      }
-    },
-    [load],
-  );
-
-  const diagnose = useCallback(async (grantId: string) => {
-    setDiagLoading(grantId);
-    try {
-      const res = await fetchPlatformDiagnostics(grantId);
-      setDiag(res);
-    } catch (e) {
-      setError(apiErrorMessage(e));
-    } finally {
-      setDiagLoading(null);
-    }
-  }, []);
+function TokensPage() {
+  const { params, setParams, rows, loading, error, reload } = useList<PlatformTokenHealth>(listPlatformTokens, "tokens");
+  const [q, setQ] = useState("");
+  const [status, setStatus] = useState("");
+  const [provider, setProvider] = useState("");
 
   return (
     <div>
-      {error && <LoadErr error={error} onRetry={load} />}
-      <DiagnosticsPanel diag={diag} onClose={() => setDiag(null)} />
-      <div className="card">
-        <div className="hd">
-          <h2>Support Access Grants</h2>
-          <div className="sp">
-            <span className="pill nu">{grants.length}</span>
-            <button className="btn sm" onClick={load}>
-              Refresh
-            </button>
-          </div>
-        </div>
-        {loading ? (
-          <Spinner />
-        ) : (
-          <div className="bd">
-            <Table headers={["Reason", "Support Member", "Tenant", "Scopes", "Status", "Expires", "Actions"]}>
-              {grants.map((g) => {
-                const expired = new Date(g.expiresAt).getTime() < Date.now();
-                const status = g.revokedAt ? "revoked" : expired ? "expired" : "active";
-                return (
-                  <tr key={g.id}>
-                    <td>{g.reason}</td>
-                    <td>{g.supportMember?.displayName ?? "—"}</td>
-                    <td className="nm">{g.tenantName}</td>
-                    <td className="mo muted">{g.scopes.join(", ")}</td>
-                    <td>
-                      <Pill status={status} />
-                    </td>
-                    <td className="muted">{fmt(g.expiresAt)}</td>
-                    <td>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button className="btn sm" onClick={() => diagnose(g.id)} disabled={diagLoading === g.id}>
-                          {diagLoading === g.id ? "…" : "Diagnose"}
-                        </button>
-                        {!g.revokedAt && (
-                          <button
-                            className="btn sm"
-                            style={{ color: "var(--crit)" }}
-                            onClick={() => revoke(g.id)}
-                          >
-                            Revoke
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </Table>
-            {grants.length === 0 && (
-              <div className="bd pad muted">No support grants exist yet.</div>
-            )}
-          </div>
+      <FilterInputs
+        q={q}
+        setQ={setQ}
+        selectLabel="Status"
+        selectValue={status}
+        selectOptions={["PENDING", "ACTIVE", "REAUTH_REQUIRED", "DEGRADED", "DISCONNECTED"]}
+        setSelectValue={setStatus}
+        extraSelectLabel="Provider"
+        extraSelectValue={provider}
+        extraSelectOptions={["GMAIL", "MICROSOFT_365", "IMAP_SMTP"]}
+        setExtraSelectValue={setProvider}
+        onApply={() => setParams({ q, status, provider, limit: 50 })}
+        onReset={() => {
+          setQ("");
+          setStatus("");
+          setProvider("");
+          setParams({ limit: 50 });
+        }}
+      />
+      <ListShell
+        loading={loading}
+        error={error}
+        onRetry={reload}
+        title="Provider Tokens"
+        count={rows.length}
+        headers={["Provider", "Account", "Tenant", "Status", "Reauth", "Token expires", "Watch expires", "Last sync", "Last error"]}
+        rows={rows}
+        render={(tok) => (
+          <tr key={tok.id}>
+            <td>
+              <span className="pill accent">{tok.provider}</span>
+            </td>
+            <td className="mo nm">
+              {tok.email}
+              <div className="muted" style={{ fontSize: 11 }}>
+                {tok.owner?.displayName ?? tok.owner?.email ?? "—"}
+              </div>
+            </td>
+            <td className="nm">{tok.tenantName}</td>
+            <td>
+              <Pill status={tok.status} />
+            </td>
+            <td>
+              <Pill status={tok.reauthRequired ? "REAUTH REQUIRED" : tok.status === "DISCONNECTED" ? "disconnected" : "ok"} />
+            </td>
+            <td className="muted">{fmt(tok.tokenExpiresAt)}</td>
+            <td className="muted">{fmt(tok.watchExpiresAt)}</td>
+            <td className="muted">{tok.lastSyncedAt ? ago(tok.lastSyncedAt) : "—"}</td>
+            <td className="mo muted">{tok.lastErrorCode ?? "—"}</td>
+          </tr>
         )}
-      </div>
+        empty="No provider connections match."
+      />
     </div>
   );
 }
@@ -1421,198 +1209,6 @@ function GrantsPage() {
 // ---------------------------------------------------------------------------
 // New standalone list pages
 // ---------------------------------------------------------------------------
-
-function MailboxesPage({
-  initialOpen,
-  onConsumed,
-}: {
-  initialOpen?: { tenantId: string; mailboxId: string } | null;
-  onConsumed?: () => void;
-}) {
-  const [q, setQ] = useState("");
-  const [applied, setApplied] = useState("");
-  const [mailboxes, setMailboxes] = useState<PlatformMailbox[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<PlatformMailboxDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState<string | null>(null);
-
-  const search = useCallback(async (query: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await searchPlatformMailboxes(query);
-      setMailboxes(res.mailboxes);
-    } catch (e) {
-      setError(apiErrorMessage(e));
-      setMailboxes([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { search(""); }, [search]);
-
-  const openDetail = useCallback(async (tenantId: string, mailboxId: string) => {
-    setDetailLoading(true);
-    setDetailError(null);
-    try {
-      const res = await fetchPlatformMailboxDetail(tenantId, mailboxId);
-      setDetail(res);
-    } catch (e) {
-      setDetailError(apiErrorMessage(e));
-    } finally {
-      setDetailLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (initialOpen) {
-      void openDetail(initialOpen.tenantId, initialOpen.mailboxId);
-      onConsumed?.();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialOpen]);
-
-  if (detailLoading) return <Spinner />;
-  if (detailError) return <LoadErr error={detailError} onRetry={() => { setDetailError(null); }} />;
-  if (detail) return <MailboxDetail data={detail} onBack={() => setDetail(null)} />;
-
-  return (
-    <div>
-      <div className="filterbar">
-        <div className="gsearch" style={{ maxWidth: 360, marginLeft: 0 }}>
-          <span>⌕</span>
-          <input placeholder="Search mailboxes by address or tenant…" value={q} onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { setApplied(q); search(q); } }} />
-        </div>
-        <button className="btn pri" onClick={() => { setApplied(q); search(q); }}>Search</button>
-      </div>
-      {error && <LoadErr error={error} onRetry={() => search(applied)} />}
-      <div className="card">
-        <div className="hd">
-          <h2>{applied ? `Mailboxes matching "${applied}"` : "All mailboxes"}</h2>
-          <div className="sp"><span className="pill nu">{mailboxes.length}</span></div>
-        </div>
-        <div className="bd">
-          <Table headers={["Address", "Tenant", "Member", "Suspended", "Accounts", "Created"]}>
-            {mailboxes.map((m) => (
-              <tr key={m.id} className="clickable" onClick={() => openDetail(m.tenantId, m.id)}>
-                <td className="mo nm">{m.address}</td>
-                <td className="nm">{m.tenantName}</td>
-                <td>{m.memberName}</td>
-                <td><Pill status={m.suspended ? "suspended" : "active"} /></td>
-                <td>{m.connectedAccounts.length}</td>
-                <td className="muted">{ago(m.createdAt)}</td>
-              </tr>
-            ))}
-            {mailboxes.length === 0 && !loading && (
-              <tr><td colSpan={6} className="muted">No mailboxes found.</td></tr>
-            )}
-          </Table>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DomainsPage({
-  initialOpen,
-  onConsumed,
-}: {
-  initialOpen?: { tenantId: string; domainId: string } | null;
-  onConsumed?: () => void;
-}) {
-  const [q, setQ] = useState("");
-  const [applied, setApplied] = useState("");
-  const [domains, setDomains] = useState<PlatformDomain[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<PlatformDomainDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState<string | null>(null);
-
-  const search = useCallback(async (query: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await searchPlatformDomains(query);
-      setDomains(res.domains);
-    } catch (e) {
-      setError(apiErrorMessage(e));
-      setDomains([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { search(""); }, [search]);
-
-  const openDetail = useCallback(async (tenantId: string, domainId: string) => {
-    setDetailLoading(true);
-    setDetailError(null);
-    try {
-      const res = await fetchPlatformDomainDetail(tenantId, domainId);
-      setDetail(res);
-    } catch (e) {
-      setDetailError(apiErrorMessage(e));
-    } finally {
-      setDetailLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (initialOpen) {
-      void openDetail(initialOpen.tenantId, initialOpen.domainId);
-      onConsumed?.();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialOpen]);
-
-  if (detailLoading) return <Spinner />;
-  if (detailError) return <LoadErr error={detailError} onRetry={() => { setDetailError(null); }} />;
-  if (detail) return <DomainDetail data={detail} onBack={() => setDetail(null)} />;
-
-  return (
-    <div>
-      <div className="filterbar">
-        <div className="gsearch" style={{ maxWidth: 360, marginLeft: 0 }}>
-          <span>⌕</span>
-          <input placeholder="Search domains by name or tenant…" value={q} onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { setApplied(q); search(q); } }} />
-        </div>
-        <button className="btn pri" onClick={() => { setApplied(q); search(q); }}>Search</button>
-      </div>
-      {error && <LoadErr error={error} onRetry={() => search(applied)} />}
-      <div className="card">
-        <div className="hd">
-          <h2>{applied ? `Domains matching "${applied}"` : "All domains"}</h2>
-          <div className="sp"><span className="pill nu">{domains.length}</span></div>
-        </div>
-        <div className="bd">
-          <Table headers={["Domain", "Tenant", "Verification", "MX", "SPF", "DKIM", "DMARC", "Sending"]}>
-            {domains.map((d) => (
-              <tr key={d.id} className="clickable" onClick={() => openDetail(d.tenant.id, d.id)}>
-                <td className="mo nm">{d.domainName}</td>
-                <td className="nm">{d.tenant.name}</td>
-                <td><Pill status={d.verificationStatus} /></td>
-                <td><Pill status={d.mxStatus} /></td>
-                <td><Pill status={d.spfStatus} /></td>
-                <td><Pill status={d.dkimStatus} /></td>
-                <td><Pill status={d.dmarcStatus} /></td>
-                <td><Pill status={d.sendingEnabled ? "enabled" : "disabled"} /></td>
-              </tr>
-            ))}
-            {domains.length === 0 && !loading && (
-              <tr><td colSpan={8} className="muted">No domains found.</td></tr>
-            )}
-          </Table>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function SuppressionsPage() {
   const { params, setParams, rows, loading, error, reload } = useList<PlatformSuppression>(listPlatformSuppressions, "suppressions");
@@ -1689,11 +1285,7 @@ export default function PlatformConsole() {
   const [globError, setGlobError] = useState<string | null>(null);
   const [globResults, setGlobResults] = useState<{
     tenants: PlatformTenant[];
-    mailboxes: PlatformMailbox[];
-    domains: PlatformDomain[];
   } | null>(null);
-  const [pendingMailbox, setPendingMailbox] = useState<{ tenantId: string; mailboxId: string } | null>(null);
-  const [pendingDomain, setPendingDomain] = useState<{ tenantId: string; domainId: string } | null>(null);
 
   // The platform token lives in localStorage, which does not exist during
   // SSR. Reading it at render time makes the server tree differ from the
@@ -1783,12 +1375,8 @@ export default function PlatformConsole() {
     setGlobLoading(true);
     setGlobError(null);
     try {
-      const [t, m, d] = await Promise.all([
-        searchPlatformTenants(query, 8),
-        searchPlatformMailboxes(query, 8),
-        searchPlatformDomains(query, 8),
-      ]);
-      setGlobResults({ tenants: t.tenants, mailboxes: m.mailboxes, domains: d.domains });
+      const t = await searchPlatformTenants(query, 8);
+      setGlobResults({ tenants: t.tenants });
       setGlobOpen(true);
     } catch (e) {
       setGlobError(apiErrorMessage(e));
@@ -1810,18 +1398,6 @@ export default function PlatformConsole() {
     closeGlobalSearch();
     openTenant(tenantId);
   }, [closeGlobalSearch, openTenant]);
-
-  const openGlobMailbox = useCallback((tenantId: string, mailboxId: string) => {
-    closeGlobalSearch();
-    setPendingMailbox({ tenantId, mailboxId });
-    setPage("mailboxes");
-  }, [closeGlobalSearch]);
-
-  const openGlobDomain = useCallback((tenantId: string, domainId: string) => {
-    closeGlobalSearch();
-    setPendingDomain({ tenantId, domainId });
-    setPage("domains");
-  }, [closeGlobalSearch]);
 
   // Hydration guard: until mount, render the exact same static tree the
   // server sent (localStorage-aware state is only resolved in the effect
@@ -1902,7 +1478,7 @@ export default function PlatformConsole() {
               <div className="gsearch" style={{ flex: 1, maxWidth: "none", marginLeft: 0 }}>
                 <span>{globLoading ? "…" : "⌕"}</span>
                 <input
-                  placeholder="Search tenants, mailboxes, domains…"
+                  placeholder="Search tenants by name…"
                   value={globQ}
                   onChange={(e) => {
                     setGlobQ(e.target.value);
@@ -1921,58 +1497,19 @@ export default function PlatformConsole() {
                 <div className="globdd">
                   {globError && <div className="gitem muted">{globError}</div>}
                   {globResults &&
-                    (globResults.tenants.length === 0 &&
-                    globResults.mailboxes.length === 0 &&
-                    globResults.domains.length === 0 ? (
+                    (globResults.tenants.length === 0 ? (
                       <div className="gitem muted">No matches for “{globQ}”.</div>
                     ) : (
-                      <>
-                        {globResults.tenants.length > 0 && (
-                          <>
-                            <div className="gh">Tenants</div>
-                            {globResults.tenants.map((t) => (
-                              <button key={t.id} className="gitem" onMouseDown={() => openGlobTenant(t.id)}>
-                                <span className="gname">{t.name}</span>
-                                <span className="gsub">
-                                  {t.planCode} · {t.mailboxes} mailboxes · {t.status}
-                                </span>
-                              </button>
-                            ))}
-                          </>
-                        )}
-                        {globResults.mailboxes.length > 0 && (
-                          <>
-                            <div className="gh">Mailboxes</div>
-                            {globResults.mailboxes.map((m) => (
-                              <button
-                                key={m.id}
-                                className="gitem"
-                                onMouseDown={() => openGlobMailbox(m.tenantId, m.id)}
-                              >
-                                <span className="gname">{m.address}</span>
-                                <span className="gsub">{m.tenantName}</span>
-                              </button>
-                            ))}
-                          </>
-                        )}
-                        {globResults.domains.length > 0 && (
-                          <>
-                            <div className="gh">Domains</div>
-                            {globResults.domains.map((d) => (
-                              <button
-                                key={d.id}
-                                className="gitem"
-                                onMouseDown={() => openGlobDomain(d.tenant.id, d.id)}
-                              >
-                                <span className="gname">{d.domainName}</span>
-                                <span className="gsub">
-                                  {d.tenant.name} · {d.verificationStatus}
-                                </span>
-                              </button>
-                            ))}
-                          </>
-                        )}
-                      </>
+                      <div className="gh" style={{ paddingTop: 8 }}>Tenants</div>
+                    ))}
+                  {globResults &&
+                    globResults.tenants.map((t) => (
+                      <button key={t.id} className="gitem" onMouseDown={() => openGlobTenant(t.id)}>
+                        <span className="gname">{t.name}</span>
+                        <span className="gsub">
+                          {t.planCode} · {t.mailboxes} mailboxes · {t.status}
+                        </span>
+                      </button>
                     ))}
                 </div>
               )}
@@ -2024,24 +1561,11 @@ export default function PlatformConsole() {
               onConsumed={() => setPendingTenant(null)}
             />
           )}
-          {page === "mailboxes" && (
-            <MailboxesPage
-              initialOpen={pendingMailbox}
-              onConsumed={() => setPendingMailbox(null)}
-            />
-          )}
-          {page === "domains" && (
-            <DomainsPage
-              initialOpen={pendingDomain}
-              onConsumed={() => setPendingDomain(null)}
-            />
-          )}
+          {page === "tokens" && <TokensPage />}
           {page === "suppressions" && <SuppressionsPage />}
           {page === "provider-events" && <ProviderEventsPage />}
           {page === "delivery-events" && <DeliveryEventsPage />}
-          {page === "jobs" && <JobsPage />}
           {page === "audit" && <AuditPage />}
-          {page === "grants" && <GrantsPage />}
           </div>
           </main>
         </div>

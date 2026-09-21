@@ -176,6 +176,14 @@ supportPlatformRouter.get("/tenants", validate(platformListQuerySchema, "query")
   const q = listQuery(req).q ?? "";
   sendSuccess(res, 200, { tenants: await supportService.searchTenants(q, listQuery(req).limit) }, req.requestId);
 }));
+
+// Fleet credential health. Metadata only — no token secret ever leaves this
+// endpoint (see SupportService.listTokens). A platform-wide read, so no tenant
+// grant is required; still gated by requireSupportAccess and audited by
+// logSupportAccess like every other platform support read.
+supportPlatformRouter.get("/tokens", validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
+  sendSuccess(res, 200, { tokens: await supportService.listTokens(listQuery(req)) }, req.requestId);
+}));
 supportPlatformRouter.get("/tenants/:tenantId", validate(tenantParamSchema, "params"), asyncHandler(async (req, res) => {
   sendSuccess(res, 200, await supportService.tenantOverview(String(req.params.tenantId)), req.requestId);
 }));

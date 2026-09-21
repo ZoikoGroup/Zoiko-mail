@@ -61,37 +61,54 @@ async function signInAsSupport(page: Page) {
 }
 
 test.describe("the support console does not go stale while it is being watched", () => {
-  test("picks up a workspace change without anyone reloading", async ({ page }) => {
-    let members = 3;
-    let overviewReads = 0;
+  test("picks up a ticket change without anyone reloading", async ({ page }) => {
+    let ticketCount = 2;
+    let ticketReads = 0;
 
     await signInAsSupport(page);
 
-    // The overview is the screen a duty operator leaves open. Its member count
+    // The ticket list is the screen a duty operator leaves open. Its count
     // stands in for anything that can change underneath them.
-    await page.route(`${API}/support/overview`, (route) => {
-      overviewReads += 1;
+    await page.route(`${API}/support/tickets*`, (route) => {
+      ticketReads += 1;
       return route.fulfill(
         json({
-          stats: { members, mailboxes: 0, activeGrants: 0 },
-          members: [],
-          team: [],
-          issues: [],
-          audit: [],
-          grants: [],
+          tickets: Array.from({ length: ticketCount }, (_, i) => ({
+            id: `t${i}`,
+            ticketNumber: i + 1,
+            subject: `Ticket ${i + 1}`,
+            description: "",
+            category: "OTHER",
+            severity: "LOW",
+            status: "OPEN",
+            tenantId: "t1",
+            tenantName: "Acme Corp",
+            openedBy: { id: "u1", email: "u1@test", displayName: "User" },
+            openedByType: "MEMBER",
+            assignedStaff: null,
+            slaDueAt: null,
+            slaOverdue: false,
+            resolvedAt: null,
+            closedAt: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            comments: [],
+          })),
+          ticketCounts: { OPEN: ticketCount, IN_PROGRESS: 0, WAITING_TENANT: 0, RESOLVED: 0, CLOSED: 0 },
         })
       );
     });
 
     await page.goto("/support");
-    await expect(page.getByText("3", { exact: true }).first()).toBeVisible({ timeout: 60_000 });
-    const readsAfterLoad = overviewReads;
+    // Wait for the ticket list to render with initial count
+    await expect(page.getByText("2", { exact: true }).first()).toBeVisible({ timeout: 60_000 });
+    const readsAfterLoad = ticketReads;
 
     // Something happens on the server. Nobody touches the browser.
-    members = 4;
+    ticketCount = 3;
 
     await expect
-      .poll(() => overviewReads, { timeout: 120_000, intervals: [2_000] })
+      .poll(() => ticketReads, { timeout: 120_000, intervals: [2_000] })
       .toBeGreaterThan(readsAfterLoad);
   });
 
@@ -104,16 +121,34 @@ test.describe("the support console does not go stale while it is being watched",
 
     let reads = 0;
     await signInAsSupport(page);
-    await page.route(`${API}/support/overview`, (route) => {
+    await page.route(`${API}/support/tickets*`, (route) => {
       reads += 1;
       return route.fulfill(
         json({
-          stats: { members: 1, mailboxes: 0, activeGrants: 0 },
-          members: [],
-          team: [],
-          issues: [],
-          audit: [],
-          grants: [],
+          tickets: [
+            {
+              id: "t1",
+              ticketNumber: 1,
+              subject: "Test Ticket",
+              description: "",
+              category: "OTHER",
+              severity: "LOW",
+              status: "OPEN",
+              tenantId: "t1",
+              tenantName: "Acme Corp",
+              openedBy: { id: "u1", email: "u1@test", displayName: "User" },
+              openedByType: "MEMBER",
+              assignedStaff: null,
+              slaDueAt: null,
+              slaOverdue: false,
+              resolvedAt: null,
+              closedAt: null,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              comments: [],
+            },
+          ],
+          ticketCounts: { OPEN: 1, IN_PROGRESS: 0, WAITING_TENANT: 0, RESOLVED: 0, CLOSED: 0 },
         })
       );
     });
