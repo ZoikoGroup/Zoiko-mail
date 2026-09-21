@@ -279,7 +279,7 @@ export class SupportService {
   async platformOverview() {
     const since24h = new Date(Date.now() - 86_400_000);
 
-    const [activeTenants, tenantMembers, activeMailboxes, configuredDomains, failedSends24h, failedJobs, retryJobs, syncFailures24h] =
+    const [activeTenants, tenantMembers, activeMailboxes, configuredDomains, failedSends24h, failedJobs, retryJobs, syncFailures24h, openTickets, overdueTickets, urgentTickets] =
       await Promise.all([
         prisma.tenant.count({ where: { status: "ACTIVE" } }),
         prisma.tenantMembership.count({ where: { status: { in: ["ACTIVE", "INVITED"] } } }),
@@ -289,6 +289,9 @@ export class SupportService {
         prisma.backgroundJob.count({ where: { status: "FAILED" } }),
         prisma.backgroundJob.count({ where: { status: "RETRY" } }),
         prisma.providerEvent.count({ where: { processingStatus: { in: ["FAILED", "DEAD_LETTER"] }, receivedAt: { gte: since24h } } }),
+        prisma.supportTicket.count({ where: { status: { in: ["OPEN", "IN_PROGRESS", "WAITING_TENANT"] } } }),
+        prisma.supportTicket.count({ where: { slaDueAt: { lt: new Date() }, status: { in: ["OPEN", "IN_PROGRESS", "WAITING_TENANT"] } } }),
+        prisma.supportTicket.count({ where: { severity: "URGENT", status: { in: ["OPEN", "IN_PROGRESS", "WAITING_TENANT"] } } }),
       ]);
 
     const [byProvider, byStatus, matrix] = await Promise.all([
@@ -408,6 +411,11 @@ export class SupportService {
         failedJobs,
         retryJobs,
       },
+      ticketStats: {
+        open: openTickets,
+        overdue: overdueTickets,
+        urgent: urgentTickets,
+      },
       providerHealth: {
         byProvider: byProvider.map((r) => ({ provider: r.provider, count: r._count._all })),
         byStatus: byStatus.map((r) => ({ status: r.status, count: r._count._all })),
@@ -439,6 +447,7 @@ export class SupportService {
       select: {
         id: true, name: true, status: true, planCode: true, createdAt: true,
         _count: { select: { memberships: true, mailboxes: true, domains: true, connectedAccounts: true } },
+        connectedAccounts: { take: 1, orderBy: { updatedAt: "desc" }, select: { provider: true, status: true, lastErrorCode: true } },
       },
     });
 
@@ -452,6 +461,7 @@ export class SupportService {
       mailboxes: t._count.mailboxes,
       domains: t._count.domains,
       connectedAccounts: t._count.connectedAccounts,
+      providerConnection: t.connectedAccounts[0] ?? null,
     }));
   }
 
@@ -1094,6 +1104,79 @@ export class SupportService {
         createdAt: e.createdAt,
       };
     });
+  }
+
+  /**
+   * Fleet credential-health list backing the staff "Tokens" section.
+   *
+   * What §9 (and the runbook) forbid is surfacing OAuth secrets. OAuth access
+   * and refresh tokens never live in this table — only a deterministic secret
+   * reference does (schema note, Security §15) — so a deliberately narrow
+   * select means not even the reference crosses the wire. Everything returned
+   * here is lifecycle metadata: when each connection last synced, when its
+   * token and webhook watch expire, and what the connector thinks is wrong.
+   */
+  async listTokens(input: { provider?: string; status?: string; q?: string; limit?: number }) {
+    const where: Prisma.ConnectedAccountWhereInput = {
+      ...(input.provider ? { provider: input.provider as Prisma.ConnectedAccountWhereInput["provider"] } : {}),
+      ...(input.status ? { status: input.status as Prisma.ConnectedAccountWhereInput["status"] } : {}),
+      ...(input.q && input.q.trim()
+        ? {
+            OR: [
+              { email: { contains: input.q.trim(), mode: "insensitive" } },
+              { providerAccountId: { contains: input.q.trim(), mode: "insensitive" } },
+              { tenant: { name: { contains: input.q.trim(), mode: "insensitive" } } },
+              { user: { email: { contains: input.q.trim(), mode: "insensitive" } } },
+            ],
+          }
+        : {}),
+    };
+
+    const accounts = await prisma.connectedAccount.findMany({
+      where,
+      select: {
+        id: true,
+        tenantId: true,
+        provider: true,
+        providerAccountId: true,
+        email: true,
+        scopes: true,
+        status: true,
+        tokenExpiresAt: true,
+        watchExpiresAt: true,
+        lastSyncedAt: true,
+        lastErrorCode: true,
+        disconnectedAt: true,
+        createdAt: true,
+        updatedAt: true,
+        tenant: { select: { id: true, name: true, status: true } },
+        user: { select: { id: true, email: true, displayName: true } },
+      },
+      orderBy: { updatedAt: "desc" },
+      take: Math.min(input.limit ?? 50, 200),
+    });
+
+    const now = Date.now();
+    return accounts.map((a) => ({
+      id: a.id,
+      provider: a.provider,
+      providerAccountId: a.providerAccountId,
+      email: a.email,
+      scopes: a.scopes,
+      status: a.status,
+      tenantId: a.tenant.id,
+      tenantName: a.tenant.name,
+      tenantStatus: a.tenant.status,
+      owner: a.user ? { id: a.user.id, email: a.user.email, displayName: a.user.displayName } : null,
+      tokenExpiresAt: a.tokenExpiresAt,
+      watchExpiresAt: a.watchExpiresAt,
+      lastSyncedAt: a.lastSyncedAt,
+      lastErrorCode: a.lastErrorCode,
+      disconnectedAt: a.disconnectedAt,
+      reauthRequired: a.status === "REAUTH_REQUIRED" || Boolean(a.tokenExpiresAt && a.tokenExpiresAt.getTime() < now),
+      createdAt: a.createdAt,
+      updatedAt: a.updatedAt,
+    }));
   }
 
   async platformDiagnostics(grantId: string | undefined, userId: string, platformRole: string) {

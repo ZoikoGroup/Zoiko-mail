@@ -141,6 +141,13 @@ export interface MeResponse {
    * session belongs to, because one role can sign into more than one.
    */
   workspace?: "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT";
+  platformRole: "NONE" | "SUPPORT" | "SUPER_ADMIN";
+  platformAccess: {
+    isSupportStaff: boolean;
+    scope: "PLATFORM" | "TENANT" | "NONE";
+    status: "ACTIVE" | "EXPIRED" | "REVOKED" | "NONE";
+    expiresAt: string | null;
+  };
 }
 
 // Pull tokens out regardless of which shape the endpoint used.

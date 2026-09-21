@@ -172,7 +172,20 @@ const SUPPORT: RoleMatrix = {
    * right" and "must have an expiry", applied to the tenant-side console the
    * way requireTenantGrant applies them to the platform one.
    */
-  "support.console.read": "GRANT",
+  /**
+   * The tenant-scoped console opens on the Owner's invitation itself: a
+   * member the Owner added as SUPPORT — accepted, with a live membership in
+   * this workspace — is authorized to read this one workspace's console
+   * without a separate access grant. ALLOW, not GRANT, because the same
+   * request that proves the membership is active also scopes every answer to
+   * the caller's own tenant (tenantContext). The grant system is aimed, not
+   * bypassed: `support.standing`, `support.workspace.access` and
+   * `mail.other.read` keep their GRANT rows for the platform-side,
+   * cross-tenant paths, and the diagnostics endpoint verifies the grant
+   * itself — those call for an expiry by their nature; looking at one's own
+   * workspace does not.
+   */
+  "support.console.read": "ALLOW",
 };
 
 export const CAPABILITY_MATRIX: Record<MembershipRole, RoleMatrix> = {

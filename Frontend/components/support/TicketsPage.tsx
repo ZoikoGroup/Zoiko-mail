@@ -3,10 +3,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   commentPlatformTicket,
+  commentTenantTicket,
   createPlatformTicket,
+  createTenantTicket,
   getPlatformTicket,
+  getTenantTicket,
   listPlatformStaff,
   listPlatformTickets,
+  listTenantTickets,
   searchPlatformTenants,
   updatePlatformTicket,
   type CreateTicketInput,
@@ -91,7 +95,8 @@ function Avatar({ name }: { name: string | null | undefined }) {
   return <span className="av">{initial}</span>;
 }
 
-export default function TicketsPage() {
+export default function TicketsPage({ mode = "staff" }: { mode?: "staff" | "tenant" }) {
+  const isTenant = mode === "tenant";
   const [params, setParams] = useState<TicketListParams>({ limit: 50 });
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
@@ -111,7 +116,10 @@ export default function TicketsPage() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    listPlatformTickets(params)
+    (isTenant
+      ? listTenantTickets({ status: params.status, q: params.q, limit: params.limit })
+      : listPlatformTickets(params)
+    )
       .then((res) => {
         if (!cancelled) setRows(res.tickets);
       })
@@ -127,7 +135,7 @@ export default function TicketsPage() {
     return () => {
       cancelled = true;
     };
-  }, [params, tick]);
+  }, [params, tick, isTenant]);
 
   // The queue Runbook §5 measures. A P0 carries a fifteen-minute initial
   // response target, which a list that only loads once cannot support —
@@ -141,6 +149,7 @@ export default function TicketsPage() {
     return (
       <TicketDetail
         ticketId={selectedId}
+        tenant={isTenant}
         onBack={() => {
           setSelectedId(null);
           reload();
@@ -154,7 +163,11 @@ export default function TicketsPage() {
       <div className="pagehd">
         <div>
           <h1>Tickets</h1>
-          <p>Support cases opened by tenants or on their behalf.</p>
+          {isTenant ? (
+            <p>Support cases for this workspace, opened by you or raised for it.</p>
+          ) : (
+            <p>Support cases opened by tenants or on their behalf.</p>
+          )}
         </div>
         <div className="sp">
           <button className="btn pri" onClick={() => setCreating(true)}>
@@ -166,7 +179,7 @@ export default function TicketsPage() {
       <div className="filterbar">
         <div className="searchin">
           <span>⌕</span>
-          <input placeholder="Search subject, tenant, requester…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input placeholder={isTenant ? "Search subject, requester…" : "Search subject, tenant, requester…"} value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         <select className="fselect" value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">Status</option>
@@ -176,35 +189,45 @@ export default function TicketsPage() {
             </option>
           ))}
         </select>
-        <select className="fselect" value={severity} onChange={(e) => setSeverity(e.target.value)}>
-          <option value="">Severity</option>
-          {SEVERITIES.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-        <select className="fselect" value={assigned} onChange={(e) => setAssigned(e.target.value)}>
-          <option value="">Assignment</option>
-          <option value="me">Assigned to me</option>
-          <option value="unassigned">Unassigned</option>
-          <option value="all">All</option>
-        </select>
-        <select className="fselect" value={overdue} onChange={(e) => setOverdue(e.target.value)}>
-          <option value="">SLA</option>
-          <option value="overdue">Overdue</option>
-        </select>
+        {!isTenant && (
+          <>
+            <select className="fselect" value={severity} onChange={(e) => setSeverity(e.target.value)}>
+              <option value="">Severity</option>
+              {SEVERITIES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+            <select className="fselect" value={assigned} onChange={(e) => setAssigned(e.target.value)}>
+              <option value="">Assignment</option>
+              <option value="me">Assigned to me</option>
+              <option value="unassigned">Unassigned</option>
+              <option value="all">All</option>
+            </select>
+            <select className="fselect" value={overdue} onChange={(e) => setOverdue(e.target.value)}>
+              <option value="">SLA</option>
+              <option value="overdue">Overdue</option>
+            </select>
+          </>
+        )}
         <button
           className="btn pri"
           onClick={() =>
-            setParams({
-              q: q || undefined,
-              status: (status || undefined) as TicketStatus | undefined,
-              severity: (severity || undefined) as TicketSeverity | undefined,
-              assigned: (assigned || undefined) as TicketListParams["assigned"],
-              overdue: overdue === "overdue" ? true : undefined,
-              limit: 50,
-            })
+            isTenant
+              ? setParams({
+                  q: q || undefined,
+                  status: (status || undefined) as TicketStatus | undefined,
+                  limit: 50,
+                })
+              : setParams({
+                  q: q || undefined,
+                  status: (status || undefined) as TicketStatus | undefined,
+                  severity: (severity || undefined) as TicketSeverity | undefined,
+                  assigned: (assigned || undefined) as TicketListParams["assigned"],
+                  overdue: overdue === "overdue" ? true : undefined,
+                  limit: 50,
+                })
           }
         >
           Apply
@@ -252,12 +275,12 @@ export default function TicketsPage() {
                 <tr>
                   <th>Ticket</th>
                   <th>Subject</th>
-                  <th>Tenant</th>
+                  {!isTenant && <th>Tenant</th>}
                   <th>Requester</th>
                   <th>Severity</th>
                   <th>Status</th>
                   <th>SLA</th>
-                  <th>Assignee</th>
+                  {!isTenant && <th>Assignee</th>}
                   <th>Updated</th>
                 </tr>
               </thead>
@@ -266,7 +289,7 @@ export default function TicketsPage() {
                   <tr key={t.id} className="clickable" onClick={() => setSelectedId(t.id)}>
                     <td className="mo">{padNum(t.ticketNumber)}</td>
                     <td className="nm">{t.subject}</td>
-                    <td>{t.tenantName}</td>
+                    {!isTenant && <td>{t.tenantName}</td>}
                     <td>{t.openedBy?.displayName ?? t.openedBy?.email ?? "—"}</td>
                     <td>
                       <span className={`pill ${severityTone(t.severity)}`}>{t.severity}</span>
@@ -275,13 +298,13 @@ export default function TicketsPage() {
                       <span className={`pill ${statusTone(t.status)}`}>{t.status.replace("_", " ")}</span>
                     </td>
                     <td className={t.slaOverdue ? "crit" : "muted"}>{t.slaOverdue ? "overdue" : dueIn(t.slaDueAt)}</td>
-                    <td>{t.assignedStaff?.displayName ?? t.assignedStaff?.email ?? <span className="muted">Unassigned</span>}</td>
+                    {!isTenant && <td>{t.assignedStaff?.displayName ?? t.assignedStaff?.email ?? <span className="muted">Unassigned</span>}</td>}
                     <td className="muted">{ago(t.updatedAt)}</td>
                   </tr>
                 ))}
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="muted">
+                    <td colSpan={isTenant ? 7 : 9} className="muted">
                       No tickets match.
                     </td>
                   </tr>
@@ -294,6 +317,7 @@ export default function TicketsPage() {
 
       {creating && (
         <NewTicketModal
+          tenant={isTenant}
           onClose={() => setCreating(false)}
           onCreated={(ticket) => {
             setCreating(false);
@@ -305,7 +329,7 @@ export default function TicketsPage() {
   );
 }
 
-function NewTicketModal({ onClose, onCreated }: { onClose: () => void; onCreated: (t: SupportTicket) => void }) {
+function NewTicketModal({ tenant = false, onClose, onCreated }: { tenant?: boolean; onClose: () => void; onCreated: (t: SupportTicket) => void }) {
   const [tenantQuery, setTenantQuery] = useState("");
   const [tenants, setTenants] = useState<Array<{ id: string; name: string }>>([]);
   const [tenantId, setTenantId] = useState("");
@@ -316,12 +340,14 @@ function NewTicketModal({ onClose, onCreated }: { onClose: () => void; onCreated
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (tenant) return;
     listPlatformStaff()
       .then((res) => setStaff(res.staff))
       .catch(() => setStaff([]));
-  }, []);
+  }, [tenant]);
 
   useEffect(() => {
+    if (tenant) return;
     let cancelled = false;
     searchPlatformTenants(tenantQuery)
       .then((res) => {
@@ -333,19 +359,21 @@ function NewTicketModal({ onClose, onCreated }: { onClose: () => void; onCreated
     return () => {
       cancelled = true;
     };
-  }, [tenantQuery]);
+  }, [tenantQuery, tenant]);
 
-  const valid = tenantId && form.subject.trim().length >= 3 && form.description.trim().length >= 10;
+  const valid = (tenant || tenantId) && form.subject.trim().length >= 3 && form.description.trim().length >= 10;
 
   async function submit() {
     setSaving(true);
     setError(null);
     try {
-      const ticket = await createPlatformTicket({
-        ...form,
-        tenantId,
-        assignedStaffId: assignedStaffId || null,
-      });
+      const ticket = tenant
+        ? await createTenantTicket(form)
+        : await createPlatformTicket({
+            ...form,
+            tenantId,
+            assignedStaffId: assignedStaffId || null,
+          });
       onCreated(ticket);
     } catch (e) {
       setError(errMsg(e));
@@ -369,34 +397,36 @@ function NewTicketModal({ onClose, onCreated }: { onClose: () => void; onCreated
         </div>
         <div style={{ padding: "8px 18px 24px" }}>
           {error && <div className="notice" style={{ background: "var(--crit-soft)", borderColor: "var(--crit)" }}>{error}</div>}
-          <div className="field">
-            <label>Tenant</label>
-            <input
-              placeholder="Search tenants…"
-              value={tenantQuery}
-              onChange={(e) => {
-                setTenantQuery(e.target.value);
-                setTenantId("");
-              }}
-            />
-            {!tenantId && tenants.length > 0 && (
-              <div className="dropdown" style={{ position: "static", marginTop: 6 }}>
-                {tenants.slice(0, 6).map((t) => (
-                  <button
-                    key={t.id}
-                    className="ditem"
-                    onClick={() => {
-                      setTenantId(t.id);
-                      setTenantQuery(t.name);
-                    }}
-                  >
-                    <b>{t.name}</b>
-                  </button>
-                ))}
-              </div>
-            )}
-            {tenantId && <div className="muted" style={{ fontSize: 10.5, marginTop: 4 }}>Selected: {tenantQuery}</div>}
-          </div>
+          {!tenant && (
+            <div className="field">
+              <label>Tenant</label>
+              <input
+                placeholder="Search tenants…"
+                value={tenantQuery}
+                onChange={(e) => {
+                  setTenantQuery(e.target.value);
+                  setTenantId("");
+                }}
+              />
+              {!tenantId && tenants.length > 0 && (
+                <div className="dropdown" style={{ position: "static", marginTop: 6 }}>
+                  {tenants.slice(0, 6).map((t) => (
+                    <button
+                      key={t.id}
+                      className="ditem"
+                      onClick={() => {
+                        setTenantId(t.id);
+                        setTenantQuery(t.name);
+                      }}
+                    >
+                      <b>{t.name}</b>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {tenantId && <div className="muted" style={{ fontSize: 10.5, marginTop: 4 }}>Selected: {tenantQuery}</div>}
+            </div>
+          )}
           <div className="field">
             <label>Subject</label>
             <input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} maxLength={200} />
@@ -432,17 +462,19 @@ function NewTicketModal({ onClose, onCreated }: { onClose: () => void; onCreated
               </select>
             </div>
           </div>
-          <div className="field">
-            <label>Assign to (optional)</label>
-            <select value={assignedStaffId} onChange={(e) => setAssignedStaffId(e.target.value)}>
-              <option value="">Unassigned</option>
-              {staff.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.displayName} · {s.email}
-                </option>
-              ))}
-            </select>
-          </div>
+          {!tenant && (
+            <div className="field">
+              <label>Assign to (optional)</label>
+              <select value={assignedStaffId} onChange={(e) => setAssignedStaffId(e.target.value)}>
+                <option value="">Unassigned</option>
+                {staff.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.displayName} · {s.email}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
             <button className="btn pri" disabled={!valid || saving} onClick={submit}>
               {saving ? "Creating…" : "Create ticket"}
@@ -457,7 +489,7 @@ function NewTicketModal({ onClose, onCreated }: { onClose: () => void; onCreated
   );
 }
 
-function TicketDetail({ ticketId, onBack }: { ticketId: string; onBack: () => void }) {
+function TicketDetail({ ticketId, tenant = false, onBack }: { ticketId: string; tenant?: boolean; onBack: () => void }) {
   const [ticket, setTicket] = useState<SupportTicket | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -469,11 +501,11 @@ function TicketDetail({ ticketId, onBack }: { ticketId: string; onBack: () => vo
   const load = useCallback(() => {
     setLoading(true);
     setError(null);
-    getPlatformTicket(ticketId)
+    (tenant ? getTenantTicket(ticketId) : getPlatformTicket(ticketId))
       .then(setTicket)
       .catch((e) => setError(errMsg(e)))
       .finally(() => setLoading(false));
-  }, [ticketId]);
+  }, [ticketId, tenant]);
 
   useEffect(() => {
     load();
@@ -484,10 +516,11 @@ function TicketDetail({ ticketId, onBack }: { ticketId: string; onBack: () => vo
   useLiveRefresh(() => void load());
 
   useEffect(() => {
+    if (tenant) return;
     listPlatformStaff()
       .then((res) => setStaff(res.staff))
       .catch(() => setStaff([]));
-  }, []);
+  }, [tenant]);
 
   async function patch(input: { status?: TicketStatus; severity?: TicketSeverity; assignedStaffId?: string | null }) {
     if (!ticket) return;
@@ -508,7 +541,11 @@ function TicketDetail({ ticketId, onBack }: { ticketId: string; onBack: () => vo
     setBusy(true);
     setError(null);
     try {
-      await commentPlatformTicket(ticket.id, reply.trim(), internal);
+      if (tenant) {
+        await commentTenantTicket(ticket.id, reply.trim());
+      } else {
+        await commentPlatformTicket(ticket.id, reply.trim(), internal);
+      }
       setReply("");
       setInternal(false);
       load();
@@ -607,19 +644,21 @@ function TicketDetail({ ticketId, onBack }: { ticketId: string; onBack: () => vo
 
           <div className="composer">
             <textarea
-              placeholder={internal ? "Internal note (staff only)…" : "Reply to the tenant…"}
+              placeholder={tenant ? "Reply to the support team…" : internal ? "Internal note (staff only)…" : "Reply to the tenant…"}
               value={reply}
               onChange={(e) => setReply(e.target.value)}
             />
             <div className="bar">
-              <div className="visitoggle">
-                <button className={!internal ? "on" : ""} onClick={() => setInternal(false)}>
-                  Reply
-                </button>
-                <button className={internal ? "on" : ""} onClick={() => setInternal(true)}>
-                  Internal note
-                </button>
-              </div>
+              {!tenant && (
+                <div className="visitoggle">
+                  <button className={!internal ? "on" : ""} onClick={() => setInternal(false)}>
+                    Reply
+                  </button>
+                  <button className={internal ? "on" : ""} onClick={() => setInternal(true)}>
+                    Internal note
+                  </button>
+                </div>
+              )}
               <button className="btn pri" style={{ marginLeft: "auto" }} disabled={busy || reply.trim().length === 0} onClick={addComment}>
                 {busy ? "Sending…" : internal ? "Add note" : "Send reply"}
               </button>
@@ -628,55 +667,59 @@ function TicketDetail({ ticketId, onBack }: { ticketId: string; onBack: () => vo
         </div>
 
         <div className="card sidepane" style={{ marginBottom: 0, alignSelf: "start" }}>
-          <div className="block">
-            <h3>Status</h3>
-            <select
-              className="fselect"
-              style={{ width: "100%" }}
-              value={ticket.status}
-              disabled={busy}
-              onChange={(e) => patch({ status: e.target.value as TicketStatus })}
-            >
-              {STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {s.replace("_", " ")}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="block">
-            <h3>Severity</h3>
-            <select
-              className="fselect"
-              style={{ width: "100%" }}
-              value={ticket.severity}
-              disabled={busy}
-              onChange={(e) => patch({ severity: e.target.value as TicketSeverity })}
-            >
-              {SEVERITIES.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="block">
-            <h3>Assignee</h3>
-            <select
-              className="fselect"
-              style={{ width: "100%" }}
-              value={ticket.assignedStaff?.id ?? ""}
-              disabled={busy}
-              onChange={(e) => patch({ assignedStaffId: e.target.value || null })}
-            >
-              <option value="">Unassigned</option>
-              {staff.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.displayName}
-                </option>
-              ))}
-            </select>
-          </div>
+          {!tenant && (
+            <>
+              <div className="block">
+                <h3>Status</h3>
+                <select
+                  className="fselect"
+                  style={{ width: "100%" }}
+                  value={ticket.status}
+                  disabled={busy}
+                  onChange={(e) => patch({ status: e.target.value as TicketStatus })}
+                >
+                  {STATUSES.map((s) => (
+                    <option key={s} value={s}>
+                      {s.replace("_", " ")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="block">
+                <h3>Severity</h3>
+                <select
+                  className="fselect"
+                  style={{ width: "100%" }}
+                  value={ticket.severity}
+                  disabled={busy}
+                  onChange={(e) => patch({ severity: e.target.value as TicketSeverity })}
+                >
+                  {SEVERITIES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="block">
+                <h3>Assignee</h3>
+                <select
+                  className="fselect"
+                  style={{ width: "100%" }}
+                  value={ticket.assignedStaff?.id ?? ""}
+                  disabled={busy}
+                  onChange={(e) => patch({ assignedStaffId: e.target.value || null })}
+                >
+                  <option value="">Unassigned</option>
+                  {staff.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.displayName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
           <div className="block">
             <h3>Details</h3>
             <div className="kv">
