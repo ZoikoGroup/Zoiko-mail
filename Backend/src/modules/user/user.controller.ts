@@ -36,7 +36,7 @@ export const updateMe = asyncHandler(async (req: Request, res: Response) => {
  * demotion immediately rather than at the caller's next sign-in.
  */
 export const getMyCapabilities = asyncHandler(async (req: Request, res: Response) => {
-  const decisions = capabilitySnapshot(capabilityContext(req));
+  const decisions = capabilitySnapshot(await capabilityContext(req));
   sendSuccess(
     res,
     200,

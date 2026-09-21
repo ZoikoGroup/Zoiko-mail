@@ -30,7 +30,6 @@ export type Capability =
   | "people.member.manage"
   | "people.admin.manage"
   | "people.owner.manage"
-  | "people.mfa.reset"
   // Workspace
   | "workspace.settings.read"
   | "workspace.settings.write"
@@ -40,6 +39,8 @@ export type Capability =
   | "policy.write"
   | "policy.security.write"
   | "audit.read"
+  | "security-alert.read"
+  | "security-alert.review"
   // Money and liability
   | "billing.read"
   | "billing.plan.write"
@@ -49,7 +50,14 @@ export type Capability =
   // Support
   | "support.standing"
   | "support.workspace.access"
-  | "support.grant.end";
+  | "support.grant.end"
+  // Reading one workspace's support console: routine for Owner and Admin,
+  // time-boxed for a Support seat, which is why it is a capability rather
+  // than a role check.
+  | "support.console.read"
+  // Seeing who currently holds access. Deliberately separate from
+  // support.console.read so a granted Support member cannot read it.
+  | "support.grant.read";
 
 export interface CapabilityState {
   data: Set<Capability> | undefined;

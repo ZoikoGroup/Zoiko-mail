@@ -231,3 +231,104 @@ test.describe("workspace settings save", () => {
     await expect(plan).toHaveAttribute("readonly", "");
   });
 });
+
+test.describe("workspace settings refuses a change it cannot save", () => {
+  /**
+   * The screen as it behaved when a required field was emptied.
+   *
+   * `name` is `min(1)` on the API, so an emptied name could only ever come
+   * back a 400. It did — worded "Validation failed" under the heading
+   * "Could not load this", because InlineError hardcoded that heading for
+   * saves as well as reads. The report named neither the field nor the rule
+   * and blamed loading, so the reasonable conclusion was that the page could
+   * not save at all.
+   *
+   * Three things are pinned here: the doomed request is not sent, the field
+   * that is wrong is the one carrying the message, and a save failure is
+   * described as a save failure.
+   */
+  const initial: Tenant = {
+    id: "t1",
+    name: "Acme Corp",
+    status: "ACTIVE",
+    planCode: "starter",
+    timezone: "Europe/London",
+    allowedDomains: ["acme.test"],
+  };
+
+  test("an emptied workspace name blocks the save and says which field is wrong", async ({
+    page,
+  }) => {
+    const stub = await stubTenant(page, initial);
+    await signInAsAdmin(page);
+
+    await page.goto("/admin/settings");
+    const name = page.locator("#setting-name");
+    await expect(name).toHaveValue("Acme Corp", { timeout: 60_000 });
+
+    await name.fill("");
+
+    // Named next to the field, while the person is still looking at it.
+    await expect(page.getByText("A workspace name is required.")).toBeVisible();
+    await expect(name).toHaveAttribute("aria-invalid", "true");
+
+    // Dirty, but not submittable: a request that can only 400 is not worth
+    // making, and an enabled button promises it would work.
+    await expect(page.getByRole("button", { name: /save changes/i })).toBeDisabled();
+    expect(stub.patches).toHaveLength(0);
+
+    // Typing a name again clears the objection and restores the button.
+    await name.fill("Acme Limited");
+    await expect(page.getByText("A workspace name is required.")).toBeHidden();
+    await expect(page.getByRole("button", { name: /save changes/i })).toBeEnabled();
+  });
+
+  test("a field the server rejects is reported on that field, as a save failure", async ({
+    page,
+  }) => {
+    await stubTenant(page, initial);
+    await signInAsAdmin(page);
+
+    // The server is the authority on the rest — a domain it will not accept
+    // comes back per-field, and the screen has to place it.
+    await page.route(`${API}/tenants/current`, async (route) => {
+      if (route.request().method() !== "PATCH") return route.fallback();
+      return route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "Validation failed",
+            details: [{ path: "allowedDomains.0", message: "Enter a valid domain name" }],
+          },
+        }),
+      });
+    });
+
+    await page.goto("/admin/settings");
+    const domain = page.locator("#setting-defaultDomain");
+    await expect(domain).toHaveValue("acme.test", { timeout: 60_000 });
+
+    await domain.fill("not a domain");
+    await page.getByRole("button", { name: /save changes/i }).click();
+
+    // The server says allowedDomains; the screen calls it Default domain. The
+    // message has to land on the control the person can actually see, which is
+    // the element the field's input points at with aria-describedby.
+    await expect(page.locator("#setting-defaultDomain-error")).toHaveText(
+      "Enter a valid domain name",
+      { timeout: 30_000 }
+    );
+    await expect(domain).toHaveAttribute("aria-invalid", "true");
+
+    // And the banner repeats the reason without the column name behind it.
+    await expect(page.getByText("allowedDomains")).toBeHidden();
+
+    // The failure is described as what it was. "Could not load this" sent the
+    // reader looking for a broken page instead of a bad value.
+    await expect(page.getByText("Could not save your changes")).toBeVisible();
+    await expect(page.getByText("Could not load this")).toBeHidden();
+  });
+});

@@ -76,6 +76,8 @@ const OWNER: RoleMatrix = {
   // ability to *end* a grant, never to start one.
   "support.grant.create": "STEP_UP",
   "support.grant.end": "ALLOW",
+  "support.console.read": "ALLOW",
+  "support.grant.read": "ALLOW",
 };
 
 /**
@@ -136,6 +138,8 @@ const ADMIN: RoleMatrix = {
   // Support cannot end its own session — that would be self-marking homework.
   // The tenant-side principal watching the session is the one who can stop it.
   "support.grant.end": "ALLOW",
+  "support.console.read": "ALLOW",
+  "support.grant.read": "ALLOW",
 };
 
 const MEMBER: RoleMatrix = {
@@ -162,6 +166,13 @@ const SUPPORT: RoleMatrix = {
    * hold this in no form at all.
    */
   "mail.other.read": "GRANT",
+  /**
+   * The console read itself is time-boxed for Support, so the screens stop
+   * answering the moment the grant expires or is revoked — §7's "no default
+   * right" and "must have an expiry", applied to the tenant-side console the
+   * way requireTenantGrant applies them to the platform one.
+   */
+  "support.console.read": "GRANT",
 };
 
 export const CAPABILITY_MATRIX: Record<MembershipRole, RoleMatrix> = {

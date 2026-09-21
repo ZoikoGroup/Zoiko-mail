@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ApiError } from "@/lib/api-client";
 import { useChangePassword } from "@/lib/auth-hooks";
-import { PasswordInput } from "..";
+import { PasswordInput, PasswordRequirements } from "..";
 
 type FormErrors = {
   currentPassword?: string;
@@ -131,6 +131,8 @@ export default function ChangePasswordForm() {
         }
         error={errors.newPassword}
       />
+
+      <PasswordRequirements password={formData.newPassword} className="mt-1" />
 
       <PasswordInput
         label="Confirm Password"

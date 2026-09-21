@@ -7,19 +7,41 @@ import { ArrowRight } from "lucide-react";
 import { AppShell } from "@/components/shell/AppShell";
 import { useMe } from "@/lib/auth-hooks";
 import { useActions } from "@/lib/actions-hooks";
-import { isLoggedIn } from "@/lib/auth-storage";
+import { isLoggedIn, clearTokens } from "@/lib/auth-storage";
 import type { MeResponse } from "@/lib/auth-api";
 import { MEMBER_NAV, sectionsFor } from "@/lib/nav";
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { data } = useMe();
+  const { data, isError, error } = useMe();
   const me = data as MeResponse | undefined;
   const { data: actions = [], isLoading } = useActions();
 
   useEffect(() => {
-    if (!isLoggedIn()) router.replace("/login");
+    const checkAuth = () => {
+      if (!isLoggedIn()) {
+        router.replace("/login");
+      }
+    };
+    checkAuth();
   }, [router]);
+
+  useEffect(() => {
+    if (isError) {
+      const apiError = error as { status?: number; code?: string } | null;
+      if (
+        apiError?.status === 401 ||
+        apiError?.code === "SESSION_SUPERSEDED" ||
+        // Backend unreachable: the token cannot be validated, so there is
+        // nothing to render the dashboard from. Go back to sign-in instead of
+        // sitting on "Loading your workspace…" forever.
+        apiError?.status === 0
+      ) {
+        clearTokens();
+        router.replace("/login");
+      }
+    }
+  }, [isError, error, router]);
 
   const active = actions.filter((a) => a.status === "OPEN" || a.status === "IN_PROGRESS").length;
   const sections = sectionsFor(MEMBER_NAV);

@@ -24,7 +24,7 @@ const MEMBER_WORKSPACE = "MEMBER" as const;
 import { AccessDenied } from "@/components/ui/AccessDenied";
 
 // Roles that belong on the member dashboard. SUPPORT has its own dashboard
-// at /support-workspace and should never land here.
+// at /support and should never land here.
 const MEMBER_DASHBOARD_ROLES = ["OWNER", "ADMIN", "MEMBER"];
 
 function initials(name?: string, email?: string) {
@@ -36,7 +36,7 @@ function initials(name?: string, email?: string) {
 export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { data, isLoading: meLoading } = useMe();
+  const { data, isLoading: meLoading, isError } = useMe();
   const me = data as MeResponse | undefined;
   const logout = useLogout();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -45,6 +45,17 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!isLoggedIn()) router.replace("/login");
   }, [router]);
+
+  // Session guard: the shell only renders for a session /auth/me validated.
+  // If that call fails — token refused, or the backend unreachable — there is
+  // nothing to show, and the loading gate below would sit on a spinner with no
+  // way onward. Treat it as signed out and return to the login form.
+  useEffect(() => {
+    if (isError) {
+      clearTokens();
+      router.replace("/login");
+    }
+  }, [isError, router]);
 
   // Staff-token guard: a user with a platform token (staff) has no tenant
   // membership, so useMe() will never resolve on this page and the loading
@@ -62,8 +73,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   // session that belongs elsewhere is ended rather than left usable.
   //
   // A tenant support member is covered by this too: their session is
-  // SUPPORT-scoped, so it is turned away here rather than quietly redirected
-  // to /tenant-support, because reaching another workspace takes a sign-in.
+  // SUPPORT-scoped, so it is turned away here and they land on the support
+  // console at /support after re-authenticating for that workspace.
   //
   // Skipped for staff, whose platform token has no tenant membership and no
   // workspace scope; the effect above has already sent them to /support.

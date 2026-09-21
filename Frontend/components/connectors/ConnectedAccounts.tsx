@@ -382,7 +382,8 @@ function ConnectPanel({ onDone }: { onDone: () => void }) {
       {showManual && (
         <form onSubmit={submitManual} className="space-y-3">
           <p className="text-xs text-[var(--ink3)]">
-            Registers an already-authorized, read-only account. (Provider consent pop-up comes once the backend OAuth flow is ready.)
+            Registers an already-authorized, read-only account without a round-trip to the
+            provider&rsquo;s consent screen.
           </p>
           <div className="flex flex-col gap-3 sm:flex-row">
             <select value={provider} onChange={(e) => setProvider(e.target.value as ConnectorProvider)} className={field}>

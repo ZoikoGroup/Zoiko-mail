@@ -7,7 +7,7 @@ import { MdLockReset } from "react-icons/md";
 import { ApiError } from "@/lib/api-client";
 import { useResetPassword, useForgotPassword } from "@/lib/auth-hooks";
 
-import { PasswordInput } from "..";
+import { PasswordInput, PasswordRequirements } from "..";
 import OtpInput from "../inputs/OtpInput";
 
 interface ResetPasswordFormProps {
@@ -152,6 +152,8 @@ export default function ResetPasswordForm({
             if (error) setError("");
           }}
         />
+
+        <PasswordRequirements password={newPassword} className="-mt-2" />
 
         <PasswordInput
           label="Confirm New Password"
