@@ -54,6 +54,13 @@ import {
   type RequestExportInput,
   type RequestDeletionInput,
 } from "./owner-api";
+import {
+  getSupportGrants,
+  createSupportGrant,
+  revokeSupportGrant,
+  type CreateSupportGrantInput,
+  type SupportGrant,
+} from "./owner-api";
 
 // ─── Members ──────────────────────────────────────────────────────────────────
 
@@ -396,5 +403,31 @@ export function useConfirmDeletion() {
     mutationFn: ({ requestId, data }: { requestId: string; data: { confirmation: string; tenantName: string } }) =>
       confirmDeletion(requestId, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "lifecycle"] }),
+  });
+}
+
+// ─── Support Access Grants ───────────────────────────────────────────────────
+
+export function useSupportGrants() {
+  return useQuery({
+    queryKey: ["owner", "support-grants"],
+    queryFn: getSupportGrants,
+    staleTime: 30_000,
+  });
+}
+
+export function useCreateSupportGrant() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateSupportGrantInput) => createSupportGrant(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "support-grants"] }),
+  });
+}
+
+export function useRevokeSupportGrant() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (grantId: string) => revokeSupportGrant(grantId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "support-grants"] }),
   });
 }
