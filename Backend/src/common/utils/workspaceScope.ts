@@ -19,10 +19,10 @@ const RANK: Record<Exclude<MembershipRole, "SUPPORT">, number> = {
  * Two independent limits, and taking the lesser of them matters for different
  * reasons. The membership is the live source of truth, so a user demoted
  * since their token was minted acts as their new role immediately — Security
- * §7.2. The session scope is which console this sign-in was for, so a senior
- * account on a MEMBER-scoped session (every Google sign-in) acts as a member
- * and cannot use owner or admin endpoints by holding a token from a mailbox
- * sign-in.
+ * §7.2. The session scope is which console this sign-in was for, so a session
+ * scoped narrower than the role allows (a demotion, or a workspace selected
+ * from a reduced seat) acts within that scope and cannot use owner or admin
+ * endpoints by holding a token from a mailbox sign-in.
  *
  * Returns null when the two are incompatible rather than picking one: a
  * SUPPORT session on a non-support membership, or the reverse, is not a

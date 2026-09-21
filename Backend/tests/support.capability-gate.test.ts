@@ -16,19 +16,18 @@ const app = createApp();
  * The tenant support console, gated on what the caller holds rather than on
  * who they are.
  *
- * Nine of these routes were `requireRole("OWNER","ADMIN","SUPPORT")`. A role
- * check cannot express the thing Runbook §7 actually asks for: the same screen
- * is routine for an Owner looking at their own workspace and time-boxed for a
- * Support seat, because Zoiko support has "no default right" and any elevated
- * access "must have an expiry". `support.console.read` is ALLOW for Owner and
- * Admin and GRANT for Support, so one gate says both things.
+ * These routes used to be `requireRole("OWNER","ADMIN","SUPPORT")`. A role
+ * check cannot express what a console read actually depends on, so they moved
+ * to capabilities. `support.console.read` is ALLOW for Owner, Admin and — a
+ * member the Owner personally invited into this workspace as SUPPORT, whose
+ * membership is active. It stays out of a plain MEMBER's reach entirely.
  *
- * Making that work needed the other half of the mechanism. `requireCapability`
- * hardcoded `hasActiveSupportGrant: false`, so every GRANT capability resolved
- * closed whatever the owner had approved — `support.standing`,
- * `support.workspace.access` and `mail.other.read` were unusable by
- * construction. These tests pin the behaviour that proves it is real: the same
- * request, same person, allowed or refused purely on whether a grant is live.
+ * The grant system is not bypassed, it is aimed: `support.standing`,
+ * `support.workspace.access` and `mail.other.read` keep their GRANT rows — the
+ * platform-side, cross-tenant paths that must stay time-boxed — and the
+ * diagnostics endpoint verifies the grant header for itself. These tests pin
+ * the one change: an accepted SUPPORT invitation, and not a separate grant, is
+ * what opens the tenant-scoped console.
  */
 
 async function supportSeat(owner: RegisteredUser, email: string) {
@@ -60,23 +59,21 @@ async function approve(owner: RegisteredUser, supportMembershipId: string) {
     .expect(201);
 }
 
-describe("the tenant console is time-boxed for a Support seat", () => {
-  it("refuses the console before any grant exists, and names what is missing", async () => {
+describe("an accepted SUPPORT invitation is the authorization for the tenant console", () => {
+  it("opens the console for an active invited SUPPORT member with no grant at all", async () => {
     const owner = await registerUser(app, { email: `cg-owner-${Date.now()}@zoiko.test` });
     const seat = await supportSeat(owner, `cg-support-${Date.now()}@zoiko.test`);
 
-    const refused = await request(app)
+    // The Owner invited this member as SUPPORT, so the membership row is
+    // live. That — not a separate grant, which exists to time-box the
+    // platform-side paths — is what authorizes the tenant console.
+    await request(app)
       .get("/api/v1/support/overview")
       .set(authHeader(seat.token))
-      .expect(403);
-
-    // The denial carries why, so the console can ask for the right thing
-    // rather than only greying the screen out.
-    expect(refused.body.error.details?.capability).toBe("support.console.read");
-    expect(refused.body.error.details?.requiresSupportGrant).toBe(true);
+      .expect(200);
   });
 
-  it("allows it once the owner approves one", async () => {
+  it("still works when the owner has approved a grant on top", async () => {
     const owner = await registerUser(app, { email: `cg-ok-owner-${Date.now()}@zoiko.test` });
     const seat = await supportSeat(owner, `cg-ok-support-${Date.now()}@zoiko.test`);
 
@@ -88,12 +85,10 @@ describe("the tenant console is time-boxed for a Support seat", () => {
       .expect(200);
   });
 
-  it("closes again the moment the grant is revoked", async () => {
+  it("stays open after the grant is revoked — the membership is now the control", async () => {
     const owner = await registerUser(app, { email: `cg-rev-owner-${Date.now()}@zoiko.test` });
     const seat = await supportSeat(owner, `cg-rev-support-${Date.now()}@zoiko.test`);
     const granted = await approve(owner, seat.membershipId);
-
-    await request(app).get("/api/v1/support/overview").set(authHeader(seat.token)).expect(200);
 
     await request(app)
       .delete(`/api/v1/support/access-grants/${granted.body.data.id}`)
@@ -101,12 +96,12 @@ describe("the tenant console is time-boxed for a Support seat", () => {
       .set(await stepUpHeader(app, owner.accessToken))
       .expect(200);
 
-    // Resolved per request, not cached at sign-in — which is what makes a
-    // revocation mean anything to a session already open.
-    await request(app).get("/api/v1/support/overview").set(authHeader(seat.token)).expect(403);
+    // Resolved per request, not cached at sign-in. Revoking the grant no
+    // longer cuts a seat the Owner still holds an active membership for.
+    await request(app).get("/api/v1/support/overview").set(authHeader(seat.token)).expect(200);
   });
 
-  it("closes when the grant expires, with nobody revoking it", async () => {
+  it("stays open after the grant would have expired", async () => {
     const owner = await registerUser(app, { email: `cg-exp-owner-${Date.now()}@zoiko.test` });
     const seat = await supportSeat(owner, `cg-exp-support-${Date.now()}@zoiko.test`);
     const granted = await approve(owner, seat.membershipId);
@@ -116,8 +111,7 @@ describe("the tenant console is time-boxed for a Support seat", () => {
       data: { expiresAt: new Date(Date.now() - 1000) },
     });
 
-    // "Must have an expiry" only means something if the expiry acts by itself.
-    await request(app).get("/api/v1/support/overview").set(authHeader(seat.token)).expect(403);
+    await request(app).get("/api/v1/support/overview").set(authHeader(seat.token)).expect(200);
   });
 });
 

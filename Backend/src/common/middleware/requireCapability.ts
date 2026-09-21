@@ -69,7 +69,7 @@ async function contextFrom(req: Request): Promise<CapabilityContext> {
  * takes effect on its own, and the point of a revocation is that it takes
  * effect at once.
  */
-async function hasLiveGrant(tenant: {
+export async function hasLiveGrant(tenant: {
   role: string;
   tenantId: string;
   membershipId: string;

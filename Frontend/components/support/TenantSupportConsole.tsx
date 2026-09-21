@@ -32,6 +32,7 @@ import {
   type TenantListParams,
 } from "@/lib/support-api";
 import { useLiveRefresh, useTenantDomains, useTenantMailboxes } from "@/lib/support-hooks";
+import TicketsPage from "@/components/support/TicketsPage";
 import { RequestAccessPanel } from "./RequestAccessPanel";
 import { supportStyles } from "@/components/support/support-styles";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
@@ -62,9 +63,18 @@ import type { LucideIcon } from "lucide-react";
  * (all tenants, provider events, jobs, …) are staff-only and deliberately do
  * not exist here.
  */
-type TabId = "overview" | "configuration" | "mailboxes" | "domains" | "provider-events" | "delivery-events" | "jobs" | "suppressions" | "audit" | "diagnostics" | "access";
+type TabId = "tickets" | "overview" | "configuration" | "mailboxes" | "domains" | "provider-events" | "delivery-events" | "jobs" | "suppressions" | "audit" | "diagnostics" | "access";
 
 const TABS: Array<{ id: TabId; label: string; icon: string }> = [
+  // First, and the one that is always here.
+  //
+  // Tickets need no grant: the workspace's own Owner invited this member as
+  // SUPPORT, and the queue is the work they were invited to do. Everything
+  // below it reads the customer's data and is gated on
+  // support.workspace.investigate, which is GRANT for this role — so a seat
+  // with no live grant lands on a console that still has something to do
+  // rather than a wall of refusals.
+  { id: "tickets", label: "Tickets", icon: "✎" },
   { id: "overview", label: "Workspace Overview", icon: "◈" },
   { id: "configuration", label: "Configuration", icon: "⚙" },
   { id: "mailboxes", label: "Mailboxes", icon: "✉" },
@@ -274,7 +284,7 @@ export default function TenantSupportConsole() {
   const logout = useLogout();
   const meQuery = useMe();
   const me = meQuery.data;
-  const [tab, setTab] = useState<TabId>("overview");
+  const [tab, setTab] = useState<TabId>("tickets");
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const [diagGrant, setDiagGrant] = useState<string | null>(null);
@@ -414,6 +424,12 @@ export default function TenantSupportConsole() {
                 </div>
               </div>
 
+              {/*
+                The request panel replaces the refused tab, not the console.
+                Tickets keep working without a grant, so covering them with
+                "ask for access" would hide work the seat is authorized to
+                do and make the console look wholly shut.
+              */}
               {tab === "overview" &&
                 (overviewLoading ? (
                   <Spinner />
@@ -435,6 +451,7 @@ export default function TenantSupportConsole() {
                   <OverviewView data={overview!} />
                 ))}
 
+              {tab === "tickets" && <TicketsPage mode="tenant" />}
               {tab === "configuration" && <ConfigurationPage />}
               {tab === "mailboxes" && <MailboxesPage />}
               {tab === "domains" && <DomainsPage />}

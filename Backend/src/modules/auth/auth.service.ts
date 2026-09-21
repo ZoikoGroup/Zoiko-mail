@@ -122,24 +122,16 @@ function parseDurationToMs(duration: string): number {
 }
 
 /**
- * The console a password sign-in opens: the one the role implies.
+ * The console a sign-in opens: the one the role implies.
  *
- * Google sign-in does not use this — it is always issued MEMBER scope, so
- * social sign-in can never land in a console. See googleWorkspaceScope.
+ * Both password and Google sign-in resolve to the same console, so the same
+ * person lands on the same dashboard however they signed in. A workspace
+ * selection or a refresh carries the bound scope forward rather than
+ * re-deriving it, keeping the session attached to the console it opened for.
  */
 export function workspaceScopeForRole(role: MembershipRole): WorkspaceScope {
   return role;
 }
-
-/**
- * A Google sign-in always acts as a member, however senior the account is.
- *
- * Reaching the admin, owner or support console is a deliberate act that must
- * go through a sign-in aimed at it. Without this an Owner who used the Google
- * button would land in the owner console, which is precisely what the rule
- * forbids.
- */
-export const GOOGLE_WORKSPACE_SCOPE: WorkspaceScope = "MEMBER";
 
 function buildAccessToken(
   membership: MembershipWithRelations,
@@ -185,7 +177,8 @@ function buildRefreshToken(
     membershipId: membership.id,
     role: membership.role,
     // Carried so a refresh renews the same console rather than re-deriving
-    // it from the role, which would promote a MEMBER-scoped Google session.
+    // it from the role, which would promote a session whose role has since
+    // been reduced.
     workspace,
     sid: sessionId,
     type: "refresh",
@@ -534,6 +527,9 @@ async function issueSession(
   // pointing at a workspace it holds no session for.
   await claimActiveWorkspace(membership, tx);
 
+  const platformRole = membership.user.platformRole;
+  const isSupportStaff = platformRole === "SUPPORT" || platformRole === "SUPER_ADMIN";
+
   return {
     accessToken,
     refreshToken: refresh.token,
@@ -542,6 +538,13 @@ async function issueSession(
       id: membership.user.id,
       email: membership.user.email,
       displayName: membership.user.displayName,
+      platformRole,
+      platformAccess: {
+        isSupportStaff,
+        scope: isSupportStaff ? "PLATFORM" : "NONE",
+        status: isSupportStaff ? "ACTIVE" : "NONE",
+        expiresAt: null,
+      },
     },
     tenant: {
       id: membership.tenant.id,
@@ -551,8 +554,8 @@ async function issueSession(
     membership: {
       id: membership.id,
       // The acting role, not the membership's maximum. The client routes on
-      // this, so reporting OWNER for a MEMBER-scoped Google session would
-      // send it straight to the owner console the scope exists to withhold.
+      // this, so a demoted member reports their live role rather than the one
+      // their session was minted under.
       role: actingRole(membership.role, workspace) ?? membership.role,
     },
     workspace,
@@ -615,6 +618,26 @@ function labelForUserAgent(userAgent?: string | null): string {
   if (browser) return browser;
   return "Unknown device";
 }
+
+/**
+ * The platform half of an AuthUserSummary for somebody who has no platform
+ * session — which is everyone at registration and at OTP verification,
+ * since both happen before any workspace or staff role is in play.
+ *
+ * PR #38 widened AuthUserSummary with these two fields and filled them in
+ * at the staff paths but not at these, which is half of why main stopped
+ * compiling. Written once here so the next state to be added has an
+ * obvious thing to reach for.
+ */
+const NO_PLATFORM_ACCESS = {
+  platformRole: "NONE",
+  platformAccess: {
+    isSupportStaff: false,
+    scope: "NONE",
+    status: "NONE",
+    expiresAt: null,
+  },
+} as const;
 
 export class AuthService {
   /**
@@ -708,6 +731,7 @@ export class AuthService {
         id: user.id,
         email: user.email,
         displayName: user.displayName,
+        ...NO_PLATFORM_ACCESS,
       },
       pendingToken: pending.token,
       expiresIn: pending.expiresIn,
@@ -1039,6 +1063,7 @@ export class AuthService {
         id: user.id,
         email: user.email,
         displayName: user.displayName,
+        ...NO_PLATFORM_ACCESS,
       },
       emailVerified: true,
       pendingInvitations,
@@ -1168,10 +1193,11 @@ export class AuthService {
  * invitations all behave identically regardless of how the user proved
  * their identity.
  *
- * This owns POST /auth/google. Selecting a Google account signs the user in
- * and lands them in their own workspace; there is no second code step,
- * because the ID token is already Google's signed assertion that it verified
- * the address.
+* This owns POST /auth/google. Selecting a Google account signs the user in
+  * and lands them in their own workspace; there is no second code step,
+  * because the ID token is already Google's signed assertion that it verified
+  * the address. The session resolves to the same console a password sign-in
+  * would open for that account — the role decides it, not the method.
  *
  * Preferred over googleLogin() below on the identity model too: UserIdentity
  * supports multiple providers per user and survives a Google address change,
@@ -1203,8 +1229,7 @@ export class AuthService {
       return this.resolveAuthState(
         identity.user,
         undefined,
-        context,
-        GOOGLE_WORKSPACE_SCOPE
+        context
       );
     }
 
@@ -1256,8 +1281,7 @@ export class AuthService {
       return this.resolveAuthState(
         created,
         undefined,
-        context,
-        GOOGLE_WORKSPACE_SCOPE
+        context
       );
     }
 
@@ -1327,17 +1351,16 @@ export class AuthService {
     return this.resolveAuthState(
       linked,
       undefined,
-      context,
-      GOOGLE_WORKSPACE_SCOPE
+      context
     );
   }
 
   /** Ordered guard chain. First matching guard decides the state. */
   /**
    * `intendedWorkspace` fixes the console the session is bound to. Left
-   * undefined it follows the membership role, which is what a password
-   * sign-in wants. Google passes MEMBER explicitly so a social sign-in can
-   * never open a console.
+   * undefined it follows the membership role, which is what both password and
+   * Google sign-in want — the same account lands on the same console however
+   * it signed in.
    */
   private async resolveAuthState(
     user: Awaited<ReturnType<typeof userRepository.findByEmail>> & {},
@@ -1399,9 +1422,19 @@ export class AuthService {
         userAgent: context.userAgent,
         metadata: { platformRole: user.platformRole },
       });
+      const isSupportStaff = user.platformRole === "SUPPORT" || user.platformRole === "SUPER_ADMIN";
       return {
         state: "STAFF_CONSOLE",
-        user: publicUser,
+        user: {
+          ...publicUser,
+          platformRole: user.platformRole,
+          platformAccess: {
+            isSupportStaff,
+            scope: "PLATFORM",
+            status: "ACTIVE",
+            expiresAt: null,
+          },
+        },
         platformRole: user.platformRole,
         platformToken: platform.token,
         expiresIn: platform.expiresIn,
@@ -1683,7 +1716,18 @@ export class AuthService {
       });
       return {
         state: "STAFF_CONSOLE",
-        user: { id: user.id, email: user.email, displayName: user.displayName },
+        user: {
+          id: user.id,
+          email: user.email,
+          displayName: user.displayName,
+          platformRole: payload.intent.platformRole,
+          platformAccess: {
+            isSupportStaff: true,
+            scope: "PLATFORM",
+            status: "ACTIVE",
+            expiresAt: null,
+          },
+        },
         platformRole: payload.intent.platformRole,
         platformToken: platform.token,
         expiresIn: platform.expiresIn,
@@ -1777,7 +1821,18 @@ export class AuthService {
         recoveryCodes,
         auth: {
           state: "STAFF_CONSOLE",
-          user: { id: user.id, email: user.email, displayName: user.displayName },
+          user: {
+            id: user.id,
+            email: user.email,
+            displayName: user.displayName,
+            platformRole: payload.intent.platformRole,
+            platformAccess: {
+              isSupportStaff: true,
+              scope: "PLATFORM",
+              status: "ACTIVE",
+              expiresAt: null,
+            },
+          },
           platformRole: payload.intent.platformRole,
           platformToken: platform.token,
           expiresIn: platform.expiresIn,
@@ -1997,8 +2052,8 @@ export class AuthService {
       if (claimed.count !== 1) return null;
 
       // The scope comes from the presented token, not from the role: a
-      // MEMBER-scoped Google session must stay a member session across a
-      // refresh rather than being promoted to whatever its role allows.
+      // session stays on the console it opened for across a refresh rather
+      // than being re-scoped to whatever the role now allows.
       const nextSession = await issueSession(
         membership,
         payload.workspace ?? workspaceScopeForRole(membership.role),
@@ -2229,12 +2284,22 @@ export class AuthService {
     tenant: AuthSessionResponse["tenant"];
     membership: AuthSessionResponse["membership"];
     workspace: WorkspaceScope;
+    platformRole: PlatformRole;
+    platformAccess: {
+      isSupportStaff: boolean;
+      scope: "PLATFORM" | "TENANT" | "NONE";
+      status: "ACTIVE" | "EXPIRED" | "REVOKED" | "NONE";
+      expiresAt: string | null;
+    };
   } {
     if (!req.tenantContext) {
       throw new AppError("Tenant context required", 403, ErrorCodes.FORBIDDEN);
     }
 
     const { user, tenant, membershipId, role, workspace } = req.tenantContext;
+
+    const platformRole = user.platformRole;
+    const isSupportStaff = platformRole === "SUPPORT" || platformRole === "SUPER_ADMIN";
 
     return {
       id: user.id,
@@ -2254,6 +2319,13 @@ export class AuthService {
       // Which console this session belongs to. The shells gate on this, so it
       // has to come from the server rather than be inferred from the role.
       workspace,
+      platformRole,
+      platformAccess: {
+        isSupportStaff,
+        scope: isSupportStaff ? "PLATFORM" : "NONE",
+        status: isSupportStaff ? "ACTIVE" : "NONE",
+        expiresAt: null,
+      },
     };
   }
 

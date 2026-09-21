@@ -61,6 +61,13 @@ import {
   reviewSecurityAlert,
   type AlertReviewAction,
 } from "./owner-api";
+import {
+  getSupportGrants,
+  createSupportGrant,
+  revokeSupportGrant,
+  type CreateSupportGrantInput,
+  type SupportGrant,
+} from "./owner-api";
 
 // ─── Members ──────────────────────────────────────────────────────────────────
 
@@ -429,8 +436,12 @@ export function useApproveSupportAccess() {
       approveSupportAccessRequest(v.requestId, v.stepUpToken, v.minutes),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["support-access-requests"] });
-      // Approving writes a grant, so the grants list is stale too.
-      void qc.invalidateQueries({ queryKey: ["support-grants"] });
+      // Approving writes a grant, so the grants list is stale too. The key
+      // is main's ["owner", "support-grants"], not the bare one this branch
+      // guessed at while that list did not exist yet — an approval that
+      // left the grants table showing the old rows would look like it had
+      // silently failed.
+      void qc.invalidateQueries({ queryKey: ["owner", "support-grants"] });
     },
   });
 }
@@ -467,5 +478,35 @@ export function useReviewSecurityAlert() {
     mutationFn: ({ id, action, note }: { id: string; action: AlertReviewAction; note?: string }) =>
       reviewSecurityAlert(id, action, note),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "security-alerts"] }),
+  });
+}
+
+// ─── Support Access Grants ───────────────────────────────────────────────────
+
+export function useSupportGrants() {
+  return useQuery({
+    queryKey: ["owner", "support-grants"],
+    queryFn: getSupportGrants,
+    staleTime: 30_000,
+  });
+}
+
+export function useCreateSupportGrant() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateSupportGrantInput) => createSupportGrant(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "support-grants"] }),
+  });
+}
+
+export function useRevokeSupportGrant() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (grantId: string) => revokeSupportGrant(grantId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["owner", "support-grants"] });
+      // Ending a grant also settles the request it came from.
+      void qc.invalidateQueries({ queryKey: ["support-access-requests"] });
+    }
   });
 }

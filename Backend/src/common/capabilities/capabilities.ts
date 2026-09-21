@@ -107,6 +107,31 @@ export const CAPABILITIES = [
    * guarded.
    */
   "support.grant.read",
+  /**
+   * Reading a workspace's diagnostics: its configuration, mailboxes,
+   * domains, provider and delivery events, jobs, suppressions, audit.
+   *
+   * Split out of `support.console.read` because the two were doing one
+   * job for two very different reads, and the split is the whole
+   * disagreement between PR #37 and PR #38 written down.
+   *
+   * #38's argument holds for the console itself: a member the Owner
+   * invited as SUPPORT, answering that workspace's own ticket queue, is
+   * authorized by the invitation. Asking an Owner to approve a grant
+   * before their own support member can read their own tickets is a
+   * ritual, and rituals get automated away.
+   *
+   * #37's argument holds for everything else on that console. Delivery
+   * events name recipients, the audit log names people and what they did,
+   * configuration exposes the workspace's security posture. Runbook §7's
+   * "no default right" and "must have an expiry" are about reading a
+   * customer's data, and those reads are exactly that — which is why they
+   * are GRANT here while the console read is ALLOW.
+   *
+   * Owner and Admin hold it outright: it is their own workspace, and every
+   * one of these screens shows them something they can already reach.
+   */
+  "support.workspace.investigate",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];

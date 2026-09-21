@@ -26,18 +26,19 @@ export const WORKSPACE_HREF: Record<WorkspaceScope, string> = {
 
 /**
  * The member workspace: a person's own mailbox, not an administration
- * console. Google sign-in always lands here whatever the account's role, so
- * reaching a console is always a deliberate sign-in aimed at it.
+ * console.
  */
 export const USER_WORKSPACE_HREF = WORKSPACE_HREF.MEMBER;
 
 /**
  * Where a session belongs, from the workspace the backend bound it to.
  *
- * Deliberately keyed on the scope rather than the role. They usually agree,
- * but a Google sign-in is MEMBER-scoped however senior the account is, and
- * routing on the role there would send an Owner to the owner console — the
- * thing the scope exists to prevent.
+ * Deliberately keyed on the scope rather than the role. They agree for a
+ * fresh sign-in — both password and Google sign-ins bind the session to the
+ * console the account's role implies — and the scope is what survives a
+ * demotion: a session stays on the console it opened for until it is
+ * re-issued, so routing on the live role there could push a reduced account
+ * into a console it no longer holds.
  */
 export function resolveWorkspaceHref(scope?: string): string {
   if (scope && scope in WORKSPACE_HREF) {

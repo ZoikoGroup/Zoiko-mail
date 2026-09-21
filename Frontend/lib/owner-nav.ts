@@ -45,18 +45,20 @@ export const OWNER_NAV: OwnerNavItem[] = [
 
   { section: "Organization", label: "Organization Settings", href: "/owner/organization-settings", icon: Settings, ownerOnly: true },
   { section: "Organization", label: "Domains", href: "/owner/domains", icon: Globe, ownerOnly: true },
-  // Owner-only: RBAC §2 records "Approve support access" as Owner Yes,
-  // Admin No. An Admin can still decline a request from the same screen.
-  { section: "Organization", label: "Support Access", href: "/owner/support-access", icon: ShieldCheck, ownerOnly: true },
   { section: "Organization", label: "Subscription & Billing", href: "/owner/billing", icon: CreditCard, ownerOnly: true },
 
-  { section: "Security", label: "Audit Logs", href: "/owner/audit-logs", icon: FileText, ownerOnly: true },
+  // Section renamed on main: "Security & Governance". Support Access moved
+  // here with it, out of Organization — approving an outsider into the
+  // workspace is a governance decision rather than an administrative one,
+  // and it now sits beside the audit log that records the result.
+  { section: "Security & Governance", label: "Audit Logs", href: "/owner/audit-logs", icon: FileText, ownerOnly: true },
   // The decision queue that sits beside the log. ownerOnly to match the rest
   // of this section — an Admin holds the capability and reaches the same
   // alerts through their own console.
-  { section: "Security", label: "Security Alerts", href: "/owner/security-alerts", icon: ShieldAlert, ownerOnly: true },
-  { section: "Security", label: "Policies", href: "/owner/policies", icon: ShieldCheck, ownerOnly: true },
-  { section: "Security", label: "Suppressions", href: "/owner/suppressions", icon: Ban, ownerOnly: true },
+  { section: "Security & Governance", label: "Security Alerts", href: "/owner/security-alerts", icon: ShieldAlert, ownerOnly: true },
+  { section: "Security & Governance", label: "Policies", href: "/owner/policies", icon: ShieldCheck, ownerOnly: true },
+  { section: "Security & Governance", label: "Suppressions", href: "/owner/suppressions", icon: Ban, ownerOnly: true },
+  { section: "Security & Governance", label: "Support Access", href: "/owner/support-access", icon: ShieldCheck, ownerOnly: true },
 
   { section: "Data Management", label: "Export Data", href: "/owner/export-data", icon: Download, ownerOnly: true },
   { section: "Data Management", label: "Deletion Requests", href: "/owner/deletion-requests", icon: Trash2, ownerOnly: true },

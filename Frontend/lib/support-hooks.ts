@@ -7,7 +7,6 @@ import {
   commentPlatformTicket,
   createPlatformTicket,
   createSupportAccessGrant,
-  fetchPlatformDiagnostics,
   fetchPlatformDomainDetail,
   fetchPlatformMailboxDetail,
   fetchPlatformOverview,
@@ -21,8 +20,6 @@ import {
   getPlatformTicket,
   listPlatformAudit,
   listPlatformDeliveryEvents,
-  listPlatformGrants,
-  listPlatformJobs,
   listPlatformProviderEvents,
   listPlatformStaff,
   listPlatformSuppressions,
@@ -32,10 +29,7 @@ import {
   listTenantJobs,
   listTenantProviderEvents,
   listTenantSuppressions,
-  revokePlatformGrant,
   revokeSupportAccessGrant,
-  searchPlatformDomains,
-  searchPlatformMailboxes,
   searchPlatformTenants,
   updatePlatformTicket,
   type CreateSupportGrantInput,
@@ -251,22 +245,6 @@ export function usePlatformTenant(tenantId: string | null) {
   });
 }
 
-export function usePlatformMailboxes(q = "", limit = 50) {
-  return useQuery({
-    queryKey: supportKeys.platformMailboxes(q, limit),
-    queryFn: () => searchPlatformMailboxes(q, limit),
-    ...SEARCH,
-  });
-}
-
-export function usePlatformDomains(q = "", limit = 50) {
-  return useQuery({
-    queryKey: supportKeys.platformDomains(q, limit),
-    queryFn: () => searchPlatformDomains(q, limit),
-    ...SEARCH,
-  });
-}
-
 export function usePlatformDomainDetail(tenantId: string | null, domainId: string | null) {
   return useQuery({
     queryKey: supportKeys.platformDomain(tenantId ?? "", domainId ?? ""),
@@ -301,14 +279,6 @@ export function usePlatformDeliveryEvents(params: PlatformListParams) {
   });
 }
 
-export function usePlatformJobs(params: PlatformListParams) {
-  return useQuery({
-    queryKey: supportKeys.platformList("jobs", params),
-    queryFn: () => listPlatformJobs(params),
-    ...QUEUE,
-  });
-}
-
 export function usePlatformSuppressions(params: PlatformListParams) {
   return useQuery({
     queryKey: supportKeys.platformList("suppressions", params),
@@ -322,31 +292,6 @@ export function usePlatformAudit(params: PlatformListParams) {
     queryKey: supportKeys.platformList("audit", params),
     queryFn: () => listPlatformAudit(params),
     ...LIVE,
-  });
-}
-
-export function usePlatformGrants() {
-  return useQuery({ queryKey: supportKeys.platformGrants, queryFn: listPlatformGrants, ...QUEUE });
-}
-
-export function usePlatformDiagnostics(grantId: string | null) {
-  return useQuery({
-    queryKey: supportKeys.platformDiagnostics(grantId ?? ""),
-    queryFn: () => fetchPlatformDiagnostics(grantId as string),
-    enabled: Boolean(grantId),
-    ...LIVE,
-  });
-}
-
-export function useRevokePlatformGrant() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (grantId: string) => revokePlatformGrant(grantId),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: supportKeys.platformGrants });
-      void qc.invalidateQueries({ queryKey: supportKeys.platformOverview });
-      void qc.invalidateQueries({ queryKey: ["support", "platform"] });
-    },
   });
 }
 
@@ -447,3 +392,12 @@ export function useLiveRefresh(reload: () => void, everyMs = 30_000, enabled = t
     };
   }, [everyMs, enabled]);
 }
+
+/*
+ * Six platform hooks lived here until PR #38 trimmed the platform console
+ * and removed the support-api calls behind them — diagnostics, grants,
+ * jobs, grant revocation, and domain/mailbox search. They are gone rather
+ * than kept warm: a hook whose fetcher no longer exists does not compile,
+ * and one that compiles but nothing calls is a trap for whoever adds the
+ * screen back and assumes it still works.
+ */

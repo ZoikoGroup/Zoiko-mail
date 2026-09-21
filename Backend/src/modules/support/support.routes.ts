@@ -3,15 +3,33 @@ import type { MailFolder } from "@prisma/client";
 import { Router } from "express";
 import { authenticate, idempotency, authenticateStaff, requireCapability, requireRole, requireSupportAccess, requireTenantGrant, logSupportAccess, logTenantSupportAccess, tenantContext, validate, crossTenantScope} from "../../common/middleware/index.js";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
+import { hasLiveGrant } from "../../common/middleware/requireCapability.js";
 import { sendSuccess } from "../../common/utils/response.js";
 import { createGrantSchema, domainParamSchema, grantIdSchema, mailboxParamSchema, platformListQuerySchema, tenantParamSchema, requestAccessSchema, approveRequestSchema, denyRequestSchema, requestIdSchema, listRequestsSchema, mailboxMessagesParamsSchema, mailboxMessagesQuerySchema } from "./support.schema.js";
 import { supportService } from "./support.service.js";
 
 export const supportRouter = Router();
 supportRouter.use(authenticate, tenantContext, idempotency, logTenantSupportAccess);
+
+// Every read below is gated on support.workspace.investigate rather than
+// support.console.read. The two were one capability until PR #37 and #38
+// disagreed about it, and the disagreement was real: opening the console a
+// workspace's own Owner invited you to needs no expiry, while reading that
+// workspace's delivery events, audit log and configuration is reading a
+// customer's data and does. Tickets live on their own router and stay
+// reachable without a grant, which is what makes the split workable — a
+// seat with no grant still has something to do here.
+// The landing screen, and the one endpoint that straddles the split: the
+// console opens without a grant, but the records this returns — audit
+// events, recent messages, delivery failures — do not come with it. The
+// counts do, so an ungranted seat still sees whether the workspace is
+// healthy without being handed the rows behind that judgement.
 supportRouter.get("/overview", requireCapability("support.console.read"), asyncHandler(async (req, res) => {
-  const result = await supportService.overview(req.tenantContext!.tenantId);
-  sendSuccess(res, 200, result, req.requestId);
+  const c = req.tenantContext!;
+  const investigative =
+    c.membershipRole !== "SUPPORT" ||
+    (await hasLiveGrant({ role: c.membershipRole, tenantId: c.tenantId, membershipId: c.membershipId }));
+  sendSuccess(res, 200, await supportService.overview(c.tenantId, investigative), req.requestId);
 }));
 supportRouter.get("/diagnostics", asyncHandler(async (req, res) => {
   const c = req.tenantContext!;
@@ -159,7 +177,7 @@ supportRouter.post(
   })
 );
 
-supportRouter.get("/tenant", requireCapability("support.console.read"), asyncHandler(async (req, res) => {
+supportRouter.get("/tenant", requireCapability("support.workspace.investigate"), asyncHandler(async (req, res) => {
   sendSuccess(res, 200, await supportService.tenantOverview(req.tenantContext!.tenantId), req.requestId);
 }));
 
@@ -168,7 +186,7 @@ supportRouter.get("/tenant", requireCapability("support.console.read"), asyncHan
  * opposed to /tenant, which is what it contains. Same capability, because
  * both are the console read that Support holds only as a grant.
  */
-supportRouter.get("/configuration", requireCapability("support.console.read"), asyncHandler(async (req, res) => {
+supportRouter.get("/configuration", requireCapability("support.workspace.investigate"), asyncHandler(async (req, res) => {
   sendSuccess(res, 200, await supportService.tenantConfiguration(req.tenantContext!.tenantId), req.requestId);
 }));
 
@@ -203,37 +221,37 @@ supportRouter.get(
     );
   })
 );
-supportRouter.get("/mailboxes", requireCapability("support.console.read"), validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
+supportRouter.get("/mailboxes", requireCapability("support.workspace.investigate"), validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
   const c = req.tenantContext!;
   const q = tenantListQuery(req).q ?? "";
   sendSuccess(res, 200, { mailboxes: await supportService.searchMailboxes(q, tenantListQuery(req).limit, c.tenantId) }, req.requestId);
 }));
-supportRouter.get("/domains", requireCapability("support.console.read"), validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
+supportRouter.get("/domains", requireCapability("support.workspace.investigate"), validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
   const c = req.tenantContext!;
   const q = tenantListQuery(req).q ?? "";
   sendSuccess(res, 200, { domains: await supportService.searchDomains(q, tenantListQuery(req).limit, c.tenantId) }, req.requestId);
 }));
-supportRouter.get("/provider-events", requireCapability("support.console.read"), validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
+supportRouter.get("/provider-events", requireCapability("support.workspace.investigate"), validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
   const c = req.tenantContext!;
   const f = tenantListQuery(req);
   sendSuccess(res, 200, { events: await supportService.listProviderEvents({ tenantId: c.tenantId, provider: f.provider, status: f.status, q: f.q, limit: f.limit }) }, req.requestId);
 }));
-supportRouter.get("/delivery-events", requireCapability("support.console.read"), validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
+supportRouter.get("/delivery-events", requireCapability("support.workspace.investigate"), validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
   const c = req.tenantContext!;
   const f = tenantListQuery(req);
   sendSuccess(res, 200, { events: await supportService.listDeliveryEvents({ tenantId: c.tenantId, type: f.type, q: f.q, limit: f.limit }) }, req.requestId);
 }));
-supportRouter.get("/jobs", requireCapability("support.console.read"), validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
+supportRouter.get("/jobs", requireCapability("support.workspace.investigate"), validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
   const c = req.tenantContext!;
   const f = tenantListQuery(req);
   sendSuccess(res, 200, { jobs: await supportService.listJobs({ tenantId: c.tenantId, type: f.type, status: f.status, q: f.q, limit: f.limit }) }, req.requestId);
 }));
-supportRouter.get("/suppressions", requireCapability("support.console.read"), validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
+supportRouter.get("/suppressions", requireCapability("support.workspace.investigate"), validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
   const c = req.tenantContext!;
   const f = tenantListQuery(req);
   sendSuccess(res, 200, { suppressions: await supportService.listSuppressions({ tenantId: c.tenantId, status: f.status, limit: f.limit }) }, req.requestId);
 }));
-supportRouter.get("/audit", requireCapability("support.console.read"), validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
+supportRouter.get("/audit", requireCapability("support.workspace.investigate"), validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
   const c = req.tenantContext!;
   const f = tenantListQuery(req);
   sendSuccess(res, 200, { events: await supportService.listAudit({ tenantId: c.tenantId, q: f.q, limit: f.limit }) }, req.requestId);
@@ -316,6 +334,14 @@ supportPlatformRouter.get("/diagnostics", asyncHandler(async (req, res) => {
 supportPlatformRouter.get("/tenants", validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
   const q = listQuery(req).q ?? "";
   sendSuccess(res, 200, { tenants: await supportService.searchTenants(q, listQuery(req).limit) }, req.requestId);
+}));
+
+// Fleet credential health. Metadata only — no token secret ever leaves this
+// endpoint (see SupportService.listTokens). A platform-wide read, so no tenant
+// grant is required; still gated by requireSupportAccess and audited by
+// logSupportAccess like every other platform support read.
+supportPlatformRouter.get("/tokens", validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
+  sendSuccess(res, 200, { tokens: await supportService.listTokens(listQuery(req)) }, req.requestId);
 }));
 supportPlatformRouter.get("/tenants/:tenantId", validate(tenantParamSchema, "params"), asyncHandler(async (req, res) => {
   sendSuccess(res, 200, await supportService.tenantOverview(String(req.params.tenantId)), req.requestId);

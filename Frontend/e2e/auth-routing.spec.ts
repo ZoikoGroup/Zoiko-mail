@@ -11,9 +11,10 @@ import { test, expect, type Page } from "@playwright/test";
  *
  * The API is stubbed, because the subject is the client's routing and guard
  * decisions for a given session, not whether the server produces it — the
- * backend suite covers that, including forcing MEMBER scope on Google.
- * Sign-in is driven through the password form because Google's button is a
- * cross-origin iframe a test cannot click; both paths share routeAuthState.
+ * backend suite covers that, including that Google resolves to the same role
+ * console as a password sign-in. Sign-in is driven through the password form
+ * because Google's button is a cross-origin iframe a test cannot click; both
+ * paths share routeAuthState.
  */
 
 const API = "**/api/v1";
@@ -32,8 +33,8 @@ const HOME: Record<Scope, string> = {
  * nested, and also flattened onto the top level.
  *
  * `role` is the acting role and `workspace` the console the session was
- * opened for. They are separate on purpose — a Google sign-in by an owner is
- * MEMBER/MEMBER, which is the case the scope exists for.
+ * opened for. They usually agree; signing in with Google resolves to the same
+ * console the role implies, exactly as a password sign-in does.
  */
 function signedIn(workspace: Scope, role: string = workspace) {
   const session = {
@@ -177,19 +178,18 @@ test.describe("a sign-in lands in the workspace it was opened for", () => {
     });
   }
 
-  test("an owner signing in with Google lands in the member workspace", async ({
+  test("an owner signing in with Google lands in the owner workspace", async ({
     page,
   }) => {
-    // The server issues MEMBER scope for every Google sign-in however senior
-    // the account. The client follows the scope, not the role — routing on
-    // the role here would open the owner console.
-    await stubSessionReads(page, "MEMBER");
-    await stubLogin(page, signedIn("MEMBER"));
+    // Google resolves to the same console the role implies, exactly like a
+    // password sign-in — an owner lands in the owner workspace either way.
+    await stubSessionReads(page, "OWNER");
+    await stubLogin(page, signedIn("OWNER"));
 
     await page.goto("/login");
     await signIn(page);
 
-    await settlesOn(page, "/inbox");
+    await settlesOn(page, "/owner");
   });
 });
 

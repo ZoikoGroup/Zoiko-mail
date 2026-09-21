@@ -734,20 +734,26 @@ export async function downloadExport(requestId: string): Promise<Blob> {
   return apiRequest<Blob>(`/lifecycle/exports/${requestId}/download`);
 }
 
-/* ─── Support access requests — Runbook §7 ──────────────────────────────── */
+// ─── Support access: grants, and the requests that produce them ─────────────
+//
+// One union under two names before the merge — SupportScopeType on this
+// branch, SupportScopeType on main. Keeping main's, because that is what
+// the rest of the merged tree already imports.
 
-export type SupportScopeName =
+export type SupportScopeType =
   | "TENANT_DIAGNOSTICS"
   | "DNS_DIAGNOSTICS"
   | "DELIVERY_DIAGNOSTICS"
-  | "AUDIT_READ";
+  | "AUDIT_READ"
+  /** Reading inside a mailbox. Asked for by name, approved by name. */
+  | "MAIL_CONTENT";
 
 export type SupportRequestStatus = "PENDING" | "APPROVED" | "DENIED" | "WITHDRAWN";
 
 export interface SupportAccessRequest {
   id: string;
   reason: string;
-  scopes: SupportScopeName[];
+  scopes: SupportScopeType[];
   requestedMinutes: number;
   status: SupportRequestStatus;
   createdAt: string;
@@ -857,5 +863,47 @@ export async function reviewSecurityAlert(
   await apiRequest(`/security-alerts/${id}/review`, {
     method: "POST",
     body: JSON.stringify({ action, ...(note ? { note } : {}) }),
+  });
+}
+
+// ─── Support access grants ───────────────────────────────────────────────────
+
+export interface SupportGrant {
+  id: string;
+  supportMembershipId: string;
+  supportUser: { id: string; email: string; displayName: string };
+  approvedByUserId: string | null;
+  approver: { id: string; email: string; displayName: string } | null;
+  reason: string;
+  ticketId: string | null;
+  scopes: SupportScopeType[];
+  expiresAt: string;
+  revokedAt: string | null;
+  createdAt: string;
+}
+
+export interface CreateSupportGrantInput {
+  supportMembershipId: string;
+  reason: string;
+  ticketId?: string;
+  expiresInMinutes: number;
+  scopes: SupportScopeType[];
+}
+
+export async function getSupportGrants(): Promise<SupportGrant[]> {
+  const res = await apiRequest<{ grants: SupportGrant[] }>("/support/access-grants");
+  return res.grants;
+}
+
+export async function createSupportGrant(input: CreateSupportGrantInput): Promise<SupportGrant> {
+  return apiRequest<SupportGrant>("/support/access-grants", {
+    method: "POST",
+    body: input,
+  });
+}
+
+export async function revokeSupportGrant(grantId: string): Promise<SupportGrant> {
+  return apiRequest<SupportGrant>(`/support/access-grants/${grantId}`, {
+    method: "DELETE",
   });
 }

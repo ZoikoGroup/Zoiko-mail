@@ -69,6 +69,11 @@ const SPEC_ADMIN_CAPABILITIES: Capability[] = [
   // decision and ought to be attributable.
   "security-alert.read",
   "security-alert.review",
+  // The diagnostics half of the support console, split out of
+  // support.console.read so the console can open on the Owner's invitation
+  // while the customer's records behind it stay time-boxed. ALLOW for an
+  // Admin: it is their own workspace.
+  "support.workspace.investigate",
 ];
 
 const activeAdmin = { role: "ADMIN" as const, membershipActive: true };
@@ -323,8 +328,8 @@ describe("vocabulary integrity", () => {
     expect(orphans).toEqual([]);
   });
 
-  it("declares forty-one capabilities", () => {
-    expect(CAPABILITIES).toHaveLength(41);
-    expect(new Set(CAPABILITIES).size).toBe(41);
+  it("declares forty-two capabilities", () => {
+    expect(CAPABILITIES).toHaveLength(42);
+    expect(new Set(CAPABILITIES).size).toBe(42);
   });
 });

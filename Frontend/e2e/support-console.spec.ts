@@ -128,7 +128,7 @@ async function grantConsole(page: Page, over: Record<string, unknown> = {}) {
 
 test.describe("the console renders for a granted seat", () => {
   test("shows the workspace it was granted, and the grant's own clock", async ({ page }) => {
-    await signIn(page, "SUPPORT", ["support.console.read"]);
+    await signIn(page, "SUPPORT", ["support.console.read", "support.workspace.investigate"]);
     await grantConsole(page);
 
     await page.goto("/support");
@@ -146,7 +146,7 @@ test.describe("the console renders for a granted seat", () => {
   test("offers the tabs the console is for, including the two recovered controls", async ({
     page,
   }) => {
-    await signIn(page, "SUPPORT", ["support.console.read"]);
+    await signIn(page, "SUPPORT", ["support.console.read", "support.workspace.investigate"]);
     await grantConsole(page);
     await page.goto("/support");
     await expect(page.getByRole("heading", { name: "Workspace Overview" })).toBeVisible({ timeout: 60_000 });
@@ -159,13 +159,13 @@ test.describe("the console renders for a granted seat", () => {
 
 test.describe("the boundary around it", () => {
   test("a seat with no grant is refused everything and offered a way to ask", async ({ page }) => {
-    await signIn(page, "SUPPORT", ["support.console.read"]);
+    await signIn(page, "SUPPORT", ["support.console.read", "support.workspace.investigate"]);
 
     for (const path of ["overview", "configuration", "tenant", "mailboxes"]) {
       await page.route(`${API}/support/${path}*`, (route) =>
         route.fulfill(
           forbidden("This workspace needs an approved support access grant.", {
-            capability: "support.console.read",
+            capability: "support.workspace.investigate",
             requiresSupportGrant: true,
           })
         )
@@ -174,15 +174,23 @@ test.describe("the boundary around it", () => {
 
     await page.goto("/support");
 
-    // Not a wall of load errors. The refusal has to become a next step, or
-    // the only route to a first grant is somebody calling the API by hand.
+    // The console still opens: tickets need no grant, and landing a seat on
+    // a wall of 403s would hide the work the Owner's invitation authorized.
+    await expect(page.getByRole("button", { name: /Tickets/i }).first()).toBeVisible({
+      timeout: 60_000,
+    });
+
+    // The diagnostics tab is where the refusal lives, and it has to become
+    // a next step rather than a load error — otherwise the only route to a
+    // first grant is somebody calling the API by hand.
+    await page.getByRole("button", { name: /Workspace Overview/i }).first().click();
     await expect(page.getByRole("heading", { name: /Ask for access/i })).toBeVisible({
       timeout: 60_000,
     });
   });
 
   test("the console asks only about its own workspace", async ({ page }) => {
-    const sent = await signIn(page, "SUPPORT", ["support.console.read"]);
+    const sent = await signIn(page, "SUPPORT", ["support.console.read", "support.workspace.investigate"]);
     await grantConsole(page);
     await page.goto("/support");
     await expect(page.getByRole("heading", { name: "Workspace Overview" })).toBeVisible({ timeout: 60_000 });
@@ -203,7 +211,7 @@ test.describe("the boundary around it", () => {
 
   test("a grant that expires mid-session takes the data off the screen", async ({ page }) => {
     test.setTimeout(180_000);
-    await signIn(page, "SUPPORT", ["support.console.read"]);
+    await signIn(page, "SUPPORT", ["support.console.read", "support.workspace.investigate"]);
     await grantConsole(page);
 
     let granted = true;
@@ -231,7 +239,7 @@ test.describe("the boundary around it", () => {
           )
         : route.fulfill(
             forbidden("This workspace needs an approved support access grant.", {
-              capability: "support.console.read",
+              capability: "support.workspace.investigate",
               requiresSupportGrant: true,
             })
           )
@@ -289,7 +297,7 @@ test.describe("the boundary around it", () => {
 
 test.describe("reading inside a mailbox", () => {
   test("says why it was refused instead of looking empty", async ({ page }) => {
-    await signIn(page, "SUPPORT", ["support.console.read"]);
+    await signIn(page, "SUPPORT", ["support.console.read", "support.workspace.investigate"]);
     await grantConsole(page);
 
     await page.route(`${API}/support/mailboxes?*`, (route) =>
@@ -336,7 +344,7 @@ test.describe("reading inside a mailbox", () => {
   });
 
   test("shows headers, and withholds subjects for a restricted mailbox", async ({ page }) => {
-    await signIn(page, "SUPPORT", ["support.console.read"]);
+    await signIn(page, "SUPPORT", ["support.console.read", "support.workspace.investigate"]);
     await grantConsole(page);
 
     await page.route(`${API}/support/mailboxes?*`, (route) =>
