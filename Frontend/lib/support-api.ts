@@ -5,7 +5,9 @@ export type SupportScope =
   | "TENANT_DIAGNOSTICS"
   | "DNS_DIAGNOSTICS"
   | "DELIVERY_DIAGNOSTICS"
-  | "AUDIT_READ";
+  | "AUDIT_READ"
+  /** Reading inside a mailbox. Asked for by name, approved by name. */
+  | "MAIL_CONTENT";
 
 export interface SupportAccessGrant {
   id: string;
@@ -327,6 +329,109 @@ export async function fetchTenantMailboxes(q = "", limit = 50): Promise<{ mailbo
 
 export async function fetchTenantDomains(q = "", limit = 50): Promise<{ domains: TenantDomain[] }> {
   return apiRequest<{ domains: TenantDomain[] }>(`/support/domains?q=${encodeURIComponent(q)}&limit=${limit}`);
+}
+
+/* ── RBAC §2, the two Support controls that had no screen ─────────────── */
+
+/**
+ * How the workspace is configured, as opposed to what it contains.
+ *
+ * Distinct from the overview: that one counts mailboxes and domains, this
+ * one says what the workspace's rules are. Most "why is this happening"
+ * questions are answered here, and without it support had to ask the
+ * customer to read their own settings screen back over a call.
+ */
+export interface TenantConfiguration {
+  tenant: {
+    id: string;
+    name: string;
+    status: string;
+    planCode: string;
+    timezone: string | null;
+    language: string | null;
+    memberLimit: number | null;
+    allowedDomains: string[];
+    createdAt: string;
+    updatedAt: string;
+  };
+  passwordPolicy: Record<string, unknown> | null;
+  aiSettings: Record<string, unknown> | null;
+  settings: Record<string, unknown> | null;
+  policies: Array<{
+    id: string;
+    type: string;
+    name: string;
+    description: string | null;
+    version: number;
+    status: string;
+    rules: unknown;
+    activatedAt: string | null;
+    updatedAt: string;
+  }>;
+  domains: Array<{
+    id: string;
+    domainName: string;
+    verificationStatus: string;
+    sendingEnabled: boolean;
+    activatedAt: string | null;
+  }>;
+  mail: {
+    mailboxes: number;
+    aiRestrictedMailboxes: number;
+    sendingSuspendedMailboxes: number;
+  };
+}
+
+export async function fetchTenantConfiguration(): Promise<TenantConfiguration> {
+  return apiRequest<TenantConfiguration>("/support/configuration");
+}
+
+/**
+ * A page of one mailbox's message headers.
+ *
+ * Headers only, by design on the server: §7 asks support views to prefer
+ * metadata over content, and the endpoint does not return bodies at all.
+ * `subject` comes back withheld for a mailbox whose owner has turned
+ * processing off (AC-008), so the field can be null or a placeholder even
+ * when the message is real.
+ */
+export interface SupportMailboxMessage {
+  id: string;
+  folder: string;
+  isRead: boolean;
+  receivedAt: string;
+  subject: string | null;
+  from: string | null;
+  to: string[];
+  status: string;
+  attachments: number;
+}
+
+export interface SupportMailboxRead {
+  mailbox: {
+    id: string;
+    address: string;
+    type: string;
+    aiEnabled: boolean;
+    sendSuspendedAt: string | null;
+    sendSuspensionReason: string | null;
+    owner: { email: string; displayName: string } | null;
+  };
+  grant: { id: string; expiresAt: string };
+  messages: SupportMailboxMessage[];
+}
+
+export async function fetchMailboxMessages(
+  mailboxId: string,
+  params: { folder?: string; q?: string; limit?: number } = {}
+): Promise<SupportMailboxRead> {
+  const query = new URLSearchParams();
+  if (params.folder) query.set("folder", params.folder);
+  if (params.q) query.set("q", params.q);
+  query.set("limit", String(params.limit ?? 25));
+  return apiRequest<SupportMailboxRead>(
+    `/support/mailboxes/${mailboxId}/messages?${query.toString()}`
+  );
 }
 
 export interface TenantListParams {

@@ -1,0 +1,4 @@
+# Local Python virtualenv. Not part of the Backend/Frontend structure and
+# not something anyone should pull down with the repo.
+venv/
+.venv/

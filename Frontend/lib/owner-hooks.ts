@@ -57,6 +57,9 @@ import {
   approveSupportAccessRequest,
   denySupportAccessRequest,
   type SupportRequestStatus,
+  getSecurityAlerts,
+  reviewSecurityAlert,
+  type AlertReviewAction,
 } from "./owner-api";
 
 // ─── Members ──────────────────────────────────────────────────────────────────
@@ -440,5 +443,29 @@ export function useDenySupportAccess() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["support-access-requests"] });
     },
+  });
+}
+
+// ─── Security alerts ─────────────────────────────────────────────────────────
+
+export function useSecurityAlerts() {
+  return useQuery({
+    queryKey: ["owner", "security-alerts"],
+    queryFn: getSecurityAlerts,
+    staleTime: 15_000,
+  });
+}
+
+/**
+ * Deciding on an alert. Invalidating on success is what keeps the filter
+ * tallies and the open count honest without a reload — they come down with
+ * the rows rather than being counted in the browser.
+ */
+export function useReviewSecurityAlert() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, action, note }: { id: string; action: AlertReviewAction; note?: string }) =>
+      reviewSecurityAlert(id, action, note),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "security-alerts"] }),
   });
 }

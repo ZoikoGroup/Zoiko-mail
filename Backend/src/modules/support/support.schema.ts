@@ -1,4 +1,21 @@
 import { z } from "zod";
+
+/**
+ * The scopes a grant can carry.
+ *
+ * Written once rather than inline at each use: the two schemas below are a
+ * request and its approval, and a scope one of them accepts while the other
+ * refuses is a grant that cannot be approved. MAIL_CONTENT was added after
+ * the first four and is exactly the kind of addition that drifts apart when
+ * the list is duplicated.
+ */
+const supportScope = z.enum([
+  "TENANT_DIAGNOSTICS",
+  "DNS_DIAGNOSTICS",
+  "DELIVERY_DIAGNOSTICS",
+  "AUDIT_READ",
+  "MAIL_CONTENT",
+]);
 export const grantIdSchema = z.object({ grantId: z.string().uuid() });
 /**
  * Opening support access — Runbook §7.
@@ -15,7 +32,7 @@ export const createGrantSchema = z.object({
   reason: z.string().trim().min(10).max(500),
   ticketId: z.string().uuid().optional(),
   expiresInMinutes: z.number().int().min(5).max(240),
-  scopes: z.array(z.enum(["TENANT_DIAGNOSTICS", "DNS_DIAGNOSTICS", "DELIVERY_DIAGNOSTICS", "AUDIT_READ"])).min(1),
+  scopes: z.array(supportScope).min(1),
 });
 
 /**
@@ -28,7 +45,7 @@ export const createGrantSchema = z.object({
 export const requestAccessSchema = z.object({
   reason: z.string().trim().min(10).max(500),
   ticketId: z.string().uuid().optional(),
-  scopes: z.array(z.enum(["TENANT_DIAGNOSTICS", "DNS_DIAGNOSTICS", "DELIVERY_DIAGNOSTICS", "AUDIT_READ"])).min(1),
+  scopes: z.array(supportScope).min(1),
   requestedMinutes: z.number().int().min(5).max(240),
 });
 
@@ -58,4 +75,13 @@ export const platformListQuerySchema = z.object({
   type: z.string().trim().min(1).optional(),
   q: z.string().trim().optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
+});
+
+/** Reading inside one mailbox — headers only, and never more than a page. */
+export const mailboxMessagesParamsSchema = z.object({ mailboxId: z.string().uuid() });
+
+export const mailboxMessagesQuerySchema = z.object({
+  folder: z.enum(["INBOX", "SENT", "DRAFTS", "ARCHIVE", "TRASH", "SPAM"]).optional(),
+  q: z.string().trim().max(200).optional(),
+  limit: z.coerce.number().int().min(1).max(50).optional(),
 });

@@ -50,6 +50,25 @@ export const CAPABILITIES = [
   "mailbox.ai.enable",
   "policy.security.write",
   "audit.read",
+  /**
+   * Security alerts — a new-device sign-in, a burst of failed logins, a
+   * refresh token replayed.
+   *
+   * Beside `audit.read` because they answer the same question from opposite
+   * ends: the audit log is everything that happened, an alert is the subset
+   * somebody should look at today. Read is held wherever the audit log is;
+   * reviewing one — acknowledging, resolving, dismissing — is the mutation
+   * half and is named separately, because dismissing a security signal is a
+   * decision and ought to be attributable to whoever made it.
+   *
+   * The routes and both screens shipped gated on these two names and were
+   * lost in the PR #35 merge along with the module behind them. Restoring
+   * the module without restoring the names would have left every request
+   * resolving UNKNOWN_CAPABILITY, which denies — a screen that loads and
+   * then refuses itself.
+   */
+  "security-alert.read",
+  "security-alert.review",
   // Money and liability.
   "billing.read",
   "billing.plan.write",

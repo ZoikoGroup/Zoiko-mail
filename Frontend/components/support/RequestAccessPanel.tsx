@@ -25,6 +25,15 @@ const SCOPES: Array<{ value: SupportScope; label: string; hint: string }> = [
   { value: "DNS_DIAGNOSTICS", label: "DNS and domains", hint: "MX, SPF, DKIM, DMARC" },
   { value: "DELIVERY_DIAGNOSTICS", label: "Delivery and bounces", hint: "delivery and provider events" },
   { value: "AUDIT_READ", label: "Audit log", hint: "who did what in this workspace" },
+  // Last, and described as what it is. RBAC §2 gives Support this only
+  // through a grant and Security §4 calls it an exceptional path, so the
+  // owner reading the request needs to see that this one is not like the
+  // others rather than find it sitting fourth in an even list.
+  {
+    value: "MAIL_CONTENT",
+    label: "Read inside a mailbox",
+    hint: "message headers only — exceptional, ask only if the case needs it",
+  },
 ];
 
 const WINDOWS = [15, 30, 60, 120, 240];

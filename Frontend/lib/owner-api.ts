@@ -797,3 +797,65 @@ export async function denySupportAccessRequest(
     body: note ? { note } : {},
   });
 }
+
+// ─── Security alerts ─────────────────────────────────────────────────────────
+
+/**
+ * The workspace's security signals — a sign-in from a new device, a burst of
+ * failed logins, a refresh token replayed, a password changed or reset.
+ *
+ * The screen that showed these was deleted in the PR #35 merge along with
+ * the module behind it, and what stood here afterwards derived a lookalike
+ * from audit events and connector status. This reads the real table.
+ */
+export type SecurityAlertType =
+  | "NEW_DEVICE_LOGIN"
+  | "FAILED_LOGIN_BURST"
+  | "REFRESH_TOKEN_REUSE"
+  | "PASSWORD_CHANGED"
+  | "PASSWORD_RESET";
+
+export type AlertSeverity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+export type AlertStatus = "OPEN" | "ACKNOWLEDGED" | "RESOLVED" | "DISMISSED";
+export type AlertReviewAction = "ACKNOWLEDGE" | "RESOLVE" | "DISMISS";
+
+export interface SecurityAlert {
+  id: string;
+  type: SecurityAlertType;
+  severity: AlertSeverity;
+  status: AlertStatus;
+  title: string;
+  message: string;
+  actorEmail: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  deviceLabel: string | null;
+  resolutionNote: string | null;
+  resolvedAt: string | null;
+  createdAt: string;
+  actor: { id: string; email: string; displayName: string | null } | null;
+  resolvedBy: { id: string; email: string; displayName: string | null } | null;
+}
+
+export interface SecurityAlertList {
+  counts: Partial<Record<AlertStatus, number>>;
+  openCount: number;
+  alerts: SecurityAlert[];
+}
+
+export async function getSecurityAlerts(): Promise<SecurityAlertList> {
+  const res = await apiRequest<SecurityAlertList>("/security-alerts");
+  return { counts: res.counts ?? {}, openCount: res.openCount ?? 0, alerts: res.alerts ?? [] };
+}
+
+/** Acknowledge, resolve or dismiss one. The server records who decided. */
+export async function reviewSecurityAlert(
+  id: string,
+  action: AlertReviewAction,
+  note?: string
+): Promise<void> {
+  await apiRequest(`/security-alerts/${id}/review`, {
+    method: "POST",
+    body: JSON.stringify({ action, ...(note ? { note } : {}) }),
+  });
+}

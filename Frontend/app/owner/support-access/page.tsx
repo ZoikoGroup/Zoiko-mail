@@ -7,6 +7,7 @@ import { ProtectedRoute } from "@/components/owner/ProtectedRoute";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { StepUpDialog, useStepUp } from "@/components/admin/StepUpDialog";
+import { useCan } from "@/lib/admin-capabilities";
 import {
   useApproveSupportAccess,
   useDenySupportAccess,
@@ -34,7 +35,19 @@ const SCOPE_LABEL: Record<string, string> = {
   DNS_DIAGNOSTICS: "DNS and domains",
   DELIVERY_DIAGNOSTICS: "Delivery and bounces",
   AUDIT_READ: "Audit log",
+  MAIL_CONTENT: "Read inside a mailbox",
 };
+
+/**
+ * The one scope that is not routine.
+ *
+ * RBAC §2 gives Support "Read private user mailbox" only through a grant and
+ * Security §4 calls it "blocked by default; exceptional security-approved
+ * path only". An owner skimming a list of four grey chips would approve it
+ * without noticing, which is exactly the outcome those two lines exist to
+ * prevent, so this one is marked and named.
+ */
+const EXCEPTIONAL_SCOPES = new Set(["MAIL_CONTENT"]);
 
 function when(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
@@ -47,6 +60,14 @@ export default function SupportAccessPage() {
   const approve = useApproveSupportAccess();
   const deny = useDenySupportAccess();
   const stepUp = useStepUp();
+  const can = useCan();
+
+  // RBAC §2: "Approve support access" is Owner Yes, Admin No — so an Admin
+  // reaching this screen sees the requests and can decline them, but is not
+  // offered a button the server will refuse. The server is still the gate;
+  // this only stops the UI promising something it cannot deliver.
+  const canApprove = can("support.grant.create");
+  const canDecline = can("support.grant.end");
 
   const [minutes, setMinutes] = useState<Record<string, number>>({});
   const [failed, setFailed] = useState<string | null>(null);
@@ -108,6 +129,12 @@ export default function SupportAccessPage() {
               )}
             </h2>
 
+            {!canApprove && pending.length > 0 && (
+              <p className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                Only a workspace owner can approve support access. You can decline a request.
+              </p>
+            )}
+
             {pending.length === 0 ? (
               <p className="rounded-xl border border-slate-200 bg-white px-4 py-6 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
                 Nothing waiting. Support will appear here when they ask for access, and you will
@@ -130,6 +157,14 @@ export default function SupportAccessPage() {
                         </p>
                         <p className="mt-1 text-sm text-slate-700 dark:text-slate-300">{r.reason}</p>
 
+                        {r.scopes.some((sc) => EXCEPTIONAL_SCOPES.has(sc)) && (
+                          <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                            This request includes reading inside a member&apos;s mailbox. Support
+                            would see message senders, recipients, subjects and delivery status —
+                            not message bodies. Approve it only if the case needs it.
+                          </p>
+                        )}
+
                         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                           <span className="inline-flex items-center gap-1">
                             <Clock className="h-3.5 w-3.5" aria-hidden />
@@ -143,7 +178,11 @@ export default function SupportAccessPage() {
                           {r.scopes.map((sc) => (
                             <span
                               key={sc}
-                              className="rounded bg-slate-100 px-1.5 py-0.5 dark:bg-slate-800"
+                              className={
+                                EXCEPTIONAL_SCOPES.has(sc)
+                                  ? "rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-900 dark:bg-amber-900/50 dark:text-amber-200"
+                                  : "rounded bg-slate-100 px-1.5 py-0.5 dark:bg-slate-800"
+                              }
                             >
                               {SCOPE_LABEL[sc] ?? sc}
                             </span>
@@ -173,6 +212,7 @@ export default function SupportAccessPage() {
                         />
                         <span className="text-xs text-slate-500 dark:text-slate-400">min</span>
 
+                        {canApprove && (
                         <button
                           type="button"
                           onClick={() => onApprove(r)}
@@ -182,6 +222,8 @@ export default function SupportAccessPage() {
                           <ShieldCheck className="h-4 w-4" aria-hidden />
                           Approve
                         </button>
+                        )}
+                        {canDecline && (
                         <button
                           type="button"
                           onClick={() => onDeny(r)}
@@ -191,6 +233,7 @@ export default function SupportAccessPage() {
                           <ShieldOff className="h-4 w-4" aria-hidden />
                           Decline
                         </button>
+                        )}
                       </div>
                     </div>
                   </li>

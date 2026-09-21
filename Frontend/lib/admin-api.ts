@@ -388,3 +388,45 @@ export interface CommitmentDto {
   due: string;
   state: "OVERDUE" | "DUE_TODAY" | "OPEN" | "APPROVAL";
 }
+
+/* ── security alerts ───────────────────────────────────────────────────── */
+
+/**
+ * The alert inbox. Recovered along with the module behind it, which PR #35
+ * dropped together with the `security_alerts` table's model — the table kept
+ * being created on every deploy and nothing in the product knew about it.
+ */
+export type SecurityAlertType =
+  | "NEW_DEVICE_LOGIN"
+  | "FAILED_LOGIN_BURST"
+  | "REFRESH_TOKEN_REUSE"
+  | "PASSWORD_CHANGED"
+  | "PASSWORD_RESET";
+
+export type AlertSeverity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+export type AlertStatus = "OPEN" | "ACKNOWLEDGED" | "RESOLVED" | "DISMISSED";
+export type AlertReviewAction = "ACKNOWLEDGE" | "RESOLVE" | "DISMISS";
+
+export interface SecurityAlertDto {
+  id: string;
+  type: SecurityAlertType;
+  severity: AlertSeverity;
+  status: AlertStatus;
+  title: string;
+  message: string;
+  actorEmail: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  deviceLabel: string | null;
+  resolutionNote: string | null;
+  resolvedAt: string | null;
+  createdAt: string;
+  actor: { id: string; email: string; displayName: string | null } | null;
+  resolvedBy: { id: string; email: string; displayName: string | null } | null;
+}
+
+export interface SecurityAlertListResponse {
+  counts: Partial<Record<AlertStatus, number>>;
+  openCount: number;
+  alerts: SecurityAlertDto[];
+}

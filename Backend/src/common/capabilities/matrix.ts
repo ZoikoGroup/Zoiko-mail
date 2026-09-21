@@ -61,6 +61,8 @@ const OWNER: RoleMatrix = {
   "mailbox.ai.enable": "STEP_UP",
   "policy.security.write": "ALLOW",
   "audit.read": "ALLOW",
+  "security-alert.read": "ALLOW",
+  "security-alert.review": "ALLOW",
   // Money and liability.
   "billing.read": "ALLOW",
   "billing.plan.write": "ALLOW",
@@ -131,6 +133,13 @@ const ADMIN: RoleMatrix = {
   // lives in the audit service, which withholds the Owner-reserved
   // governance categories. See ADMIN_AUDIT_EXCLUDED_PREFIXES.
   "audit.read": "ALLOW",
+  // Admin is "the bounded operator", and triaging a security signal is
+  // operator work — the alert screens shipped for Admin as well as Owner.
+  // Not step-up: acknowledging or resolving is reversible and recorded, and
+  // demanding a password to clear a new-device notice would teach people to
+  // re-authenticate without reading why.
+  "security-alert.read": "ALLOW",
+  "security-alert.review": "ALLOW",
   // §2 "Request export": Admin = "By policy" + Step-up. Step-up is expressed
   // here; the policy half is evaluation step 8 and belongs to the policy gate,
   // not to the matrix.

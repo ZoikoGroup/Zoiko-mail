@@ -1,25 +1,14 @@
 import type { Request } from "express";
+import type { MailFolder } from "@prisma/client";
 import { Router } from "express";
-import { authenticate, idempotency, authenticateStaff, requireCapability, requireRole, requireSupportAccess, requireTenantGrant, logSupportAccess, tenantContext, validate, crossTenantScope} from "../../common/middleware/index.js";
+import { authenticate, idempotency, authenticateStaff, requireCapability, requireRole, requireSupportAccess, requireTenantGrant, logSupportAccess, logTenantSupportAccess, tenantContext, validate, crossTenantScope} from "../../common/middleware/index.js";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
-import {
-  createGrantSchema,
-  domainParamSchema,
-  grantIdSchema,
-  mailboxParamSchema,
-  platformListQuerySchema,
-  tenantParamSchema,
-  requestAccessSchema,
-  approveRequestSchema,
-  denyRequestSchema,
-  requestIdSchema,
-  listRequestsSchema,
-} from "./support.schema.js";
+import { createGrantSchema, domainParamSchema, grantIdSchema, mailboxParamSchema, platformListQuerySchema, tenantParamSchema, requestAccessSchema, approveRequestSchema, denyRequestSchema, requestIdSchema, listRequestsSchema, mailboxMessagesParamsSchema, mailboxMessagesQuerySchema } from "./support.schema.js";
 import { supportService } from "./support.service.js";
 
 export const supportRouter = Router();
-supportRouter.use(authenticate, tenantContext, idempotency);
+supportRouter.use(authenticate, tenantContext, idempotency, logTenantSupportAccess);
 supportRouter.get("/overview", requireCapability("support.console.read"), asyncHandler(async (req, res) => {
   const result = await supportService.overview(req.tenantContext!.tenantId);
   sendSuccess(res, 200, result, req.requestId);
@@ -173,6 +162,47 @@ supportRouter.post(
 supportRouter.get("/tenant", requireCapability("support.console.read"), asyncHandler(async (req, res) => {
   sendSuccess(res, 200, await supportService.tenantOverview(req.tenantContext!.tenantId), req.requestId);
 }));
+
+/**
+ * RBAC §2 "View tenant configuration" — how the workspace is set up, as
+ * opposed to /tenant, which is what it contains. Same capability, because
+ * both are the console read that Support holds only as a grant.
+ */
+supportRouter.get("/configuration", requireCapability("support.console.read"), asyncHandler(async (req, res) => {
+  sendSuccess(res, 200, await supportService.tenantConfiguration(req.tenantContext!.tenantId), req.requestId);
+}));
+
+/**
+ * RBAC §2 "Read private user mailbox" — the one route in the platform that
+ * reaches a member's own mail, and the only capability in the matrix that
+ * allows it. `mail.other.read` is GRANT for Support and held by nobody else
+ * in any form, so an Owner calling this is refused as firmly as a stranger.
+ * The service adds the second condition the capability cannot express: the
+ * live grant has to carry MAIL_CONTENT.
+ */
+supportRouter.get(
+  "/mailboxes/:mailboxId/messages",
+  requireCapability("mail.other.read"),
+  validate(mailboxMessagesParamsSchema, "params"),
+  validate(mailboxMessagesQuerySchema, "query"),
+  asyncHandler(async (req, res) => {
+    const c = req.tenantContext!;
+    const q = req.query as { folder?: MailFolder; q?: string; limit?: number };
+    sendSuccess(
+      res,
+      200,
+      await supportService.mailboxMessages({
+        tenantId: c.tenantId,
+        mailboxId: String(req.params.mailboxId),
+        actorUserId: c.userId,
+        folder: q.folder,
+        q: q.q,
+        limit: q.limit,
+      }),
+      req.requestId
+    );
+  })
+);
 supportRouter.get("/mailboxes", requireCapability("support.console.read"), validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
   const c = req.tenantContext!;
   const q = tenantListQuery(req).q ?? "";
