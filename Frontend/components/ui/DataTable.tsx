@@ -106,10 +106,10 @@ export function DataTable<T>({
           <tbody>
             {loading ? (
               Array.from({ length: pageSize }).map((_, i) => (
-                <tr key={i} className="border-b border-[var(--border)]">
+                <tr key={i} className="border-b border-[var(--border)]" style={{ animationDelay: `${Math.min(i, 6) * 24}ms` }}>
                   {columns.map((col) => (
                     <td key={col.key} className="px-4 py-3">
-                      <div className="h-4 w-3/4 animate-pulse rounded bg-[var(--s3)]" />
+                      <div className="zoi-skeleton h-4 w-3/4 rounded" />
                     </td>
                   ))}
                   {actions && <td className="px-4 py-3" />}
@@ -125,10 +125,11 @@ export function DataTable<T>({
                 </td>
               </tr>
             ) : (
-              paged.map((row) => (
+              paged.map((row, rowIndex) => (
                 <tr
                   key={keyExtractor(row)}
-                  className={`border-b border-[var(--border)] last:border-b-0 transition ${
+                  style={{ animationDelay: `${Math.min(rowIndex, 8) * 30}ms` }}
+                  className={`zoi-fade border-b border-[var(--border)] last:border-b-0 transition ${
                     onRowClick ? "cursor-pointer hover:bg-[var(--s2)]" : "hover:bg-[var(--s2)]"
                   }`}
                   onClick={() => onRowClick?.(row)}

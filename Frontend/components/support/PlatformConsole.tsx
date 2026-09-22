@@ -21,14 +21,17 @@ import {
   fetchPlatformTenantOverview,
   listPlatformAudit,
   listPlatformDeliveryEvents,
+  listPlatformJobs,
   listPlatformProviderEvents,
   listPlatformSuppressions,
   listPlatformTokens,
+  retryPlatformJob,
   searchPlatformTenants,
   type PlatformAuditEvent,
   type PlatformDeliveryEvent,
   type PlatformDomainDetail,
   type PlatformIssue,
+  type PlatformJob,
   type PlatformListParams,
   type PlatformMailboxDetail,
   type PlatformOverview,
@@ -69,7 +72,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-type PageId = "overview" | "tenants" | "tokens" | "suppressions" | "provider-events" | "delivery-events" | "audit" | "tickets";
+type PageId = "overview" | "tenants" | "tokens" | "suppressions" | "jobs" | "provider-events" | "delivery-events" | "audit" | "tickets";
 
 const PAGES: Array<{ id: PageId; label: string; icon: string }> = [
   { id: "overview", label: "Workspace Overview", icon: "◈" },
@@ -77,10 +80,14 @@ const PAGES: Array<{ id: PageId; label: string; icon: string }> = [
   { id: "tokens", label: "Tokens", icon: "🗝" },
   { id: "delivery-events", label: "Delivery Events", icon: "✉" },
   { id: "provider-events", label: "Provider Events", icon: "⇄" },
+  { id: "jobs", label: "Background Jobs", icon: "⛭" },
   { id: "audit", label: "Audit Logs", icon: "🛡" },
   { id: "suppressions", label: "Suppressions", icon: "⊘" },
   { id: "tickets", label: "Tickets", icon: "✎" },
 ];
+
+const JOB_TYPES = ["DATA_EXPORT", "DATA_DELETION", "NOTIFICATION_DIGEST", "IMAP_SYNC", "SMTP_SEND", "AI_EXTRACTION", "AI_DRAFT_GENERATION"];
+const JOB_STATUSES = ["PENDING", "RUNNING", "RETRY", "COMPLETED", "FAILED", "CANCELLED"];
 
 const COUNT_ICONS: Record<string, LucideIcon> = {
   members: Users,
@@ -154,6 +161,7 @@ function val(row: Record<string, unknown>, key: string): string {
 function useList<T>(
   fetchFn: (p: PlatformListParams) => Promise<Record<string, T[]>>,
   key: string,
+  ns = key,
 ) {
   const [params, setParams] = useState<PlatformListParams>({ limit: 50 });
 
@@ -161,9 +169,12 @@ function useList<T>(
   // Six pages reach this one, and with bespoke state each refetched from
   // scratch whenever the operator moved between tabs — during an incident,
   // which is when people move between tabs most. `key` names the array in
-  // the response envelope and namespaces the cache entry with it.
+  // the response envelope; `ns` namespaces the cache entry. The two are not
+  // the same: provider events, delivery events and audit all answer under
+  // `{ events }`, and sharing the envelope name as the cache key made the
+  // first page clicked feed its rows to the other two.
   const query = useQuery({
-    queryKey: ["support", "platform-list", key, params],
+    queryKey: ["support", "platform-list", ns, params],
     queryFn: () => fetchFn(params),
     staleTime: 15_000,
     // Keeps the current page on screen while the next loads, so changing a
@@ -217,8 +228,14 @@ function LoadErr({ error, onRetry }: { error: string; onRetry: () => void }) {
 
 function Spinner() {
   return (
-    <div className="bd pad" style={{ color: "var(--ink3)", fontSize: "12px" }}>
-      Loading…
+    <div className="bd pad" style={{ color: "var(--ink3)", fontSize: 12 }}>
+      <div className="sloader">
+        <span className="ring" /> Loading&hellip;
+      </div>
+      <div className="skel" style={{ width: "45%", height: 11, marginTop: 14 }} />
+      <div className="skel" style={{ width: "80%", height: 10, marginTop: 9 }} />
+      <div className="skel" style={{ width: "66%", height: 10, marginTop: 8 }} />
+      <div className="skel" style={{ width: "72%", height: 10, marginTop: 8 }} />
     </div>
   );
 }
@@ -987,7 +1004,7 @@ function ListShell<T>({
 }
 
 function ProviderEventsPage() {
-  const { params, setParams, rows, loading, error, reload } = useList<PlatformProviderEvent>(listPlatformProviderEvents, "events");
+  const { params, setParams, rows, loading, error, reload } = useList<PlatformProviderEvent>(listPlatformProviderEvents, "events", "provider-events");
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
   const [provider, setProvider] = useState("");
@@ -1044,7 +1061,7 @@ function ProviderEventsPage() {
 }
 
 function DeliveryEventsPage() {
-  const { params, setParams, rows, loading, error, reload } = useList<PlatformDeliveryEvent>(listPlatformDeliveryEvents, "events");
+  const { params, setParams, rows, loading, error, reload } = useList<PlatformDeliveryEvent>(listPlatformDeliveryEvents, "events", "delivery-events");
   const [q, setQ] = useState("");
   const [type, setType] = useState("");
 
@@ -1092,7 +1109,7 @@ function DeliveryEventsPage() {
 }
 
 function AuditPage() {
-  const { params, setParams, rows, loading, error, reload } = useList<PlatformAuditEvent>(listPlatformAudit, "events");
+  const { params, setParams, rows, loading, error, reload } = useList<PlatformAuditEvent>(listPlatformAudit, "events", "audit");
   const [q, setQ] = useState("");
 
   return (
@@ -1255,6 +1272,84 @@ function SuppressionsPage() {
   );
 }
 
+function JobsPage() {
+  const { params, setParams, rows, loading, error, reload } = useList<PlatformJob>(listPlatformJobs, "jobs");
+  const [q, setQ] = useState("");
+  const [type, setType] = useState("");
+  const [status, setStatus] = useState("");
+  const [retrying, setRetrying] = useState<string | null>(null);
+  const [retryError, setRetryError] = useState<string | null>(null);
+
+  const retry = async (jobId: string) => {
+    setRetrying(jobId);
+    setRetryError(null);
+    try {
+      await retryPlatformJob(jobId);
+      reload();
+    } catch (e) {
+      setRetryError(apiErrorMessage(e));
+    } finally {
+      setRetrying(null);
+    }
+  };
+
+  return (
+    <div>
+      <FilterInputs
+        q={q}
+        setQ={setQ}
+        selectLabel="Type"
+        selectValue={type}
+        selectOptions={JOB_TYPES}
+        setSelectValue={setType}
+        extraSelectLabel="Status"
+        extraSelectValue={status}
+        extraSelectOptions={JOB_STATUSES}
+        setExtraSelectValue={setStatus}
+        onApply={() => setParams({ q, type, status, limit: 50 })}
+        onReset={() => { setQ(""); setType(""); setStatus(""); setParams({ limit: 50 }); }}
+      />
+      {retryError && (
+        <div className="notice" style={{ background: "var(--crit-soft)", borderColor: "var(--crit)" }}>
+          <b>⚠</b>
+          <div style={{ flex: 1 }}>{retryError}</div>
+        </div>
+      )}
+      <ListShell
+        loading={loading}
+        error={error}
+        onRetry={reload}
+        title="Background Jobs"
+        count={rows.length}
+        headers={["Type", "Tenant", "Resource", "Status", "Attempts", "Run At", "Completed", "Last Error", "Action"]}
+        rows={rows}
+        render={(j) => (
+          <tr key={j.id}>
+            <td className="mo">{j.type}</td>
+            <td className="nm">{j.tenantName}</td>
+            <td className="mo muted">{j.resource ?? "—"}</td>
+            <td><Pill status={j.status} /></td>
+            <td className="mo">
+              {j.attempts}/{j.maxAttempts}
+            </td>
+            <td className="muted">{fmt(j.runAt)}</td>
+            <td className="muted">{fmt(j.completedAt)}</td>
+            <td className="mo muted" title={j.lastError ?? undefined}>{j.lastError ?? "—"}</td>
+            <td className="mo">
+              {(j.status === "FAILED" || j.status === "CANCELLED") && (
+                <button className="btn sm" disabled={retrying === j.id} onClick={() => retry(j.id)}>
+                  {retrying === j.id ? "Retrying…" : "Retry"}
+                </button>
+              )}
+            </td>
+          </tr>
+        )}
+        empty="No background jobs match."
+      />
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Shell
 // ---------------------------------------------------------------------------
@@ -1411,7 +1506,10 @@ export default function PlatformConsole() {
   if (!mounted) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <div className="text-sm">Loading…</div>
+        <div className="flex items-center gap-2.5 text-sm text-[var(--ink3)]">
+          <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--accent)]" />
+          Loading…
+        </div>
       </div>
     );
   }
@@ -1423,7 +1521,10 @@ export default function PlatformConsole() {
   if (!isPlatform && (meLoading || !me)) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <div className="text-sm">Loading…</div>
+        <div className="flex items-center gap-2.5 text-sm text-[var(--ink3)]">
+          <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--accent)]" />
+          Loading…
+        </div>
       </div>
     );
   }
@@ -1538,42 +1639,40 @@ export default function PlatformConsole() {
           </div>
 
           <main>
-          <div className="page">
-          <div className="crumbs">
-            <span>Support Workspace</span>
-            <span>/</span>
-            <span className="cur">{PAGES.find((p) => p.id === page)?.label}</span>
-          </div>
-
-          <div className="pagehd">
-            <div>
-              <h1>{PAGES.find((p) => p.id === page)?.label}</h1>
-              <p>Fleet-wide visibility across every tenant, provider account, and background job.</p>
+          {/* Keyed by the active page so this container remounts on every page
+              switch and the .page entrance animation replays — a real, smooth
+              transition instead of an instant swap. */}
+          <div className="page" key={page}>
+            <div className="pagehd">
+              <div>
+                <h1>{PAGES.find((p) => p.id === page)?.label}</h1>
+                <p>Fleet-wide visibility across every tenant, provider account, and background job.</p>
+              </div>
             </div>
-          </div>
 
-          {page === "overview" &&
-            (overviewLoading ? (
-              <Spinner />
-            ) : overviewError ? (
-              <LoadErr error={overviewError} onRetry={loadOverview} />
-            ) : (
-              <OverviewPage data={overview} onOpenTenant={openTenant} onOpenTickets={() => setPage("tickets")} />
-            ))}
-          {page === "tickets" && <TicketsPage />}
-          {page === "tenants" && (
-            <TenantsPage
-              initialOpenTenant={pendingTenant}
-              onConsumed={() => setPendingTenant(null)}
-            />
-          )}
-          {page === "tokens" && <TokensPage />}
-          {page === "suppressions" && <SuppressionsPage />}
-          {page === "provider-events" && <ProviderEventsPage />}
-          {page === "delivery-events" && <DeliveryEventsPage />}
-          {page === "audit" && <AuditPage />}
+            {page === "overview" &&
+              (overviewLoading ? (
+                <Spinner />
+              ) : overviewError ? (
+                <LoadErr error={overviewError} onRetry={loadOverview} />
+              ) : (
+                <OverviewPage data={overview} onOpenTenant={openTenant} onOpenTickets={() => setPage("tickets")} />
+              ))}
+            {page === "tickets" && <TicketsPage mode="staff" />}
+            {page === "tenants" && (
+              <TenantsPage
+                initialOpenTenant={pendingTenant}
+                onConsumed={() => setPendingTenant(null)}
+              />
+            )}
+            {page === "tokens" && <TokensPage />}
+            {page === "suppressions" && <SuppressionsPage />}
+            {page === "jobs" && <JobsPage />}
+            {page === "provider-events" && <ProviderEventsPage />}
+            {page === "delivery-events" && <DeliveryEventsPage />}
+            {page === "audit" && <AuditPage />}
           </div>
-          </main>
+        </main>
         </div>
       </div>
     </div>

@@ -80,8 +80,11 @@ export default function SupportPage() {
 
 function FullPageLoading() {
   return (
-    <div className="flex min-h-screen items-center justify-center">
-      <div className="text-sm">Loading…</div>
+    <div className="flex min-h-screen items-center justify-center bg-[var(--ground)]">
+      <div className="flex items-center gap-2.5 text-sm text-[var(--ink3)]">
+        <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--accent)]" />
+        Loading…
+      </div>
     </div>
   );
 }

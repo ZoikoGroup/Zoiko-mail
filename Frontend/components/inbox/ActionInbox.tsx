@@ -165,8 +165,14 @@ export function ActionInbox() {
           </div>
         )}
 
-        {visible.map((a) => (
-          <ActionCard key={a.id} action={a} onSetStatus={setStatus} onSnooze={onSnooze} busy={update.isPending} />
+        {visible.map((a, i) => (
+          <div
+            key={a.id}
+            className="zoi-item"
+            style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}
+          >
+            <ActionCard action={a} onSetStatus={setStatus} onSnooze={onSnooze} busy={update.isPending} />
+          </div>
         ))}
       </div>
     </div>

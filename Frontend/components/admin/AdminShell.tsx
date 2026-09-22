@@ -60,7 +60,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
       {mobileOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
           <div className="absolute inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
-          <aside className="absolute left-0 top-0 flex h-full w-[232px] flex-col border-r border-[var(--border)] bg-[var(--s2)]">
+          <aside className="zoi-drawer absolute left-0 top-0 flex h-full w-[232px] flex-col border-r border-[var(--border)] bg-[var(--s2)]">
             <div className="flex justify-end p-2">
               <button
                 onClick={() => setMobileOpen(false)}

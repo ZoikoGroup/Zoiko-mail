@@ -34,6 +34,22 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : "Something went wrong";
 }
 
+// Shimmering stand-ins for table rows while the queue is loading.
+function TableSkeleton({ cols }: { cols: number }) {
+  const widths = ["38%", "55%", "42%", "60%", "48%", "52%", "44%", "50%", "40%"];
+  return (
+    <div className="skelrows">
+      {Array.from({ length: 6 }).map((_, r) => (
+        <div key={r} className="skelrow">
+          {Array.from({ length: cols }).map((_, c) => (
+            <span key={c} className="skel" style={{ width: widths[c % widths.length], height: 11 }} />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function fmt(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -265,9 +281,7 @@ export default function TicketsPage({ mode = "staff" }: { mode?: "staff" | "tena
           </div>
         </div>
         {loading ? (
-          <div className="bd pad" style={{ color: "var(--ink3)", fontSize: 12 }}>
-            Loading…
-          </div>
+          <TableSkeleton cols={isTenant ? 7 : 9} />
         ) : (
           <div className="tblwrap">
             <table>
@@ -572,8 +586,18 @@ function TicketDetail({ ticketId, tenant = false, onBack }: { ticketId: string; 
 
   if (loading && !ticket) {
     return (
-      <div className="bd pad muted" style={{ fontSize: 12 }}>
-        Loading ticket…
+      <div>
+        <div className="sloader" style={{ padding: "14px 2px 12px" }}>
+          <span className="ring" /> Loading ticket…
+        </div>
+        <div className="card">
+          <div className="bd pad">
+            <div className="skel" style={{ width: "56%", height: 13 }} />
+            <div className="skel" style={{ width: "82%", height: 10, marginTop: 10 }} />
+            <div className="skel" style={{ width: "70%", height: 10, marginTop: 8 }} />
+            <div className="skel" style={{ width: "60%", height: 10, marginTop: 8 }} />
+          </div>
+        </div>
       </div>
     );
   }

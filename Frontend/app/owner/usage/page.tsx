@@ -374,6 +374,11 @@ function SummaryCard({
   );
 }
 
+/** SVG gradient ids must be url-safe and unique; titles like "Email Volume" are not. */
+function gradientId(title: string): string {
+  return `grad-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+}
+
 function VolumeChart({
   title,
   data,
@@ -395,7 +400,7 @@ function VolumeChart({
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={data}>
               <defs>
-                <linearGradient id={`grad-${title}`} x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id={gradientId(title)} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={color} stopOpacity={0.3} />
                   <stop offset="100%" stopColor={color} stopOpacity={0} />
                 </linearGradient>
@@ -422,7 +427,7 @@ function VolumeChart({
                 type="monotone"
                 dataKey="count"
                 stroke={color}
-                fill={`url(#grad-${title})`}
+                fill={`url(#${gradientId(title)})`}
                 strokeWidth={2}
               />
             </AreaChart>

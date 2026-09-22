@@ -3,9 +3,8 @@ import type { MailFolder } from "@prisma/client";
 import { Router } from "express";
 import { authenticate, idempotency, authenticateStaff, requireCapability, requireRole, requireSupportAccess, requireTenantGrant, logSupportAccess, logTenantSupportAccess, tenantContext, validate, crossTenantScope} from "../../common/middleware/index.js";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
-import { hasLiveGrant } from "../../common/middleware/requireCapability.js";
 import { sendSuccess } from "../../common/utils/response.js";
-import { createGrantSchema, domainParamSchema, grantIdSchema, mailboxParamSchema, platformListQuerySchema, tenantParamSchema, requestAccessSchema, approveRequestSchema, denyRequestSchema, requestIdSchema, listRequestsSchema, mailboxMessagesParamsSchema, mailboxMessagesQuerySchema } from "./support.schema.js";
+import { approveRequestSchema, createGrantSchema, denyRequestSchema, domainParamSchema, grantIdSchema, jobIdSchema, listRequestsSchema, mailboxMessagesParamsSchema, mailboxMessagesQuerySchema, mailboxParamSchema, platformListQuerySchema, requestAccessSchema, requestIdSchema, tenantParamSchema } from "./support.schema.js";
 import { supportService } from "./support.service.js";
 
 export const supportRouter = Router();
@@ -16,20 +15,20 @@ supportRouter.use(authenticate, tenantContext, idempotency, logTenantSupportAcce
 // disagreed about it, and the disagreement was real: opening the console a
 // workspace's own Owner invited you to needs no expiry, while reading that
 // workspace's delivery events, audit log and configuration is reading a
-// customer's data and does. Tickets live on their own router and stay
-// reachable without a grant, which is what makes the split workable — a
-// seat with no grant still has something to do here.
-// The landing screen, and the one endpoint that straddles the split: the
-// console opens without a grant, but the records this returns — audit
-// events, recent messages, delivery failures — do not come with it. The
-// counts do, so an ungranted seat still sees whether the workspace is
-// healthy without being handed the rows behind that judgement.
+// customer's data and does.
+//
+// The Owner's invitation is the whole authorization for a tenant SUPPORT
+// seat: an accepted, active SUPPORT membership scopes every answer to the
+// seat's own workspace, and `support.workspace.investigate` is ALLOW for
+// that role — the invited seat reads this workspace the way staff read the
+// fleet, with no separate grant, approval or expiry standing between them
+// and the workspace they were invited to work in. Grants still exist, but
+// only for diagnostics, which both a tenant seat and staff must get
+// approved for. Tickets live on their own router and stay reachable
+// without a grant too.
 supportRouter.get("/overview", requireCapability("support.console.read"), asyncHandler(async (req, res) => {
   const c = req.tenantContext!;
-  const investigative =
-    c.membershipRole !== "SUPPORT" ||
-    (await hasLiveGrant({ role: c.membershipRole, tenantId: c.tenantId, membershipId: c.membershipId }));
-  sendSuccess(res, 200, await supportService.overview(c.tenantId, investigative), req.requestId);
+  sendSuccess(res, 200, await supportService.overview(c.tenantId), req.requestId);
 }));
 supportRouter.get("/diagnostics", asyncHandler(async (req, res) => {
   const c = req.tenantContext!;
@@ -45,11 +44,14 @@ supportRouter.delete("/access-grants/:grantId", requireCapability("support.grant
 // Tenant-scoped read lists for the support console.
 //
 // A workspace SUPPORT member (or an OWNER/ADMIN reading the same surface)
-// needs the same sections as the staff console — mailboxes, domains,
-// provider events, delivery events, jobs, suppressions and audit — but scoped
-// to their OWN tenant. These routes reuse the platform service functions with
-// tenantId forced from the session; the client can never pick another tenant,
-// so there is no cross-tenant read even if a caller tampers with query params.
+// sees the same sections as the staff console — mailboxes, domains,
+// provider events, delivery events, jobs, suppressions and audit — scoped
+// to their OWN tenant. These routes reuse the platform service functions
+// with tenantId forced from the session; the client can never pick another
+// tenant, so there is no cross-tenant read even if a caller tampers with
+// query params. `support.workspace.investigate` is ALLOW for the three
+// console roles, so an invited SUPPORT seat reads its workspace without a
+// separate grant — a grant only gates diagnostics, one floor below.
 // ---------------------------------------------------------------------------
 
 function tenantListQuery(req: Request): {
@@ -184,7 +186,8 @@ supportRouter.get("/tenant", requireCapability("support.workspace.investigate"),
 /**
  * RBAC §2 "View tenant configuration" — how the workspace is set up, as
  * opposed to /tenant, which is what it contains. Same capability, because
- * both are the console read that Support holds only as a grant.
+ * both are the console read that an invited Support seat holds through its
+ * membership rather than through a grant.
  */
 supportRouter.get("/configuration", requireCapability("support.workspace.investigate"), asyncHandler(async (req, res) => {
   sendSuccess(res, 200, await supportService.tenantConfiguration(req.tenantContext!.tenantId), req.requestId);
@@ -193,10 +196,9 @@ supportRouter.get("/configuration", requireCapability("support.workspace.investi
 /**
  * RBAC §2 "Read private user mailbox" — the one route in the platform that
  * reaches a member's own mail, and the only capability in the matrix that
- * allows it. `mail.other.read` is GRANT for Support and held by nobody else
- * in any form, so an Owner calling this is refused as firmly as a stranger.
- * The service adds the second condition the capability cannot express: the
- * live grant has to carry MAIL_CONTENT.
+ * allows it. `mail.other.read` is ALLOW for a SUPPORT seat and held by
+ * nobody else in any form, so an Owner calling this is refused as firmly
+ * as a stranger. The service scopes every read to the caller's own tenant.
  */
 supportRouter.get(
   "/mailboxes/:mailboxId/messages",
@@ -370,6 +372,10 @@ supportPlatformRouter.get("/delivery-events", validate(platformListQuerySchema, 
 }));
 supportPlatformRouter.get("/jobs", validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
   sendSuccess(res, 200, { jobs: await supportService.listJobs(listQuery(req)) }, req.requestId);
+}));
+supportPlatformRouter.post("/jobs/:jobId/retry", validate(jobIdSchema, "params"), asyncHandler(async (req, res) => {
+  const staff = req.staffAuth!;
+  sendSuccess(res, 200, { job: await supportService.requeue(String(req.params.jobId), { userId: staff.userId, platformRole: staff.platformRole }) }, req.requestId);
 }));
 supportPlatformRouter.get("/suppressions", validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
   sendSuccess(res, 200, { suppressions: await supportService.listSuppressions(listQuery(req)) }, req.requestId);
