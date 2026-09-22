@@ -181,3 +181,72 @@ export function logSupportAccess(req: Request, res: Response, next: NextFunction
   });
   next();
 }
+
+
+/** The seat managing its own request for access, rather than using any. */
+const ASKING_FOR_ACCESS = /^\/access-requests(?:\/|$)/;
+
+/**
+ * Record what a tenant Support seat looked at, once the read has succeeded.
+ *
+ * `logSupportAccess` above covers the platform console, and keys off
+ * `req.staffAuth` — which a tenant-side seat does not have. So the console a
+ * workspace's own SUPPORT member uses was recording nothing, while the
+ * request screen told the customer in as many words:
+ *
+ *     everything you read while it is open is recorded in your audit log
+ *
+ * §7 asks for that, and a promise the product makes to a customer about
+ * their own data is not one to leave unimplemented.
+ *
+ * Only a SUPPORT membership is recorded. An Owner or Admin opening the same
+ * screen holds `support.console.read` outright rather than through a grant —
+ * they are reading their own workspace, which is not support access, and
+ * logging it would bury the entries that matter under their own traffic.
+ */
+export function logTenantSupportAccess(req: Request, res: Response, next: NextFunction): void {
+  res.on("finish", () => {
+    // A 403 is recorded too, as a denial rather than an access. The
+    // platform gate writes one of those itself; `requireCapability`, which
+    // is what guards the tenant console, does not — so until this branch
+    // existed a support seat could be turned away from a workspace over and
+    // over and the customer's log would show nothing at all. Other failures
+    // (404, validation, a bug) are not access decisions and are left out.
+    const denied = res.statusCode === 403;
+    if (res.statusCode >= 400 && !denied) return;
+
+    const context = req.tenantContext;
+    if (!context || context.membershipRole !== "SUPPORT") return;
+
+    // Asking for access is not using it. The access-request endpoints are
+    // the one thing a seat can reach while holding no grant at all, they
+    // touch none of the customer's data, and they already write their own
+    // SUPPORT_ACCESS_REQUESTED entry. Counting them here would put a read
+    // in the log for the moment support asked permission to read.
+    if (ASKING_FOR_ACCESS.test(req.path)) return;
+
+    void auditService
+      .record({
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        actorType: "SUPPORT",
+        eventType: denied ? "SUPPORT_ACCESS_DENIED" : "SUPPORT_ACCESS_USED",
+        targetType: "Tenant",
+        targetId: context.tenantId,
+        requestId: req.requestId,
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent") ?? undefined,
+        metadata: {
+          path: req.originalUrl.split("?")[0],
+          method: req.method,
+          membershipId: context.membershipId,
+        },
+      })
+      .catch((error: unknown) => {
+        // eslint-disable-next-line no-console
+        console.error("tenant support access audit failed", error);
+      });
+  });
+
+  next();
+}

@@ -76,6 +76,16 @@ export const ADMIN_NAV: AdminNavGroup[] = [
       { label: "Policies", href: "/admin/policies", icon: ShieldCheck, capability: "policy.write" },
       { label: "Provider sync", href: "/admin/provider-sync", icon: RefreshCw },
       { label: "Audit logs", href: "/admin/audit", icon: FileText, capability: "audit.read" },
+      // Beside the audit log because they answer the same question from
+      // opposite ends: the log is everything, an alert is what needs a
+      // decision today. The entry went with the module in the PR #35 merge,
+      // though the icon import it used stayed behind.
+      {
+        label: "Security alerts",
+        href: "/admin/security-alerts",
+        icon: ShieldAlert,
+        capability: "security-alert.read",
+      },
     ],
   },
   {

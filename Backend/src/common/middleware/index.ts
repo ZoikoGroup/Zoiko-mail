@@ -6,7 +6,7 @@ export { requestIdMiddleware } from "./requestId.js";
 export { crossTenantScope, requireRole, tenantContext } from "./tenantContext.js";
 export { requireCapability, requireCapabilityWhen, capabilityContext } from "./requireCapability.js";
 export { requireSupportAccess } from "./requireSupportAccess.js";
-export { requireTenantGrant, logSupportAccess } from "./supportAccess.js";
+export { requireTenantGrant, logSupportAccess, logTenantSupportAccess } from "./supportAccess.js";
 export { idempotency, purgeExpiredIdempotencyRecords } from "./idempotency.js";
 export { validate } from "./validate.js";
 export { loginRateLimit, refreshRateLimit, registerRateLimit , passwordResetRateLimit } from "./authRateLimit.js";

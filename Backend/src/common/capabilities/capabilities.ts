@@ -50,6 +50,25 @@ export const CAPABILITIES = [
   "mailbox.ai.enable",
   "policy.security.write",
   "audit.read",
+  /**
+   * Security alerts — a new-device sign-in, a burst of failed logins, a
+   * refresh token replayed.
+   *
+   * Beside `audit.read` because they answer the same question from opposite
+   * ends: the audit log is everything that happened, an alert is the subset
+   * somebody should look at today. Read is held wherever the audit log is;
+   * reviewing one — acknowledging, resolving, dismissing — is the mutation
+   * half and is named separately, because dismissing a security signal is a
+   * decision and ought to be attributable to whoever made it.
+   *
+   * The routes and both screens shipped gated on these two names and were
+   * lost in the PR #35 merge along with the module behind them. Restoring
+   * the module without restoring the names would have left every request
+   * resolving UNKNOWN_CAPABILITY, which denies — a screen that loads and
+   * then refuses itself.
+   */
+  "security-alert.read",
+  "security-alert.review",
   // Money and liability.
   "billing.read",
   "billing.plan.write",
@@ -88,6 +107,31 @@ export const CAPABILITIES = [
    * guarded.
    */
   "support.grant.read",
+  /**
+   * Reading a workspace's diagnostics: its configuration, mailboxes,
+   * domains, provider and delivery events, jobs, suppressions, audit.
+   *
+   * Split out of `support.console.read` because the two were doing one
+   * job for two very different reads, and the split is the whole
+   * disagreement between PR #37 and PR #38 written down.
+   *
+   * #38's argument holds for the console itself: a member the Owner
+   * invited as SUPPORT, answering that workspace's own ticket queue, is
+   * authorized by the invitation. Asking an Owner to approve a grant
+   * before their own support member can read their own tickets is a
+   * ritual, and rituals get automated away.
+   *
+   * #37's argument holds for everything else on that console. Delivery
+   * events name recipients, the audit log names people and what they did,
+   * configuration exposes the workspace's security posture. Runbook §7's
+   * "no default right" and "must have an expiry" are about reading a
+   * customer's data, and those reads are exactly that — which is why they
+   * are GRANT here while the console read is ALLOW.
+   *
+   * Owner and Admin hold it outright: it is their own workspace, and every
+   * one of these screens shows them something they can already reach.
+   */
+  "support.workspace.investigate",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];

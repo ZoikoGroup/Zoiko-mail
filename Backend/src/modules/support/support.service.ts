@@ -1,4 +1,4 @@
-import type { PlatformRole, Prisma, SupportScope } from "@prisma/client";
+import type { MailFolder, PlatformRole, Prisma, SupportScope } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
@@ -16,7 +16,21 @@ const DELIVERY_ISSUE_TYPES = ["FAILED", "BOUNCED", "REJECTED", "BLOCKED"] as con
 const NAMES_AN_INCIDENT = /\b(?:INC|INCIDENT|P0|P1|SEV[- ]?[0-3]|CASE)\b[- ]?\w*/i;
 
 export class SupportService {
-  async overview(tenantId: string) {
+  /**
+   * The console's landing screen.
+   *
+   * Reachable without a grant, because the console itself is — a member the
+   * Owner invited as SUPPORT can open their workspace and see how it is
+   * doing. But this method also reads audit events, recent messages and
+   * delivery failures, which are the customer's records rather than a
+   * health summary, so `investigative` decides whether those come back.
+   *
+   * Counts either way. A seat with no grant learns that eleven messages
+   * failed yesterday; it does not learn who sent them. That is the line the
+   * split between support.console.read and support.workspace.investigate
+   * draws, applied inside the one endpoint that straddles it.
+   */
+  async overview(tenantId: string, investigative = true) {
     const since24h = new Date(Date.now() - 86_400_000);
 
     const [
@@ -178,10 +192,10 @@ export class SupportService {
     return {
       stats,
       domains,
-      members,
-      team,
-      issues,
-      audit: audit.map((event) => ({
+      members: investigative ? members : [],
+      team: investigative ? team : [],
+      issues: investigative ? issues : [],
+      audit: !investigative ? [] : audit.map((event) => ({
         id: event.id,
         eventType: event.eventType,
         targetType: event.targetType,
@@ -233,6 +247,239 @@ export class SupportService {
       actorType: "SUPPORT", targetType: "SupportAccessGrant", targetId: grant.id, metadata: { scopes: grant.scopes, expiresAt: grant.expiresAt.toISOString(), reason: grant.reason, ticketId: grant.ticketId } });
     return grant;
   }
+  /**
+   * Support asking a workspace for access.
+   *
+   * Open to the SUPPORT seat itself and needs no grant, which is the point:
+   * this is how the first grant comes into existence. Until it existed the
+   * enforcement was real and unusable — nothing in the product could create a
+   * grant, so the only way to open access was a direct API call.
+   *
+   * The same attribution rule as approving one (Runbook §7): a ticket in this
+   * workspace, or an incident named in the reason. Asked for at request time
+   * rather than at approval, so the approver decides on a case rather than
+   * being asked to invent one.
+   */
+  async requestAccess(
+    input: { reason: string; ticketId?: string; scopes: SupportScope[]; requestedMinutes: number },
+    tenantId: string,
+    membershipId: string,
+    userId: string
+  ) {
+    await this.assertAttributable(input, tenantId);
+
+    const existing = await prisma.supportAccessRequest.findFirst({
+      where: { tenantId, supportMembershipId: membershipId, status: "PENDING" },
+      select: { id: true },
+    });
+    if (existing) {
+      throw new AppError("You already have a request waiting on this workspace.", 409, ErrorCodes.CONFLICT);
+    }
+
+    const request = await prisma.supportAccessRequest.create({
+      data: {
+        tenantId,
+        supportMembershipId: membershipId,
+        reason: input.reason,
+        ticketId: input.ticketId ?? null,
+        scopes: input.scopes,
+        requestedMinutes: input.requestedMinutes,
+      },
+    });
+
+    await auditService.record({
+      tenantId, actorUserId: userId, actorType: "SUPPORT",
+      eventType: "SUPPORT_ACCESS_REQUESTED",
+      targetType: "SupportAccessRequest", targetId: request.id,
+      metadata: {
+        scopes: request.scopes,
+        requestedMinutes: request.requestedMinutes,
+        reason: request.reason,
+        ticketId: request.ticketId,
+      },
+    });
+
+    await this.notifyApprovers(tenantId, request.reason);
+    return request;
+  }
+
+  /** Pending first, because that is the list anyone opens this screen for. */
+  async listRequests(tenantId: string, status?: "PENDING" | "APPROVED" | "DENIED" | "WITHDRAWN") {
+    return prisma.supportAccessRequest.findMany({
+      where: { tenantId, ...(status ? { status } : {}) },
+      include: {
+        supportMembership: { include: { user: { select: { id: true, email: true, displayName: true } } } },
+        decidedBy: { select: { id: true, email: true, displayName: true } },
+        ticket: { select: { id: true, ticketNumber: true, subject: true } },
+      },
+      orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+      take: 100,
+    });
+  }
+
+  /**
+   * Approve a request, which is what actually writes the grant.
+   *
+   * The approver may shorten the window but never lengthen it, and the scopes
+   * are the ones that were asked for. An approval that silently widened the
+   * request would make the request a formality rather than the thing being
+   * approved.
+   */
+  async approveRequest(
+    requestId: string,
+    tenantId: string,
+    approverUserId: string,
+    overrideMinutes?: number
+  ) {
+    const request = await prisma.supportAccessRequest.findFirst({
+      where: { id: requestId, tenantId, status: "PENDING" },
+    });
+    if (!request) throw new AppError("Pending support access request not found", 404, ErrorCodes.NOT_FOUND);
+
+    const minutes = Math.min(overrideMinutes ?? request.requestedMinutes, request.requestedMinutes);
+
+    const grant = await this.create(
+      {
+        supportMembershipId: request.supportMembershipId,
+        reason: request.reason,
+        ticketId: request.ticketId ?? undefined,
+        expiresInMinutes: minutes,
+        scopes: request.scopes,
+      },
+      tenantId,
+      approverUserId
+    );
+
+    const updated = await prisma.supportAccessRequest.update({
+      where: { id: request.id },
+      data: { status: "APPROVED", decidedByUserId: approverUserId, decidedAt: new Date(), grantId: grant.id },
+    });
+
+    await auditService.record({
+      tenantId, actorUserId: approverUserId, actorType: "SUPPORT",
+      eventType: "SUPPORT_ACCESS_REQUEST_APPROVED",
+      targetType: "SupportAccessRequest", targetId: request.id,
+      metadata: { grantId: grant.id, minutes, scopes: request.scopes },
+    });
+
+    await this.notifyRequester(request.supportMembershipId, tenantId, "approved", grant.expiresAt);
+    return { request: updated, grant };
+  }
+
+  async denyRequest(requestId: string, tenantId: string, userId: string, note?: string) {
+    const request = await prisma.supportAccessRequest.findFirst({
+      where: { id: requestId, tenantId, status: "PENDING" },
+    });
+    if (!request) throw new AppError("Pending support access request not found", 404, ErrorCodes.NOT_FOUND);
+
+    const updated = await prisma.supportAccessRequest.update({
+      where: { id: request.id },
+      data: { status: "DENIED", decidedByUserId: userId, decidedAt: new Date() },
+    });
+
+    await auditService.record({
+      tenantId, actorUserId: userId, actorType: "SUPPORT",
+      eventType: "SUPPORT_ACCESS_REQUEST_DENIED",
+      targetType: "SupportAccessRequest", targetId: request.id,
+      metadata: { note: note ?? null },
+    });
+
+    await this.notifyRequester(request.supportMembershipId, tenantId, "declined");
+    return updated;
+  }
+
+  /** The requester changing their mind, which needs nobody's approval. */
+  async withdrawRequest(requestId: string, tenantId: string, membershipId: string, userId: string) {
+    const request = await prisma.supportAccessRequest.findFirst({
+      where: { id: requestId, tenantId, supportMembershipId: membershipId, status: "PENDING" },
+    });
+    if (!request) throw new AppError("Pending support access request not found", 404, ErrorCodes.NOT_FOUND);
+
+    const updated = await prisma.supportAccessRequest.update({
+      where: { id: request.id },
+      data: { status: "WITHDRAWN", decidedAt: new Date() },
+    });
+    await auditService.record({
+      tenantId, actorUserId: userId, actorType: "SUPPORT",
+      eventType: "SUPPORT_ACCESS_REQUEST_WITHDRAWN",
+      targetType: "SupportAccessRequest", targetId: request.id,
+    });
+    return updated;
+  }
+
+  /** Runbook §7's attribution rule, shared by asking and by granting directly. */
+  private async assertAttributable(
+    input: { reason: string; ticketId?: string },
+    tenantId: string
+  ): Promise<void> {
+    if (input.ticketId) {
+      const ticket = await prisma.supportTicket.findFirst({
+        where: { id: input.ticketId, tenantId },
+        select: { id: true },
+      });
+      if (!ticket) throw new AppError("That ticket does not belong to this workspace", 404, ErrorCodes.NOT_FOUND);
+      return;
+    }
+    if (!NAMES_AN_INCIDENT.test(input.reason)) {
+      throw new AppError(
+        "Link this access to a ticket, or name the incident it is for in the reason.",
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+  }
+
+  /**
+   * Tell the people who can decide.
+   *
+   * ACTION_REQUIRED with a link, because a request that waits for somebody to
+   * happen to open a screen is a request that expires unanswered — and the
+   * support member is blocked for the whole of it.
+   */
+  private async notifyApprovers(tenantId: string, reason: string): Promise<void> {
+    const approvers = await prisma.tenantMembership.findMany({
+      where: { tenantId, status: "ACTIVE", role: { in: ["OWNER", "ADMIN"] } },
+      select: { userId: true },
+    });
+    if (approvers.length === 0) return;
+    await prisma.notification.createMany({
+      data: approvers.map((a) => ({
+        tenantId,
+        userId: a.userId,
+        type: "ACTION_REQUIRED" as const,
+        title: "Support has asked for access to this workspace",
+        body: reason.slice(0, 280),
+        linkPath: "/owner/support-access",
+      })),
+    });
+  }
+
+  private async notifyRequester(
+    supportMembershipId: string,
+    tenantId: string,
+    outcome: "approved" | "declined",
+    expiresAt?: Date
+  ): Promise<void> {
+    const membership = await prisma.tenantMembership.findUnique({
+      where: { id: supportMembershipId },
+      select: { userId: true },
+    });
+    if (!membership) return;
+    await prisma.notification.create({
+      data: {
+        tenantId,
+        userId: membership.userId,
+        type: outcome === "approved" ? "INFO" : "WARNING",
+        title: "Support access " + outcome,
+        body:
+          outcome === "approved" && expiresAt
+            ? "Your access is open until " + expiresAt.toISOString() + ". It ends on its own."
+            : "Your request for access to this workspace was not granted.",
+        linkPath: "/support",
+      },
+    });
+  }
+
   async revoke(id: string, tenantId: string, userId: string) {
     const grant = await prisma.supportAccessGrant.findFirst({ where: { id, tenantId, revokedAt: null } });
     if (!grant) throw new AppError("Active support grant not found", 404, ErrorCodes.NOT_FOUND);
@@ -279,7 +526,7 @@ export class SupportService {
   async platformOverview() {
     const since24h = new Date(Date.now() - 86_400_000);
 
-    const [activeTenants, tenantMembers, activeMailboxes, configuredDomains, failedSends24h, failedJobs, retryJobs, syncFailures24h] =
+    const [activeTenants, tenantMembers, activeMailboxes, configuredDomains, failedSends24h, failedJobs, retryJobs, syncFailures24h, openTickets, overdueTickets, urgentTickets] =
       await Promise.all([
         prisma.tenant.count({ where: { status: "ACTIVE" } }),
         prisma.tenantMembership.count({ where: { status: { in: ["ACTIVE", "INVITED"] } } }),
@@ -289,6 +536,9 @@ export class SupportService {
         prisma.backgroundJob.count({ where: { status: "FAILED" } }),
         prisma.backgroundJob.count({ where: { status: "RETRY" } }),
         prisma.providerEvent.count({ where: { processingStatus: { in: ["FAILED", "DEAD_LETTER"] }, receivedAt: { gte: since24h } } }),
+        prisma.supportTicket.count({ where: { status: { in: ["OPEN", "IN_PROGRESS", "WAITING_TENANT"] } } }),
+        prisma.supportTicket.count({ where: { slaDueAt: { lt: new Date() }, status: { in: ["OPEN", "IN_PROGRESS", "WAITING_TENANT"] } } }),
+        prisma.supportTicket.count({ where: { severity: "URGENT", status: { in: ["OPEN", "IN_PROGRESS", "WAITING_TENANT"] } } }),
       ]);
 
     const [byProvider, byStatus, matrix] = await Promise.all([
@@ -408,6 +658,11 @@ export class SupportService {
         failedJobs,
         retryJobs,
       },
+      ticketStats: {
+        open: openTickets,
+        overdue: overdueTickets,
+        urgent: urgentTickets,
+      },
       providerHealth: {
         byProvider: byProvider.map((r) => ({ provider: r.provider, count: r._count._all })),
         byStatus: byStatus.map((r) => ({ status: r.status, count: r._count._all })),
@@ -439,6 +694,7 @@ export class SupportService {
       select: {
         id: true, name: true, status: true, planCode: true, createdAt: true,
         _count: { select: { memberships: true, mailboxes: true, domains: true, connectedAccounts: true } },
+        connectedAccounts: { take: 1, orderBy: { updatedAt: "desc" }, select: { provider: true, status: true, lastErrorCode: true } },
       },
     });
 
@@ -452,6 +708,7 @@ export class SupportService {
       mailboxes: t._count.mailboxes,
       domains: t._count.domains,
       connectedAccounts: t._count.connectedAccounts,
+      providerConnection: t.connectedAccounts[0] ?? null,
     }));
   }
 
@@ -1096,6 +1353,79 @@ export class SupportService {
     });
   }
 
+  /**
+   * Fleet credential-health list backing the staff "Tokens" section.
+   *
+   * What §9 (and the runbook) forbid is surfacing OAuth secrets. OAuth access
+   * and refresh tokens never live in this table — only a deterministic secret
+   * reference does (schema note, Security §15) — so a deliberately narrow
+   * select means not even the reference crosses the wire. Everything returned
+   * here is lifecycle metadata: when each connection last synced, when its
+   * token and webhook watch expire, and what the connector thinks is wrong.
+   */
+  async listTokens(input: { provider?: string; status?: string; q?: string; limit?: number }) {
+    const where: Prisma.ConnectedAccountWhereInput = {
+      ...(input.provider ? { provider: input.provider as Prisma.ConnectedAccountWhereInput["provider"] } : {}),
+      ...(input.status ? { status: input.status as Prisma.ConnectedAccountWhereInput["status"] } : {}),
+      ...(input.q && input.q.trim()
+        ? {
+            OR: [
+              { email: { contains: input.q.trim(), mode: "insensitive" } },
+              { providerAccountId: { contains: input.q.trim(), mode: "insensitive" } },
+              { tenant: { name: { contains: input.q.trim(), mode: "insensitive" } } },
+              { user: { email: { contains: input.q.trim(), mode: "insensitive" } } },
+            ],
+          }
+        : {}),
+    };
+
+    const accounts = await prisma.connectedAccount.findMany({
+      where,
+      select: {
+        id: true,
+        tenantId: true,
+        provider: true,
+        providerAccountId: true,
+        email: true,
+        scopes: true,
+        status: true,
+        tokenExpiresAt: true,
+        watchExpiresAt: true,
+        lastSyncedAt: true,
+        lastErrorCode: true,
+        disconnectedAt: true,
+        createdAt: true,
+        updatedAt: true,
+        tenant: { select: { id: true, name: true, status: true } },
+        user: { select: { id: true, email: true, displayName: true } },
+      },
+      orderBy: { updatedAt: "desc" },
+      take: Math.min(input.limit ?? 50, 200),
+    });
+
+    const now = Date.now();
+    return accounts.map((a) => ({
+      id: a.id,
+      provider: a.provider,
+      providerAccountId: a.providerAccountId,
+      email: a.email,
+      scopes: a.scopes,
+      status: a.status,
+      tenantId: a.tenant.id,
+      tenantName: a.tenant.name,
+      tenantStatus: a.tenant.status,
+      owner: a.user ? { id: a.user.id, email: a.user.email, displayName: a.user.displayName } : null,
+      tokenExpiresAt: a.tokenExpiresAt,
+      watchExpiresAt: a.watchExpiresAt,
+      lastSyncedAt: a.lastSyncedAt,
+      lastErrorCode: a.lastErrorCode,
+      disconnectedAt: a.disconnectedAt,
+      reauthRequired: a.status === "REAUTH_REQUIRED" || Boolean(a.tokenExpiresAt && a.tokenExpiresAt.getTime() < now),
+      createdAt: a.createdAt,
+      updatedAt: a.updatedAt,
+    }));
+  }
+
   async platformDiagnostics(grantId: string | undefined, userId: string, platformRole: string) {
     if (!grantId) throw new AppError("Support grant ID is required", 403, ErrorCodes.FORBIDDEN);
 
@@ -1155,7 +1485,267 @@ export class SupportService {
 
     return result;
   }
+  /**
+   * The workspace's configuration, read-only — RBAC §2 "View tenant
+   * configuration", Support = grant.
+   *
+   * The console could already show what a workspace *has* — counts of
+   * mailboxes, domains, jobs. It could not show how the workspace is *set
+   * up*, which is the half most support questions actually turn on: why is
+   * this member locked out, why did the assistant skip this mailbox, why is
+   * sending from this domain refused. Answering those meant asking the
+   * customer to read their own settings screen back over a call.
+   *
+   * Configuration only. Nothing here is a secret, and `safeJson` is what
+   * keeps it that way even if somebody later parks a token in
+   * `tenant.settings` — that column is free-form JSON, so the safe
+   * assumption is that one day it will hold something it should not.
+   */
+  async tenantConfiguration(tenantId: string) {
+    const tenant = await prisma.tenant.findFirst({
+      where: { id: tenantId },
+      select: {
+        id: true, name: true, status: true, planCode: true, timezone: true,
+        language: true, allowedDomains: true, memberLimit: true,
+        passwordPolicy: true, aiSettings: true, settings: true,
+        createdAt: true, updatedAt: true,
+      },
+    });
+    if (!tenant) throw new AppError("Tenant not found", 404, ErrorCodes.NOT_FOUND);
+
+    const [policies, domains, aiRestricted, mailboxes, sendingSuspended] = await Promise.all([
+      prisma.tenantPolicy.findMany({
+        where: { tenantId, status: "ACTIVE" },
+        select: {
+          id: true, type: true, name: true, description: true, version: true,
+          status: true, rules: true, activatedAt: true, updatedAt: true,
+        },
+        orderBy: { type: "asc" },
+      }),
+      prisma.mailDomain.findMany({
+        where: { tenantId },
+        select: { id: true, domainName: true, verificationStatus: true, sendingEnabled: true, activatedAt: true },
+        orderBy: { domainName: "asc" },
+      }),
+      // AC-008's restricted set as a count rather than a list: how many
+      // mailboxes the assistant is kept out of is configuration; which ones
+      // they are is a member-level detail this view has no reason to name.
+      prisma.mailbox.count({ where: { tenantId, aiEnabled: false } }),
+      prisma.mailbox.count({ where: { tenantId } }),
+      prisma.mailbox.count({ where: { tenantId, sendSuspendedAt: { not: null } } }),
+    ]);
+
+    return {
+      tenant: {
+        id: tenant.id,
+        name: tenant.name,
+        status: tenant.status,
+        planCode: tenant.planCode,
+        timezone: tenant.timezone,
+        language: tenant.language,
+        memberLimit: tenant.memberLimit,
+        allowedDomains: tenant.allowedDomains,
+        createdAt: tenant.createdAt,
+        updatedAt: tenant.updatedAt,
+      },
+      passwordPolicy: safeJson(tenant.passwordPolicy),
+      aiSettings: safeJson(tenant.aiSettings),
+      settings: safeJson(tenant.settings),
+      policies: policies.map((policy) => ({ ...policy, rules: safeJson(policy.rules) })),
+      domains,
+      mail: { mailboxes, aiRestrictedMailboxes: aiRestricted, sendingSuspendedMailboxes: sendingSuspended },
+    };
+  }
+
+  /**
+   * What is in a member's mailbox — RBAC §2 "Read private user mailbox".
+   *
+   * The one capability in the matrix that reaches private content, and the
+   * only role holding it is Support, as a grant. Two conditions beyond an
+   * ordinary console read, both enforced here rather than at the route
+   * because both depend on the grant rather than on the caller:
+   *
+   *  - the live grant must carry MAIL_CONTENT, so approving a delivery
+   *    investigation does not quietly become approving a mail read;
+   *  - every call is written to the tenant's audit log naming the mailbox,
+   *    because §7 requires the customer to be able to see afterwards exactly
+   *    what support looked at.
+   *
+   * Headers only. §7 asks support views to "prefer metadata, status, error
+   * codes, hashes, and excerpts over full content", and the questions this
+   * exists for — did it arrive, who sent it, what happened to it — are
+   * answered without the body. Bodies are not returned by this endpoint at
+   * all. That is a deliberate stopping point rather than an unfinished one,
+   * and moving it belongs to whoever owns the security spec.
+   */
+  async mailboxMessages(input: {
+    tenantId: string;
+    mailboxId: string;
+    actorUserId: string;
+    // Typed as the enum rather than a bare string, so the `where` below
+    // needs no cast and a folder the schema does not allow cannot reach it.
+    folder?: MailFolder;
+    q?: string;
+    limit?: number;
+  }) {
+    const { tenantId, mailboxId, actorUserId } = input;
+    const limit = Math.min(Math.max(input.limit ?? 25, 1), 50);
+
+    const grant = await prisma.supportAccessGrant.findFirst({
+      where: {
+        tenantId,
+        supportMembership: { userId: actorUserId },
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { expiresAt: "desc" },
+      select: { id: true, scopes: true, expiresAt: true, reason: true, ticketId: true },
+    });
+
+    if (!grant || !grant.scopes.includes("MAIL_CONTENT")) {
+      // Recorded even though nothing was read. A refused attempt to open
+      // someone's mailbox is exactly the thing a customer reviewing the log
+      // afterwards would want to know about.
+      await auditService.record({
+        tenantId, actorUserId, actorType: "SUPPORT",
+        eventType: "SUPPORT_ACCESS_DENIED",
+        targetType: "Mailbox", targetId: mailboxId,
+        metadata: {
+          capability: "mail.other.read",
+          requiredScope: "MAIL_CONTENT",
+          heldScopes: grant?.scopes ?? [],
+        },
+      });
+      throw new AppError(
+        "Reading a mailbox needs a support access grant that covers mail content. Ask the workspace owner to approve one.",
+        403,
+        ErrorCodes.FORBIDDEN
+      );
+    }
+
+    const mailbox = await prisma.mailbox.findFirst({
+      where: { id: mailboxId, tenantId },
+      select: {
+        id: true, address: true, type: true, aiEnabled: true,
+        sendSuspendedAt: true, sendSuspensionReason: true,
+        membership: { select: { id: true, user: { select: { email: true, displayName: true } } } },
+      },
+    });
+    if (!mailbox) throw new AppError("Mailbox not found", 404, ErrorCodes.NOT_FOUND);
+
+    const rows = await prisma.mailboxMessage.findMany({
+      where: {
+        tenantId,
+        mailboxId,
+        ...(input.folder ? { folder: input.folder } : {}),
+        ...(input.q
+          ? {
+              message: {
+                OR: [
+                  { subject: { contains: input.q, mode: "insensitive" as const } },
+                  { fromAddress: { contains: input.q, mode: "insensitive" as const } },
+                ],
+              },
+            }
+          : {}),
+      },
+      select: {
+        id: true, folder: true, isRead: true, createdAt: true,
+        message: {
+          select: {
+            id: true, subject: true, fromAddress: true,
+            status: true, sentAt: true, createdAt: true,
+            // Recipients are their own rows rather than an array column, and
+            // TO is the one this view needs — CC and BCC would turn a triage
+            // list into a wall, and BCC in particular is not support's to
+            // put on a screen.
+            recipients: { where: { type: "TO" }, select: { email: true } },
+            _count: { select: { attachments: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+    });
+
+    // A restricted mailbox stays restricted even here. The grant says
+    // support may read this mailbox; AC-008 says its owner has turned
+    // processing off, and subject is the field the data model marks
+    // redactable for exactly that case. The remaining metadata is what
+    // triage runs on and is returned either way.
+    const restricted = mailbox.aiEnabled
+      ? new Set<string>()
+      : new Set(rows.map((row) => row.message.id));
+
+    await auditService.record({
+      tenantId, actorUserId, actorType: "SUPPORT",
+      eventType: "SUPPORT_MAILBOX_READ",
+      targetType: "Mailbox", targetId: mailbox.id,
+      metadata: redactMetadata({
+        mailbox: mailbox.address,
+        grantId: grant.id,
+        ticketId: grant.ticketId,
+        reason: grant.reason,
+        messagesReturned: rows.length,
+        folder: input.folder ?? null,
+        query: input.q ?? null,
+        subjectsRedacted: restricted.size > 0,
+      }) as Prisma.InputJsonValue,
+    });
+
+    return {
+      mailbox: {
+        id: mailbox.id,
+        address: mailbox.address,
+        type: mailbox.type,
+        aiEnabled: mailbox.aiEnabled,
+        sendSuspendedAt: mailbox.sendSuspendedAt,
+        sendSuspensionReason: mailbox.sendSuspensionReason,
+        owner: mailbox.membership?.user ?? null,
+      },
+      grant: { id: grant.id, expiresAt: grant.expiresAt },
+      messages: rows.map((row) => ({
+        id: row.id,
+        folder: row.folder,
+        isRead: row.isRead,
+        // A received message has no sentAt of its own, so the row's own
+        // createdAt — when it landed in this mailbox — is the timestamp a
+        // support agent is actually asking about.
+        receivedAt: row.message.sentAt ?? row.createdAt,
+        subject: redactSubject(row.message.subject, row.message.id, restricted),
+        from: row.message.fromAddress,
+        to: row.message.recipients.map((recipient) => recipient.email),
+        status: row.message.status,
+        attachments: row.message._count.attachments,
+      })),
+    };
+  }
 }
+
+/**
+ * A free-form JSON column, with anything that looks like a credential taken
+ * out before it reaches a console outside the tenant.
+ *
+ * `tenant.settings`, `aiSettings` and a policy's `rules` are open-shaped, so
+ * what they hold is whatever some later feature decides to put there.
+ * Support needs to read configuration out of them; nobody needs support to
+ * read a key. Matched by key name rather than by value, because a redactor
+ * that guesses at contents will miss the first thing it has not seen before.
+ */
+function safeJson(value: Prisma.JsonValue | null | undefined): Prisma.JsonValue | null {
+  if (value === null || value === undefined) return null;
+  if (Array.isArray(value)) return value.map((item) => safeJson(item)) as Prisma.JsonValue;
+  if (typeof value !== "object") return value;
+
+  const out: Record<string, Prisma.JsonValue> = {};
+  for (const [key, val] of Object.entries(value as Record<string, Prisma.JsonValue>)) {
+    out[key] = SECRETISH_KEY.test(key) ? "[redacted]" : (safeJson(val) as Prisma.JsonValue);
+  }
+  return out;
+}
+
+const SECRETISH_KEY =
+  /(secret|token|password|passwd|credential|apikey|api_key|private|signature|salt|hash)/i;
 
 function jobResource(payload: Prisma.JsonValue | null | undefined): string | null {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;

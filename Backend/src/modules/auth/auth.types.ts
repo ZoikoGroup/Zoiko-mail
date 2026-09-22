@@ -32,6 +32,13 @@ export interface AuthUserSummary {
   id: string;
   email: string;
   displayName: string;
+  platformRole: "NONE" | "SUPPORT" | "SUPER_ADMIN";
+  platformAccess: {
+    isSupportStaff: boolean;
+    scope: "PLATFORM" | "TENANT" | "NONE";
+    status: "ACTIVE" | "EXPIRED" | "REVOKED" | "NONE";
+    expiresAt: string | null;
+  };
 }
 
 export interface AuthTenantSummary {

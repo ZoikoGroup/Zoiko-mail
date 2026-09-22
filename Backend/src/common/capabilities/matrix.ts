@@ -61,6 +61,16 @@ const OWNER: RoleMatrix = {
   "mailbox.ai.enable": "STEP_UP",
   "policy.security.write": "ALLOW",
   "audit.read": "ALLOW",
+  /**
+   * Security alerts — a new-device sign-in, a burst of failed logins, a
+   * refresh token replayed. Beside audit.read because they answer the same
+   * question from opposite ends: the log is everything that happened, an
+   * alert is the subset somebody should look at today. Review is named
+   * separately because dismissing a signal is a decision, and it ought to
+   * be attributable to whoever made it.
+   */
+  "security-alert.read": "ALLOW",
+  "security-alert.review": "ALLOW",
   // Money and liability.
   "billing.read": "ALLOW",
   "billing.plan.write": "ALLOW",
@@ -77,6 +87,9 @@ const OWNER: RoleMatrix = {
   "support.grant.create": "STEP_UP",
   "support.grant.end": "ALLOW",
   "support.console.read": "ALLOW",
+  // Their own workspace, and every one of these screens shows them
+  // something they could already reach. GRANT is for the Support seat.
+  "support.workspace.investigate": "ALLOW",
   "support.grant.read": "ALLOW",
 };
 
@@ -131,6 +144,16 @@ const ADMIN: RoleMatrix = {
   // lives in the audit service, which withholds the Owner-reserved
   // governance categories. See ADMIN_AUDIT_EXCLUDED_PREFIXES.
   "audit.read": "ALLOW",
+  /**
+   * Security alerts — a new-device sign-in, a burst of failed logins, a
+   * refresh token replayed. Beside audit.read because they answer the same
+   * question from opposite ends: the log is everything that happened, an
+   * alert is the subset somebody should look at today. Review is named
+   * separately because dismissing a signal is a decision, and it ought to
+   * be attributable to whoever made it.
+   */
+  "security-alert.read": "ALLOW",
+  "security-alert.review": "ALLOW",
   // §2 "Request export": Admin = "By policy" + Step-up. Step-up is expressed
   // here; the policy half is evaluation step 8 and belongs to the policy gate,
   // not to the matrix.
@@ -139,6 +162,9 @@ const ADMIN: RoleMatrix = {
   // The tenant-side principal watching the session is the one who can stop it.
   "support.grant.end": "ALLOW",
   "support.console.read": "ALLOW",
+  // Their own workspace, and every one of these screens shows them
+  // something they could already reach. GRANT is for the Support seat.
+  "support.workspace.investigate": "ALLOW",
   "support.grant.read": "ALLOW",
 };
 
@@ -150,9 +176,12 @@ const MEMBER: RoleMatrix = {
 };
 
 /**
- * Platform staff. Tenant data is reachable only through a time-boxed,
- * audited grant, never by virtue of being staff — hence GRANT rather than
- * ALLOW, and hence no tenant-administration capabilities at all.
+ * Platform staff. A customer's data is reachable only through a time-boxed,
+ * audited grant, never by virtue of being staff — hence GRANT on every row
+ * that reaches it, and no tenant-administration capabilities at all.
+ *
+ * The one ALLOW is the console shell and its own ticket queue, which a
+ * workspace's Owner opened by issuing the invitation.
  */
 const SUPPORT: RoleMatrix = {
   "support.standing": "GRANT",
@@ -172,7 +201,33 @@ const SUPPORT: RoleMatrix = {
    * right" and "must have an expiry", applied to the tenant-side console the
    * way requireTenantGrant applies them to the platform one.
    */
-  "support.console.read": "GRANT",
+  /**
+   * The tenant-scoped console opens on the Owner's invitation itself: a
+   * member the Owner added as SUPPORT — accepted, with a live membership in
+   * this workspace — is authorized to read this one workspace's console
+   * without a separate access grant. ALLOW, not GRANT, because the same
+   * request that proves the membership is active also scopes every answer to
+   * the caller's own tenant (tenantContext). The grant system is aimed, not
+   * bypassed: `support.standing`, `support.workspace.access` and
+   * `mail.other.read` keep their GRANT rows for the platform-side,
+   * cross-tenant paths, and the diagnostics endpoint verifies the grant
+   * itself — those call for an expiry by their nature; looking at one's own
+   * workspace does not.
+   */
+  "support.console.read": "ALLOW",
+  /**
+   * The diagnostics half of that console, kept time-boxed.
+   *
+   * The row above and this one are the whole disagreement between PR #37
+   * and PR #38, settled by splitting what was one capability doing two
+   * jobs. Reading the ticket queue of a workspace whose Owner invited you
+   * needs no expiry — that was #38's point, and it holds. Reading that
+   * workspace's delivery events, audit log and configuration is reading a
+   * customer's data, which is what §7's "no default right" and "must have
+   * an expiry" are actually about — that was #37's point, and it holds
+   * too. They were only in conflict while both lived under one name.
+   */
+  "support.workspace.investigate": "GRANT",
 };
 
 export const CAPABILITY_MATRIX: Record<MembershipRole, RoleMatrix> = {

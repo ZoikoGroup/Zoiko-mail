@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import Image from "next/image";
 import { ApiError } from "@/lib/api-client";
 import { useLogout, useMe } from "@/lib/auth-hooks";
@@ -8,8 +9,8 @@ import {
   fetchSupportDiagnostics,
   fetchSupportOverview,
   fetchTenantSupportOverview,
-  fetchTenantMailboxes,
-  fetchTenantDomains,
+  fetchTenantConfiguration,
+  fetchMailboxMessages,
   listTenantProviderEvents,
   listTenantDeliveryEvents,
   listTenantJobs,
@@ -19,6 +20,8 @@ import {
   type SupportDiagnosticsData,
   type SupportOverview,
   type TenantMailbox,
+  type TenantConfiguration,
+  type SupportMailboxRead,
   type TenantDomain,
   type TenantProviderEvent,
   type TenantDeliveryEvent,
@@ -28,7 +31,9 @@ import {
   type TenantOverviewData,
   type TenantListParams,
 } from "@/lib/support-api";
-import { useLiveRefresh } from "@/lib/support-hooks";
+import { useLiveRefresh, useTenantDomains, useTenantMailboxes } from "@/lib/support-hooks";
+import TicketsPage from "@/components/support/TicketsPage";
+import { RequestAccessPanel } from "./RequestAccessPanel";
 import { supportStyles } from "@/components/support/support-styles";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import {
@@ -58,10 +63,20 @@ import type { LucideIcon } from "lucide-react";
  * (all tenants, provider events, jobs, …) are staff-only and deliberately do
  * not exist here.
  */
-type TabId = "overview" | "mailboxes" | "domains" | "provider-events" | "delivery-events" | "jobs" | "suppressions" | "audit" | "diagnostics" | "access";
+type TabId = "tickets" | "overview" | "configuration" | "mailboxes" | "domains" | "provider-events" | "delivery-events" | "jobs" | "suppressions" | "audit" | "diagnostics" | "access";
 
 const TABS: Array<{ id: TabId; label: string; icon: string }> = [
+  // First, and the one that is always here.
+  //
+  // Tickets need no grant: the workspace's own Owner invited this member as
+  // SUPPORT, and the queue is the work they were invited to do. Everything
+  // below it reads the customer's data and is gated on
+  // support.workspace.investigate, which is GRANT for this role — so a seat
+  // with no live grant lands on a console that still has something to do
+  // rather than a wall of refusals.
+  { id: "tickets", label: "Tickets", icon: "✎" },
   { id: "overview", label: "Workspace Overview", icon: "◈" },
+  { id: "configuration", label: "Configuration", icon: "⚙" },
   { id: "mailboxes", label: "Mailboxes", icon: "✉" },
   { id: "domains", label: "Domains", icon: "⊞" },
   { id: "provider-events", label: "Provider Events", icon: "⇄" },
@@ -121,6 +136,26 @@ function initials(name: string | undefined): string {
   return (first + last).toUpperCase();
 }
 
+/**
+ * How long is left, in words — Runbook §7.
+ *
+ * The expiry *is* the control: access ends on its own, and a screen that
+ * shows only a timestamp makes an operator do the arithmetic to find out
+ * whether they have twelve minutes or two. Counting down means the moment it
+ * lapses is expected rather than discovered as a sudden 403 mid-investigation.
+ */
+function timeLeft(expiresAt: string | null | undefined): string | null {
+  if (!expiresAt) return null;
+  const ms = new Date(expiresAt).getTime() - Date.now();
+  if (Number.isNaN(ms)) return null;
+  if (ms <= 0) return "expired";
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 1) return "under a minute left";
+  if (mins < 60) return `${mins} min left`;
+  const hours = Math.floor(mins / 60);
+  return `${hours}h ${mins % 60}m left`;
+}
+
 function grantActive(grant: SupportAccessGrant): boolean {
   if (grant.revokedAt) return false;
   if (grant.expiresAt) {
@@ -163,34 +198,29 @@ function useList<T>(
   key: string,
 ) {
   const [params, setParams] = useState<TenantListParams>({ limit: 50 });
-  const [rows, setRows] = useState<T[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [tick, setTick] = useState(0);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    fetchFn(params)
-      .then((res) => {
-        if (!cancelled) setRows(res[key] ?? []);
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          setRows([]);
-          setError(apiErrorMessage(e));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [fetchFn, key, params, tick]);
+  // On the shared query cache rather than component state. Five pages reach
+  // this hook, and with bespoke state each one refetched from scratch every
+  // time the operator moved between tabs — during an incident, which is when
+  // people move between tabs most. The cache also gives the console one
+  // place to invalidate from: a mutation elsewhere can mark these stale
+  // instead of every list having to know it happened.
+  //
+  // `key` names the array inside the response envelope, and also namespaces
+  // the cache entry — two lists with the same filters but different shapes
+  // must not share a key.
+  const query = useQuery({
+    queryKey: ["support", "tenant-list", key, params],
+    queryFn: () => fetchFn(params),
+    staleTime: 15_000,
+    // The previous page stays on screen while the next one loads, so
+    // changing a filter does not blank the table and jump the scroll.
+    placeholderData: (prev) => prev,
+  });
 
-  const reload = useCallback(() => setTick((t) => t + 1), []);
+  const reload = useCallback(() => {
+    void query.refetch();
+  }, [query]);
 
   // Runbook §5 sets a fifteen-minute initial response for a P0, which a
   // screen that only loads once cannot support: the operator would have to
@@ -198,7 +228,22 @@ function useList<T>(
   // this console keeps itself current, and pauses while the tab is hidden.
   useLiveRefresh(reload);
 
-  return { params, setParams, rows, loading, error, reload };
+  // placeholderData keeps the previous page on screen while the next loads,
+  // which is right for a filter change and wrong for a refusal: a grant that
+  // has just expired would leave the customer's rows sitting under the error
+  // banner. §7 makes the expiry the control, so a failed read shows nothing.
+  // The bespoke fetch this replaced cleared its rows on error; keeping that
+  // was not optional.
+  const rows = query.error ? [] : ((query.data?.[key] ?? []) as T[]);
+
+  return {
+    params,
+    setParams,
+    rows,
+    loading: query.isLoading,
+    error: query.error ? apiErrorMessage(query.error) : null,
+    reload,
+  };
 }
 
 function Table({ headers, children }: { headers: string[]; children: React.ReactNode }) {
@@ -239,43 +284,55 @@ export default function TenantSupportConsole() {
   const logout = useLogout();
   const meQuery = useMe();
   const me = meQuery.data;
-  const [tab, setTab] = useState<TabId>("overview");
+  const [tab, setTab] = useState<TabId>("tickets");
   const [mobileOpen, setMobileOpen] = useState(false);
-
-  const [overview, setOverview] = useState<SupportOverview | null>(null);
-  const [overviewLoading, setOverviewLoading] = useState(true);
-  const [overviewError, setOverviewError] = useState<string | null>(null);
 
   const [diagGrant, setDiagGrant] = useState<string | null>(null);
   const [diagState, setDiagState] = useState<
     Record<string, { status: "loading" } | { status: "done"; data: SupportDiagnosticsData } | { status: "error"; message: string }>
   >({});
 
-  const loadOverview = useCallback(async () => {
-    setOverviewLoading(true);
-    setOverviewError(null);
-    try {
-      const data = await fetchSupportOverview();
-      setOverview(data);
-      const firstActive = data.grants.find(grantActive)?.id;
-      if (firstActive) setDiagGrant((cur) => cur ?? firstActive);
-    } catch (e) {
-      setOverviewError(apiErrorMessage(e));
-    } finally {
-      setOverviewLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // On the shared cache like the lists below it. This one also has to stay
+  // readable while it refetches: it decides whether the console or the
+  // request form is drawn, and a hook that dropped to `undefined` on every
+  // background refresh would flash the request form at a seat that holds a
+  // perfectly good grant.
+  const overviewQuery = useQuery({
+    queryKey: ["support", "tenant-overview"],
+    queryFn: fetchSupportOverview,
+    staleTime: 15_000,
+    retry: false,
+    placeholderData: (prev) => prev,
+  });
+
+  // Dropped on a refusal for the same reason the lists are: an expired
+  // grant must not leave the last good overview on screen.
+  const overview = overviewQuery.error ? null : overviewQuery.data ?? null;
+  const overviewLoading = overviewQuery.isLoading;
+  const overviewError = overviewQuery.error ? apiErrorMessage(overviewQuery.error) : null;
+
+  const loadOverview = useCallback(() => {
+    void overviewQuery.refetch();
+  }, [overviewQuery]);
+
+  // Preselect the first live grant for the diagnostics tab, once. Kept out
+  // of the fetch so a background refresh cannot move the operator's
+  // selection out from under them mid-investigation.
+  useEffect(() => {
+    if (!overview) return;
+    const firstActive = overview.grants.find(grantActive)?.id;
+    if (firstActive) setDiagGrant((cur) => cur ?? firstActive);
+  }, [overview]);
 
   // A grant ends by itself. An expiry only noticed on reload is one the
   // screen misreports for as long as the tab stays open, and §7 wants the
   // expiry to be the control rather than a note about one.
-  useLiveRefresh(() => void loadOverview(), 60_000);
+  useLiveRefresh(loadOverview, 60_000);
 
-  useEffect(() => {
-    void loadOverview();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // The server names the reason in the denial (requiresSupportGrant), and
+  // falls back to the message for anything that predates that detail.
+  const needsAccess =
+    Boolean(overviewError) && /support access grant|approved support/i.test(overviewError ?? "");
 
   const runDiagnostics = useCallback(
     async (grantId: string) => {
@@ -367,15 +424,35 @@ export default function TenantSupportConsole() {
                 </div>
               </div>
 
+              {/*
+                The request panel replaces the refused tab, not the console.
+                Tickets keep working without a grant, so covering them with
+                "ask for access" would hide work the seat is authorized to
+                do and make the console look wholly shut.
+              */}
               {tab === "overview" &&
                 (overviewLoading ? (
                   <Spinner />
+                ) : needsAccess ? (
+                  // Runbook §7: the console read is GRANT for a Support seat,
+                  // so no live grant means every panel 403s. Showing the way
+                  // to ask beats a screen of load errors with nothing to act
+                  // on — which is what this was until the request flow
+                  // existed at all.
+                  // No reload on success, deliberately. Asking does not grant
+                  // anything, so a refetch returns the same refusal — and it
+                  // would flip this back to the spinner, unmounting the
+                  // confirmation and showing the empty form again as though
+                  // nothing had been sent.
+                  <RequestAccessPanel />
                 ) : overviewError ? (
                   <LoadErr error={overviewError} onRetry={loadOverview} />
                 ) : (
                   <OverviewView data={overview!} />
                 ))}
 
+              {tab === "tickets" && <TicketsPage mode="tenant" />}
+              {tab === "configuration" && <ConfigurationPage />}
               {tab === "mailboxes" && <MailboxesPage />}
               {tab === "domains" && <DomainsPage />}
               {tab === "provider-events" && <ProviderEventsPage />}
@@ -516,7 +593,12 @@ function OverviewView({ data }: { data: SupportOverview }) {
                 <div className="tx">
                   <b>{g.reason}</b>
                   <span>
-                    {g.scopes.join(", ")} · {grantActive(g) ? `expires ${fmt(g.expiresAt)}` : g.revokedAt ? "revoked" : "expired"}
+                    {g.scopes.join(", ")} ·{" "}
+                    {grantActive(g)
+                      ? `${timeLeft(g.expiresAt) ?? "active"} — expires ${fmt(g.expiresAt)}`
+                      : g.revokedAt
+                        ? "revoked"
+                        : "expired"}
                   </span>
                 </div>
                 <div className="sp">
@@ -591,7 +673,8 @@ function DiagnosticsView({
             <div className="tx">
               <b>What this grant allows</b>
               <span>
-                {current.scopes.join(", ")} · expires {fmt(current.expiresAt)}
+                {current.scopes.join(", ")} · {timeLeft(current.expiresAt) ?? "active"} — expires{" "}
+                {fmt(current.expiresAt)}
               </span>
             </div>
             <div className="sp">
@@ -865,25 +948,23 @@ function ListShell<T>({
 function MailboxesPage() {
   const [q, setQ] = useState("");
   const [applied, setApplied] = useState("");
-  const [mailboxes, setMailboxes] = useState<TenantMailbox[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [reading, setReading] = useState<TenantMailbox | null>(null);
 
-  const search = useCallback(async (query: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetchTenantMailboxes(query, 200);
-      setMailboxes(res.mailboxes);
-    } catch (e) {
-      setError(apiErrorMessage(e));
-      setMailboxes([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  // The search term the results belong to, held separately from what is
+  // being typed: the query key has to change when a search is run, not on
+  // every keystroke.
+  const query = useTenantMailboxes(applied, 200);
+  const mailboxes = query.data?.mailboxes ?? [];
+  const loading = query.isLoading;
+  const error = query.error ? apiErrorMessage(query.error) : null;
 
-  useEffect(() => { search(""); }, [search]);
+  const search = useCallback((next: string) => setApplied(next), []);
+  // Retry has to refetch, not re-set the term it already holds: setting
+  // state to the value it already has is a no-op, so the button would look
+  // live and do nothing.
+  const retry = useCallback(() => { void query.refetch(); }, [query]);
+
+  if (reading) return <MailboxMessages mailbox={reading} onClose={() => setReading(null)} />;
 
   return (
     <div>
@@ -895,14 +976,14 @@ function MailboxesPage() {
         </div>
         <button className="btn pri" onClick={() => { setApplied(q); search(q); }}>Search</button>
       </div>
-      {error && <LoadErr error={error} onRetry={() => search(applied)} />}
+      {error && <LoadErr error={error} onRetry={retry} />}
       <div className="card">
         <div className="hd">
           <h2>{applied ? `Mailboxes matching "${applied}"` : "All mailboxes"}</h2>
           <div className="sp"><span className="pill nu">{mailboxes.length}</span></div>
         </div>
         <div className="bd">
-          <Table headers={["Address", "Member", "Type", "Suspended", "Accounts", "Created"]}>
+          <Table headers={["Address", "Member", "Type", "Suspended", "Accounts", "Created", ""]}>
             {mailboxes.map((m) => (
               <tr key={m.id}>
                 <td className="mo nm">{m.address}</td>
@@ -911,10 +992,21 @@ function MailboxesPage() {
                 <td><Pill status={m.suspended ? "suspended" : "active"} /></td>
                 <td>{m.connectedAccounts.length}</td>
                 <td className="muted">{ago(m.createdAt)}</td>
+                <td>
+                  {/*
+                    Refused unless the live grant carries MAIL_CONTENT. The
+                    button is offered anyway and the server's refusal is shown
+                    verbatim, because hiding it would leave an agent unable to
+                    tell "not allowed" from "not there".
+                  */}
+                  <button className="btn" onClick={() => setReading(m)} title="Read headers — recorded in the audit log">
+                    Open
+                  </button>
+                </td>
               </tr>
             ))}
             {mailboxes.length === 0 && !loading && (
-              <tr><td colSpan={6} className="muted">No mailboxes found.</td></tr>
+              <tr><td colSpan={7} className="muted">No mailboxes found.</td></tr>
             )}
           </Table>
         </div>
@@ -926,25 +1018,13 @@ function MailboxesPage() {
 function DomainsPage() {
   const [q, setQ] = useState("");
   const [applied, setApplied] = useState("");
-  const [domains, setDomains] = useState<TenantDomain[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const query = useTenantDomains(applied, 200);
+  const domains = query.data?.domains ?? [];
+  const loading = query.isLoading;
+  const error = query.error ? apiErrorMessage(query.error) : null;
 
-  const search = useCallback(async (query: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetchTenantDomains(query, 200);
-      setDomains(res.domains);
-    } catch (e) {
-      setError(apiErrorMessage(e));
-      setDomains([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { search(""); }, [search]);
+  const search = useCallback((next: string) => setApplied(next), []);
+  const retry = useCallback(() => { void query.refetch(); }, [query]);
 
   return (
     <div>
@@ -956,7 +1036,7 @@ function DomainsPage() {
         </div>
         <button className="btn pri" onClick={() => { setApplied(q); search(q); }}>Search</button>
       </div>
-      {error && <LoadErr error={error} onRetry={() => search(applied)} />}
+      {error && <LoadErr error={error} onRetry={retry} />}
       <div className="card">
         <div className="hd">
           <h2>{applied ? `Domains matching "${applied}"` : "All domains"}</h2>
@@ -1269,6 +1349,269 @@ function AccessView({ grants }: { grants: number }) {
             <span>Staff only</span>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+
+/**
+ * RBAC §2 "View tenant configuration".
+ *
+ * The overview answers "what does this workspace have"; this answers "how is
+ * it set up", which is the half most support calls actually turn on — why a
+ * member cannot sign in, why the assistant skipped a mailbox, why sending
+ * from a domain is refused. The server strips anything credential-shaped out
+ * of the free-form JSON columns before they get here, so what is rendered is
+ * configuration and nothing else.
+ */
+function ConfigurationPage() {
+  const query = useQuery({
+    queryKey: ["support", "tenant-configuration"],
+    queryFn: fetchTenantConfiguration,
+    // Longer than the event lists: configuration changes when somebody
+    // changes it, not continuously, and re-reading it every fifteen seconds
+    // would be noise on both ends.
+    staleTime: 60_000,
+  });
+  const config = query.data ?? null;
+  const loading = query.isLoading;
+  const error = query.error ? apiErrorMessage(query.error) : null;
+
+  const load = useCallback(() => {
+    void query.refetch();
+  }, [query]);
+
+  useLiveRefresh(load, 60_000, !loading && !error);
+
+  if (loading && !config) return <Spinner />;
+  if (error) return <LoadErr error={error} onRetry={load} />;
+  if (!config) return null;
+
+  const t = config.tenant;
+
+  return (
+    <div>
+      <div className="card">
+        <div className="hd"><h2>Workspace</h2></div>
+        <div className="bd">
+          <Table headers={["Setting", "Value"]}>
+            <tr><td>Name</td><td className="nm">{t.name}</td></tr>
+            <tr><td>Status</td><td><Pill status={t.status.toLowerCase()} /></td></tr>
+            <tr><td>Plan</td><td className="mo">{t.planCode}</td></tr>
+            <tr><td>Timezone</td><td>{t.timezone ?? "UTC"}</td></tr>
+            <tr><td>Language</td><td>{t.language ?? "en"}</td></tr>
+            <tr><td>Member limit</td><td>{t.memberLimit ?? "no limit"}</td></tr>
+            <tr>
+              <td>Allowed sign-in domains</td>
+              <td className="mo">{t.allowedDomains.length > 0 ? t.allowedDomains.join(", ") : "any"}</td>
+            </tr>
+            <tr><td>Created</td><td className="muted">{fmt(t.createdAt)}</td></tr>
+            <tr><td>Last changed</td><td className="muted">{ago(t.updatedAt)}</td></tr>
+          </Table>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="hd">
+          <h2>Mail posture</h2>
+          <div className="sp"><span className="pill nu">{config.mail.mailboxes} mailboxes</span></div>
+        </div>
+        <div className="bd">
+          <Table headers={["Setting", "Value"]}>
+            <tr><td>Mailboxes</td><td>{config.mail.mailboxes}</td></tr>
+            <tr>
+              {/*
+                AC-008's restricted set. Worth surfacing here rather than
+                only on the mailbox row, because "the assistant is not
+                touching this workspace's mail" is a configuration fact and
+                a common cause of "why did nothing happen".
+              */}
+              <td>Mailboxes the assistant is kept out of</td>
+              <td>{config.mail.aiRestrictedMailboxes}</td>
+            </tr>
+            <tr>
+              <td>Mailboxes with sending suspended</td>
+              <td>{config.mail.sendingSuspendedMailboxes}</td>
+            </tr>
+          </Table>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="hd">
+          <h2>Domains</h2>
+          <div className="sp"><span className="pill nu">{config.domains.length}</span></div>
+        </div>
+        <div className="bd">
+          <Table headers={["Domain", "Verification", "Sending", "Activated"]}>
+            {config.domains.map((d) => (
+              <tr key={d.id}>
+                <td className="mo nm">{d.domainName}</td>
+                <td>{d.verificationStatus}</td>
+                <td><Pill status={d.sendingEnabled ? "active" : "suspended"} /></td>
+                <td className="muted">{d.activatedAt ? fmt(d.activatedAt) : "—"}</td>
+              </tr>
+            ))}
+            {config.domains.length === 0 && (
+              <tr><td colSpan={4} className="muted">No domains configured.</td></tr>
+            )}
+          </Table>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="hd">
+          <h2>Active policies</h2>
+          <div className="sp"><span className="pill nu">{config.policies.length}</span></div>
+        </div>
+        <div className="bd">
+          {config.policies.length === 0 ? (
+            <p className="muted">No active policies. The workspace is on platform defaults.</p>
+          ) : (
+            config.policies.map((policy) => (
+              <details key={policy.id} style={{ marginBottom: 10 }}>
+                <summary style={{ cursor: "pointer" }}>
+                  <strong>{policy.name}</strong>{" "}
+                  <span className="muted">
+                    {policy.type} · v{policy.version} · active {policy.activatedAt ? ago(policy.activatedAt) : "—"}
+                  </span>
+                </summary>
+                {policy.description && <p className="muted">{policy.description}</p>}
+                <pre className="mo" style={{ whiteSpace: "pre-wrap", fontSize: 12, marginTop: 6 }}>
+                  {JSON.stringify(policy.rules, null, 2)}
+                </pre>
+              </details>
+            ))
+          )}
+        </div>
+      </div>
+
+      <ConfigJson title="Password policy" value={config.passwordPolicy} />
+      <ConfigJson title="Assistant settings" value={config.aiSettings} />
+      <ConfigJson title="Other settings" value={config.settings} />
+    </div>
+  );
+}
+
+/** A free-form settings column, shown as-is because its shape is not fixed. */
+function ConfigJson({ title, value }: { title: string; value: Record<string, unknown> | null }) {
+  return (
+    <div className="card">
+      <div className="hd"><h2>{title}</h2></div>
+      <div className="bd">
+        {value && Object.keys(value).length > 0 ? (
+          <pre className="mo" style={{ whiteSpace: "pre-wrap", fontSize: 12 }}>
+            {JSON.stringify(value, null, 2)}
+          </pre>
+        ) : (
+          <p className="muted">Not set — the workspace uses the platform default.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * RBAC §2 "Read private user mailbox" — the exceptional path.
+ *
+ * Reachable only from a mailbox row, and only opens anything if the live
+ * grant carries MAIL_CONTENT; the server refuses otherwise and says so. The
+ * refusal is shown as-is rather than softened, because a support agent who
+ * cannot tell "no grant" from "no messages" will ask the customer the wrong
+ * question.
+ *
+ * Headers only. The endpoint returns no bodies, so there is nothing here to
+ * expand into one.
+ */
+function MailboxMessages({ mailbox, onClose }: { mailbox: TenantMailbox; onClose: () => void }) {
+  const [data, setData] = useState<SupportMailboxRead | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [q, setQ] = useState("");
+
+  // Deliberately not on the query cache, unlike every other read in this
+  // console. The server writes an audit entry for each call, because §7
+  // requires the customer to see afterwards exactly what support looked at.
+  // Serving a second look from cache would make that record undercount —
+  // the log would show one read where two happened. A screen that is slower
+  // is the right trade against an audit trail that is wrong.
+  const load = useCallback(async (query: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      setData(await fetchMailboxMessages(mailbox.id, { q: query || undefined, limit: 50 }));
+    } catch (e) {
+      setError(apiErrorMessage(e));
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [mailbox.id]);
+
+  useEffect(() => { void load(""); }, [load]);
+
+  return (
+    <div className="card">
+      <div className="hd">
+        <h2>{mailbox.address}</h2>
+        <div className="sp">
+          {data && (
+            <span className="pill nu" title="This read is recorded in the workspace's audit log">
+              grant ends {fmt(data.grant.expiresAt)}
+            </span>
+          )}
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
+      </div>
+      <div className="bd">
+        <p className="muted" style={{ marginTop: 0 }}>
+          Headers only — no message bodies are returned. Every time you open this, the workspace&apos;s
+          audit log records which mailbox you read and why.
+        </p>
+
+        <div className="filterbar">
+          <div className="gsearch" style={{ maxWidth: 360, marginLeft: 0 }}>
+            <span>⌕</span>
+            <input
+              placeholder="Filter by subject or sender…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void load(q); }}
+            />
+          </div>
+          <button className="btn pri" onClick={() => void load(q)}>Search</button>
+        </div>
+
+        {error ? (
+          <LoadErr error={error} onRetry={() => load(q)} />
+        ) : loading ? (
+          <Spinner />
+        ) : data ? (
+          <>
+            {!data.mailbox.aiEnabled && (
+              <p className="muted">
+                This mailbox&apos;s owner has turned processing off, so subject lines are withheld.
+                Sender, recipient, status and timing are shown.
+              </p>
+            )}
+            <Table headers={["Received", "From", "Subject", "Status", "Attachments", "Folder"]}>
+              {data.messages.map((m) => (
+                <tr key={m.id}>
+                  <td className="muted">{fmt(m.receivedAt)}</td>
+                  <td className="mo">{m.from ?? "—"}</td>
+                  <td className="nm">{m.subject ?? "—"}</td>
+                  <td>{m.status}</td>
+                  <td>{m.attachments || "—"}</td>
+                  <td className="muted">{m.folder}</td>
+                </tr>
+              ))}
+              {data.messages.length === 0 && (
+                <tr><td colSpan={6} className="muted">No messages match.</td></tr>
+              )}
+            </Table>
+          </>
+        ) : null}
       </div>
     </div>
   );
