@@ -6,6 +6,8 @@ export type SupportScope =
   | "DNS_DIAGNOSTICS"
   | "DELIVERY_DIAGNOSTICS"
   | "AUDIT_READ"
+  /** Putting one of a mailbox's own settings back. The only support write. */
+  | "MAILBOX_ADMIN"
   /** Reading inside a mailbox. Asked for by name, approved by name. */
   | "MAIL_CONTENT";
 
@@ -419,6 +421,35 @@ export interface SupportMailboxRead {
   };
   grant: { id: string; expiresAt: string };
   messages: SupportMailboxMessage[];
+}
+
+/**
+ * Put one of a mailbox's own settings back — §11.1, "if requested and
+ * audited". A closed list rather than a patch: support restores settings the
+ * customer already had, and cannot author new ones.
+ */
+export async function resetMailboxSetting(
+  mailboxId: string,
+  setting: "FORWARDING" | "SEND_SUSPENSION",
+  reason: string
+): Promise<{ mailboxId: string; address: string; setting: string; changed: number }> {
+  return apiRequest(`/support/mailboxes/${mailboxId}/reset-setting`, {
+    method: "POST",
+    body: { setting, reason },
+  });
+}
+
+/**
+ * Raise a deletion request the Owner then decides on — RBAC §2 marks
+ * Support "Workflow" here, not permission. It lands REQUESTED and goes no
+ * further without them.
+ */
+export async function requestTenantDeletion(input: {
+  targetType: "TENANT" | "USER";
+  targetId?: string;
+  reason: string;
+}): Promise<{ id: string; status: string }> {
+  return apiRequest("/support/deletion-requests", { method: "POST", body: input });
 }
 
 export async function fetchMailboxMessages(

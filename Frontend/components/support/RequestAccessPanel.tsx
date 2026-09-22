@@ -25,6 +25,11 @@ const SCOPES: Array<{ value: SupportScope; label: string; hint: string }> = [
   { value: "DNS_DIAGNOSTICS", label: "DNS and domains", hint: "MX, SPF, DKIM, DMARC" },
   { value: "DELIVERY_DIAGNOSTICS", label: "Delivery and bounces", hint: "delivery and provider events" },
   { value: "AUDIT_READ", label: "Audit log", hint: "who did what in this workspace" },
+  {
+    value: "MAILBOX_ADMIN",
+    label: "Reset a mailbox setting",
+    hint: "clear forwarding, or lift a send suspension — the only change support can make",
+  },
   // Last, and described as what it is. RBAC §2 gives Support this only
   // through a grant and Security §4 calls it an exceptional path, so the
   // owner reading the request needs to see that this one is not like the

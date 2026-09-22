@@ -1558,6 +1558,251 @@ export class SupportService {
   }
 
   /**
+   * A live grant for this seat that carries a particular scope.
+   *
+   * Shared by the three actions that need more than the console read.
+   * Returns the grant rather than a boolean because every one of them has
+   * to put the grant's id and case into the audit entry — a support action
+   * nobody can attribute afterwards is the thing §7 exists to prevent.
+   */
+  private async grantWithScope(
+    tenantId: string,
+    actorUserId: string,
+    scope: SupportScope,
+    capability: string
+  ) {
+    const grant = await prisma.supportAccessGrant.findFirst({
+      where: {
+        tenantId,
+        supportMembership: { userId: actorUserId },
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { expiresAt: "desc" },
+      select: { id: true, scopes: true, expiresAt: true, reason: true, ticketId: true },
+    });
+
+    if (!grant || !grant.scopes.includes(scope)) {
+      // Recorded even though nothing happened. Somebody reaching for a
+      // scope they were not approved for is exactly what a customer
+      // reviewing their log afterwards would want to see.
+      await auditService.record({
+        tenantId, actorUserId, actorType: "SUPPORT",
+        eventType: "SUPPORT_ACCESS_DENIED",
+        targetType: "Tenant", targetId: tenantId,
+        metadata: { capability, requiredScope: scope, heldScopes: grant?.scopes ?? [] },
+      });
+      throw new AppError(
+        `That needs a support access grant covering ${scope}. Ask the workspace owner to approve one.`,
+        403,
+        ErrorCodes.FORBIDDEN
+      );
+    }
+
+    return grant;
+  }
+
+  /**
+   * Put one of a mailbox's own settings back — RBAC §11.1 "Reset mailbox
+   * setting (support)", allowed "if requested and audited".
+   *
+   * Deliberately a short, closed list rather than a general editor. Runbook
+   * §6.1 names what support is actually called about — "login, mailbox
+   * provisioning, send/receive, quota, alias, forwarding" — and of those,
+   * two are settings the customer already had that have started working
+   * against them:
+   *
+   *   FORWARDING        a rule quietly sending their mail somewhere else,
+   *                     which is the usual answer to "I stopped receiving"
+   *   SEND_SUSPENSION   a suspension that has outlived its reason and is
+   *                     now just a mailbox that cannot send
+   *
+   * Restoring a setting, not inventing configuration. Support cannot create
+   * a forwarding rule, only clear the ones that exist; cannot suspend, only
+   * lift. The asymmetry is the point — every action here reduces what the
+   * mailbox is doing, so the worst outcome of a mistaken reset is a setting
+   * the customer has to put back, never mail sent somewhere new.
+   */
+  async resetMailboxSetting(input: {
+    tenantId: string;
+    mailboxId: string;
+    actorUserId: string;
+    setting: "FORWARDING" | "SEND_SUSPENSION";
+    reason: string;
+  }) {
+    const { tenantId, mailboxId, actorUserId, setting } = input;
+    const grant = await this.grantWithScope(
+      tenantId,
+      actorUserId,
+      "MAILBOX_ADMIN",
+      "support.mailbox.reset"
+    );
+
+    const mailbox = await prisma.mailbox.findFirst({
+      where: { id: mailboxId, tenantId },
+      select: {
+        id: true, address: true, sendSuspendedAt: true, sendSuspensionReason: true,
+        _count: { select: { forwardingRules: true } },
+      },
+    });
+    if (!mailbox) throw new AppError("Mailbox not found", 404, ErrorCodes.NOT_FOUND);
+
+    let changed = 0;
+    let before: Prisma.InputJsonValue = {};
+
+    if (setting === "FORWARDING") {
+      if (mailbox._count.forwardingRules === 0) {
+        throw new AppError(
+          "That mailbox has no forwarding rules, so there is nothing to clear.",
+          409,
+          ErrorCodes.CONFLICT,
+          { reason: "NOTHING_TO_RESET" }
+        );
+      }
+      // The addresses are kept in the audit entry before they go. A
+      // customer asking later where their mail was going needs the answer,
+      // and after the delete it exists nowhere else.
+      const rules = await prisma.forwardingRule.findMany({
+        where: { tenantId, mailboxId },
+        select: { forwardToAddress: true, keepCopy: true },
+      });
+      before = { forwardingRules: rules };
+      const result = await prisma.forwardingRule.deleteMany({ where: { tenantId, mailboxId } });
+      changed = result.count;
+    } else {
+      if (!mailbox.sendSuspendedAt) {
+        throw new AppError(
+          "That mailbox is not suspended from sending.",
+          409,
+          ErrorCodes.CONFLICT,
+          { reason: "NOTHING_TO_RESET" }
+        );
+      }
+      before = {
+        sendSuspendedAt: mailbox.sendSuspendedAt.toISOString(),
+        sendSuspensionReason: mailbox.sendSuspensionReason,
+      };
+      await prisma.mailbox.update({
+        where: { id: mailbox.id },
+        data: { sendSuspendedAt: null, sendSuspensionReason: null },
+      });
+      changed = 1;
+    }
+
+    await auditService.record({
+      tenantId, actorUserId, actorType: "SUPPORT",
+      eventType: "SUPPORT_MAILBOX_SETTING_RESET",
+      targetType: "Mailbox", targetId: mailbox.id,
+      metadata: redactMetadata({
+        mailbox: mailbox.address,
+        setting,
+        changed,
+        before,
+        // §11.1's "if requested": the case this was done for, carried from
+        // the grant so the reset cannot be attributed to nothing.
+        grantId: grant.id,
+        ticketId: grant.ticketId,
+        grantReason: grant.reason,
+        supportReason: input.reason,
+      }) as Prisma.InputJsonValue,
+    });
+
+    return { mailboxId: mailbox.id, address: mailbox.address, setting, changed };
+  }
+
+  /**
+   * Raise a deletion request on the customer's behalf — RBAC §2 "Request
+   * deletion: Support = Workflow".
+   *
+   * Workflow, not permission. Support can start one and can do nothing
+   * else with it: the row lands PENDING and the existing Owner chain —
+   * approve, schedule, confirm — is untouched. The whole lifecycle router
+   * is Owner-only and stays that way.
+   *
+   * Worth being exact about why this is support's to start at all. A
+   * customer asking for erasure usually asks the person they are already
+   * talking to, and the alternative is an agent telling them to go and
+   * find the right screen, which is how a thirty-day statutory clock gets
+   * lost. Starting the request is not deciding it.
+   */
+  async requestDeletion(input: {
+    tenantId: string;
+    actorUserId: string;
+    targetType: "TENANT" | "USER";
+    targetId?: string;
+    reason: string;
+  }) {
+    const { tenantId, actorUserId, targetType } = input;
+    const grant = await this.grantWithScope(
+      tenantId,
+      actorUserId,
+      "TENANT_DIAGNOSTICS",
+      "support.workspace.investigate"
+    );
+
+    if (targetType === "USER" && !input.targetId) {
+      throw new AppError(
+        "A target id is required when the request is for one account.",
+        422,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+
+    if (input.targetId) {
+      const member = await prisma.tenantMembership.findFirst({
+        where: { id: input.targetId, tenantId },
+        select: { id: true },
+      });
+      if (!member) throw new AppError("Membership not found", 404, ErrorCodes.NOT_FOUND);
+    }
+
+    const existing = await prisma.dataLifecycleRequest.findFirst({
+      where: { tenantId, type: "DELETION", status: "REQUESTED", targetId: input.targetId ?? null },
+      select: { id: true },
+    });
+    if (existing) {
+      throw new AppError(
+        "A deletion request for that target is already open.",
+        409,
+        ErrorCodes.CONFLICT,
+        { reason: "ALREADY_PENDING", requestId: existing.id }
+      );
+    }
+
+    const request = await prisma.dataLifecycleRequest.create({
+      data: {
+        tenantId,
+        requestedByUserId: actorUserId,
+        type: "DELETION",
+        // REQUESTED is the whole distinction between "Workflow" and a
+        // permission: raised, and nothing more. §6.14 starts the thirty-day
+        // clock at VERIFIED, not here, so support asking does not put the
+        // workspace on a deadline — the Owner does that by verifying, then
+        // approving, through the chain that already exists.
+        status: "REQUESTED",
+        targetType,
+        targetId: input.targetId ?? null,
+        reason: input.reason,
+      },
+    });
+
+    await auditService.record({
+      tenantId, actorUserId, actorType: "SUPPORT",
+      eventType: "SUPPORT_DELETION_REQUESTED",
+      targetType: "DataLifecycleRequest", targetId: request.id,
+      metadata: redactMetadata({
+        requestTargetType: targetType,
+        requestTargetId: input.targetId ?? null,
+        reason: input.reason,
+        grantId: grant.id,
+        ticketId: grant.ticketId,
+      }) as Prisma.InputJsonValue,
+    });
+
+    return { id: request.id, status: request.status, targetType, targetId: request.targetId };
+  }
+
+  /**
    * What is in a member's mailbox — RBAC §2 "Read private user mailbox".
    *
    * The one capability in the matrix that reaches private content, and the

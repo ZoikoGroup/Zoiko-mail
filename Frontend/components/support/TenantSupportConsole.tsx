@@ -11,6 +11,7 @@ import {
   fetchTenantSupportOverview,
   fetchTenantConfiguration,
   fetchMailboxMessages,
+  resetMailboxSetting,
   listTenantProviderEvents,
   listTenantDeliveryEvents,
   listTenantJobs,
@@ -320,7 +321,7 @@ export default function TenantSupportConsole() {
   // selection out from under them mid-investigation.
   useEffect(() => {
     if (!overview) return;
-    const firstActive = overview.grants.find(grantActive)?.id;
+    const firstActive = overview.grants?.find(grantActive)?.id;
     if (firstActive) setDiagGrant((cur) => cur ?? firstActive);
   }, [overview]);
 
@@ -348,7 +349,7 @@ export default function TenantSupportConsole() {
     []
   );
 
-  const activeGrants = overview?.grants.filter(grantActive) ?? [];
+  const activeGrants = overview?.grants?.filter(grantActive) ?? [];
 
   return (
     <div className="support-workspace">
@@ -949,6 +950,7 @@ function MailboxesPage() {
   const [q, setQ] = useState("");
   const [applied, setApplied] = useState("");
   const [reading, setReading] = useState<TenantMailbox | null>(null);
+  const [fixing, setFixing] = useState<TenantMailbox | null>(null);
 
   // The search term the results belong to, held separately from what is
   // being typed: the query key has to change when a search is run, not on
@@ -965,6 +967,7 @@ function MailboxesPage() {
   const retry = useCallback(() => { void query.refetch(); }, [query]);
 
   if (reading) return <MailboxMessages mailbox={reading} onClose={() => setReading(null)} />;
+  if (fixing) return <MailboxReset mailbox={fixing} onClose={() => setFixing(null)} />;
 
   return (
     <div>
@@ -1001,6 +1004,15 @@ function MailboxesPage() {
                   */}
                   <button className="btn" onClick={() => setReading(m)} title="Read headers — recorded in the audit log">
                     Open
+                  </button>
+                  {/*
+                    §11.1's one support write, and its own scope — a seat
+                    approved to read is not thereby approved to change. The
+                    server refuses without MAILBOX_ADMIN and the refusal is
+                    shown as it comes.
+                  */}
+                  <button className="btn" onClick={() => setFixing(m)} title="Clear forwarding or lift a send suspension">
+                    Fix setting
                   </button>
                 </td>
               </tr>
@@ -1612,6 +1624,100 @@ function MailboxMessages({ mailbox, onClose }: { mailbox: TenantMailbox; onClose
             </Table>
           </>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+
+/**
+ * Putting one of a mailbox's own settings back — RBAC §11.1, allowed "if
+ * requested and audited".
+ *
+ * Two buttons rather than a settings form, because support restores what the
+ * customer already had and does not author new configuration. Both actions
+ * only ever reduce what the mailbox is doing — clearing a forward, lifting a
+ * suspension — so the worst outcome of a mistaken press is a setting the
+ * customer has to put back, never mail sent somewhere new.
+ *
+ * The reason is required by the server and asked for here rather than
+ * invented, because a reset nobody can account for afterwards is exactly
+ * what §11.1's "if requested" exists to prevent.
+ */
+function MailboxReset({ mailbox, onClose }: { mailbox: TenantMailbox; onClose: () => void }) {
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+
+  const run = async (setting: "FORWARDING" | "SEND_SUSPENSION") => {
+    setBusy(setting);
+    setError(null);
+    setDone(null);
+    try {
+      const result = await resetMailboxSetting(mailbox.id, setting, reason.trim());
+      setDone(
+        setting === "FORWARDING"
+          ? `Cleared ${result.changed} forwarding rule${result.changed === 1 ? "" : "s"}.`
+          : "Sending is available again."
+      );
+    } catch (e) {
+      setError(apiErrorMessage(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const ready = reason.trim().length >= 10;
+
+  return (
+    <div className="card">
+      <div className="hd">
+        <h2>{mailbox.address}</h2>
+        <div className="sp">
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
+      </div>
+      <div className="bd pad">
+        <p className="muted" style={{ marginTop: 0 }}>
+          Restores a setting this mailbox already had. Support cannot create forwarding or
+          suspend sending — only clear and lift. Both are recorded in the workspace&apos;s audit
+          log with the reason you give.
+        </p>
+
+        <label htmlFor="mr-reason" className="muted" style={{ display: "block", marginBottom: 4 }}>
+          Why, and who asked
+        </label>
+        <textarea
+          id="mr-reason"
+          rows={2}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="INC-1234 — customer says inbound mail stopped arriving"
+          style={{ width: "100%" }}
+        />
+
+        {error && <LoadErr error={error} onRetry={() => setError(null)} />}
+        {done && <p className="muted">{done}</p>}
+
+        <div className="filterbar" style={{ marginTop: 10 }}>
+          <button
+            className="btn"
+            disabled={!ready || busy !== null}
+            onClick={() => void run("FORWARDING")}
+            title="Deletes every forwarding rule on this mailbox"
+          >
+            {busy === "FORWARDING" ? "Clearing…" : "Clear forwarding"}
+          </button>
+          <button
+            className="btn"
+            disabled={!ready || busy !== null}
+            onClick={() => void run("SEND_SUSPENSION")}
+            title="Lets this mailbox send again"
+          >
+            {busy === "SEND_SUSPENSION" ? "Lifting…" : "Lift send suspension"}
+          </button>
+        </div>
       </div>
     </div>
   );

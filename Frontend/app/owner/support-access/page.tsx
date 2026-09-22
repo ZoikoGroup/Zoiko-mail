@@ -78,6 +78,7 @@ const scopeLabels: Record<string, string> = {
   DNS_DIAGNOSTICS: "DNS Diagnostics",
   DELIVERY_DIAGNOSTICS: "Delivery Diagnostics",
   AUDIT_READ: "Audit Read",
+  MAILBOX_ADMIN: "Reset a mailbox setting",
   MAIL_CONTENT: "Read inside a mailbox",
 };
 

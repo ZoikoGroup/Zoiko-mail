@@ -76,8 +76,20 @@ export const CAPABILITIES = [
   "tenant.ownership.transfer",
   "tenant.delete",
   // Support.
-  "support.standing",
-  "support.workspace.access",
+  //
+  // `support.standing` and `support.workspace.access` used to sit here and
+  // were removed rather than wired. The first is a contradiction in terms:
+  // §11.1 opens with "Support has no standing access", so a capability
+  // called `support.standing` held as GRANT describes standing access that
+  // is not standing. The second was superseded — `support.console.read`
+  // (ALLOW) and `support.workspace.investigate` (GRANT) now say precisely
+  // what a seat may open and what it must be approved for, and the
+  // platform-side path is guarded by requireTenantGrant, which the RBAC
+  // spec puts outside this matrix on purpose: "the platform tier is
+  // intentionally out of scope of this matrix."
+  //
+  // Leaving them declared and enforced nowhere was the worst of the three
+  // options: a reader of the matrix would assume a gate existed.
   // Security §5 lists "support access grant" among the high-risk actions that
   // require step-up. Granting a stranger access to a tenant is exactly that,
   // and the route gated on a bare role.
@@ -132,6 +144,22 @@ export const CAPABILITIES = [
    * one of these screens shows them something they can already reach.
    */
   "support.workspace.investigate",
+  /**
+   * Putting one of a mailbox's own settings back — RBAC §11.1 "Reset
+   * mailbox setting (support): ⏱ grant, if requested and audited".
+   *
+   * The narrow set Runbook §6.1 names as what support is actually called
+   * about: forwarding that is swallowing somebody's mail, and a send
+   * suspension that has outlived the reason for it. Both are the customer's
+   * own settings being restored, not configuration being invented — which
+   * is why this is a support action at all rather than administration.
+   *
+   * A write, so it is not folded into `support.workspace.investigate`:
+   * reading a workspace and changing it are different permissions, and a
+   * grant approved for a delivery investigation must not also authorise
+   * editing what it finds.
+   */
+  "support.mailbox.reset",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];

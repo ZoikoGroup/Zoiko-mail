@@ -263,12 +263,12 @@ describe("conditional resolver kinds", () => {
   });
 
   it("gives platform staff nothing without an active grant", () => {
-    const ungranted = resolveCapability("support.workspace.access", activeSupport);
+    const ungranted = resolveCapability("support.workspace.investigate", activeSupport);
     expect(ungranted.kind).toBe("GRANT");
     expect(ungranted.allowed).toBe(false);
     expect(ungranted.reason).toBe("REQUIRES_SUPPORT_GRANT");
 
-    const granted = resolveCapability("support.workspace.access", {
+    const granted = resolveCapability("support.workspace.investigate", {
       ...activeSupport,
       hasActiveSupportGrant: true,
     });
@@ -328,8 +328,8 @@ describe("vocabulary integrity", () => {
     expect(orphans).toEqual([]);
   });
 
-  it("declares forty-two capabilities", () => {
-    expect(CAPABILITIES).toHaveLength(42);
-    expect(new Set(CAPABILITIES).size).toBe(42);
+  it("declares forty-one capabilities", () => {
+    expect(CAPABILITIES).toHaveLength(41);
+    expect(new Set(CAPABILITIES).size).toBe(41);
   });
 });

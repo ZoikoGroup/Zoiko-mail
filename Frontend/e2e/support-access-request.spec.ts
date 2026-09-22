@@ -99,8 +99,15 @@ test.describe("a support seat with no grant is offered a way to ask", () => {
 
     await page.goto("/support");
 
-    // The refusal turns into something to do, rather than a wall of load
-    // errors with no next step.
+    // The console lands on Tickets, which needs no grant — that is what
+    // makes the console/investigate split workable rather than a wall of
+    // refusals. The request panel belongs to the tab that was refused.
+    await page.getByRole("button", { name: /Workspace Overview/i }).first().click({
+      timeout: 60_000,
+    });
+
+    // The refusal turns into something to do, rather than a load error with
+    // no next step.
     await expect(page.getByRole("heading", { name: /Ask for access/i })).toBeVisible({
       timeout: 60_000,
     });

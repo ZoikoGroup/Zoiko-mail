@@ -14,6 +14,7 @@ const supportScope = z.enum([
   "DNS_DIAGNOSTICS",
   "DELIVERY_DIAGNOSTICS",
   "AUDIT_READ",
+  "MAILBOX_ADMIN",
   "MAIL_CONTENT",
 ]);
 export const grantIdSchema = z.object({ grantId: z.string().uuid() });
@@ -75,6 +76,27 @@ export const platformListQuerySchema = z.object({
   type: z.string().trim().min(1).optional(),
   q: z.string().trim().optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
+});
+
+/**
+ * Putting one of a mailbox's own settings back — §11.1.
+ *
+ * A closed list, not a patch body. Support restores settings the customer
+ * already had; it does not author new ones, so there is nothing here to set
+ * a value with. The reason is required because §11.1 allows this only "if
+ * requested", and a reset nobody can account for afterwards is the thing
+ * that rule exists to stop.
+ */
+export const resetMailboxSettingSchema = z.object({
+  setting: z.enum(["FORWARDING", "SEND_SUSPENSION"]),
+  reason: z.string().trim().min(10).max(500),
+});
+
+/** Support raising a deletion request the Owner then decides on. */
+export const supportDeletionRequestSchema = z.object({
+  targetType: z.enum(["TENANT", "USER"]),
+  targetId: z.string().uuid().optional(),
+  reason: z.string().trim().min(10).max(500),
 });
 
 /** Reading inside one mailbox — headers only, and never more than a page. */

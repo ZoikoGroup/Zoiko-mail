@@ -184,8 +184,7 @@ const MEMBER: RoleMatrix = {
  * workspace's Owner opened by issuing the invitation.
  */
 const SUPPORT: RoleMatrix = {
-  "support.standing": "GRANT",
-  "support.workspace.access": "GRANT",
+
   /**
    * The only path to private mail content anywhere in the matrix, and even
    * here it is not routine: §2 marks Support "⏱ grant", while §4 adds
@@ -208,11 +207,10 @@ const SUPPORT: RoleMatrix = {
    * without a separate access grant. ALLOW, not GRANT, because the same
    * request that proves the membership is active also scopes every answer to
    * the caller's own tenant (tenantContext). The grant system is aimed, not
-   * bypassed: `support.standing`, `support.workspace.access` and
-   * `mail.other.read` keep their GRANT rows for the platform-side,
-   * cross-tenant paths, and the diagnostics endpoint verifies the grant
-   * itself — those call for an expiry by their nature; looking at one's own
-   * workspace does not.
+   * bypassed: `support.workspace.investigate`, `support.mailbox.reset` and
+   * `mail.other.read` keep their GRANT rows, and the diagnostics endpoint
+   * verifies the grant itself — those call for an expiry by their nature;
+   * opening one's own ticket queue does not.
    */
   "support.console.read": "ALLOW",
   /**
@@ -228,6 +226,12 @@ const SUPPORT: RoleMatrix = {
    * too. They were only in conflict while both lived under one name.
    */
   "support.workspace.investigate": "GRANT",
+  /**
+   * The one write a support seat holds, and only under a grant that names
+   * it. §11.1 allows it "if requested and audited" — so the scope has to be
+   * asked for by name, and every reset writes its own entry.
+   */
+  "support.mailbox.reset": "GRANT",
 };
 
 export const CAPABILITY_MATRIX: Record<MembershipRole, RoleMatrix> = {

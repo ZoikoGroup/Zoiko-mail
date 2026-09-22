@@ -22,8 +22,9 @@ const app = createApp();
  * member the Owner personally invited into this workspace as SUPPORT, whose
  * membership is active. It stays out of a plain MEMBER's reach entirely.
  *
- * The grant system is not bypassed, it is aimed: `support.standing`,
- * `support.workspace.access` and `mail.other.read` keep their GRANT rows — the
+ * The grant system is not bypassed, it is aimed:
+ * `support.workspace.investigate`, `support.mailbox.reset` and
+ * `mail.other.read` keep their GRANT rows — the
  * platform-side, cross-tenant paths that must stay time-boxed — and the
  * diagnostics endpoint verifies the grant header for itself. These tests pin
  * the one change: an accepted SUPPORT invitation, and not a separate grant, is
