@@ -1,19 +1,52 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
-import { authHeader, registerUser, loginUser, type RegisteredUser } from "./helpers.js";
+import { authHeader, registerUser, loginUser, stepUpHeader, type RegisteredUser } from "./helpers.js";
 import { prisma } from "../src/config/prisma.js";
 
 const app = createApp();
 
 /**
- * The tenant-scoped support sections. A SUPPORT seat is authorized by the
- * Owner's invitation — an accepted, active membership in this workspace — so
- * the console read is ALLOW for SUPPORT and these tests do not need a grant to
- * assert what the sections show. Grants still govern the platform-side,
- * cross-tenant capabilities (covered in the capabilities and support-platform
- * suites) and the diagnostics endpoint, not these list screens.
+ * The tenant-scoped support sections.
+ *
+ * The Owner's invitation authorizes the console — a SUPPORT seat opens it
+ * and works its ticket queue with no grant at all. It does not authorize
+ * these screens. Delivery events name recipients, the audit log names
+ * people and what they did, and a workspace's configuration is its security
+ * posture; reading those is reading the customer's data, which Runbook §7
+ * makes time-boxed and approved.
+ *
+ * So `support.console.read` is ALLOW for SUPPORT and
+ * `support.workspace.investigate` is GRANT, and these tests assert the
+ * seam: refused without a grant, answered with one, and never crossing into
+ * another workspace either way.
  */
+
+/**
+ * Open a grant for a support seat, the way an Owner would.
+ *
+ * Written against the request/approve flow rather than inserting a row,
+ * because a grant that only the test knows how to create proves nothing
+ * about the path a customer actually walks.
+ */
+async function grantInvestigation(owner: RegisteredUser, supportToken: string) {
+  const asked = await request(app)
+    .post("/api/v1/support/access-requests")
+    .set(authHeader(supportToken))
+    .send({
+      reason: "INC-2201 investigating reported delivery failures",
+      scopes: ["TENANT_DIAGNOSTICS"],
+      requestedMinutes: 60,
+    })
+    .expect(201);
+
+  await request(app)
+    .post(`/api/v1/support/access-requests/${asked.body.data.id}/approve`)
+    .set(authHeader(owner.accessToken))
+    .set(await stepUpHeader(app, owner.accessToken))
+    .send({})
+    .expect(200);
+}
 
 describe("Tenant-scoped support console sections", () => {
   it("gates list endpoints: unauthenticated 401, MEMBER 403, OWNER/ADMIN/SUPPORT 200", async () => {
@@ -71,13 +104,41 @@ describe("Tenant-scoped support console sections", () => {
       expect(Array.isArray(res.body.data[Object.keys(res.body.data)[0]])).toBe(true);
     }
 
-    // SUPPORT -> 200
+    // SUPPORT with no grant -> 403. The console opens for them; these
+    // screens do not, because this is where the customer's records are.
+    for (const ep of endpoints) {
+      await request(app).get(`/api/v1/support${ep}`)
+        .set(authHeader(supportLogin.accessToken))
+        .expect(403);
+    }
+
+    // SUPPORT with an approved grant -> 200.
+    await grantInvestigation(owner, supportLogin.accessToken);
     for (const ep of endpoints) {
       const res = await request(app).get(`/api/v1/support${ep}`)
         .set(authHeader(supportLogin.accessToken))
         .expect(200);
       expect(Array.isArray(res.body.data[Object.keys(res.body.data)[0]])).toBe(true);
     }
+  });
+
+  it("opens the console for an invited SUPPORT seat that holds no grant", async () => {
+    const owner = await registerUser(app, { email: `sec-open-o-${Date.now()}@zoiko.test` });
+    const support = await registerUser(app, { email: `sec-open-s-${Date.now()}@zoiko.test` });
+    await request(app).post("/api/v1/membership/members").set(authHeader(owner.accessToken))
+      .send({ email: support.email, role: "SUPPORT" }).expect(201);
+    const supportLogin = await loginUser(app, support.email, support.password, owner.tenantId);
+
+    // The other half of the split, and the reason it is workable: a seat
+    // with no grant still lands somewhere useful instead of a wall of 403s.
+    const res = await request(app).get("/api/v1/support/overview")
+      .set(authHeader(supportLogin.accessToken))
+      .expect(200);
+
+    // Counts, but none of the records behind them.
+    expect(res.body.data.stats).toBeTruthy();
+    expect(res.body.data.audit).toEqual([]);
+    expect(res.body.data.issues).toEqual([]);
   });
 
   it("exposes tenant overview at GET /support/tenant for OWNER/ADMIN/SUPPORT", async () => {
@@ -93,6 +154,12 @@ describe("Tenant-scoped support console sections", () => {
     expect(ownerRes.body.data.tenant.id).toBe(owner.tenantId);
     expect(ownerRes.body.data.tenant.name).toBe("Overview Tenant");
 
+    // Refused for a support seat until the Owner approves, then answered.
+    await request(app).get("/api/v1/support/tenant")
+      .set(authHeader(supportLogin.accessToken))
+      .expect(403);
+
+    await grantInvestigation(owner, supportLogin.accessToken);
     const supportRes = await request(app).get("/api/v1/support/tenant")
       .set(authHeader(supportLogin.accessToken))
       .expect(200);
@@ -109,6 +176,11 @@ describe("Tenant-scoped support console sections", () => {
     // list is forced to the session's tenant regardless of what the caller
     // asks for.
     const supportALogin = await loginUser(app, supportA.email, supportA.password, ownerA.tenantId);
+
+    // A grant, so this test proves isolation rather than re-proving the
+    // gate. A seat refused at the door tells us nothing about whether the
+    // door leads to the right room.
+    await grantInvestigation(ownerA, supportALogin.accessToken);
 
     // Seed data in tenant B
     await prisma.suppressionEntry.create({

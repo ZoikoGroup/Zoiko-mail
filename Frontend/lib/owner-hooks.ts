@@ -53,6 +53,13 @@ import {
   type ConnectorProvider,
   type RequestExportInput,
   type RequestDeletionInput,
+  fetchSupportAccessRequests,
+  approveSupportAccessRequest,
+  denySupportAccessRequest,
+  type SupportRequestStatus,
+  getSecurityAlerts,
+  reviewSecurityAlert,
+  type AlertReviewAction,
 } from "./owner-api";
 import {
   getSupportGrants,
@@ -406,6 +413,74 @@ export function useConfirmDeletion() {
   });
 }
 
+/* ─── Support access requests — Runbook §7 ──────────────────────────────── */
+
+/**
+ * Polled, because a request arrives while nobody is looking at this screen
+ * and a support member is blocked until it is answered.
+ */
+export function useSupportAccessRequests(status?: SupportRequestStatus) {
+  return useQuery({
+    queryKey: ["support-access-requests", status ?? "all"],
+    queryFn: () => fetchSupportAccessRequests(status),
+    staleTime: 15_000,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+  });
+}
+
+export function useApproveSupportAccess() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { requestId: string; stepUpToken?: string; minutes?: number }) =>
+      approveSupportAccessRequest(v.requestId, v.stepUpToken, v.minutes),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["support-access-requests"] });
+      // Approving writes a grant, so the grants list is stale too. The key
+      // is main's ["owner", "support-grants"], not the bare one this branch
+      // guessed at while that list did not exist yet — an approval that
+      // left the grants table showing the old rows would look like it had
+      // silently failed.
+      void qc.invalidateQueries({ queryKey: ["owner", "support-grants"] });
+    },
+  });
+}
+
+export function useDenySupportAccess() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { requestId: string; note?: string }) =>
+      denySupportAccessRequest(v.requestId, v.note),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["support-access-requests"] });
+    },
+  });
+}
+
+// ─── Security alerts ─────────────────────────────────────────────────────────
+
+export function useSecurityAlerts() {
+  return useQuery({
+    queryKey: ["owner", "security-alerts"],
+    queryFn: getSecurityAlerts,
+    staleTime: 15_000,
+  });
+}
+
+/**
+ * Deciding on an alert. Invalidating on success is what keeps the filter
+ * tallies and the open count honest without a reload — they come down with
+ * the rows rather than being counted in the browser.
+ */
+export function useReviewSecurityAlert() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, action, note }: { id: string; action: AlertReviewAction; note?: string }) =>
+      reviewSecurityAlert(id, action, note),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "security-alerts"] }),
+  });
+}
+
 // ─── Support Access Grants ───────────────────────────────────────────────────
 
 export function useSupportGrants() {
@@ -428,6 +503,10 @@ export function useRevokeSupportGrant() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (grantId: string) => revokeSupportGrant(grantId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "support-grants"] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["owner", "support-grants"] });
+      // Ending a grant also settles the request it came from.
+      void qc.invalidateQueries({ queryKey: ["support-access-requests"] });
+    }
   });
 }

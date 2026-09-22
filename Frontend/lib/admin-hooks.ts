@@ -15,48 +15,50 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  activateDomain,
+  addDomain,
+  assignToGroup,
+  cancelInvitation,
+  createAlias,
+  createForwarding,
+  createGroup,
+  createMailbox,
+  deleteAlias,
+  deleteForwarding,
+  deleteMailbox,
+  exportAuditEvents,
   fetchActiveSupportGrant,
   fetchAuditEvents,
-  exportAuditEvents,
   fetchCommitments,
   fetchConnectors,
   fetchDashboard,
-  fetchDomains,
   fetchDomainChecks,
-  addDomain,
-  recheckDomain,
-  activateDomain,
-  removeDomain,
-  fetchGroups,
+  fetchDomains,
   fetchGroupAssignees,
-  createGroup,
-  assignToGroup,
-  removeFromGroup,
+  fetchGroups,
   fetchInvitations,
-  previewInvitation,
-  sendInvitation,
-  updateWorkspaceSettings,
+  fetchMailboxRouting,
   fetchMailboxes,
-  createMailbox,
-  deleteMailbox,
-  setMailboxSending,
   fetchMembers,
   fetchNotifications,
   fetchPolicies,
-  savePolicyRules,
+  fetchSecurityAlerts,
   fetchSettings,
   fetchSyncErrors,
-  setMailboxAi,
-  updateMember,
-  removeMember,
-  cancelInvitation,
   markNotificationRead,
+  previewInvitation,
+  recheckDomain,
+  removeDomain,
+  removeFromGroup,
+  removeMember,
   replayDeadLetter,
-  fetchMailboxRouting,
-  createAlias,
-  deleteAlias,
-  createForwarding,
-  deleteForwarding,
+  reviewSecurityAlert,
+  savePolicyRules,
+  sendInvitation,
+  setMailboxAi,
+  setMailboxSending,
+  updateMember,
+  updateWorkspaceSettings
 } from "./admin-queries";
 import type {
   AuditPage,
@@ -69,13 +71,14 @@ import type {
 import { useUnreadCounts } from "./mail-hooks";
 import { CAPABILITY_MATRIX, GUARDRAILS } from "./admin-api";
 import type {
+  AlertReviewAction,
   AuditEventDto,
   CapabilityGroupDto,
   CommitmentDto,
   ConnectorDto,
   DashboardDto,
-  DomainDto,
   DomainCheckDto,
+  DomainDto,
   GroupDto,
   GuardrailDto,
   InvitationDto,
@@ -83,8 +86,9 @@ import type {
   MemberDto,
   MembershipRole,
   NotificationDto,
-  PolicyDto,
   PolicyConditionDto,
+  PolicyDto,
+  SecurityAlertListResponse,
   SettingsDto,
   SupportGrantDto,
   SyncErrorDto,
@@ -707,4 +711,27 @@ export function useSetMailboxSending() {
       reason?: string;
     }) => setMailboxSending(mailboxId, { suspended, reason })
   );
+}
+
+/* ── security alerts ───────────────────────────────────────────────────── */
+
+export function useSecurityAlerts(): QueryLike<SecurityAlertListResponse> {
+  return shape(
+    useQuery({ queryKey: ["security-alerts"], queryFn: fetchSecurityAlerts, ...LIVE })
+  );
+}
+
+/**
+ * Owner/admin decision on an alert. Refreshing the inbox after a review keeps
+ * the row's badge and the rail count honest without a reload.
+ */
+export function useReviewSecurityAlert() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, action, note }: { id: string; action: AlertReviewAction; note?: string }) =>
+      reviewSecurityAlert(id, action, note),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["security-alerts"] });
+    },
+  });
 }

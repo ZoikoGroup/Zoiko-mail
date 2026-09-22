@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { ApiError } from "@/lib/api-client";
 import {
@@ -155,34 +156,24 @@ function useList<T>(
   key: string,
 ) {
   const [params, setParams] = useState<PlatformListParams>({ limit: 50 });
-  const [rows, setRows] = useState<T[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [tick, setTick] = useState(0);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    fetchFn(params)
-      .then((res) => {
-        if (!cancelled) setRows(res[key] ?? []);
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          setRows([]);
-          setError(apiErrorMessage(e));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [fetchFn, key, params, tick]);
+  // On the shared query cache, as the tenant console's identical hook is.
+  // Six pages reach this one, and with bespoke state each refetched from
+  // scratch whenever the operator moved between tabs — during an incident,
+  // which is when people move between tabs most. `key` names the array in
+  // the response envelope and namespaces the cache entry with it.
+  const query = useQuery({
+    queryKey: ["support", "platform-list", key, params],
+    queryFn: () => fetchFn(params),
+    staleTime: 15_000,
+    // Keeps the current page on screen while the next loads, so changing a
+    // filter does not blank the table and jump the scroll position.
+    placeholderData: (prev) => prev,
+  });
 
-  const reload = useCallback(() => setTick((t) => t + 1), []);
+  const reload = useCallback(() => {
+    void query.refetch();
+  }, [query]);
 
   // Runbook §5 sets a fifteen-minute initial response for a P0, which a
   // screen that only loads once cannot support: the operator would have to
@@ -190,7 +181,22 @@ function useList<T>(
   // this console keeps itself current, and pauses while the tab is hidden.
   useLiveRefresh(reload);
 
-  return { params, setParams, rows, loading, error, reload };
+  // placeholderData keeps the previous page on screen while the next loads,
+  // which is right for a filter change and wrong for a refusal: a grant that
+  // has just expired would leave the customer's rows sitting under the error
+  // banner. §7 makes the expiry the control, so a failed read shows nothing.
+  // The bespoke fetch this replaced cleared its rows on error; keeping that
+  // was not optional.
+  const rows = query.error ? [] : ((query.data?.[key] ?? []) as T[]);
+
+  return {
+    params,
+    setParams,
+    rows,
+    loading: query.isLoading,
+    error: query.error ? apiErrorMessage(query.error) : null,
+    reload,
+  };
 }
 
 // ---------------------------------------------------------------------------

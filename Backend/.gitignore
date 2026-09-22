@@ -11,3 +11,11 @@ coverage/
 storage/
 # Local writable secret store (connector OAuth tokens) — never commit.
 .secrets/
+
+# A local Python virtualenv. Nothing here is Python — no .py files, no
+# requirements.txt — so it is a scratch environment rather than part of
+# the build. It sits under Backend/ because the repository is meant to be
+# two folders, which is also why this rule lives here rather than in a
+# root .gitignore.
+venv/
+.venv/

@@ -121,6 +121,13 @@ class GmailConnector {
       include: { membership: { include: { mailbox: true, user: { select: { id: true } } } } },
     });
     if (!account) throw new AppError("Connected account not found", 404, ErrorCodes.NOT_FOUND);
+    if (!account.membership) {
+      throw new AppError(
+        "This connection belongs to the workspace rather than to a person, so it has no mailbox to sync into.",
+        409,
+        ErrorCodes.CONFLICT
+      );
+    }
     const mailbox = account.membership.mailbox;
     if (!mailbox) throw new AppError("Gmail account has no mailbox to sync into", 409, ErrorCodes.CONFLICT);
 

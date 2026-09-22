@@ -297,7 +297,10 @@ export default function TicketsPage({ mode = "staff" }: { mode?: "staff" | "tena
                     <td>
                       <span className={`pill ${statusTone(t.status)}`}>{t.status.replace("_", " ")}</span>
                     </td>
-                    <td className={t.slaOverdue ? "crit" : "muted"}>{t.slaOverdue ? "overdue" : dueIn(t.slaDueAt)}</td>
+                    <td className={t.slaOverdue ? "crit" : "muted"} title={t.slaTarget ? `Target: ${t.slaTarget}` : undefined}>
+                      {t.slaOverdue ? "overdue" : dueIn(t.slaDueAt)}
+                      {t.slaTarget && <span className="muted"> · {t.slaTarget}</span>}
+                    </td>
                     {!isTenant && <td>{t.assignedStaff?.displayName ?? t.assignedStaff?.email ?? <span className="muted">Unassigned</span>}</td>}
                     <td className="muted">{ago(t.updatedAt)}</td>
                   </tr>
@@ -560,7 +563,11 @@ function TicketDetail({ ticketId, tenant = false, onBack }: { ticketId: string; 
     if (!ticket?.slaDueAt) return null;
     const due = new Date(ticket.slaDueAt).getTime();
     const overdue = due < Date.now() && ticket.status !== "RESOLVED" && ticket.status !== "CLOSED";
-    return { label: fmt(ticket.slaDueAt), overdue };
+    // The target in the runbook's own words — "15 minutes", "4 business
+    // hours". A due time on its own states a deadline without the promise it
+    // came from, so nobody reading the queue can tell a tight one from a
+    // generous one.
+    return { label: fmt(ticket.slaDueAt), overdue, target: ticket.slaTarget ?? null };
   }, [ticket]);
 
   if (loading && !ticket) {
@@ -733,7 +740,9 @@ function TicketDetail({ ticketId, tenant = false, onBack }: { ticketId: string; 
             <div className="kv">
               <span>SLA due</span>
               <span style={{ color: sla?.overdue ? "var(--crit)" : undefined }}>
-                {sla ? `${sla.label}${sla.overdue ? " · overdue" : ""}` : "—"}
+                {sla
+                  ? `${sla.label}${sla.target ? ` · target ${sla.target}` : ""}${sla.overdue ? " · overdue" : ""}`
+                  : "—"}
               </span>
             </div>
             <div className="kv">

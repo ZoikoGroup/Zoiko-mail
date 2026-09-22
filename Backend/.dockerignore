@@ -8,3 +8,9 @@ storage
 coverage
 .tmp_arch_review
 *.log
+
+# A Python virtualenv lives here now that the repository is two folders.
+# Nothing in the image needs it, and 22MB of it in the build context is
+# 22MB uploaded to the daemon on every build.
+venv
+.venv

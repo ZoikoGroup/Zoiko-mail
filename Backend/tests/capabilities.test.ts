@@ -62,6 +62,18 @@ const SPEC_ADMIN_CAPABILITIES: Capability[] = [
   // check could not make.
   "support.console.read",
   "support.grant.read",
+  // Restored with the security-alert module that PR #35 dropped. Admin is
+  // "the bounded operator" and triaging a security signal is operator work
+  // — both screens shipped for Admin as well as Owner. Read sits beside
+  // audit.read; review is named separately because dismissing a signal is a
+  // decision and ought to be attributable.
+  "security-alert.read",
+  "security-alert.review",
+  // The diagnostics half of the support console, split out of
+  // support.console.read so the console can open on the Owner's invitation
+  // while the customer's records behind it stay time-boxed. ALLOW for an
+  // Admin: it is their own workspace.
+  "support.workspace.investigate",
 ];
 
 const activeAdmin = { role: "ADMIN" as const, membershipActive: true };
@@ -316,8 +328,8 @@ describe("vocabulary integrity", () => {
     expect(orphans).toEqual([]);
   });
 
-  it("declares thirty-nine capabilities", () => {
-    expect(CAPABILITIES).toHaveLength(39);
-    expect(new Set(CAPABILITIES).size).toBe(39);
+  it("declares forty-two capabilities", () => {
+    expect(CAPABILITIES).toHaveLength(42);
+    expect(new Set(CAPABILITIES).size).toBe(42);
   });
 });

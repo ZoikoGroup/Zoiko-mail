@@ -164,8 +164,11 @@ export default function GeneralSettingsPage() {
 
   const handleRegenerateRecoveryCodes = async () => {
     if (!regenCode) return;
-    const codes = await regenerateRecoveryCodes.mutateAsync(regenCode);
-    setShowRecoveryCodes(codes);
+    // The endpoint answers { recoveryCodes }, and this state holds the
+    // array. Passing the envelope straight through would have rendered
+    // nothing — .map on an object — had it ever compiled.
+    const { recoveryCodes } = await regenerateRecoveryCodes.mutateAsync(regenCode);
+    setShowRecoveryCodes(recoveryCodes);
     setRegenCode("");
   };
 
@@ -476,7 +479,6 @@ export default function GeneralSettingsPage() {
                       </div>
                     </div>
                   </div>
-                </div>
               ) : (
                 <div className="space-y-4">
                   <div className="rounded-lg bg-[var(--warn-soft)] p-4">
@@ -553,8 +555,9 @@ export default function GeneralSettingsPage() {
                       </div>
 </div>
                   )}
-            )}
-          )}
+                </div>
+              )
+            ) : null}
         </div>
 
         {error && (
