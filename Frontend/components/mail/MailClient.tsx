@@ -45,6 +45,8 @@ import {
   SlidersHorizontal, MailCheck,
 } from "lucide-react";
 import { AttachmentList } from "@/components/mail/AttachmentPreview";
+import { Sparkles, BrainCircuit } from "lucide-react";
+import { useCreateAiAction } from "@/lib/ai-hooks";
 
 const FOLDERS: { key: MailFolder; label: string; icon: any }[] = [
   { key: "INBOX", label: "Inbox", icon: Inbox },
@@ -219,8 +221,8 @@ export function MailClient() {
                   key={f.key}
                   onClick={() => switchFolder(f.key)}
                   className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition ${active
-                      ? "bg-[var(--accent-soft)] font-medium text-[var(--accent-ink)]"
-                      : "text-[var(--ink2)] hover:bg-[var(--s2)]"
+                    ? "bg-[var(--accent-soft)] font-medium text-[var(--accent-ink)]"
+                    : "text-[var(--ink2)] hover:bg-[var(--s2)]"
                     }`}
                 >
                   <Icon className="h-4 w-4 shrink-0" /> {f.label}
@@ -253,8 +255,8 @@ export function MailClient() {
                 key={f.key}
                 onClick={() => switchFolder(f.key)}
                 className={`shrink-0 rounded-full px-3 py-1 text-xs transition ${folder === f.key
-                    ? "bg-[var(--accent)] text-white"
-                    : "bg-[var(--surface)] text-[var(--ink2)] ring-1 ring-inset ring-[var(--border)]"
+                  ? "bg-[var(--accent)] text-white"
+                  : "bg-[var(--surface)] text-[var(--ink2)] ring-1 ring-inset ring-[var(--border)]"
                   }`}
               >
                 {f.label}
@@ -615,6 +617,8 @@ function ReadingPane({
   const { data: labels = [] } = useMailLabels();
   const assignLabel = useAssignLabel();
   const removeLabel = useRemoveLabel();
+  const createAiAction = useCreateAiAction();
+  const [aiTriggered, setAiTriggered] = useState<string | null>(null);
 
   // Mark read on open (once we have the item and it's unread).
   const isUnread = item && !item.isRead;
@@ -681,7 +685,7 @@ function ReadingPane({
           <DropdownMenu
             trigger={
               <span className="zoiko-btn sm">
-                <Tag className="h-4 w-4" /> <span className="hidden sm:inline">Labels</span>
+                <Tag className="h-3 w-3" /> <span className="hidden sm:inline">Labels</span>
               </span>
             }
           >
@@ -709,6 +713,33 @@ function ReadingPane({
               );
             })}
           </DropdownMenu>
+          {/* <button onClick={() => onCompose("reply", item)} className="zoiko-btn sm" title="Reply">
+            <Reply className="h-4 w-4" /> <span className="hidden sm:inline">Reply</span>
+          </button>
+          <button onClick={() => onCompose("replyAll", item)} className="zoiko-btn sm" title="Reply all">
+            <ReplyAll className="h-4 w-4" />
+          </button>
+          <button onClick={() => onCompose("forward", item)} className="zoiko-btn sm" title="Forward">
+            <Forward className="h-4 w-4" />
+          </button> */}
+          {folder === "DRAFTS" && (
+            <>
+              <button
+                onClick={async () => {
+                  const { sendDraft } = await import("@/lib/mail-api");
+                  await sendDraft(messageId);
+                  onClose();
+                }}
+                className="zoiko-btn sm pri"
+                title="Send this draft now"
+              >
+                <Send className="h-4 w-4" />
+                <span className="hidden sm:inline">Send</span>
+              </button>
+              <div className="mx-1 h-5 w-px bg-[var(--border)]" />
+            </>
+          )}
+
           <button onClick={() => onCompose("reply", item)} className="zoiko-btn sm" title="Reply">
             <Reply className="h-4 w-4" /> <span className="hidden sm:inline">Reply</span>
           </button>
@@ -718,6 +749,45 @@ function ReadingPane({
           <button onClick={() => onCompose("forward", item)} className="zoiko-btn sm" title="Forward">
             <Forward className="h-4 w-4" />
           </button>
+
+          {/* AI Actions */}
+          <div className="mx-1 h-5 w-px bg-[var(--border)]" /> {/* separator */}
+          <button
+            onClick={() => {
+              setAiTriggered("extract");
+              createAiAction.mutate(
+                { actionType: "COMMITMENT_EXTRACTION", messageId, threadId: m.threadId ?? undefined },
+                { onSettled: () => setTimeout(() => setAiTriggered(null), 3000) }
+              );
+            }}
+            disabled={createAiAction.isPending}
+            className="zoiko-btn sm"
+            title="Extract actions (commitments, deadlines, approvals)"
+          >
+            <Sparkles className="h-4 w-4" />
+            <span className="hidden sm:inline">
+              {aiTriggered === "extract" ? "Sent to AI ✓" : "Extract"}
+            </span>
+          </button>
+          <button
+            onClick={() => {
+              setAiTriggered("draft");
+              createAiAction.mutate(
+                // { actionType: "DRAFT", messageId, threadId: m.threadId ?? undefined },
+                { actionType: "REPLY_OWED", messageId, threadId: m.threadId ?? undefined },
+                { onSettled: () => setTimeout(() => setAiTriggered(null), 3000) }
+              );
+            }}
+            disabled={createAiAction.isPending}
+            className="zoiko-btn sm"
+            title="AI draft reply"
+          >
+            <BrainCircuit className="h-4 w-4" />
+            <span className="hidden sm:inline">
+              {aiTriggered === "draft" ? "Drafting ✓" : "AI Draft"}
+            </span>
+          </button>
+
         </div>
       </div>
 

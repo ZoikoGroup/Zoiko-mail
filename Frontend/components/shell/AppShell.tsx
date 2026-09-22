@@ -17,6 +17,7 @@ import type { MeResponse } from "@/lib/auth-api";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { DASHBOARD_ITEM, MEMBER_NAV, sectionsFor } from "@/lib/nav";
 import { resolveWorkspaceHref, workspaceDenialNotice } from "@/lib/workspace";
+import { NetworkBanner } from "@/components/ui/NetworkBanner";
 
 /** This shell is the member workspace; only sessions opened for it belong. */
 const MEMBER_WORKSPACE = "MEMBER" as const;
@@ -148,6 +149,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* Main column */}
       <div className="flex min-w-0 flex-1 flex-col">
+        <NetworkBanner />
         <header className="flex items-center gap-3 border-b border-[var(--border)] bg-[var(--surface)] px-4 py-3 sm:px-6">
           <button
             onClick={() => setMobileOpen(true)}
