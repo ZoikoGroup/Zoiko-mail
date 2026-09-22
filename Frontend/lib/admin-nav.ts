@@ -74,7 +74,17 @@ export const ADMIN_NAV: AdminNavGroup[] = [
     items: [
       { label: "Roles & permissions", href: "/admin/permissions", icon: KeyRound },
       { label: "Policies", href: "/admin/policies", icon: ShieldCheck, capability: "policy.write" },
-      { label: "Provider sync", href: "/admin/provider-sync", icon: RefreshCw },
+      // Gated: this reads every connected account in the workspace, which is
+      // what /connectors/admin serves behind workspace.mailboxes.manage. The
+      // other three entries in this file are deliberately ungated — a
+      // dashboard, a read-only permissions reference and a notification list
+      // show the caller only what they already hold.
+      {
+        label: "Provider sync",
+        href: "/admin/provider-sync",
+        icon: RefreshCw,
+        capability: "workspace.mailboxes.manage",
+      },
       { label: "Audit logs", href: "/admin/audit", icon: FileText, capability: "audit.read" },
       // Beside the audit log because they answer the same question from
       // opposite ends: the log is everything, an alert is what needs a

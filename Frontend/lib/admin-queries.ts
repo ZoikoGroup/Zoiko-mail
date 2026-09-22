@@ -1180,6 +1180,25 @@ export async function updateMember(
 }
 
 /** Remove someone from the workspace. The account survives; the membership does not. */
+/**
+ * Clear a member's authenticator so they can enrol a new one.
+ *
+ * Step-up per RBAC §2, and Owner-only — the capability appears in no other
+ * role's row. Deliberately not called "disable": the factor is not removed
+ * from the account, it is re-established under the member's own control at
+ * their next sign-in. A reset that left them reachable without a factor
+ * would be the silent MFA bypass Security §11 forbids.
+ */
+export async function resetMemberMfa(
+  membershipId: string,
+  stepUpToken?: string
+): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>(
+    `/membership/members/${encodeURIComponent(membershipId)}/mfa/reset`,
+    { method: "POST", stepUpToken }
+  );
+}
+
 export async function removeMember(membershipId: string): Promise<void> {
   await apiRequest(`/membership/members/${membershipId}`, { method: "DELETE" });
 }
@@ -1306,6 +1325,10 @@ export async function reviewSecurityAlert(
 ): Promise<void> {
   await apiRequest(`/security-alerts/${id}/review`, {
     method: "POST",
-    body: JSON.stringify({ action, ...(note ? { note } : {}) }),
+    // apiRequest stringifies the body itself, so passing a string here
+    // double-encoded it: the server received a JSON *string* where it
+    // expected an object, and the review never applied. Caught by driving
+    // the screen in a browser rather than by reading the call.
+    body: { action, ...(note ? { note } : {}) },
   });
 }

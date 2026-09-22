@@ -72,6 +72,13 @@ async function signIn(
   await page.route(`${API}/users/me/capabilities`, (route) =>
     route.fulfill(json({ capabilities, decisions: [] }))
   );
+  // The console opens on Tickets, so this is the first thing it reads. The
+  // catch-all's generic envelope has no `tickets`, which is a fixture gap
+  // rather than a product one — but it blanked the whole console, which is
+  // why TicketsPage now defaults the list rather than trusting the shape.
+  await page.route(`${API}/support/tickets*`, (route) =>
+    route.fulfill(json({ tickets: [], ticketCounts: {} }))
+  );
 
   await page.goto("/login");
   await page.getByPlaceholder("john@example.com").fill(session.user.email);
@@ -126,6 +133,21 @@ async function grantConsole(page: Page, over: Record<string, unknown> = {}) {
   );
 }
 
+
+/**
+ * Reach the diagnostics half of the console.
+ *
+ * The console lands on Tickets on purpose: a seat holding no grant still has
+ * its queue, which is what makes the console/investigate split workable
+ * rather than a wall of refusals. Everything below that tab is a click away.
+ */
+async function openOverview(page: Page) {
+  await page.getByRole("button", { name: /Workspace Overview/i }).first().click({ timeout: 60_000 });
+  await expect(page.getByRole("heading", { name: "Workspace Overview" })).toBeVisible({
+    timeout: 60_000,
+  });
+}
+
 test.describe("the console renders for a granted seat", () => {
   test("shows the workspace it was granted, and the grant's own clock", async ({ page }) => {
     await signIn(page, "SUPPORT", ["support.console.read", "support.workspace.investigate"]);
@@ -135,7 +157,7 @@ test.describe("the console renders for a granted seat", () => {
 
     // The overview, not the request form — the difference between a seat
     // that holds access and one that does not.
-    await expect(page.getByRole("heading", { name: "Workspace Overview" })).toBeVisible({ timeout: 60_000 });
+    await openOverview(page);
     await expect(page.getByRole("heading", { name: /Ask for access/i })).toHaveCount(0);
 
     // §7 requires every grant to expire. A console that does not say when
@@ -149,7 +171,7 @@ test.describe("the console renders for a granted seat", () => {
     await signIn(page, "SUPPORT", ["support.console.read", "support.workspace.investigate"]);
     await grantConsole(page);
     await page.goto("/support");
-    await expect(page.getByRole("heading", { name: "Workspace Overview" })).toBeVisible({ timeout: 60_000 });
+    await openOverview(page);
 
     for (const label of ["Configuration", "Mailboxes", "Domains", "Audit Logs"]) {
       await expect(page.getByRole("button", { name: new RegExp(label, "i") }).first()).toBeVisible();
@@ -193,7 +215,7 @@ test.describe("the boundary around it", () => {
     const sent = await signIn(page, "SUPPORT", ["support.console.read", "support.workspace.investigate"]);
     await grantConsole(page);
     await page.goto("/support");
-    await expect(page.getByRole("heading", { name: "Workspace Overview" })).toBeVisible({ timeout: 60_000 });
+    await openOverview(page);
 
     // Tenant scoping is the server's job, but the tenant console must not be
     // reaching for the fleet-wide routes in the first place — those are
@@ -246,9 +268,7 @@ test.describe("the boundary around it", () => {
     );
 
     await page.goto("/support");
-    await expect(page.getByRole("heading", { name: "Workspace Overview" })).toBeVisible({
-      timeout: 60_000,
-    });
+    await openOverview(page);
     await page.getByRole("button", { name: /Jobs/i }).first().click();
     await expect(page.getByText("PROVIDER_TIMEOUT").first()).toBeVisible();
 
@@ -330,7 +350,7 @@ test.describe("reading inside a mailbox", () => {
     );
 
     await page.goto("/support");
-    await expect(page.getByRole("heading", { name: "Workspace Overview" })).toBeVisible({ timeout: 60_000 });
+    await openOverview(page);
     await page.getByRole("button", { name: /Mailboxes/i }).first().click();
 
     await expect(page.getByText("devon@acme.test").first()).toBeVisible();
@@ -399,7 +419,7 @@ test.describe("reading inside a mailbox", () => {
     );
 
     await page.goto("/support");
-    await expect(page.getByRole("heading", { name: "Workspace Overview" })).toBeVisible({ timeout: 60_000 });
+    await openOverview(page);
     await page.getByRole("button", { name: /Mailboxes/i }).first().click();
     await page.getByRole("button", { name: "Open" }).first().click();
 

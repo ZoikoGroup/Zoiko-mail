@@ -137,7 +137,11 @@ export default function TicketsPage({ mode = "staff" }: { mode?: "staff" | "tena
       : listPlatformTickets(params)
     )
       .then((res) => {
-        if (!cancelled) setRows(res.tickets);
+        // `?? []` rather than trusting the envelope. This component is the
+        // support console's landing tab, so a response without `tickets` —
+        // a proxy error page, a shape change, a stubbed call — took the
+        // whole console blank rather than this one list empty.
+        if (!cancelled) setRows(res.tickets ?? []);
       })
       .catch((e) => {
         if (!cancelled) {

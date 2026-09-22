@@ -877,7 +877,11 @@ export async function reviewSecurityAlert(
 ): Promise<void> {
   await apiRequest(`/security-alerts/${id}/review`, {
     method: "POST",
-    body: JSON.stringify({ action, ...(note ? { note } : {}) }),
+    // apiRequest stringifies the body itself, so passing a string here
+    // double-encoded it: the server received a JSON *string* where it
+    // expected an object, and the review never applied. Caught by driving
+    // the screen in a browser rather than by reading the call.
+    body: { action, ...(note ? { note } : {}) },
   });
 }
 

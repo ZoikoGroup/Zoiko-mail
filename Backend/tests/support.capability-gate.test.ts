@@ -22,13 +22,14 @@ const app = createApp();
  * member the Owner personally invited into this workspace as SUPPORT, whose
  * membership is active. It stays out of a plain MEMBER's reach entirely.
  *
- * The grant system is not bypassed, it is aimed: `support.standing` and
- * `support.workspace.access` keep their GRANT rows — the platform-side,
- * cross-tenant paths that must stay time-boxed — and the diagnostics
- * endpoint verifies the grant header for itself. An invited seat reads its
- * own workspace by membership; grants exist to approve diagnostics. These
- * tests pin the one change: an accepted SUPPORT invitation, and not a
- * separate grant, is what opens the tenant-scoped console.
+ * The grant system is not bypassed, it is aimed. Reading the workspace you
+ * were invited into is open; the paths that must stay time-boxed still are.
+ * `support.mailbox.reset` — the one write a seat holds — keeps its GRANT row
+ * and its own MAILBOX_ADMIN scope, the cross-tenant platform routes are
+ * gated by requireTenantGrant, and the diagnostics endpoint verifies the
+ * grant header for itself. These tests pin the one change: an accepted
+ * SUPPORT invitation, and not a separate grant, is what opens the
+ * tenant-scoped console.
  */
 
 async function supportSeat(owner: RegisteredUser, email: string) {

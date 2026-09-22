@@ -52,6 +52,7 @@ import {
   removeFromGroup,
   removeMember,
   replayDeadLetter,
+  resetMemberMfa,
   reviewSecurityAlert,
   savePolicyRules,
   sendInvitation,
@@ -732,6 +733,24 @@ export function useReviewSecurityAlert() {
       reviewSecurityAlert(id, action, note),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["security-alerts"] });
+    },
+  });
+}
+
+/**
+ * Clearing a member's authenticator.
+ *
+ * Invalidates the roster because the row's MFA state is part of what it
+ * shows, and ending their sessions changes nothing visible until the list
+ * is re-read.
+ */
+export function useResetMemberMfa() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { membershipId: string; stepUpToken?: string }) =>
+      resetMemberMfa(v.membershipId, v.stepUpToken),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["members"] });
     },
   });
 }

@@ -4,7 +4,7 @@ import { Router } from "express";
 import { authenticate, idempotency, authenticateStaff, requireCapability, requireRole, requireSupportAccess, requireTenantGrant, logSupportAccess, logTenantSupportAccess, tenantContext, validate, crossTenantScope} from "../../common/middleware/index.js";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
-import { approveRequestSchema, createGrantSchema, denyRequestSchema, domainParamSchema, grantIdSchema, jobIdSchema, listRequestsSchema, mailboxMessagesParamsSchema, mailboxMessagesQuerySchema, mailboxParamSchema, platformListQuerySchema, requestAccessSchema, requestIdSchema, tenantParamSchema } from "./support.schema.js";
+import { approveRequestSchema, createGrantSchema, denyRequestSchema, domainParamSchema, grantIdSchema, jobIdSchema, listRequestsSchema, mailboxMessagesParamsSchema, mailboxMessagesQuerySchema, mailboxParamSchema, platformListQuerySchema, requestAccessSchema, requestIdSchema, resetMailboxSettingSchema, supportDeletionRequestSchema, tenantParamSchema } from "./support.schema.js";
 import { supportService } from "./support.service.js";
 
 export const supportRouter = Router();
@@ -200,6 +200,52 @@ supportRouter.get("/configuration", requireCapability("support.workspace.investi
  * nobody else in any form, so an Owner calling this is refused as firmly
  * as a stranger. The service scopes every read to the caller's own tenant.
  */
+/**
+ * RBAC §11.1 "Reset mailbox setting (support)" — ⏱ grant, "if requested and
+ * audited". The one write a support seat holds, behind its own capability
+ * and its own MAILBOX_ADMIN scope so an owner approving a delivery
+ * investigation has not also approved editing what it found.
+ */
+supportRouter.post(
+  "/mailboxes/:mailboxId/reset-setting",
+  requireCapability("support.mailbox.reset"),
+  validate(mailboxMessagesParamsSchema, "params"),
+  validate(resetMailboxSettingSchema),
+  asyncHandler(async (req, res) => {
+    const c = req.tenantContext!;
+    sendSuccess(res, 200, await supportService.resetMailboxSetting({
+      tenantId: c.tenantId,
+      mailboxId: String(req.params.mailboxId),
+      actorUserId: c.userId,
+      setting: req.body.setting,
+      reason: req.body.reason,
+    }), req.requestId);
+  })
+);
+
+/**
+ * RBAC §2 "Request deletion: Support = Workflow".
+ *
+ * Support starts it; the Owner decides it. The row lands PENDING and the
+ * existing Owner-only lifecycle chain — approve, schedule, confirm — is
+ * untouched, which is what makes this a workflow rather than a permission.
+ */
+supportRouter.post(
+  "/deletion-requests",
+  requireCapability("support.workspace.investigate"),
+  validate(supportDeletionRequestSchema),
+  asyncHandler(async (req, res) => {
+    const c = req.tenantContext!;
+    sendSuccess(res, 201, await supportService.requestDeletion({
+      tenantId: c.tenantId,
+      actorUserId: c.userId,
+      targetType: req.body.targetType,
+      targetId: req.body.targetId,
+      reason: req.body.reason,
+    }), req.requestId);
+  })
+);
+
 supportRouter.get(
   "/mailboxes/:mailboxId/messages",
   requireCapability("mail.other.read"),

@@ -16,9 +16,13 @@ describe("SUPPORT invitation", () => {
       .send({ email: candidate.email, role: "SUPPORT" })
       .expect(201);
 
-    expect(invited.body.data.role).toBe("SUPPORT");
-    expect(invited.body.data.status).toBe("INVITED");
-    expect(invited.body.invitationToken).toBeDefined();
-    expect(invited.body.expiresAt).toBeDefined();
+    // createInvitation returns { membership, invitationToken, expiresAt } and
+    // sendSuccess nests that under `data`, so every field sits one level
+    // deeper than a flat membership response would put it. Asserted against
+    // the shape the endpoint actually returns rather than an assumed one.
+    expect(invited.body.data.membership.role).toBe("SUPPORT");
+    expect(invited.body.data.membership.status).toBe("INVITED");
+    expect(invited.body.data.invitationToken).toBeDefined();
+    expect(invited.body.data.expiresAt).toBeDefined();
   });
 });

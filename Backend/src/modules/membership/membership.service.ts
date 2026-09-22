@@ -469,6 +469,91 @@ export class MembershipService {
     });
   }
 
+  /**
+   * Clear a member's authenticator so they can enrol a new one — RBAC §2
+   * "people.mfa.reset", Owner only, step-up.
+   *
+   * This is the one MFA path an administrator holds, and it is deliberately
+   * not `mfaService.disable`. Disable is self-service, requires a valid code
+   * from the device being removed, and refuses outright for a role AC-002
+   * covers — which is correct for someone who still has their authenticator
+   * and wrong for someone who has lost it. Losing the device is the whole
+   * reason this exists.
+   *
+   * What it does *not* do is turn MFA off. It removes the enrolled secret and
+   * the recovery codes, so the account's next sign-in lands on
+   * MFA_ENROLLMENT_REQUIRED and the member sets up a new authenticator before
+   * reaching anything. Security §11 forbids support staff quietly bypassing
+   * MFA; forcing re-enrolment is the opposite of a bypass — the factor is
+   * never absent, it is re-established under the member's own control.
+   *
+   * Live sessions are revoked with it. Leaving them alone would mean the
+   * window between "lost the device" and "enrolled a new one" is a window in
+   * which whoever holds the old session keeps working without a factor, and
+   * that window is exactly the one an attacker asking for a reset wants.
+   */
+  async resetMfa(
+    id: string,
+    context: ActorContext
+  ): Promise<{ membershipId: string; userId: string; email: string }> {
+    return prisma.$transaction(async (tx) => {
+      const target = await tx.tenantMembership.findFirst({
+        where: { id, tenantId: context.tenantId, status: { not: "REMOVED" } },
+        include: { user: { select: { id: true, email: true, mfaEnrolledAt: true } } },
+      });
+      if (!target) throw new AppError("Membership not found", 404, ErrorCodes.NOT_FOUND);
+
+      // The same ceiling every other member action observes: an Admin may
+      // not act on an Owner. Reset is if anything the most attractive
+      // action to abuse — it is the one that ends with somebody enrolling a
+      // new factor of their choosing.
+      assertAdminBoundary(context.role, target.role);
+
+      // Resetting your own is not an administrative act; it is the
+      // self-service path, and that one asks for a code you can only supply
+      // from the device you still have. Routing round it here would let a
+      // stolen session re-enrol itself.
+      if (target.userId === context.userId) {
+        throw new AppError(
+          "Use your own account settings to change your authenticator.",
+          409,
+          ErrorCodes.CONFLICT,
+          { reason: "SELF_RESET_NOT_ADMINISTRATIVE" }
+        );
+      }
+
+      if (!target.user.mfaEnrolledAt) {
+        throw new AppError(
+          "That member has no authenticator enrolled, so there is nothing to reset.",
+          409,
+          ErrorCodes.CONFLICT,
+          { reason: "MFA_NOT_ENROLLED" }
+        );
+      }
+
+      await tx.appUser.update({
+        where: { id: target.userId },
+        data: { mfaSecret: null, mfaEnrolledAt: null, mfaLastUsedStep: null },
+      });
+      await tx.mfaRecoveryCode.deleteMany({ where: { userId: target.userId } });
+      await tx.refreshToken.deleteMany({
+        where: { tenantId: context.tenantId, userId: target.userId },
+      });
+
+      await this.audit(tx, context, "MFA_RESET_BY_ADMIN", target.id, {
+        userId: target.userId,
+        email: target.user.email,
+        role: target.role,
+        // Says plainly what the member now has to do, so the row reads as a
+        // recovery rather than as a factor being removed.
+        outcome: "RE_ENROLMENT_REQUIRED",
+        sessionsRevoked: true,
+      });
+
+      return { membershipId: target.id, userId: target.userId, email: target.user.email };
+    });
+  }
+
   async remove(id: string, context: ActorContext): Promise<void> {
     await prisma.$transaction(async (tx) => {
       const target = await tx.tenantMembership.findFirst({

@@ -1,100 +1,170 @@
-# Zoiko Mail — Starter (Track A: Action Inbox)
+# Zoiko Mail — Web
 
-A runnable Next.js starting point for **Zoiko Mail**, the business-first email
-platform that turns communication into accountable work. This scaffold builds
-the **Action Inbox** — the Track A "first-ship" screen where AI-detected
-commitments, replies owed, approvals and deadlines are triaged by a human.
+The Next.js application. Four workspaces, one codebase: **Member**, **Admin**,
+**Owner** and **Support**.
 
-It demonstrates the two state patterns you'll use everywhere:
-
-- **TanStack Query** for *server state* (the commitments list, AI jobs).
-- **Zustand** for *client state* (active tenant, selected item, filter).
+> New to the project? Read the [root README](../README.md) first — it explains
+> tenants, capabilities and support grants, which most of this code assumes.
 
 ---
 
-## Quick start
+## Running it
 
 ```bash
 npm install
-npm run dev
+npm run dev          # http://localhost:3000
 ```
 
-Open http://localhost:3000
+The API base defaults to `http://localhost:5000/api/v1`, so if the backend is
+running you need no configuration at all. Override it in `.env.local`:
 
-No backend or API keys needed — a mock route at `app/api/commitments/route.ts`
-serves seed data so it runs immediately.
-
-> Node 18.18+ or 20+ recommended.
-> On Windows PowerShell the commands are the same: `npm install`, `npm run dev`.
-
----
-
-## What's inside
-
-```
-zoiko-mail-starter/
-├─ app/
-│  ├─ api/commitments/route.ts   # mock backend (replace with real API calls)
-│  ├─ globals.css                # Tailwind entry
-│  ├─ layout.tsx                 # root layout, wraps app in <Providers>
-│  ├─ providers.tsx              # TanStack Query provider (server state)
-│  └─ page.tsx                   # renders <ActionInbox />
-├─ components/
-│  └─ action-inbox.tsx           # the whole screen (list + detail drawer)
-├─ lib/
-│  ├─ types.ts                   # Commitment types (mirror the Data Model spec)
-│  ├─ store.ts                   # Zustand UI store (client state)
-│  └─ api.ts                     # fetch helpers (server state)
-├─ tailwind.config.ts            # brand color hooks + serif font slot
-├─ package.json
-└─ ...config files
+```bash
+NEXT_PUBLIC_API_URL=https://api.example.com/api/v1
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=...    # only for Google sign-in
 ```
 
----
-
-## Try these interactions
-
-- Click any card → the **detail drawer** shows the exact source email excerpt
-  and a "why flagged" rationale (this is the trust anchor from the specs).
-- **Confirm** / **Dismiss** → optimistic update through a TanStack Query
-  `useMutation` (see `action-inbox.tsx`). No page reload.
-- **Generate a draft** → mimics the async-AI pattern: POST returns `202`, then
-  the client polls until the job is `succeeded`. Every draft ends in a human
-  **Review & send** — the AI never sends on its own.
-- Filter chips and the selected card are driven by the **Zustand** store.
+| Script | What it does |
+|---|---|
+| `npm run dev` | Development server on port 3000 |
+| `npm run build` | Production build |
+| `npm run typecheck` | TypeScript, no emit |
+| `npm run lint` | Next.js lint |
+| `npm run test:e2e` | Playwright browser tests |
+| `npm run test:e2e:ui` | Step through them visually |
 
 ---
 
-## Wiring it to the real backend later
+## How it is organised
 
-1. In `lib/api.ts`, point `fetchCommitments` at the real endpoint and add:
-   - `Authorization: Bearer <zoiko_access_token>`
-   - `X-Zoiko-Tenant-ID: <tenantId>`
-   - `Idempotency-Key: <uuid>` on every mutation (confirm/dismiss/assign…).
-2. Replace `app/api/commitments/route.ts` (or delete it and call the API
-   directly from the client / a server action).
-3. Generate types from the OpenAPI 3.1 contract instead of hand-writing
-   `lib/types.ts`.
-4. Move confirm/dismiss to real `POST /commitments/{id}/confirm` calls; keep
-   the optimistic `onMutate` pattern already in place.
+```
+app/            one folder per URL — Next.js App Router
+  admin/        the Admin workspace      (15 screens)
+  owner/        the Owner workspace      (21 screens)
+  support/      both support consoles
+  inbox/  mail/  threads/  contacts/  ai/  settings/   the Member workspace
+  login/  verify-mfa/  select-workspace/               getting in
+
+components/
+  admin/  owner/  support/    workspace-specific UI
+  ui/  shell/                 shared primitives and layout
+
+lib/
+  *-api.ts      typed fetch wrappers — one per workspace
+  *-hooks.ts    TanStack Query hooks over those wrappers
+  *-nav.ts      navigation, with the capability each entry needs
+  api-client.ts the single place that talks to the network
+
+e2e/            Playwright specs
+```
+
+### Which API module do I use?
+
+Each workspace has its own client, and they are deliberately not shared —
+the Owner console and the Support console ask different questions of the same
+endpoints and evolve separately.
+
+| Workspace | Client | Hooks |
+|---|---|---|
+| Member | `mail-api`, `contacts-api` | `mail-hooks` |
+| Admin | `admin-api`, `admin-queries` | `admin-hooks` |
+| Owner | `owner-api` | `owner-hooks` |
+| Support | `support-api` | `support-hooks` |
 
 ---
 
-## Design notes
+## Two rules worth knowing before you write code
 
-- Palette: cool slate/white base, **teal** primary, **amber** reserved for
-  due/overdue only. Serif on brand + headings, sans body, mono for confidence.
-- The component uses Tailwind's default `teal`/`slate`/`amber` so it runs with
-  no extra setup. To apply real Zoiko brand hex, edit `tailwind.config.ts`
-  (`brand.teal`, `brand.navy`, `brand.amber`) and swap the classes.
-- `preview.html` (in the zip root, one level up) is a static, no-build preview
-  you can open directly in a browser.
+### 1. `apiRequest` stringifies the body for you
+
+```ts
+// correct
+await apiRequest("/path", { method: "POST", body: { action: "RESOLVE" } });
+
+// wrong — double-encodes, and the server receives a string
+await apiRequest("/path", { method: "POST", body: JSON.stringify({ … }) });
+```
+
+This is not hypothetical. Reviewing a security alert silently did nothing for
+weeks because of exactly that, on a screen that looked completely correct.
+
+### 2. Hiding a button is not access control
+
+```tsx
+const can = useCan();
+{can("workspace.domains.remove") && <button>Remove domain</button>}
+```
+
+`useCan` exists so nobody is offered a control the server will refuse — it is
+courtesy, not security. **The server checks the same capability on every
+route**, and that check is the one that matters. Never reason "the button is
+hidden, so the endpoint is safe".
 
 ---
 
-## Next screens to build (suggested order)
+## State
 
-1. Connect account (Gmail / Microsoft 365 OAuth) + connection status.
-2. Thread / message view (metadata-first; full body via detail fetch).
-3. Daily digest.
-4. Track B (gated): webmail, admin console, domain setup wizard.
+Two homes, and the split is deliberate:
+
+- **TanStack Query** owns anything that came from the server — lists, entities,
+  anything with a loading state. It handles caching, refetching and
+  invalidation.
+- **React state** owns anything that only exists in the browser — which tab is
+  open, what is typed in a box, whether a dialog is showing.
+
+If you find yourself copying server data into `useState`, that is usually a
+sign the query should be doing the work.
+
+### One deliberate exception
+
+The support console's mailbox reader does **not** use the query cache. Every
+read there is written to the customer's audit log, and serving a second look
+from cache would make that record undercount. A slower screen is the right
+trade against an audit trail that is wrong — the comment above it says so, so
+nobody "optimises" it later.
+
+---
+
+## Testing
+
+```bash
+npm run test:e2e              # needs the dev server running
+npm run test:e2e:ui           # visual runner, good for debugging
+npx playwright test e2e/admin-people.spec.ts
+```
+
+**143 tests across 16 specs.** They assert on **what the browser sends**, not
+what it draws:
+
+```ts
+// what these tests do
+expect(sent[0].body.action).toBe("RESOLVE");
+
+// what they avoid
+expect(screen.getByText("Resolved")).toBeVisible();
+```
+
+A screen that renders a decision but never tells the server looks perfectly
+correct in a screenshot. That class of bug is what these are for, and it is the
+class they have actually caught.
+
+### Fixtures must be complete
+
+Several views read fields with `.length` or `.map`. A stub missing one crashes
+the component during hydration, which shows up as *"element not found"* — and
+reads like a product bug rather than a short fixture.
+
+If a test fails that way, attach a listener before diagnosing further:
+
+```ts
+page.on("pageerror", (e) => console.log("PAGEERROR:" + e.message));
+```
+
+---
+
+## Conventions
+
+- **TypeScript strict.** `npm run typecheck` must pass.
+- **Tailwind with CSS variables** — `var(--ink)`, `var(--surface)`, `var(--crit)`
+  — never hard-coded colours, so light and dark themes both work.
+- **Comments explain *why*.** Where something looks odd, the comment usually
+  names the specification clause that required it. Read it before simplifying.

@@ -221,6 +221,126 @@ export class ConnectorService {
   }
 
   /**
+   * Disconnect somebody else's connected account — RBAC §2 "Disconnect
+   * connected account: Owner Yes, Admin Tenant scope".
+   *
+   * `disconnect` above is the member's own path and scopes by membershipId,
+   * so before this there was no way for an Owner or Admin to act on an
+   * account they do not hold. That is the "Tenant scope" column, and it had
+   * no route — the capability existed and named nothing.
+   *
+   * Reuses the member path once the account is resolved tenant-wide, so
+   * provider revocation, secret deletion and the audit entry behave
+   * identically. The difference is who may ask and whose account it is, and
+   * that difference belongs at the boundary rather than duplicated here.
+   */
+  async disconnectForTenant(
+    accountId: string,
+    context: { tenantId: string; userId: string; requestId?: string }
+  ) {
+    const account = await prisma.connectedAccount.findFirst({
+      where: { id: accountId, tenantId: context.tenantId },
+      select: { id: true, membershipId: true },
+    });
+    if (!account) throw new AppError("Connected account not found", 404, ErrorCodes.NOT_FOUND);
+
+    // An org-level connection belongs to the workspace rather than to a
+    // person, so there is no membership to borrow. Those are disconnected
+    // through the workspace connector settings, not through a member's row.
+    if (!account.membershipId) {
+      throw new AppError(
+        "That connection belongs to the workspace rather than to a person.",
+        409,
+        ErrorCodes.CONFLICT,
+        { reason: "ORG_LEVEL_CONNECTION" }
+      );
+    }
+
+    return this.disconnect(accountId, {
+      tenantId: context.tenantId,
+      membershipId: account.membershipId,
+      userId: context.userId,
+      requestId: context.requestId,
+    });
+  }
+
+  /**
+   * Force a fresh access token for a connected account — RBAC §2 "Rotate
+   * provider credentials", Owner Yes / Admin "If policy", **Step-up**.
+   *
+   * Step-up because §5 counts a provider-credential action as high-risk, and
+   * the capability existed with nothing behind it: the refresh machinery was
+   * here and only reachable as a side effect of a sync that happened to find
+   * an expired token. An operator who suspects a leaked token could not act
+   * on that suspicion.
+   *
+   * Rotation, not re-authorisation. It exchanges the stored refresh token for
+   * a new access token, which is what invalidates a leaked access token. If
+   * the refresh token itself is gone the provider says so and the account
+   * needs the member to reconnect — this reports that rather than pretending
+   * it rotated something.
+   *
+   * Returns no token material. The caller learns that it worked and when.
+   */
+  async rotateCredentials(
+    accountId: string,
+    context: { tenantId: string; userId: string; requestId?: string }
+  ) {
+    const account = await prisma.connectedAccount.findFirst({
+      where: { id: accountId, tenantId: context.tenantId },
+      select: { id: true, provider: true, email: true, status: true },
+    });
+    if (!account) throw new AppError("Connected account not found", 404, ErrorCodes.NOT_FOUND);
+
+    if (account.status === "DISCONNECTED") {
+      throw new AppError(
+        "That account is disconnected, so it holds no credentials to rotate.",
+        409,
+        ErrorCodes.CONFLICT,
+        { reason: "ACCOUNT_DISCONNECTED" }
+      );
+    }
+
+    let rotated = false;
+    let failure: string | null = null;
+    try {
+      if (account.provider === "GMAIL") {
+        await this.refreshGoogleToken(accountId);
+      } else {
+        await this.refreshMicrosoftToken(accountId);
+      }
+      rotated = true;
+    } catch (error) {
+      // Recorded as an attempt either way. A rotation that failed is a
+      // thing an operator chasing a suspected leak needs to see, and the
+      // most likely cause — a refresh token the provider has forgotten —
+      // is exactly the case where somebody must go and reconnect.
+      failure = error instanceof AppError ? error.message : "Provider refused the refresh";
+    }
+
+    await auditService.record({
+      tenantId: context.tenantId,
+      actorUserId: context.userId,
+      eventType: rotated ? "CONNECTOR_CREDENTIALS_ROTATED" : "CONNECTOR_CREDENTIALS_ROTATION_FAILED",
+      targetType: "ConnectedAccount",
+      targetId: account.id,
+      requestId: context.requestId,
+      // Never the token, never the secret ref. Provider and address are
+      // what identify which credential moved.
+      metadata: { provider: account.provider, email: account.email, ...(failure ? { failure } : {}) },
+    });
+
+    if (!failure) return { id: account.id, provider: account.provider, rotatedAt: new Date() };
+
+    throw new AppError(
+      `Could not rotate that credential: ${failure}. The account may need to be reconnected.`,
+      502,
+      "PROVIDER_ERROR",
+      { reason: "ROTATION_FAILED" }
+    );
+  }
+
+  /**
    * On-demand sync for a single connected account (Sync Now).
    *
    * Deliberately caller-scoped like `list` / `disconnect`: the caller must own

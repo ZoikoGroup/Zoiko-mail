@@ -31,7 +31,7 @@ import { prisma } from "../../config/prisma.js";
  *
  * Support-grant state is real too. It was hardcoded false, which made every
  * GRANT capability resolve closed no matter what the workspace owner had
- * approved — so `support.standing`, `support.workspace.access` and
+ * approved — so `support.workspace.investigate`, `support.mailbox.reset` and
  * `mail.other.read` were unusable by construction, and the one path the matrix
  * opens to a Support member led nowhere. Runbook §7 wants that path to exist
  * and to be time-bound; it can only be both if the grant is actually read.

@@ -1520,6 +1520,14 @@ enum SupportScope {
   DNS_DIAGNOSTICS
   DELIVERY_DIAGNOSTICS
   AUDIT_READ
+  /// Putting one of a mailbox's own settings back — forwarding that is
+  /// swallowing mail, or a send suspension that has outlived its reason.
+  ///
+  /// Its own scope rather than part of TENANT_DIAGNOSTICS because it is the
+  /// only write a support seat can make: an owner approving a delivery
+  /// investigation should not discover afterwards that they also approved
+  /// changing what it found.
+  MAILBOX_ADMIN
   /// Reading inside a member's mailbox.
   ///
   /// Separate from TENANT_DIAGNOSTICS on purpose. RBAC 2 marks "Read private

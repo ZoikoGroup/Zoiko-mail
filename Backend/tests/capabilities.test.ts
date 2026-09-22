@@ -264,17 +264,43 @@ describe("conditional resolver kinds", () => {
     }
   });
 
-  it("gives platform staff nothing without an active grant", () => {
-    const ungranted = resolveCapability("support.workspace.access", activeSupport);
+  /**
+   * The GRANT resolver itself: closed without a live grant, open with one.
+   *
+   * This used to assert on `support.workspace.investigate`. That capability
+   * is now ALLOW — an invited SUPPORT seat reads the workspace its Owner
+   * added it to, and tenantContext pins every answer to that one tenant, so
+   * a grant there would gate the wrong thing. The cross-tenant boundary this
+   * test was really about is enforced on the platform router by
+   * requireTenantGrant, which is covered separately.
+   *
+   * `support.mailbox.reset` is the capability that carries GRANT now — the
+   * one write a support seat holds — so the resolver semantics stay pinned
+   * rather than going untested.
+   */
+  it("holds the one support write closed until a grant is live", () => {
+    const ungranted = resolveCapability("support.mailbox.reset", activeSupport);
     expect(ungranted.kind).toBe("GRANT");
     expect(ungranted.allowed).toBe(false);
     expect(ungranted.reason).toBe("REQUIRES_SUPPORT_GRANT");
 
-    const granted = resolveCapability("support.workspace.access", {
+    const granted = resolveCapability("support.mailbox.reset", {
       ...activeSupport,
       hasActiveSupportGrant: true,
     });
     expect(granted.allowed).toBe(true);
+  });
+
+  /**
+   * The counterpart: reads of the seat's own workspace do not wait on a
+   * grant. Pinned so that flipping investigate back to GRANT — which would
+   * lock an invited seat out of the workspace it was invited to — fails here
+   * rather than in a support ticket.
+   */
+  it("lets an invited support seat read its own workspace without a grant", () => {
+    const decision = resolveCapability("support.workspace.investigate", activeSupport);
+    expect(decision.allowed).toBe(true);
+    expect(decision.kind).toBe("ALLOW");
   });
 
   it("gives platform staff no tenant administration capability at all", () => {
@@ -330,8 +356,8 @@ describe("vocabulary integrity", () => {
     expect(orphans).toEqual([]);
   });
 
-  it("declares forty-two capabilities", () => {
-    expect(CAPABILITIES).toHaveLength(42);
-    expect(new Set(CAPABILITIES).size).toBe(42);
+  it("declares forty-one capabilities", () => {
+    expect(CAPABILITIES).toHaveLength(41);
+    expect(new Set(CAPABILITIES).size).toBe(41);
   });
 });

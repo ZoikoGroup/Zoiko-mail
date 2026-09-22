@@ -184,8 +184,6 @@ const MEMBER: RoleMatrix = {
  * workspace's Owner opened by issuing the invitation.
  */
 const SUPPORT: RoleMatrix = {
-  "support.standing": "GRANT",
-  "support.workspace.access": "GRANT",
   /**
    * The only path to private mail content anywhere in the matrix, and it is
    * scoped to the seat's own workspace: the workspace's Owner invited this
@@ -195,40 +193,39 @@ const SUPPORT: RoleMatrix = {
    */
   "mail.other.read": "ALLOW",
   /**
-   * The console read itself is time-boxed for Support, so the screens stop
-   * answering the moment the grant expires or is revoked — §7's "no default
-   * right" and "must have an expiry", applied to the tenant-side console the
-   * way requireTenantGrant applies them to the platform one.
-   */
-  /**
    * The tenant-scoped console opens on the Owner's invitation itself: a
    * member the Owner added as SUPPORT — accepted, with a live membership in
    * this workspace — is authorized to read this one workspace's console
    * without a separate access grant. ALLOW, not GRANT, because the same
    * request that proves the membership is active also scopes every answer to
-   * the caller's own tenant (tenantContext). The grant system is aimed, not
-   * bypassed: `support.standing`, `support.workspace.access` and
-   * `mail.other.read` keep their GRANT rows for the platform-side,
-   * cross-tenant paths, and the diagnostics endpoint verifies the grant
-   * itself — those call for an expiry by their nature; looking at one's own
-   * workspace does not.
+   * the caller's own tenant (tenantContext).
    */
   "support.console.read": "ALLOW",
   /**
-   * The tenant-scoped console opens on the Owner's invitation itself: a
-   * member the Owner added as SUPPORT — accepted, with a live membership in
-   * this workspace — is authorized to read this one workspace's console
-   * outright, same as the Owner and Admin reading their own workspace do.
-   * ALLOW, not GRANT, because the same request that proves the membership
-   * is active also scopes every answer to the caller's own tenant
-   * (tenantContext). No separate time-boxed grant is needed for the
-   * workspace an Owner already invited the seat to work in. Grants remain
-   * for diagnostics, which both staff and tenant seats must still get
-   * approved by a workspace Owner.
+   * Reading the workspace the seat was invited into: overview, configuration,
+   * mailboxes, domains, delivery events and audit. ALLOW for the same reason
+   * as the console itself — tenantContext pins every answer to the caller's
+   * own tenant, so this cannot reach another workspace.
+   *
+   * Runbook §7's "no default right" is about Zoiko staff reaching into a
+   * customer's workspace, and it is enforced where that happens rather than
+   * here: the platform router stacks crossTenantScope, authenticateStaff,
+   * requireSupportAccess and requireTenantGrant, and requireTenantGrant
+   * refuses any read narrowed to one workspace without a live approved
+   * grant. Demanding a second grant from the Owner who already invited this
+   * seat would gate the wrong thing and leave the cross-tenant path no safer.
    */
   "support.workspace.investigate": "ALLOW",
+  /**
+   * The one write a support seat holds, and where the grant system is aimed:
+   * reading the workspace you were invited into is open, changing it is not.
+   * §11.1 allows it "if requested and audited", so it needs a live grant
+   * naming the MAILBOX_ADMIN scope — an Owner approving a delivery
+   * investigation has not thereby approved editing what it found — and every
+   * reset writes its own audit entry.
+   */
+  "support.mailbox.reset": "GRANT",
 };
-
 export const CAPABILITY_MATRIX: Record<MembershipRole, RoleMatrix> = {
   OWNER,
   ADMIN,
