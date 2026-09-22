@@ -101,7 +101,9 @@ export function DropdownMenu({ trigger, children, align = "right" }: DropdownMen
             ref={menuRef}
             role="menu"
             style={menuStyle}
-            className="fixed z-50 min-w-[160px] rounded-lg border border-[var(--border)] bg-[var(--surface)] py-1 shadow-[var(--sh2)]"
+            className={`fixed z-50 min-w-[160px] rounded-lg border border-[var(--border)] bg-[var(--surface)] py-1 shadow-[var(--sh2)] ${
+              align === "right" ? "zoi-pop-rt" : "zoi-pop-lt"
+            }`}
             onClick={() => setOpen(false)}
           >
             {children}

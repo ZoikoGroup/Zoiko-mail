@@ -130,6 +130,33 @@ export class PolicyService {
     });
   }
 
+  /**
+   * Take a policy out of force without superseding it: back to DRAFT.
+   *
+   * Evaluation only ever looks at an ACTIVE policy, so the current version is
+   * what the toggle really asks about. Archiving the only active version would
+   * make the category read as "disabled" too, but it would also bury it under
+   * the same status `activate` writes for replaced versions, and a once-in-force
+   * policy that someone explicitly turned off reads better as DRAFT than as a
+   * version history footnote.
+   */
+  async deactivate(policyId: string, context: Context) {
+    return prisma.$transaction(async (tx) => {
+      const target = await tx.tenantPolicy.findFirst({
+        where: { id: policyId, tenantId: context.tenantId },
+      });
+      if (!target) throw new AppError("Policy not found", 404, ErrorCodes.NOT_FOUND);
+      if (target.status !== "ACTIVE") return target;
+
+      const policy = await tx.tenantPolicy.update({
+        where: { id: target.id },
+        data: { status: "DRAFT", activatedAt: null },
+      });
+      await this.audit(tx, context, "POLICY_DEACTIVATED", policy.id, { type: policy.type, version: policy.version });
+      return policy;
+    });
+  }
+
   async evaluate(input: EvaluatePolicyInput, context: Context) {
     const policy = await prisma.tenantPolicy.findFirst({
       where: { tenantId: context.tenantId, type: input.type, status: "ACTIVE" },

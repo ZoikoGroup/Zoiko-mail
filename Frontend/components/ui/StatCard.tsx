@@ -12,13 +12,13 @@ interface StatCardProps {
 
 export function StatCard({ label, value, icon: Icon, trend }: StatCardProps) {
   return (
-    <div className="zoiko-stat">
+    <div className="zoiko-stat group">
       <div className="flex items-center justify-between">
         <div className="font-mono-num text-[10px] font-medium uppercase tracking-wider text-[var(--ink3)]">
           {label}
         </div>
         {Icon && (
-          <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-[var(--accent-soft)] text-[var(--accent-ink)]">
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-[var(--accent-soft)] text-[var(--accent-ink)] transition-transform duration-[var(--t-med)] ease-[var(--ease)] group-hover:scale-110 group-hover:-rotate-6">
             <Icon className="h-3.5 w-3.5" />
           </span>
         )}

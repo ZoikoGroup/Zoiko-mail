@@ -211,8 +211,14 @@ function LoadErr({ error, onRetry }: { error: string; onRetry: () => void }) {
 
 function Spinner() {
   return (
-    <div className="bd pad" style={{ color: "var(--ink3)", fontSize: "12px" }}>
-      Loading…
+    <div className="bd pad" style={{ color: "var(--ink3)", fontSize: 12 }}>
+      <div className="sloader">
+        <span className="ring" /> Loading&hellip;
+      </div>
+      <div className="skel" style={{ width: "45%", height: 11, marginTop: 14 }} />
+      <div className="skel" style={{ width: "80%", height: 10, marginTop: 9 }} />
+      <div className="skel" style={{ width: "66%", height: 10, marginTop: 8 }} />
+      <div className="skel" style={{ width: "72%", height: 10, marginTop: 8 }} />
     </div>
   );
 }
@@ -1405,7 +1411,10 @@ export default function PlatformConsole() {
   if (!mounted) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <div className="text-sm">Loading…</div>
+        <div className="flex items-center gap-2.5 text-sm text-[var(--ink3)]">
+          <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--accent)]" />
+          Loading…
+        </div>
       </div>
     );
   }
@@ -1417,7 +1426,10 @@ export default function PlatformConsole() {
   if (!isPlatform && (meLoading || !me)) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <div className="text-sm">Loading…</div>
+        <div className="flex items-center gap-2.5 text-sm text-[var(--ink3)]">
+          <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--accent)]" />
+          Loading…
+        </div>
       </div>
     );
   }
@@ -1532,7 +1544,10 @@ export default function PlatformConsole() {
           </div>
 
           <main>
-          <div className="page">
+          {/* Keyed by the active page so this container remounts on every page
+              switch and the .page entrance animation replays — a real, smooth
+              transition instead of an instant swap. */}
+          <div className="page" key={page}>
           <div className="crumbs">
             <span>Support Workspace</span>
             <span>/</span>

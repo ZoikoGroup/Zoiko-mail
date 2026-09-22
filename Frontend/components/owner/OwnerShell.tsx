@@ -62,7 +62,7 @@ export function OwnerShell({ children }: { children: ReactNode }) {
             className="absolute inset-0 bg-black/50"
             onClick={() => setMobileOpen(false)}
           />
-          <aside className="absolute left-0 top-0 flex h-full w-64 flex-col border-r border-[var(--border)] bg-[var(--surface)]">
+          <aside className="zoi-drawer absolute left-0 top-0 flex h-full w-64 flex-col border-r border-[var(--border)] bg-[var(--surface)]">
             <div className="flex justify-end p-2">
               <button
                 onClick={() => setMobileOpen(false)}

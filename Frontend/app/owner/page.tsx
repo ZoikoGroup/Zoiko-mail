@@ -5,6 +5,8 @@ import { WelcomeSection } from "@/components/owner/overview/WelcomeSection";
 import { SummaryCards } from "@/components/owner/overview/SummaryCards";
 import { MailActivityChart } from "@/components/owner/overview/MailActivityChart";
 import { SetupChecklist } from "@/components/owner/overview/SetupChecklist";
+import { OrganizationHealth } from "@/components/owner/overview/OrganizationHealth";
+import { RecentActivity } from "@/components/owner/overview/RecentActivity";
 import { QuickActions } from "@/components/owner/overview/QuickActions";
 
 export default function OwnerOverviewPage() {
@@ -17,6 +19,10 @@ export default function OwnerOverviewPage() {
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <MailActivityChart />
           <SetupChecklist />
+        </div>
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <OrganizationHealth />
+          <RecentActivity />
         </div>
       </div>
     </ProtectedRoute>
