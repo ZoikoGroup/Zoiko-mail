@@ -57,10 +57,14 @@ describe("a support seat can ask for access without holding any", () => {
     const owner = await registerUser(app, { email: `ar-owner-${Date.now()}@zoiko.test` });
     const seat = await supportSeat(owner, `ar-support-${Date.now()}@zoiko.test`);
 
-    // The console itself is refused — support.console.read is GRANT for this
-    // role — so the request endpoint has to be reachable without one, or
-    // there is no way to ever obtain the first grant.
-    await request(app).get("/api/v1/support/overview").set(authHeader(seat.token)).expect(403);
+    // The diagnostics screens are refused — support.workspace.investigate
+    // is GRANT for this role — so the request endpoint has to be reachable
+    // without one, or there is no way to obtain the first grant.
+    //
+    // /configuration rather than /overview: since the console read and the
+    // investigation read were split, the overview opens on the Owner's
+    // invitation and it is these screens that wait for a grant.
+    await request(app).get("/api/v1/support/configuration").set(authHeader(seat.token)).expect(403);
 
     const asked = await ask(seat.token);
     expect(asked.status).toBe(201);
@@ -75,7 +79,7 @@ describe("a support seat can ask for access without holding any", () => {
     // The whole reason the request is a separate table. A pending row on
     // support_access_grants would satisfy the middleware's "revokedAt null
     // and expiresAt in the future" check.
-    await request(app).get("/api/v1/support/overview").set(authHeader(seat.token)).expect(403);
+    await request(app).get("/api/v1/support/configuration").set(authHeader(seat.token)).expect(403);
   });
 
   it("refuses a second pending request from the same seat", async () => {
@@ -126,8 +130,10 @@ describe("approving a request is what opens the access", () => {
     expect(approved.body.data.request.status).toBe("APPROVED");
     expect(approved.body.data.grant.id).toBeTruthy();
 
-    // The point of the whole exercise: the console now answers.
-    await request(app).get("/api/v1/support/overview").set(authHeader(seat.token)).expect(200);
+    // The point of the whole exercise: the diagnostics screens now answer.
+    // The overview answered before the approval too, so asserting that
+    // would prove nothing about what the grant changed.
+    await request(app).get("/api/v1/support/configuration").set(authHeader(seat.token)).expect(200);
   });
 
   it("lets the approver shorten the window but never lengthen it", async () => {
@@ -200,7 +206,7 @@ describe("approving a request is what opens the access", () => {
       .send({})
       .expect(200);
 
-    await request(app).get("/api/v1/support/overview").set(authHeader(seat.token)).expect(403);
+    await request(app).get("/api/v1/support/configuration").set(authHeader(seat.token)).expect(403);
 
     const listed = await request(app)
       .get("/api/v1/support/access-requests")
