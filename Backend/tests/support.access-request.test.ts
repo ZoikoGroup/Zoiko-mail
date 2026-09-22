@@ -57,14 +57,12 @@ describe("a support seat can ask for access without holding any", () => {
     const owner = await registerUser(app, { email: `ar-owner-${Date.now()}@zoiko.test` });
     const seat = await supportSeat(owner, `ar-support-${Date.now()}@zoiko.test`);
 
-    // The diagnostics screens are refused — support.workspace.investigate
-    // is GRANT for this role — so the request endpoint has to be reachable
-    // without one, or there is no way to obtain the first grant.
-    //
-    // /configuration rather than /overview: since the console read and the
-    // investigation read were split, the overview opens on the Owner's
-    // invitation and it is these screens that wait for a grant.
-    await request(app).get("/api/v1/support/configuration").set(authHeader(seat.token)).expect(403);
+    // The console reads answer by invitation now — support.workspace.investigate
+    // is ALLOW for this role — so they cannot prove the point of the request
+    // endpoint. Diagnostics still wait for an approved grant, and it is the
+    // one screen a seat cannot reach without something to run against, so it
+    // stands in for "no grant" here.
+    await request(app).get("/api/v1/support/diagnostics").set(authHeader(seat.token)).expect(403);
 
     const asked = await ask(seat.token);
     expect(asked.status).toBe(201);
@@ -77,9 +75,10 @@ describe("a support seat can ask for access without holding any", () => {
     await ask(seat.token).expect(201);
 
     // The whole reason the request is a separate table. A pending row on
-    // support_access_grants would satisfy the middleware's "revokedAt null
-    // and expiresAt in the future" check.
-    await request(app).get("/api/v1/support/configuration").set(authHeader(seat.token)).expect(403);
+    // support_access_grants would satisfy a live-grant check, so diagnostics —
+    // the one screen a seat still needs a grant for — must stay refused while
+    // the request just sits there pending.
+    await request(app).get("/api/v1/support/diagnostics").set(authHeader(seat.token)).expect(403);
   });
 
   it("refuses a second pending request from the same seat", async () => {
@@ -130,10 +129,14 @@ describe("approving a request is what opens the access", () => {
     expect(approved.body.data.request.status).toBe("APPROVED");
     expect(approved.body.data.grant.id).toBeTruthy();
 
-    // The point of the whole exercise: the diagnostics screens now answer.
-    // The overview answered before the approval too, so asserting that
+    // The point of the whole exercise: diagnostics now answer. Every other
+    // screen answered before the approval too, so asserting one of those
     // would prove nothing about what the grant changed.
-    await request(app).get("/api/v1/support/configuration").set(authHeader(seat.token)).expect(200);
+    await request(app)
+      .get("/api/v1/support/diagnostics")
+      .set("x-support-grant-id", approved.body.data.grant.id)
+      .set(authHeader(seat.token))
+      .expect(200);
   });
 
   it("lets the approver shorten the window but never lengthen it", async () => {
@@ -195,7 +198,7 @@ describe("approving a request is what opens the access", () => {
       .expect(200);
   });
 
-  it("leaves a denied request closed, and the console still refused", async () => {
+  it("leaves a denied request closed, and diagnostics still refused", async () => {
     const owner = await registerUser(app, { email: `dn-owner-${Date.now()}@zoiko.test` });
     const seat = await supportSeat(owner, `dn-support-${Date.now()}@zoiko.test`);
     const asked = await ask(seat.token).expect(201);
@@ -206,7 +209,9 @@ describe("approving a request is what opens the access", () => {
       .send({})
       .expect(200);
 
-    await request(app).get("/api/v1/support/configuration").set(authHeader(seat.token)).expect(403);
+    // Denial keeps the grant-gated screen closed: diagnostics is the one
+    // thing on this console that still waits for an approved grant.
+    await request(app).get("/api/v1/support/diagnostics").set(authHeader(seat.token)).expect(403);
 
     const listed = await request(app)
       .get("/api/v1/support/access-requests")

@@ -161,6 +161,7 @@ function val(row: Record<string, unknown>, key: string): string {
 function useList<T>(
   fetchFn: (p: PlatformListParams) => Promise<Record<string, T[]>>,
   key: string,
+  ns = key,
 ) {
   const [params, setParams] = useState<PlatformListParams>({ limit: 50 });
 
@@ -168,9 +169,12 @@ function useList<T>(
   // Six pages reach this one, and with bespoke state each refetched from
   // scratch whenever the operator moved between tabs — during an incident,
   // which is when people move between tabs most. `key` names the array in
-  // the response envelope and namespaces the cache entry with it.
+  // the response envelope; `ns` namespaces the cache entry. The two are not
+  // the same: provider events, delivery events and audit all answer under
+  // `{ events }`, and sharing the envelope name as the cache key made the
+  // first page clicked feed its rows to the other two.
   const query = useQuery({
-    queryKey: ["support", "platform-list", key, params],
+    queryKey: ["support", "platform-list", ns, params],
     queryFn: () => fetchFn(params),
     staleTime: 15_000,
     // Keeps the current page on screen while the next loads, so changing a
@@ -1000,7 +1004,7 @@ function ListShell<T>({
 }
 
 function ProviderEventsPage() {
-  const { params, setParams, rows, loading, error, reload } = useList<PlatformProviderEvent>(listPlatformProviderEvents, "events");
+  const { params, setParams, rows, loading, error, reload } = useList<PlatformProviderEvent>(listPlatformProviderEvents, "events", "provider-events");
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
   const [provider, setProvider] = useState("");
@@ -1057,7 +1061,7 @@ function ProviderEventsPage() {
 }
 
 function DeliveryEventsPage() {
-  const { params, setParams, rows, loading, error, reload } = useList<PlatformDeliveryEvent>(listPlatformDeliveryEvents, "events");
+  const { params, setParams, rows, loading, error, reload } = useList<PlatformDeliveryEvent>(listPlatformDeliveryEvents, "events", "delivery-events");
   const [q, setQ] = useState("");
   const [type, setType] = useState("");
 
@@ -1105,7 +1109,7 @@ function DeliveryEventsPage() {
 }
 
 function AuditPage() {
-  const { params, setParams, rows, loading, error, reload } = useList<PlatformAuditEvent>(listPlatformAudit, "events");
+  const { params, setParams, rows, loading, error, reload } = useList<PlatformAuditEvent>(listPlatformAudit, "events", "audit");
   const [q, setQ] = useState("");
 
   return (
@@ -1639,42 +1643,36 @@ export default function PlatformConsole() {
               switch and the .page entrance animation replays — a real, smooth
               transition instead of an instant swap. */}
           <div className="page" key={page}>
-          <div className="crumbs">
-            <span>Support Workspace</span>
-            <span>/</span>
-            <span className="cur">{PAGES.find((p) => p.id === page)?.label}</span>
-          </div>
-
-          <div className="pagehd">
-            <div>
-              <h1>{PAGES.find((p) => p.id === page)?.label}</h1>
-              <p>Fleet-wide visibility across every tenant, provider account, and background job.</p>
+            <div className="pagehd">
+              <div>
+                <h1>{PAGES.find((p) => p.id === page)?.label}</h1>
+                <p>Fleet-wide visibility across every tenant, provider account, and background job.</p>
+              </div>
             </div>
-          </div>
 
-          {page === "overview" &&
-            (overviewLoading ? (
-              <Spinner />
-            ) : overviewError ? (
-              <LoadErr error={overviewError} onRetry={loadOverview} />
-            ) : (
-              <OverviewPage data={overview} onOpenTenant={openTenant} onOpenTickets={() => setPage("tickets")} />
-            ))}
-          {page === "tickets" && <TicketsPage />}
-          {page === "tenants" && (
-            <TenantsPage
-              initialOpenTenant={pendingTenant}
-              onConsumed={() => setPendingTenant(null)}
-            />
-          )}
-          {page === "tokens" && <TokensPage />}
-          {page === "suppressions" && <SuppressionsPage />}
-          {page === "jobs" && <JobsPage />}
-          {page === "provider-events" && <ProviderEventsPage />}
-          {page === "delivery-events" && <DeliveryEventsPage />}
-          {page === "audit" && <AuditPage />}
+            {page === "overview" &&
+              (overviewLoading ? (
+                <Spinner />
+              ) : overviewError ? (
+                <LoadErr error={overviewError} onRetry={loadOverview} />
+              ) : (
+                <OverviewPage data={overview} onOpenTenant={openTenant} onOpenTickets={() => setPage("tickets")} />
+              ))}
+            {page === "tickets" && <TicketsPage mode="staff" />}
+            {page === "tenants" && (
+              <TenantsPage
+                initialOpenTenant={pendingTenant}
+                onConsumed={() => setPendingTenant(null)}
+              />
+            )}
+            {page === "tokens" && <TokensPage />}
+            {page === "suppressions" && <SuppressionsPage />}
+            {page === "jobs" && <JobsPage />}
+            {page === "provider-events" && <ProviderEventsPage />}
+            {page === "delivery-events" && <DeliveryEventsPage />}
+            {page === "audit" && <AuditPage />}
           </div>
-          </main>
+        </main>
         </div>
       </div>
     </div>

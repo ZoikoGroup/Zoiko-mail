@@ -6,6 +6,7 @@ import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { acceptInvitation } from "@/lib/owner-api";
 import { isLoggedIn } from "@/lib/auth-storage";
+import { logout } from "@/lib/auth-api";
 
 function AcceptInvitationInner() {
   const params = useSearchParams();
@@ -34,16 +35,20 @@ function AcceptInvitationInner() {
     if (attemptedToken.current === token) return;
     attemptedToken.current = token;
 
-    if (!isLoggedIn()) {
+    const wasLoggedIn = isLoggedIn();
+
+    if (!wasLoggedIn) {
       sessionStorage.setItem("pendingInvitationToken", token);
       setStatus("need-login");
       return;
     }
 
     acceptInvitation(token)
-      .then(() => {
+      .then(async () => {
         sessionStorage.removeItem("pendingInvitationToken");
-        setStatus("success");
+        // Clear the session so the user re-authenticates and picks up the new SUPPORT workspace.
+        await logout();
+        window.location.href = "/login";
       })
       .catch((e: Error) => {
         setStatus("error");
@@ -96,14 +101,8 @@ function AcceptInvitationInner() {
           </div>
           <h2 className="text-lg font-semibold text-slate-900 dark:text-white">You&apos;re in!</h2>
           <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-            Your invitation has been accepted. Welcome to the team.
+            Your invitation has been accepted. Signing you in…
           </p>
-          <Link
-            href="/"
-            className="mt-6 inline-block rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-teal-700"
-          >
-            Go to Dashboard
-          </Link>
         </div>
       )}
 

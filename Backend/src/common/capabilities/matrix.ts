@@ -187,14 +187,13 @@ const SUPPORT: RoleMatrix = {
   "support.standing": "GRANT",
   "support.workspace.access": "GRANT",
   /**
-   * The only path to private mail content anywhere in the matrix, and even
-   * here it is not routine: §2 marks Support "⏱ grant", while §4 adds
-   * "blocked by default; exceptional security-approved path only". GRANT
-   * expresses the time-boxed approval; the security-approved exception is an
-   * additional control that does not belong in a role matrix. Owner and Admin
-   * hold this in no form at all.
+   * The only path to private mail content anywhere in the matrix, and it is
+   * scoped to the seat's own workspace: the workspace's Owner invited this
+   * member as SUPPORT, and the invitation, not a grant, is the authorization
+   * — the same membership that authorizes every other console read also
+   * authorizes this one. Owner and Admin still hold it in no form at all.
    */
-  "mail.other.read": "GRANT",
+  "mail.other.read": "ALLOW",
   /**
    * The console read itself is time-boxed for Support, so the screens stop
    * answering the moment the grant expires or is revoked — §7's "no default
@@ -216,18 +215,18 @@ const SUPPORT: RoleMatrix = {
    */
   "support.console.read": "ALLOW",
   /**
-   * The diagnostics half of that console, kept time-boxed.
-   *
-   * The row above and this one are the whole disagreement between PR #37
-   * and PR #38, settled by splitting what was one capability doing two
-   * jobs. Reading the ticket queue of a workspace whose Owner invited you
-   * needs no expiry — that was #38's point, and it holds. Reading that
-   * workspace's delivery events, audit log and configuration is reading a
-   * customer's data, which is what §7's "no default right" and "must have
-   * an expiry" are actually about — that was #37's point, and it holds
-   * too. They were only in conflict while both lived under one name.
+   * The tenant-scoped console opens on the Owner's invitation itself: a
+   * member the Owner added as SUPPORT — accepted, with a live membership in
+   * this workspace — is authorized to read this one workspace's console
+   * outright, same as the Owner and Admin reading their own workspace do.
+   * ALLOW, not GRANT, because the same request that proves the membership
+   * is active also scopes every answer to the caller's own tenant
+   * (tenantContext). No separate time-boxed grant is needed for the
+   * workspace an Owner already invited the seat to work in. Grants remain
+   * for diagnostics, which both staff and tenant seats must still get
+   * approved by a workspace Owner.
    */
-  "support.workspace.investigate": "GRANT",
+  "support.workspace.investigate": "ALLOW",
 };
 
 export const CAPABILITY_MATRIX: Record<MembershipRole, RoleMatrix> = {

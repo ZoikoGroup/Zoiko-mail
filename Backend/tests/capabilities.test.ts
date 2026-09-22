@@ -58,8 +58,8 @@ const SPEC_ADMIN_CAPABILITIES: Capability[] = [
   "support.grant.end",
   // §2 gives Admin the support console for their own workspace. These two
   // replaced requireRole("OWNER","ADMIN","SUPPORT") on the console routes:
-  // ALLOW here, GRANT for a Support seat, which is the distinction a role
-  // check could not make.
+  // ALLOW for Owner and Admin, and for a SUPPORT seat the Owner invited into
+  // the workspace — the membership itself, not a grant, is the authorization.
   "support.console.read",
   "support.grant.read",
   // Restored with the security-alert module that PR #35 dropped. Admin is
@@ -69,10 +69,10 @@ const SPEC_ADMIN_CAPABILITIES: Capability[] = [
   // decision and ought to be attributable.
   "security-alert.read",
   "security-alert.review",
-  // The diagnostics half of the support console, split out of
-  // support.console.read so the console can open on the Owner's invitation
-  // while the customer's records behind it stay time-boxed. ALLOW for an
-  // Admin: it is their own workspace.
+  // The investigate half of the support console: the console shell opens on
+  // the Owner's invitation, and every section behind it — delivery events,
+  // audit log, configuration — is the same workspace, read the same way.
+  // ALLOW for Admin and Owner, and for the SUPPORT seat the Owner invited.
   "support.workspace.investigate",
 ];
 
@@ -111,12 +111,14 @@ describe("capability matrix — Security §7.2 step 6", () => {
     ).toBe(false);
   });
 
-  it("routes private content only through an approved support grant", () => {
+  it("gives invited support the private-content read by membership, and nobody else any form", () => {
     expect(rolesHolding("mail.other.read")).toEqual(["SUPPORT"]);
-    expect(can("mail.other.read", activeSupport)).toBe(false);
-    expect(
-      can("mail.other.read", { ...activeSupport, hasActiveSupportGrant: true })
-    ).toBe(true);
+    // The Owner's invitation is the authorization: a live SUPPORT seat in
+    // the workspace reads this workspace's mail outright, no grant needed.
+    expect(can("mail.other.read", activeSupport)).toBe(true);
+    // While Owner and Admin hold no form at all, with or without a grant.
+    expect(can("mail.other.read", activeOwner)).toBe(false);
+    expect(can("mail.other.read", { ...activeAdmin, hasActiveSupportGrant: true })).toBe(false);
   });
 
   it("holds an Admin export behind step-up rather than refusing it", () => {

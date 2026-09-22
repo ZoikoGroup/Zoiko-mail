@@ -417,7 +417,9 @@ export interface SupportMailboxRead {
     sendSuspensionReason: string | null;
     owner: { email: string; displayName: string } | null;
   };
-  grant: { id: string; expiresAt: string };
+  // Always null: reading mail is by the SUPPORT membership itself now, not
+  // by an expiring grant, so there is no window left to report on.
+  grant: null;
   messages: SupportMailboxMessage[];
 }
 
