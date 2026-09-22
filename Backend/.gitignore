@@ -19,3 +19,8 @@ storage/
 # root .gitignore.
 venv/
 .venv/
+
+# TypeScript incremental build cache. Not generated today — this tsconfig is
+# not incremental — but `tsc --build` or turning that flag on would produce it,
+# and the frontend already had one committed by accident. Same rule there.
+*.tsbuildinfo

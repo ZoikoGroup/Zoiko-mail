@@ -19,3 +19,10 @@ blob-report
 # committed. Backend/.gitignore carries the same rule.
 venv/
 .venv/
+
+# TypeScript incremental build cache. tsconfig.json sets "incremental": true,
+# so tsc rewrites this on every typecheck — it was tracked, which meant a dirty
+# working tree after any build and a 150KB binary diff on every commit that
+# touched types. Machine-local state, regenerated on demand.
+tsconfig.tsbuildinfo
+*.tsbuildinfo
