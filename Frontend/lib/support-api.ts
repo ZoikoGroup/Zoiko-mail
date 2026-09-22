@@ -1,6 +1,479 @@
 import { apiRequest } from "./api-client";
 import { getAccessToken, getPlatformToken } from "./auth-storage";
 
+export type SupportScope =
+  | "TENANT_DIAGNOSTICS"
+  | "DNS_DIAGNOSTICS"
+  | "DELIVERY_DIAGNOSTICS"
+  | "AUDIT_READ"
+  /** Reading inside a mailbox. Asked for by name, approved by name. */
+  | "MAIL_CONTENT";
+
+export interface SupportAccessGrant {
+  id: string;
+  tenantId: string;
+  supportMembershipId: string;
+  approvedByUserId: string;
+  reason: string;
+  ticketId: string | null;
+  scopes: SupportScope[];
+  expiresAt: string;
+  revokedAt: string | null;
+  createdAt: string;
+  supportMembership?: {
+    id: string;
+    user: { id: string; email: string; displayName: string };
+  };
+  approvedBy?: {
+    id: string;
+    email: string;
+    displayName: string;
+  };
+}
+
+export interface SupportDiagnosticsData {
+  grant: {
+    id: string;
+    reason: string;
+    scopes: SupportScope[];
+    expiresAt: string;
+  };
+  tenant?: {
+    id: string;
+    name: string;
+    status: string;
+    planCode: string;
+    createdAt: string;
+    activeMembers: number;
+    mailboxes: number;
+  };
+  domains?: Array<{
+    id: string;
+    domainName: string;
+    verificationStatus: string;
+    mxStatus: string;
+    spfStatus: string;
+    dkimStatus: string;
+    dmarcStatus: string;
+    lastCheckedAt: string | null;
+  }>;
+  delivery?: Array<{
+    type: string;
+    _count: number;
+  }>;
+  audit?: Array<{
+    id: string;
+    eventType: string;
+    targetType: string | null;
+    targetId: string | null;
+    createdAt: string;
+  }>;
+}
+
+export interface CreateSupportGrantInput {
+  supportMembershipId: string;
+  reason: string;
+  /**
+   * The case this access is for — Runbook §7 "purpose-bound".
+   *
+   * Optional here and required by the server unless the reason names an
+   * incident, because a P0 can begin before anyone has raised a ticket. An
+   * access with neither is refused: what §7 forbids is one nobody can account
+   * for afterwards.
+   */
+  ticketId?: string;
+  expiresInMinutes: number;
+  scopes: SupportScope[];
+}
+
+export interface SupportMember {
+  id: string;
+  userId: string;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+  userStatus: string;
+  lastLoginAt: string | null;
+  joinedAt: string;
+  mailboxes: string[];
+}
+
+export interface SupportIssue {
+  id: string;
+  kind: "message" | "delivery" | "job";
+  subject: string;
+  customer: string;
+  mailbox: string | null;
+  category: string;
+  priority: string;
+  status: string;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupportTeamMember {
+  id: string;
+  userId: string;
+  name: string;
+  email: string;
+  status: string;
+}
+
+export interface SupportOverview {
+  stats: {
+    tenantId: string;
+    members: number;
+    mailboxes: number;
+    domains: number;
+    activeGrants: number;
+    openCommitments: number;
+    issues: number;
+    failedMessages24h: number;
+    failedDeliveries24h: number;
+    retryJobs: number;
+    failedJobs: number;
+    deliveryEvents24h: number;
+  };
+  domains: SupportDiagnosticsData["domains"];
+  members: SupportMember[];
+  team: SupportTeamMember[];
+  issues: SupportIssue[];
+  audit: Array<{
+    id: string;
+    eventType: string;
+    targetType: string | null;
+    targetId: string | null;
+    actor: { id: string; email: string; displayName: string } | null;
+    createdAt: string;
+  }>;
+  grants: SupportAccessGrant[];
+}
+
+export async function fetchSupportOverview(): Promise<SupportOverview> {
+  return apiRequest<SupportOverview>("/support/overview");
+}
+
+export async function fetchSupportDiagnostics(grantId: string): Promise<SupportDiagnosticsData> {
+  return apiRequest<SupportDiagnosticsData>("/support/diagnostics", {
+    headers: {
+      "x-support-grant-id": grantId,
+    },
+  });
+}
+
+export async function fetchSupportAccessGrants(): Promise<{ grants: SupportAccessGrant[] }> {
+  return apiRequest<{ grants: SupportAccessGrant[] }>("/support/access-grants");
+}
+
+export async function createSupportAccessGrant(input: CreateSupportGrantInput): Promise<SupportAccessGrant> {
+  return apiRequest<SupportAccessGrant>("/support/access-grants", {
+    method: "POST",
+    body: input,
+  });
+}
+
+export async function revokeSupportAccessGrant(grantId: string): Promise<SupportAccessGrant> {
+  return apiRequest<SupportAccessGrant>(`/support/access-grants/${encodeURIComponent(grantId)}`, {
+    method: "DELETE",
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Tenant-scoped support console (SUPPORT/OWNER/ADMIN roles). Uses the
+// tenant-scoped access token. All list endpoints are forced to the caller's
+// tenant by the backend (session-scoped tenantId).
+// ---------------------------------------------------------------------------
+
+export interface TenantMailbox {
+  id: string;
+  address: string;
+  tenantId: string;
+  memberName: string | null;
+  memberEmail: string | null;
+  suspended: boolean;
+  suspensionReason: string | null;
+  createdAt: string;
+  mailboxType: string;
+  connectedAccounts: Array<{
+    id: string;
+    provider: string;
+    email: string;
+    status: string;
+    lastSyncedAt: string | null;
+    lastErrorCode: string | null;
+  }>;
+}
+
+export interface TenantDomain {
+  id: string;
+  domainName: string;
+  verificationStatus: string;
+  mxStatus: string;
+  spfStatus: string;
+  dkimStatus: string;
+  dmarcStatus: string;
+  lastCheckedAt: string | null;
+  sendingEnabled: boolean;
+  activatedAt: string | null;
+}
+
+export interface TenantProviderEvent {
+  id: string;
+  providerEventId: string | null;
+  tenantId: string;
+  provider: string;
+  accountEmail: string;
+  accountStatus: string;
+  eventType: string;
+  processingStatus: string;
+  errorCode: string | null;
+  attempts: number;
+  maxAttempts: number;
+  receivedAt: string;
+  processedAt: string | null;
+}
+
+export interface TenantDeliveryEvent {
+  id: string;
+  type: string;
+  tenantId: string;
+  failureCode: string | null;
+  failureReason: string | null;
+  providerEventId: string | null;
+  createdAt: string;
+  message: {
+    subject: string | null;
+    fromAddress: string | null;
+    fromName: string | null;
+    providerMessageId: string | null;
+    status: string;
+    createdAt: string;
+    recipients: Array<{ email: string; type: string; deliveryStatus: string }>;
+  } | null;
+}
+
+export interface TenantJob {
+  id: string;
+  type: string;
+  tenantId: string;
+  status: string;
+  attempts: number;
+  maxAttempts: number;
+  runAt: string;
+  lockedAt: string | null;
+  completedAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TenantSuppression {
+  id: string;
+  tenantId: string;
+  emailHash: string;
+  reason: string;
+  active: boolean;
+  sourceEventId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TenantAuditEvent {
+  id: string;
+  eventType: string;
+  actor: { id: string; email: string; displayName: string } | null;
+  actorRole: string | null;
+  tenantId: string;
+  resource: string | null;
+  reason: string | null;
+  result: string | null;
+  requestId: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  metadata: unknown;
+  createdAt: string;
+}
+
+export interface TenantOverviewData {
+  tenant: {
+    id: string;
+    name: string;
+    status: string;
+    planCode: string;
+    timezone: string | null;
+    createdAt: string;
+    updatedAt: string;
+    _count: Record<string, number>;
+  };
+  members: Array<Record<string, unknown>>;
+  mailboxes: Array<Record<string, unknown>>;
+  domains: Array<Record<string, unknown>>;
+  connectedAccounts: Array<Record<string, unknown>>;
+  providerEvents: Array<Record<string, unknown>>;
+  deliveryEvents: Array<Record<string, unknown>>;
+  jobs: Array<Record<string, unknown>>;
+  audit: Array<Record<string, unknown>>;
+  grants: SupportAccessGrant[];
+  suppressions: TenantSuppression[];
+}
+
+export async function fetchTenantSupportOverview(): Promise<TenantOverviewData> {
+  return apiRequest<TenantOverviewData>("/support/tenant");
+}
+
+export async function fetchTenantMailboxes(q = "", limit = 50): Promise<{ mailboxes: TenantMailbox[] }> {
+  return apiRequest<{ mailboxes: TenantMailbox[] }>(`/support/mailboxes?q=${encodeURIComponent(q)}&limit=${limit}`);
+}
+
+export async function fetchTenantDomains(q = "", limit = 50): Promise<{ domains: TenantDomain[] }> {
+  return apiRequest<{ domains: TenantDomain[] }>(`/support/domains?q=${encodeURIComponent(q)}&limit=${limit}`);
+}
+
+/* ── RBAC §2, the two Support controls that had no screen ─────────────── */
+
+/**
+ * How the workspace is configured, as opposed to what it contains.
+ *
+ * Distinct from the overview: that one counts mailboxes and domains, this
+ * one says what the workspace's rules are. Most "why is this happening"
+ * questions are answered here, and without it support had to ask the
+ * customer to read their own settings screen back over a call.
+ */
+export interface TenantConfiguration {
+  tenant: {
+    id: string;
+    name: string;
+    status: string;
+    planCode: string;
+    timezone: string | null;
+    language: string | null;
+    memberLimit: number | null;
+    allowedDomains: string[];
+    createdAt: string;
+    updatedAt: string;
+  };
+  passwordPolicy: Record<string, unknown> | null;
+  aiSettings: Record<string, unknown> | null;
+  settings: Record<string, unknown> | null;
+  policies: Array<{
+    id: string;
+    type: string;
+    name: string;
+    description: string | null;
+    version: number;
+    status: string;
+    rules: unknown;
+    activatedAt: string | null;
+    updatedAt: string;
+  }>;
+  domains: Array<{
+    id: string;
+    domainName: string;
+    verificationStatus: string;
+    sendingEnabled: boolean;
+    activatedAt: string | null;
+  }>;
+  mail: {
+    mailboxes: number;
+    aiRestrictedMailboxes: number;
+    sendingSuspendedMailboxes: number;
+  };
+}
+
+export async function fetchTenantConfiguration(): Promise<TenantConfiguration> {
+  return apiRequest<TenantConfiguration>("/support/configuration");
+}
+
+/**
+ * A page of one mailbox's message headers.
+ *
+ * Headers only, by design on the server: §7 asks support views to prefer
+ * metadata over content, and the endpoint does not return bodies at all.
+ * `subject` comes back withheld for a mailbox whose owner has turned
+ * processing off (AC-008), so the field can be null or a placeholder even
+ * when the message is real.
+ */
+export interface SupportMailboxMessage {
+  id: string;
+  folder: string;
+  isRead: boolean;
+  receivedAt: string;
+  subject: string | null;
+  from: string | null;
+  to: string[];
+  status: string;
+  attachments: number;
+}
+
+export interface SupportMailboxRead {
+  mailbox: {
+    id: string;
+    address: string;
+    type: string;
+    aiEnabled: boolean;
+    sendSuspendedAt: string | null;
+    sendSuspensionReason: string | null;
+    owner: { email: string; displayName: string } | null;
+  };
+  grant: { id: string; expiresAt: string };
+  messages: SupportMailboxMessage[];
+}
+
+export async function fetchMailboxMessages(
+  mailboxId: string,
+  params: { folder?: string; q?: string; limit?: number } = {}
+): Promise<SupportMailboxRead> {
+  const query = new URLSearchParams();
+  if (params.folder) query.set("folder", params.folder);
+  if (params.q) query.set("q", params.q);
+  query.set("limit", String(params.limit ?? 25));
+  return apiRequest<SupportMailboxRead>(
+    `/support/mailboxes/${mailboxId}/messages?${query.toString()}`
+  );
+}
+
+export interface TenantListParams {
+  provider?: string;
+  status?: string;
+  type?: string;
+  q?: string;
+  limit?: number;
+}
+
+function tenantListQueryString(params: TenantListParams): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      search.set(key, String(value));
+    }
+  }
+  const query = search.toString();
+  return query ? `?${query}` : "";
+}
+
+export async function listTenantProviderEvents(params: TenantListParams = {}): Promise<{ events: TenantProviderEvent[] }> {
+  return apiRequest<{ events: TenantProviderEvent[] }>(`/support/provider-events${tenantListQueryString(params)}`);
+}
+
+export async function listTenantDeliveryEvents(params: TenantListParams = {}): Promise<{ events: TenantDeliveryEvent[] }> {
+  return apiRequest<{ events: TenantDeliveryEvent[] }>(`/support/delivery-events${tenantListQueryString(params)}`);
+}
+
+export async function listTenantJobs(params: TenantListParams = {}): Promise<{ jobs: TenantJob[] }> {
+  return apiRequest<{ jobs: TenantJob[] }>(`/support/jobs${tenantListQueryString(params)}`);
+}
+
+export async function listTenantSuppressions(params: TenantListParams = {}): Promise<{ suppressions: TenantSuppression[] }> {
+  return apiRequest<{ suppressions: TenantSuppression[] }>(`/support/suppressions${tenantListQueryString(params)}`);
+}
+
+export async function listTenantAudit(params: TenantListParams = {}): Promise<{ events: TenantAuditEvent[] }> {
+  return apiRequest<{ events: TenantAuditEvent[] }>(`/support/audit${tenantListQueryString(params)}`);
+}
+
+
 // ---------------------------------------------------------------------------
 // Platform support console (staff). Sends the platform token when present,
 // otherwise falls back to the tenant-scoped access token — the backend's
@@ -473,6 +946,27 @@ export function commentPlatformTicket(ticketId: string, body: string, internal: 
 
 export function listPlatformStaff(): Promise<{ staff: TicketAuthor[] }> {
   return platformRequest<{ staff: TicketAuthor[] }>("/support/platform/tickets/staff");
+}
+
+/* ─── asking this workspace for access — Runbook §7 ─────────────────────── */
+
+export interface RequestAccessInput {
+  reason: string;
+  ticketId?: string;
+  scopes: SupportScope[];
+  requestedMinutes: number;
+}
+
+/**
+ * The one support call that needs no grant, because it is how the first grant
+ * comes to exist. Everything else on the tenant console is gated on
+ * `support.console.read`, which is GRANT for a Support seat.
+ */
+export async function requestSupportAccess(input: RequestAccessInput): Promise<{ id: string; status: string }> {
+  return apiRequest<{ id: string; status: string }>("/support/access-requests", {
+    method: "POST",
+    body: input,
+  });
 }
 
 // ---------------------------------------------------------------------------

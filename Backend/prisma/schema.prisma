@@ -37,6 +37,10 @@ model Tenant {
   backgroundJobs      BackgroundJob[]
   lifecycleRequests   DataLifecycleRequest[]
   supportAccessGrants SupportAccessGrant[]
+  supportAccessRequests SupportAccessRequest[]
+  mailGroups            MailGroup[]
+  ownershipTransfersOut OwnershipTransfer[]
+  securityAlerts        SecurityAlert[]
   mailLabels          MailLabel[]
   messageLabels       MailboxMessageLabel[]
   connectedAccounts   ConnectedAccount[]
@@ -104,6 +108,11 @@ model AppUser {
   createdJobs             BackgroundJob[]        @relation("JobCreator")
   lifecycleRequests       DataLifecycleRequest[] @relation("LifecycleRequester")
   approvedSupportGrants   SupportAccessGrant[]   @relation("SupportApprover")
+  decidedSupportRequests  SupportAccessRequest[] @relation("SupportRequestDecider")
+  initiatedOwnershipTransfers OwnershipTransfer[] @relation("OwnershipTransferInitiator")
+  approvedOwnershipTransfers  OwnershipTransfer[] @relation("OwnershipTransferApprover")
+  securityAlertsRaised        SecurityAlert[]     @relation("SecurityAlertActor")
+  securityAlertsResolved      SecurityAlert[]     @relation("SecurityAlertResolver")
   connectedAccounts       ConnectedAccount[]
   identities              UserIdentity[]
   usedSelectionTokens     UsedSelectionToken[]
@@ -186,6 +195,9 @@ model TenantMembership {
   mailboxAccess       MailboxAccess[]
   receivedMessages    MessageRecipient[]
   supportAccessGrants SupportAccessGrant[]
+  supportAccessRequests SupportAccessRequest[]
+  mailGroupMembers    MailGroupMember[]
+  ownershipTransfers  OwnershipTransfer[]
   connectedAccounts   ConnectedAccount[]
   contacts            Contact[]
 
@@ -202,6 +214,16 @@ model RefreshToken {
   tokenHash String    @unique @map("token_hash")
   expiresAt DateTime  @map("expires_at")
   revokedAt DateTime? @map("revoked_at")
+  /**
+   * Where this session was opened from — added by 20260917010000 for the
+   * "active sessions" screen, which the same merge dropped. Kept because the
+   * columns exist and because revoking a session you cannot identify is not
+   * a feature anyone can use.
+   */
+  deviceLabel String?   @map("device_label")
+  ipAddress   String?   @map("ip_address")
+  userAgent   String?   @map("user_agent")
+  lastUsedAt  DateTime? @map("last_used_at")
   createdAt DateTime  @default(now()) @map("created_at")
   tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user      AppUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -826,7 +848,13 @@ model IntegrationLink {
 model ConnectedAccount {
   id                String                 @id @default(uuid()) @db.Uuid
   tenantId          String                 @map("tenant_id") @db.Uuid
-  membershipId      String                 @map("membership_id") @db.Uuid
+  /**
+   * Null for an org-level connection — one the workspace owns rather than a
+   * person. The column was made nullable by 20260916114737 and the model
+   * never followed, so Prisma believed it was still required.
+   */
+  membershipId      String?                @map("membership_id") @db.Uuid
+  isOrgLevel        Boolean                @default(false) @map("is_org_level")
   userId            String                 @map("user_id") @db.Uuid
   provider          ConnectorProvider
   providerAccountId String                 @map("provider_account_id")
@@ -851,7 +879,7 @@ model ConnectedAccount {
   createdAt          DateTime               @default(now()) @map("created_at")
   updatedAt          DateTime               @updatedAt @map("updated_at")
   tenant             Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  membership         TenantMembership       @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  membership         TenantMembership?      @relation(fields: [membershipId], references: [id], onDelete: Cascade)
   user               AppUser                @relation(fields: [userId], references: [id], onDelete: Cascade)
   providerEvents     ProviderEvent[]
 
@@ -1022,6 +1050,54 @@ model IdempotencyRecord {
   @@map("idempotency_records")
 }
 
+/**
+ * Support asking for access, before anyone has decided.
+ *
+ * Deliberately not a state on SupportAccessGrant. The middleware that guards
+ * every tenant read treats a grant as live when `revokedAt` is null and
+ * `expiresAt` is in the future — a pending row would satisfy both, so merely
+ * *asking* would have granted the access. Separate table, and the grant is
+ * only written when someone approves.
+ *
+ * Runbook §7: access must be "linked to a ticket, incident, or approved
+ * customer support request". This is that request.
+ */
+model SupportAccessRequest {
+  id                  String                     @id @default(uuid()) @db.Uuid
+  tenantId            String                     @map("tenant_id") @db.Uuid
+  supportMembershipId String                     @map("support_membership_id") @db.Uuid
+  reason              String
+  ticketId            String?                    @map("ticket_id") @db.Uuid
+  scopes              SupportScope[]
+  /// What the requester asked for; the approver may shorten it.
+  requestedMinutes    Int                        @map("requested_minutes")
+  status              SupportAccessRequestStatus @default(PENDING)
+  decidedByUserId     String?                    @map("decided_by_user_id") @db.Uuid
+  decidedAt           DateTime?                  @map("decided_at")
+  /// The grant this became, when it was approved.
+  grantId             String?                    @unique @map("grant_id") @db.Uuid
+  createdAt           DateTime                   @default(now()) @map("created_at")
+  updatedAt           DateTime                   @updatedAt @map("updated_at")
+
+  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supportMembership TenantMembership    @relation(fields: [supportMembershipId], references: [id], onDelete: Cascade)
+  decidedBy         AppUser?            @relation("SupportRequestDecider", fields: [decidedByUserId], references: [id], onDelete: SetNull)
+  ticket            SupportTicket?      @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  grant             SupportAccessGrant? @relation(fields: [grantId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status])
+  @@map("support_access_requests")
+}
+
+enum SupportAccessRequestStatus {
+  PENDING
+  APPROVED
+  DENIED
+  WITHDRAWN
+
+  @@map("support_access_request_status")
+}
+
 model SupportAccessGrant {
   id                  String           @id @default(uuid()) @db.Uuid
   tenantId            String           @map("tenant_id") @db.Uuid
@@ -1044,8 +1120,10 @@ model SupportAccessGrant {
   supportMembership   TenantMembership @relation(fields: [supportMembershipId], references: [id], onDelete: Cascade)
   approvedBy          AppUser          @relation("SupportApprover", fields: [approvedByUserId], references: [id], onDelete: Restrict)
   ticket              SupportTicket?   @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  request             SupportAccessRequest?
 
   @@index([tenantId, supportMembershipId, expiresAt])
+  @@index([ticketId])
   @@map("support_access_grants")
 }
 
@@ -1078,8 +1156,9 @@ model SupportTicket {
   tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   openedBy      AppUser                @relation("TicketOpenedBy", fields: [openedByUserId], references: [id], onDelete: Cascade)
   assignedStaff AppUser?               @relation("TicketAssignedStaff", fields: [assignedStaffId], references: [id], onDelete: SetNull)
-  comments      SupportTicketComment[]
-  accessGrants  SupportAccessGrant[]
+  comments       SupportTicketComment[]
+  accessGrants   SupportAccessGrant[]
+  accessRequests SupportAccessRequest[]
 
   @@index([tenantId, status, updatedAt])
   @@index([assignedStaffId])
@@ -1441,6 +1520,15 @@ enum SupportScope {
   DNS_DIAGNOSTICS
   DELIVERY_DIAGNOSTICS
   AUDIT_READ
+  /// Reading inside a member's mailbox.
+  ///
+  /// Separate from TENANT_DIAGNOSTICS on purpose. RBAC 2 marks "Read private
+  /// user mailbox" as grant-only for Support and Security 4 calls it
+  /// "blocked by default; exceptional security-approved path only" — so an
+  /// owner approving a routine delivery investigation must not be handing
+  /// over their people's mail as a side effect. It has to be asked for by
+  /// name and approved by name.
+  MAIL_CONTENT
 }
 
 enum TicketCategory {
@@ -1581,4 +1669,163 @@ model StripeWebhookEvent {
   createdAt     DateTime  @default(now()) @map("created_at")
 
   @@map("stripe_webhook_events")
+}
+
+/* ── tables PR #35 created and left unmodelled ───────────────────────────
+ *
+ * Five migrations from the akarsh branch landed in that merge; the Prisma
+ * models they belong to did not, and neither did the services. The tables
+ * were therefore created on every deploy and known to nothing — and
+ * `prisma migrate diff` confirms what that costs: the next `migrate dev`
+ * generates DROP TABLE for all four of them plus six enums.
+ *
+ * Modelled here so the schema tells the truth about the database. That is
+ * the safe direction: it destroys nothing, removes the latent DROP, and
+ * leaves the features recoverable. Dropping the tables instead would make
+ * the loss permanent, and that is a decision for whoever owns the roadmap,
+ * not a side effect of a merge conflict.
+ *
+ * Nothing reads these yet. They are shaped exactly as the database has them,
+ * recovered by introspection rather than retyped from the original branch,
+ * so the model cannot drift from the table it describes.
+ */
+
+/**
+ * A distribution list or shared address.
+ *
+ * Unused, and deliberately so: `kind = SHARED` overlaps the shared mailboxes
+ * main already implements as Mailbox(type=SHARED) + MailboxAccess. Wiring
+ * this up would give the platform two models for one concept. The table is
+ * preserved and the ambiguity is left visible rather than resolved by
+ * accident — see Backend/docs/operations/known-issues.md, KI-004.
+ */
+model MailGroup {
+  id        String            @id @default(uuid()) @db.Uuid
+  tenantId  String            @map("tenant_id") @db.Uuid
+  name      String
+  address   String
+  kind      MailGroupKind     @default(DISTRIBUTION)
+  status    MailGroupStatus   @default(ACTIVE)
+  createdAt DateTime          @default(now()) @map("created_at")
+  updatedAt DateTime          @updatedAt @map("updated_at")
+
+  tenant  Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  members MailGroupMember[]
+
+  @@unique([tenantId, address])
+  @@index([tenantId, status])
+  @@map("mail_groups")
+}
+
+model MailGroupMember {
+  groupId      String   @map("group_id") @db.Uuid
+  membershipId String   @map("membership_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  group      MailGroup        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  membership TenantMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, membershipId])
+  @@index([membershipId])
+  @@map("mail_group_members")
+}
+
+/**
+ * Handing a workspace to a different owner.
+ *
+ * The mechanism `tenant.ownership.transfer` needs, which the matrix marks
+ * TWO_PERSON. The approval gate that capability implies still does not
+ * exist, so this stays unwired.
+ */
+model OwnershipTransfer {
+  id                 String                  @id @default(uuid()) @db.Uuid
+  tenantId           String                  @map("tenant_id") @db.Uuid
+  initiatorUserId    String                  @map("initiator_user_id") @db.Uuid
+  targetMembershipId String                  @map("target_membership_id") @db.Uuid
+  status             OwnershipTransferStatus @default(PENDING)
+  approvedByUserId   String?                 @map("approved_by_user_id") @db.Uuid
+  completedAt        DateTime?               @map("completed_at")
+  createdAt          DateTime                @default(now()) @map("created_at")
+  updatedAt          DateTime                @updatedAt @map("updated_at")
+
+  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  initiator        AppUser          @relation("OwnershipTransferInitiator", fields: [initiatorUserId], references: [id], onDelete: Cascade)
+  approvedBy       AppUser?         @relation("OwnershipTransferApprover", fields: [approvedByUserId], references: [id])
+  targetMembership TenantMembership @relation(fields: [targetMembershipId], references: [id], onDelete: Cascade)
+
+  @@index([targetMembershipId])
+  @@index([tenantId, status])
+  @@map("ownership_transfers")
+}
+
+/**
+ * A security signal worth a human looking at.
+ *
+ * The Owner console had a screen for these that the same merge deleted, and
+ * what main shows today under "security alerts" is derived from connectors
+ * and audit events rather than from this table.
+ */
+model SecurityAlert {
+  id             String              @id @default(uuid()) @db.Uuid
+  tenantId       String              @map("tenant_id") @db.Uuid
+  type           SecurityAlertType   @default(NEW_DEVICE_LOGIN)
+  severity       AlertSeverity       @default(MEDIUM)
+  status         SecurityAlertStatus @default(OPEN)
+  title          String
+  message        String
+  actorUserId    String?             @map("actor_user_id") @db.Uuid
+  actorEmail     String?             @map("actor_email")
+  ipAddress      String?             @map("ip_address")
+  userAgent      String?             @map("user_agent")
+  deviceLabel    String?             @map("device_label")
+  metadata       Json?
+  resolutionNote String?             @map("resolution_note")
+  resolvedById   String?             @map("resolved_by_id") @db.Uuid
+  resolvedAt     DateTime?           @map("resolved_at")
+  createdAt      DateTime            @default(now()) @map("created_at")
+
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actor      AppUser? @relation("SecurityAlertActor", fields: [actorUserId], references: [id])
+  resolvedBy AppUser? @relation("SecurityAlertResolver", fields: [resolvedById], references: [id])
+
+  @@index([tenantId, status, createdAt])
+  @@map("security_alerts")
+}
+
+enum MailGroupKind {
+  SHARED
+  DISTRIBUTION
+}
+
+enum MailGroupStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum OwnershipTransferStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+enum AlertSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum SecurityAlertStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+  DISMISSED
+}
+
+enum SecurityAlertType {
+  NEW_DEVICE_LOGIN
+  FAILED_LOGIN_BURST
+  REFRESH_TOKEN_REUSE
+  PASSWORD_CHANGED
+  PASSWORD_RESET
 }

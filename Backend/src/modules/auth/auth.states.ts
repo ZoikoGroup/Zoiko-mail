@@ -4,7 +4,7 @@ import type {
   PlatformRole,
   TenantStatus,
 } from "@prisma/client";
-import type { AuthSessionResponse } from "./auth.types.js";
+import type { AuthSessionResponse, AuthUserSummary } from "./auth.types.js";
 
 export interface PublicUser {
   id: string;
@@ -70,7 +70,13 @@ export type AuthState =
   }
   | {
     state: "STAFF_CONSOLE";
-    user: PublicUser;
+    /**
+     * AuthUserSummary, not PublicUser: this state's user carries
+     * platformRole and platformAccess, which PublicUser does not have.
+     * PR #38 added those fields to the object without widening the type,
+     * so main has not compiled since it merged.
+     */
+    user: AuthUserSummary;
     platformRole: PlatformRole;
     /** Access-only platform session token (no refresh yet — see jwt.ts). */
     platformToken: string;

@@ -17,21 +17,23 @@
  */
 import { ApiError, apiDownload, apiRequest } from "./api-client";
 import type {
+  AlertReviewAction,
   AuditEventDto,
   CommitmentDto,
   ConnectorDto,
   DashboardDto,
   DeliveryFailureSummaryDto,
-  DomainDto,
   DomainCheckDto,
+  DomainDto,
   GroupDto,
   InvitationDto,
   MailboxDto,
   MemberDto,
   MembershipRole,
   NotificationDto,
-  PolicyDto,
   PolicyConditionDto,
+  PolicyDto,
+  SecurityAlertListResponse,
   SettingsDto,
   SupportGrantDto,
   SyncErrorDto,
@@ -1279,4 +1281,31 @@ export async function fetchDomainChecks(domainId: string): Promise<DomainCheckDt
       ([record, message]) => `${record.toUpperCase()}: ${String(message)}`
     ),
   }));
+}
+
+/* ── security alerts ───────────────────────────────────────────────────── */
+
+/**
+ * The workspace alert inbox. The backend returns status tallies alongside the
+ * rows so the filter chips and the rail badge never round-trip twice.
+ */
+export async function fetchSecurityAlerts(): Promise<SecurityAlertListResponse> {
+  const res = await apiRequest<SecurityAlertListResponse>("/security-alerts");
+  return {
+    counts: res.counts ?? {},
+    openCount: res.openCount ?? 0,
+    alerts: res.alerts ?? [],
+  };
+}
+
+/** Owner/admin decision on one alert. The server audits who decided, and how. */
+export async function reviewSecurityAlert(
+  id: string,
+  action: AlertReviewAction,
+  note?: string
+): Promise<void> {
+  await apiRequest(`/security-alerts/${id}/review`, {
+    method: "POST",
+    body: JSON.stringify({ action, ...(note ? { note } : {}) }),
+  });
 }

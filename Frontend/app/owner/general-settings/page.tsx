@@ -164,8 +164,11 @@ export default function GeneralSettingsPage() {
 
   const handleRegenerateRecoveryCodes = async () => {
     if (!regenCode) return;
-    const codes = await regenerateRecoveryCodes.mutateAsync(regenCode);
-    setShowRecoveryCodes(codes.recoveryCodes);
+    // The endpoint answers { recoveryCodes }, and this state holds the
+    // array. Passing the envelope straight through would have rendered
+    // nothing — .map on an object — had it ever compiled.
+    const { recoveryCodes } = await regenerateRecoveryCodes.mutateAsync(regenCode);
+    setShowRecoveryCodes(recoveryCodes);
     setRegenCode("");
   };
 

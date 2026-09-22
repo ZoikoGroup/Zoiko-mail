@@ -20,6 +20,7 @@ import type {
   WorkspaceScope,
 } from "../../common/types/jwt.js";
 import { auditService } from "../audit/audit.service.js";
+import { securityAlertService } from "../security-alert/security-alert.service.js";
 // import { mfaService, roleRequiresMfa } from "./mfa.service.js";
 import { mfaEnforcementEnabled, mfaService, roleRequiresMfa } from "./mfa.service.js";
 import { membershipRepository } from "../membership/membership.repository.js";
@@ -419,11 +420,27 @@ function toWorkspaceOption(m: MembershipWithRelations): WorkspaceOption {
   };
 }
 
+/**
+ * What a session is, as far as anyone looking at it later is concerned.
+ *
+ * The columns behind this exist — 20260917010000 added them — but the merge
+ * that dropped the sessions screen also dropped every write to them, so
+ * every refresh row was an anonymous one. That is what made new-device
+ * detection impossible: `recordNewDeviceLogin` recognises a device by the
+ * user agent on a prior refresh row, and there were none to recognise.
+ */
+export interface SessionDeviceMetadata {
+  deviceLabel?: string | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}
+
 async function persistRefreshToken(
   membership: MembershipWithRelations,
   refreshToken: string,
   expiresAt: Date,
-  tx: Prisma.TransactionClient | typeof prisma = prisma
+  tx: Prisma.TransactionClient | typeof prisma = prisma,
+  device?: SessionDeviceMetadata
 ): Promise<void> {
   await tx.refreshToken.create({
     data: {
@@ -431,6 +448,9 @@ async function persistRefreshToken(
       tenantId: membership.tenantId,
       tokenHash: hashToken(refreshToken),
       expiresAt,
+      deviceLabel: device?.deviceLabel ?? null,
+      ipAddress: device?.ipAddress ?? null,
+      userAgent: device?.userAgent ?? null,
     },
   });
 }
@@ -494,14 +514,15 @@ async function issueSession(
   membership: MembershipWithRelations,
   workspace: WorkspaceScope,
   tx: Prisma.TransactionClient | typeof prisma = prisma,
-  continueSessionId?: string
+  continueSessionId?: string,
+  device?: SessionDeviceMetadata
 ): Promise<AuthSessionResponse> {
   // The refresh token is minted first because it decides the session id,
   // which the access token then carries (AC-001).
   const refresh = buildRefreshToken(membership, workspace, continueSessionId);
   const accessToken = buildAccessToken(membership, workspace, refresh.sessionId);
 
-  await persistRefreshToken(membership, refresh.token, refresh.expiresAt, tx);
+  await persistRefreshToken(membership, refresh.token, refresh.expiresAt, tx, device);
   // After the new token is stored, so a failure here cannot leave the account
   // pointing at a workspace it holds no session for.
   await claimActiveWorkspace(membership, tx);
@@ -558,6 +579,65 @@ async function ensureSystemTenant(): Promise<void> {
     },
   });
 }
+
+/**
+ * A device name a person will recognise in their sessions list.
+ *
+ * Deliberately coarse. The point is to let somebody say "that Windows
+ * Chrome was not me" — a precise fingerprint would be both worse at that
+ * and more to store about them than the feature needs.
+ */
+function labelForUserAgent(userAgent?: string | null): string {
+  const ua = (userAgent ?? "").toLowerCase();
+  const platform =
+    ua.includes("iphone") || ua.includes("ipad")
+      ? "iOS"
+      : ua.includes("android")
+        ? "Android"
+        : ua.includes("windows") || ua.includes("win32")
+          ? "Windows"
+          : ua.includes("mac os")
+            ? "macOS"
+            : ua.includes("linux")
+              ? "Linux"
+              : "";
+  const browser =
+    ua.includes("edg/")
+      ? "Edge"
+      : ua.includes("opr/") || ua.includes("opera")
+        ? "Opera"
+        : ua.includes("firefox")
+          ? "Firefox"
+          : ua.includes("chrome")
+            ? "Chrome"
+            : ua.includes("safari")
+              ? "Safari"
+              : "";
+  if (platform && browser) return `${platform} · ${browser}`;
+  if (platform) return platform;
+  if (browser) return browser;
+  return "Unknown device";
+}
+
+/**
+ * The platform half of an AuthUserSummary for somebody who has no platform
+ * session — which is everyone at registration and at OTP verification,
+ * since both happen before any workspace or staff role is in play.
+ *
+ * PR #38 widened AuthUserSummary with these two fields and filled them in
+ * at the staff paths but not at these, which is half of why main stopped
+ * compiling. Written once here so the next state to be added has an
+ * obvious thing to reach for.
+ */
+const NO_PLATFORM_ACCESS = {
+  platformRole: "NONE",
+  platformAccess: {
+    isSupportStaff: false,
+    scope: "NONE",
+    status: "NONE",
+    expiresAt: null,
+  },
+} as const;
 
 export class AuthService {
   /**
@@ -651,6 +731,7 @@ export class AuthService {
         id: user.id,
         email: user.email,
         displayName: user.displayName,
+        ...NO_PLATFORM_ACCESS,
       },
       pendingToken: pending.token,
       expiresIn: pending.expiresIn,
@@ -761,7 +842,14 @@ export class AuthService {
       state: "SIGNED_IN",
       session: await issueSession(
         membershipWithRelations,
-        workspaceScopeForRole(membershipWithRelations.role)
+        workspaceScopeForRole(membershipWithRelations.role),
+        undefined,
+        undefined,
+        {
+          deviceLabel: labelForUserAgent(context.userAgent),
+          ipAddress: context.ipAddress ?? null,
+          userAgent: context.userAgent ?? null,
+        }
       ),
     };
   }
@@ -878,7 +966,13 @@ export class AuthService {
         session: await issueSession(
           membershipWithRelations,
           workspaceScopeForRole(membershipWithRelations.role),
-          tx
+          tx,
+          undefined,
+          {
+            deviceLabel: labelForUserAgent(context.userAgent),
+            ipAddress: context.ipAddress ?? null,
+            userAgent: context.userAgent ?? null,
+          }
         ),
       };
     });
@@ -969,6 +1063,7 @@ export class AuthService {
         id: user.id,
         email: user.email,
         displayName: user.displayName,
+        ...NO_PLATFORM_ACCESS,
       },
       emailVerified: true,
       pendingInvitations,
@@ -1048,6 +1143,16 @@ export class AuthService {
         requestId: context.requestId, ipAddress: context.ipAddress, userAgent: context.userAgent,
       }, tx);
     });
+    await securityAlertService.recordPasswordReset(
+      (await this.activeTenantForUser(user)) ?? SYSTEM_TENANT_ID,
+      user.id,
+      user.email,
+      {
+        ipAddress: context.ipAddress ?? null,
+        userAgent: context.userAgent ?? null,
+        requestId: context.requestId,
+      }
+    );
     return { message: "Password has been reset. You can now sign in with your new password." };
   }
 
@@ -1637,7 +1742,32 @@ export class AuthService {
       throw new AppError("This workspace is no longer available", 403, ErrorCodes.FORBIDDEN);
     }
 
-    const session = await issueSession(membership, payload.intent.workspace);
+    // MFA is mandatory here, so this — not resolveSelectedWorkspace — is
+    // where an ordinary sign-in actually completes. Before issueSession,
+    // because that writes the refresh row for this device and afterwards
+    // every device looks like one the account already knows.
+    await securityAlertService.recordNewDeviceLogin(
+      membership.tenantId,
+      user.id,
+      context.userAgent ?? null,
+      {
+        ipAddress: context.ipAddress ?? null,
+        deviceLabel: labelForUserAgent(context.userAgent),
+        requestId: context.requestId,
+      }
+    );
+
+    const session = await issueSession(
+      membership,
+      payload.intent.workspace,
+      undefined,
+      undefined,
+      {
+        deviceLabel: labelForUserAgent(context.userAgent),
+        ipAddress: context.ipAddress ?? null,
+        userAgent: context.userAgent ?? null,
+      }
+    );
     await auditService.record({
       tenantId: membership.tenantId,
       actorUserId: user.id,
@@ -1716,7 +1846,32 @@ export class AuthService {
     if (!membership || membership.status !== "ACTIVE" || membership.tenant.status !== "ACTIVE") {
       throw new AppError("This workspace is no longer available", 403, ErrorCodes.FORBIDDEN);
     }
-    const session = await issueSession(membership, payload.intent.workspace);
+    // MFA is mandatory here, so this — not resolveSelectedWorkspace — is
+    // where an ordinary sign-in actually completes. Before issueSession,
+    // because that writes the refresh row for this device and afterwards
+    // every device looks like one the account already knows.
+    await securityAlertService.recordNewDeviceLogin(
+      membership.tenantId,
+      user.id,
+      context.userAgent ?? null,
+      {
+        ipAddress: context.ipAddress ?? null,
+        deviceLabel: labelForUserAgent(context.userAgent),
+        requestId: context.requestId,
+      }
+    );
+
+    const session = await issueSession(
+      membership,
+      payload.intent.workspace,
+      undefined,
+      undefined,
+      {
+        deviceLabel: labelForUserAgent(context.userAgent),
+        ipAddress: context.ipAddress ?? null,
+        userAgent: context.userAgent ?? null,
+      }
+    );
     return { recoveryCodes, auth: { state: "SIGNED_IN", session } };
   }
 
@@ -1780,9 +1935,31 @@ export class AuthService {
     if (gate) return gate;
 
     // ACTIVE membership + ACTIVE tenant → sign in.
+    //
+    // The new-device check has to run before issueSession: that call writes
+    // the refresh row for this device, and once it exists every sign-in
+    // looks like one from a device the account already knows.
+    await securityAlertService.recordNewDeviceLogin(
+      membership.tenantId,
+      user.id,
+      context.userAgent ?? null,
+      {
+        ipAddress: context.ipAddress ?? null,
+        deviceLabel: labelForUserAgent(context.userAgent),
+        requestId: context.requestId,
+      }
+    );
+
     const session = await issueSession(
       membership,
-      intendedWorkspace ?? workspaceScopeForRole(membership.role)
+      intendedWorkspace ?? workspaceScopeForRole(membership.role),
+      undefined,
+      undefined,
+      {
+        deviceLabel: labelForUserAgent(context.userAgent),
+        ipAddress: context.ipAddress ?? null,
+        userAgent: context.userAgent ?? null,
+      }
     );
     await auditService.record({
       tenantId: membership.tenantId,
@@ -1884,7 +2061,15 @@ export class AuthService {
         // Continue the same session across the rotation. A token minted
         // before session ids existed has no sid, and seeds one from its own
         // jti rather than being refused.
-        payload.sid ?? payload.jti
+        payload.sid ?? payload.jti,
+        // Carried across too, or the row this rotation replaces would lose
+        // the device it belongs to and the next sign-in from the same
+        // browser would read as a new one.
+        {
+          deviceLabel: labelForUserAgent(context.userAgent),
+          ipAddress: context.ipAddress ?? null,
+          userAgent: context.userAgent ?? null,
+        }
       );
       await auditService.record(
         {
@@ -1996,6 +2181,17 @@ export class AuthService {
     return buildStepUpToken(context.userId, context.tenantId);
   }
 
+  // The one workspace a password reset alert should be filed under. Resets
+  // happen on a public endpoint with no tenant context, so fall back to the
+  // account's active workspace.
+  private async activeTenantForUser(user: { id: string }): Promise<string | null> {
+    const memberships = await membershipRepository.findByUserId(user.id);
+    const live = memberships.find(
+      (membership) => membership.status === "ACTIVE" && membership.tenant.status === "ACTIVE"
+    );
+    return live?.tenantId ?? null;
+  }
+
   async changePassword(
     input: ChangePasswordInput,
     userId: string,
@@ -2045,6 +2241,11 @@ export class AuthService {
         },
         tx
       );
+    });
+    await securityAlertService.recordPasswordChanged(tenantId, userId, user.email, {
+      ipAddress: context.ipAddress ?? null,
+      userAgent: context.userAgent ?? null,
+      requestId: context.requestId,
     });
   }
 
@@ -2223,6 +2424,17 @@ export class AuthService {
         reason,
       },
     });
+
+    // Surfaces a credential-stuffing run as an alert rather than as
+    // something an owner would only find by reading the log. Skipped for
+    // the system tenant, where there is no owner to tell.
+    if (userId && tenantId !== SYSTEM_TENANT_ID) {
+      await securityAlertService.recordFailedLoginBurst(tenantId, userId, email, {
+        ipAddress: context.ipAddress ?? null,
+        userAgent: context.userAgent ?? null,
+        requestId: context.requestId,
+      });
+    }
   }
 
   private async handleRefreshTokenReuse(
@@ -2253,6 +2465,19 @@ export class AuthService {
         tx
       );
     });
+
+    const reuseActor = await userRepository.findById(token.userId);
+    await securityAlertService.recordRefreshTokenReuse(
+      token.tenantId,
+      token.userId,
+      reuseActor?.email ?? "unknown",
+      {
+        ipAddress: context.ipAddress ?? null,
+        userAgent: context.userAgent ?? null,
+        deviceLabel: labelForUserAgent(context.userAgent),
+        requestId: context.requestId,
+      }
+    );
 
     throw new AppError(
       "Refresh token reuse detected",

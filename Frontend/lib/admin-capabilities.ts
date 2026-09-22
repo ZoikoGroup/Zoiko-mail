@@ -51,6 +51,9 @@ export type Capability =
   | "support.standing"
   | "support.workspace.access"
   | "support.grant.end"
+  // Approving support access: STEP_UP and Owner-only (RBAC §2). Listed so the
+  // owner screen can hide a control an Admin would only be refused.
+  | "support.grant.create"
   // Reading one workspace's support console: routine for Owner and Admin,
   // time-boxed for a Support seat, which is why it is a capability rather
   // than a role check.

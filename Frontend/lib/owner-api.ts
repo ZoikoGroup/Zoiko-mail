@@ -749,13 +749,139 @@ export async function downloadExport(requestId: string, stepUpToken?: string): P
   return apiDownload(`/lifecycle/exports/${requestId}/download`, "zoiko-mail-export.json", stepUpToken);
 }
 
-// ─── Support Access Grants ───────────────────────────────────────────────────
+// ─── Support access: grants, and the requests that produce them ─────────────
+//
+// One union under two names before the merge — SupportScopeType on this
+// branch, SupportScopeType on main. Keeping main's, because that is what
+// the rest of the merged tree already imports.
 
 export type SupportScopeType =
   | "TENANT_DIAGNOSTICS"
   | "DNS_DIAGNOSTICS"
   | "DELIVERY_DIAGNOSTICS"
-  | "AUDIT_READ";
+  | "AUDIT_READ"
+  /** Reading inside a mailbox. Asked for by name, approved by name. */
+  | "MAIL_CONTENT";
+
+export type SupportRequestStatus = "PENDING" | "APPROVED" | "DENIED" | "WITHDRAWN";
+
+export interface SupportAccessRequest {
+  id: string;
+  reason: string;
+  scopes: SupportScopeType[];
+  requestedMinutes: number;
+  status: SupportRequestStatus;
+  createdAt: string;
+  decidedAt: string | null;
+  grantId: string | null;
+  supportMembership: {
+    id: string;
+    user: { id: string; email: string; displayName: string };
+  };
+  decidedBy: { id: string; email: string; displayName: string } | null;
+  ticket: { id: string; ticketNumber: number; subject: string } | null;
+}
+
+export async function fetchSupportAccessRequests(
+  status?: SupportRequestStatus
+): Promise<{ requests: SupportAccessRequest[] }> {
+  const q = status ? `?status=${status}` : "";
+  return apiRequest<{ requests: SupportAccessRequest[] }>(`/support/access-requests${q}`);
+}
+
+/**
+ * Approving is what writes the grant.
+ *
+ * Carries a step-up token because RBAC §2 marks "Approve support access"
+ * high-risk and the capability is STEP_UP for Owner — the only role that
+ * holds it. `minutes` may shorten the window the requester asked for; the
+ * server refuses to lengthen it.
+ */
+export async function approveSupportAccessRequest(
+  requestId: string,
+  stepUpToken?: string,
+  minutes?: number
+): Promise<unknown> {
+  return apiRequest(`/support/access-requests/${encodeURIComponent(requestId)}/approve`, {
+    method: "POST",
+    body: minutes ? { minutes } : {},
+    stepUpToken,
+  });
+}
+
+export async function denySupportAccessRequest(
+  requestId: string,
+  note?: string
+): Promise<unknown> {
+  return apiRequest(`/support/access-requests/${encodeURIComponent(requestId)}/deny`, {
+    method: "POST",
+    body: note ? { note } : {},
+  });
+}
+
+// ─── Security alerts ─────────────────────────────────────────────────────────
+
+/**
+ * The workspace's security signals — a sign-in from a new device, a burst of
+ * failed logins, a refresh token replayed, a password changed or reset.
+ *
+ * The screen that showed these was deleted in the PR #35 merge along with
+ * the module behind it, and what stood here afterwards derived a lookalike
+ * from audit events and connector status. This reads the real table.
+ */
+export type SecurityAlertType =
+  | "NEW_DEVICE_LOGIN"
+  | "FAILED_LOGIN_BURST"
+  | "REFRESH_TOKEN_REUSE"
+  | "PASSWORD_CHANGED"
+  | "PASSWORD_RESET";
+
+export type AlertSeverity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+export type AlertStatus = "OPEN" | "ACKNOWLEDGED" | "RESOLVED" | "DISMISSED";
+export type AlertReviewAction = "ACKNOWLEDGE" | "RESOLVE" | "DISMISS";
+
+export interface SecurityAlert {
+  id: string;
+  type: SecurityAlertType;
+  severity: AlertSeverity;
+  status: AlertStatus;
+  title: string;
+  message: string;
+  actorEmail: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  deviceLabel: string | null;
+  resolutionNote: string | null;
+  resolvedAt: string | null;
+  createdAt: string;
+  actor: { id: string; email: string; displayName: string | null } | null;
+  resolvedBy: { id: string; email: string; displayName: string | null } | null;
+}
+
+export interface SecurityAlertList {
+  counts: Partial<Record<AlertStatus, number>>;
+  openCount: number;
+  alerts: SecurityAlert[];
+}
+
+export async function getSecurityAlerts(): Promise<SecurityAlertList> {
+  const res = await apiRequest<SecurityAlertList>("/security-alerts");
+  return { counts: res.counts ?? {}, openCount: res.openCount ?? 0, alerts: res.alerts ?? [] };
+}
+
+/** Acknowledge, resolve or dismiss one. The server records who decided. */
+export async function reviewSecurityAlert(
+  id: string,
+  action: AlertReviewAction,
+  note?: string
+): Promise<void> {
+  await apiRequest(`/security-alerts/${id}/review`, {
+    method: "POST",
+    body: JSON.stringify({ action, ...(note ? { note } : {}) }),
+  });
+}
+
+// ─── Support access grants ───────────────────────────────────────────────────
 
 export interface SupportGrant {
   id: string;
