@@ -68,3 +68,27 @@ export const remove = asyncHandler(async (req: Request, res: Response) => {
   await membershipService.remove(String(req.params.membershipId), requestContext(req));
   sendSuccess(res, 200, { message: "Membership removed successfully" }, req.requestId);
 });
+
+/**
+ * Clear a member's authenticator so they can enrol a new one.
+ *
+ * The response says what happens next rather than "ok": the member has to
+ * set up a new authenticator before they can reach anything, and whoever
+ * pressed the button is the person who will be asked about it.
+ */
+export const resetMfa = asyncHandler(async (req: Request, res: Response) => {
+  const result = await membershipService.resetMfa(
+    String(req.params.membershipId),
+    requestContext(req)
+  );
+  sendSuccess(
+    res,
+    200,
+    {
+      ...result,
+      message:
+        "Authenticator cleared and active sessions ended. They will be asked to set up a new authenticator the next time they sign in.",
+    },
+    req.requestId
+  );
+});

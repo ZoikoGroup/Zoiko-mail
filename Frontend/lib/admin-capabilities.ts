@@ -30,6 +30,10 @@ export type Capability =
   | "people.member.manage"
   | "people.admin.manage"
   | "people.owner.manage"
+  // Clearing a member's authenticator so they can enrol a new one. Owner
+  // only, step-up. The one MFA path an administrator holds — and it forces
+  // re-enrolment rather than switching the factor off.
+  | "people.mfa.reset"
   // Workspace
   | "workspace.settings.read"
   | "workspace.settings.write"

@@ -4,7 +4,8 @@ import { useState } from "react";
 
 import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { useRemoveMember, useUpdateMember } from "@/lib/admin-hooks";
+import { useRemoveMember, useResetMemberMfa, useUpdateMember } from "@/lib/admin-hooks";
+import { StepUpDialog, useStepUp } from "@/components/admin/StepUpDialog";
 import { useCan } from "@/lib/admin-capabilities";
 import type { MemberDto, MembershipRole } from "@/lib/admin-api";
 
@@ -34,9 +35,12 @@ export function ManageMemberDialog({
   const can = useCan();
   const update = useUpdateMember();
   const remove = useRemoveMember();
+  const resetMfa = useResetMemberMfa();
+  const stepUp = useStepUp();
 
   const [role, setRole] = useState<MembershipRole>(person.role);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [mfaReset, setMfaReset] = useState<string | null>(null);
 
   // Which roles this admin may hand out. The target's *current* role decides
   // whether they may be touched at all (the caller checks that before opening
@@ -56,8 +60,22 @@ export function ManageMemberDialog({
 
   const suspended = person.status === "SUSPENDED";
   const roleChanged = role !== person.role;
-  const busy = update.isPending || remove.isPending;
-  const error = update.error ?? remove.error;
+  const busy = update.isPending || remove.isPending || resetMfa.isPending;
+  const error = update.error ?? remove.error ?? resetMfa.error;
+
+  // RBAC §2 puts people.mfa.reset in the Owner row and no other, so an Admin
+  // opening this dialog does not see the control at all. The server refuses
+  // it either way; this stops an Admin being invited to fail.
+  const canResetMfa = can("people.mfa.reset");
+
+  const doResetMfa = () => {
+    setMfaReset(null);
+    void stepUp.attempt(`Clearing the authenticator for ${person.user.email}`, (token) =>
+      resetMfa
+        .mutateAsync({ membershipId: person.id, stepUpToken: token })
+        .then((result) => setMfaReset(result.message))
+    );
+  };
 
   const applyRole = () =>
     update.mutate({ membershipId: person.id, patch: { role } }, { onSuccess: onClose });
@@ -70,6 +88,8 @@ export function ManageMemberDialog({
 
   return (
     <>
+      <StepUpDialog {...stepUp.dialog} />
+
       <Modal
         open={!confirmRemove}
         onClose={onClose}
@@ -138,6 +158,27 @@ export function ManageMemberDialog({
                   : "Suspend"}
             </button>
           </div>
+
+          {canResetMfa ? (
+            <div className="border-t border-[var(--border)] pt-4">
+              <div className="mb-1 text-[12.6px] font-semibold text-[var(--ink)]">
+                Reset authenticator
+              </div>
+              <p className="mb-2.5 text-[11.5px] text-[var(--ink3)]">
+                For someone who has lost their phone and their recovery codes. This does
+                not switch two-factor off — it clears what they had, ends their sessions,
+                and asks them to set up a new authenticator the next time they sign in.
+              </p>
+              {mfaReset ? (
+                <p className="mb-2.5 rounded-lg bg-[var(--ok-soft)] px-3 py-2 text-[11.5px] text-[var(--ok)]">
+                  {mfaReset}
+                </p>
+              ) : null}
+              <button className="zoiko-btn sm" onClick={doResetMfa} disabled={busy}>
+                {resetMfa.isPending ? "Clearing…" : "Reset authenticator"}
+              </button>
+            </div>
+          ) : null}
 
           <div className="border-t border-[var(--border)] pt-4">
             <div className="mb-1 text-[12.6px] font-semibold text-[var(--crit)]">

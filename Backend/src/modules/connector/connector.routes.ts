@@ -351,7 +351,13 @@ connectorRouter.get(
   })
 );
 
-connectorRouter.post("/", validate(createConnectedAccountSchema), asyncHandler(async (req, res) => {
+/**
+ * RBAC §2 "Connect own account (OAuth)" — Owner Yes, Admin Yes, Member "If
+ * allowed". The role floor above already admits all three; naming the
+ * capability is what makes the Member's "if allowed" expressible at all,
+ * and lets the policy gate hang off it later rather than off a role list.
+ */
+connectorRouter.post("/", requireCapability("connector.own.connect"), validate(createConnectedAccountSchema), asyncHandler(async (req, res) => {
   sendSuccess(res, 201, await connectorService.create(req.body, {
     tenantId: req.tenantContext!.tenantId,
     membershipId: req.tenantContext!.membershipId,
@@ -416,6 +422,48 @@ connectorRouter.delete("/:accountId", validate(connectedAccountIdSchema, "params
     requestId: req.requestId,
   }), req.requestId);
 }));
+
+/**
+ * The tenant-scope half of RBAC §2's "Disconnect connected account".
+ *
+ * Declared before "/:accountId" so "admin" is not read as an account id, and
+ * kept a separate route from the member's own disconnect on purpose: the two
+ * differ in whose account they may touch, and one gate cannot say both
+ * "your own" and "anyone in this workspace".
+ */
+connectorRouter.delete(
+  "/admin/:accountId",
+  requireCapability("connector.tenant.disconnect"),
+  validate(connectedAccountIdSchema, "params"),
+  asyncHandler(async (req, res) => {
+    const c = req.tenantContext!;
+    sendSuccess(res, 200, await connectorService.disconnectForTenant(String(req.params.accountId), {
+      tenantId: c.tenantId,
+      userId: c.userId,
+      requestId: req.requestId,
+    }), req.requestId);
+  })
+);
+
+/**
+ * RBAC §2 "Rotate provider credentials" — Step-up, because §5 counts a
+ * provider-credential action as high-risk. The refresh machinery existed and
+ * was reachable only as a side effect of a sync finding an expired token, so
+ * an operator suspecting a leak had no way to act on it.
+ */
+connectorRouter.post(
+  "/admin/:accountId/rotate",
+  requireCapability("connector.credentials.rotate"),
+  validate(connectedAccountIdSchema, "params"),
+  asyncHandler(async (req, res) => {
+    const c = req.tenantContext!;
+    sendSuccess(res, 200, await connectorService.rotateCredentials(String(req.params.accountId), {
+      tenantId: c.tenantId,
+      userId: c.userId,
+      requestId: req.requestId,
+    }), req.requestId);
+  })
+);
 
 connectorRouter.post("/:accountId/sync", validate(connectedAccountIdSchema, "params"), asyncHandler(async (req, res) => {
   sendSuccess(res, 200, await connectorService.syncNow(String(req.params.accountId), {

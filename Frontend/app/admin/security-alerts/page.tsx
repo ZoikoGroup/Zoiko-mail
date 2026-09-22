@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import { useReviewSecurityAlert, useSecurityAlerts } from "@/lib/admin-hooks";
+import { useCan } from "@/lib/admin-capabilities";
 import { ago } from "@/lib/admin-queries";
 import type { AlertSeverity, AlertReviewAction, AlertStatus, SecurityAlertDto } from "@/lib/admin-api";
 import {
@@ -40,6 +41,14 @@ function labelFor(type: SecurityAlertDto["type"]): string {
 export default function AdminSecurityAlertsPage() {
   const { data, isLoading, error } = useSecurityAlerts();
   const review = useReviewSecurityAlert();
+  const can = useCan();
+
+  // The matrix names `security-alert.read` and `security-alert.review`
+  // separately, because looking at a signal and closing one are different
+  // acts — dismissing a security alert is a decision, and it ought to be
+  // attributable to whoever made it. An account holding only the read half
+  // sees the queue without the three buttons the server would refuse.
+  const canReview = can("security-alert.review");
   const [filter, setFilter] = useState<string>(STATUS_FILTERS[0]);
   const [note, setNote] = useState<string>("");
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -114,6 +123,19 @@ export default function AdminSecurityAlertsPage() {
                 detail={
                   <>
                     {alert.message}
+                    {/*
+                      Whose account it was. The row carried the address and
+                      the device but never the person, which in a workspace
+                      with more than one member makes "sign-in from a new
+                      device" unactionable — the first question anyone asks
+                      is who, and the answer was only in the API response.
+                    */}
+                    {(alert.actor?.email ?? alert.actorEmail) && (
+                      <span className="font-mono-num text-[var(--ink3)]">
+                        {" "}
+                        · {alert.actor?.email ?? alert.actorEmail}
+                      </span>
+                    )}
                     {alert.ipAddress && (
                       <span className="font-mono-num text-[var(--ink3)]">
                         {" "}
@@ -142,7 +164,7 @@ export default function AdminSecurityAlertsPage() {
                   </>
                 }
               />
-              {alert.status === "OPEN" && (
+              {alert.status === "OPEN" && canReview && (
                 <form
                   onSubmit={(e) => submitReview(e, alert, "RESOLVE")}
                   className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] bg-[var(--s2)] px-4 py-2.5"

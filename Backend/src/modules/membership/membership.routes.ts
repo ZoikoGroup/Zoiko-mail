@@ -66,4 +66,20 @@ membershipRouter.delete(
   controller.remove
 );
 
+/**
+ * RBAC §2 "people.mfa.reset" — Owner Yes, Admin No, Step-up.
+ *
+ * Step-up because §5 lists it among the high-risk actions, and rightly:
+ * whoever holds this can end a member's second factor and have a new one
+ * enrolled. Owner-only because the matrix says so — the capability appears
+ * in no other role's row, so an Admin reaching this route is refused by the
+ * gate rather than by a role string.
+ */
+membershipRouter.post(
+  "/members/:membershipId/mfa/reset",
+  requireCapability("people.mfa.reset"),
+  validate(membershipIdParamsSchema, "params"),
+  controller.resetMfa
+);
+
 export { membershipRouter };

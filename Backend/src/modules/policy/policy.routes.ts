@@ -19,6 +19,13 @@ policyRouter.post(
   requireCapability("policy.write"),
   validate(createPolicySchema),
   requireCapabilityWhen((req) => (req.body?.type === "AI" ? "policy.ai.write" : null)),
+  // The other half of the split the matrix calls out as defining the
+  // Owner/Admin boundary: `policy.write` is Admin, `policy.security.write`
+  // is Owner. An Admin authors inside a frame the Owner locks — and until
+  // this line, authored the frame too.
+  requireCapabilityWhen((req) =>
+    req.body?.type === "SECURITY" ? "policy.security.write" : null
+  ),
   controller.create
 );
 policyRouter.get("/:policyId", requireCapability("policy.write"), validate(policyIdParamsSchema, "params"), controller.get);
