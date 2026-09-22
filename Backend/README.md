@@ -12,7 +12,7 @@ Custom-domain protection records DNS check history with readable errors and bloc
 
 The SecureServer pilot adapter supports `imap.secureserver.net:993` and `smtpout.secureserver.net:465` using TLS 1.2 or newer. It is enabled only through environment-backed credentials plus an explicit tenant and membership mapping. Inbox sync stores allow-listed metadata only, SMTP sends run as idempotent background jobs, and passwords are never stored in PostgreSQL.
 
-## Technolo
+## Technology
 
 - Node.js 22
 - Express.js 5
@@ -51,7 +51,17 @@ src/
     integration/          Provider-independent product links
     job/                  Background-job processing
     lifecycle/            Exports and protected tenant deletion
-    support/              Temporary audited support diagnostics
+    support/              Grant-bound, audited support diagnostics
+    ticket/               Support tickets, tenant-side and staff-side
+    security-alert/       New-device sign-ins, failed-login bursts, token reuse
+    connector/            Gmail and Microsoft 365 read-only connectors
+    provider-mail/        Hosted mail over IMAP/SMTP, driven by jobs
+    delivery-protection/  Warm-up, send caps, suppression, spam verdicts
+    ai/                   Commitment extraction, behind a policy gate
+    billing/              Plans, subscriptions and invoices (Stripe)
+    contact/              Address book
+    participant/          Who appears in a thread, and how often
+    dashboard/            The aggregate each console opens on
   routes/                 API router
   app.ts                  Express application
   server.ts               HTTP server, workers and graceful shutdown
@@ -62,6 +72,52 @@ prisma/
 tests/                    Integration and security tests
 docs/                     API testing and deployment guides
 ```
+
+## Authorization
+
+Three layers, and they are separate on purpose.
+
+**1. Capabilities, not roles.** A route asks whether the caller holds a named
+capability, never whether they are an admin:
+
+```ts
+router.delete("/:domainId",
+  requireCapability("workspace.domains.remove"),   // STEP_UP in the matrix
+  controller.remove);
+```
+
+The matrix in `src/common/capabilities/matrix.ts` maps 41 capabilities across
+four roles, and an answer can be `ALLOW`, `DENY`, `OWN`, `STEP_UP`,
+`TWO_PERSON` or `GRANT`. **An omitted entry is a denial** — so adding a
+capability to the vocabulary cannot silently widen anyone's access.
+
+**2. The capability is a floor, not the whole check.** Where a decision depends
+on the *target* rather than the caller, the service decides. `people.member.manage`
+opens the route; `assertAdminBoundary` is what refuses an Admin acting on an
+Owner — you cannot know the target's role at route time.
+
+**3. Tenant isolation is enforced twice.** Every query filters by `tenantId`,
+and PostgreSQL row-level security enforces it underneath on the sensitive
+tables. The second layer is there for the query that forgets the first.
+
+### Support access
+
+Support holds no standing access to any workspace. A seat asks with a reason
+and a case, the Owner approves with step-up, the grant carries named scopes and
+an expiry, and every read it allows is written to the customer's audit log.
+When it lapses the screens stop answering.
+
+Scopes are approved individually, so an owner approving a delivery
+investigation has not also approved reading their staff's mail:
+
+| Scope | Allows |
+|---|---|
+| `TENANT_DIAGNOSTICS` | Members, mailboxes, configuration |
+| `DNS_DIAGNOSTICS` | Domains, MX/SPF/DKIM/DMARC |
+| `DELIVERY_DIAGNOSTICS` | Delivery and provider events |
+| `AUDIT_READ` | The workspace audit log |
+| `MAILBOX_ADMIN` | Clear forwarding, lift a send suspension |
+| `MAIL_CONTENT` | Message headers — never bodies |
 
 ## Implemented features
 
