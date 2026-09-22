@@ -21,6 +21,7 @@ export const createGrantSchema = z.object({
 export const tenantParamSchema = z.object({ tenantId: z.string().uuid() });
 export const domainParamSchema = z.object({ tenantId: z.string().uuid(), domainId: z.string().uuid() });
 export const mailboxParamSchema = z.object({ tenantId: z.string().uuid(), mailboxId: z.string().uuid() });
+export const jobIdSchema = z.object({ jobId: z.string().uuid() });
 
 export const platformListQuerySchema = z.object({
   tenantId: z.string().uuid().optional(),

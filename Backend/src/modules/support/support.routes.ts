@@ -3,7 +3,7 @@ import { Router } from "express";
 import { authenticate, idempotency, authenticateStaff, requireCapability, requireSupportAccess, requireTenantGrant, logSupportAccess, tenantContext, validate, crossTenantScope} from "../../common/middleware/index.js";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
-import { createGrantSchema, domainParamSchema, grantIdSchema, mailboxParamSchema, platformListQuerySchema, tenantParamSchema } from "./support.schema.js";
+import { createGrantSchema, domainParamSchema, grantIdSchema, jobIdSchema, mailboxParamSchema, platformListQuerySchema, tenantParamSchema } from "./support.schema.js";
 import { supportService } from "./support.service.js";
 
 export const supportRouter = Router();
@@ -211,6 +211,10 @@ supportPlatformRouter.get("/delivery-events", validate(platformListQuerySchema, 
 }));
 supportPlatformRouter.get("/jobs", validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
   sendSuccess(res, 200, { jobs: await supportService.listJobs(listQuery(req)) }, req.requestId);
+}));
+supportPlatformRouter.post("/jobs/:jobId/retry", validate(jobIdSchema, "params"), asyncHandler(async (req, res) => {
+  const staff = req.staffAuth!;
+  sendSuccess(res, 200, { job: await supportService.requeue(String(req.params.jobId), { userId: staff.userId, platformRole: staff.platformRole }) }, req.requestId);
 }));
 supportPlatformRouter.get("/suppressions", validate(platformListQuerySchema, "query"), asyncHandler(async (req, res) => {
   sendSuccess(res, 200, { suppressions: await supportService.listSuppressions(listQuery(req)) }, req.requestId);

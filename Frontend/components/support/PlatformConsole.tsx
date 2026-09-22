@@ -20,14 +20,17 @@ import {
   fetchPlatformTenantOverview,
   listPlatformAudit,
   listPlatformDeliveryEvents,
+  listPlatformJobs,
   listPlatformProviderEvents,
   listPlatformSuppressions,
   listPlatformTokens,
+  retryPlatformJob,
   searchPlatformTenants,
   type PlatformAuditEvent,
   type PlatformDeliveryEvent,
   type PlatformDomainDetail,
   type PlatformIssue,
+  type PlatformJob,
   type PlatformListParams,
   type PlatformMailboxDetail,
   type PlatformOverview,
@@ -68,7 +71,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-type PageId = "overview" | "tenants" | "tokens" | "suppressions" | "provider-events" | "delivery-events" | "audit" | "tickets";
+type PageId = "overview" | "tenants" | "tokens" | "suppressions" | "jobs" | "provider-events" | "delivery-events" | "audit" | "tickets";
 
 const PAGES: Array<{ id: PageId; label: string; icon: string }> = [
   { id: "overview", label: "Workspace Overview", icon: "◈" },
@@ -76,10 +79,14 @@ const PAGES: Array<{ id: PageId; label: string; icon: string }> = [
   { id: "tokens", label: "Tokens", icon: "🗝" },
   { id: "delivery-events", label: "Delivery Events", icon: "✉" },
   { id: "provider-events", label: "Provider Events", icon: "⇄" },
+  { id: "jobs", label: "Background Jobs", icon: "⛭" },
   { id: "audit", label: "Audit Logs", icon: "🛡" },
   { id: "suppressions", label: "Suppressions", icon: "⊘" },
   { id: "tickets", label: "Tickets", icon: "✎" },
 ];
+
+const JOB_TYPES = ["DATA_EXPORT", "DATA_DELETION", "NOTIFICATION_DIGEST", "IMAP_SYNC", "SMTP_SEND", "AI_EXTRACTION", "AI_DRAFT_GENERATION"];
+const JOB_STATUSES = ["PENDING", "RUNNING", "RETRY", "COMPLETED", "FAILED", "CANCELLED"];
 
 const COUNT_ICONS: Record<string, LucideIcon> = {
   members: Users,
@@ -1255,6 +1262,84 @@ function SuppressionsPage() {
   );
 }
 
+function JobsPage() {
+  const { params, setParams, rows, loading, error, reload } = useList<PlatformJob>(listPlatformJobs, "jobs");
+  const [q, setQ] = useState("");
+  const [type, setType] = useState("");
+  const [status, setStatus] = useState("");
+  const [retrying, setRetrying] = useState<string | null>(null);
+  const [retryError, setRetryError] = useState<string | null>(null);
+
+  const retry = async (jobId: string) => {
+    setRetrying(jobId);
+    setRetryError(null);
+    try {
+      await retryPlatformJob(jobId);
+      reload();
+    } catch (e) {
+      setRetryError(apiErrorMessage(e));
+    } finally {
+      setRetrying(null);
+    }
+  };
+
+  return (
+    <div>
+      <FilterInputs
+        q={q}
+        setQ={setQ}
+        selectLabel="Type"
+        selectValue={type}
+        selectOptions={JOB_TYPES}
+        setSelectValue={setType}
+        extraSelectLabel="Status"
+        extraSelectValue={status}
+        extraSelectOptions={JOB_STATUSES}
+        setExtraSelectValue={setStatus}
+        onApply={() => setParams({ q, type, status, limit: 50 })}
+        onReset={() => { setQ(""); setType(""); setStatus(""); setParams({ limit: 50 }); }}
+      />
+      {retryError && (
+        <div className="notice" style={{ background: "var(--crit-soft)", borderColor: "var(--crit)" }}>
+          <b>⚠</b>
+          <div style={{ flex: 1 }}>{retryError}</div>
+        </div>
+      )}
+      <ListShell
+        loading={loading}
+        error={error}
+        onRetry={reload}
+        title="Background Jobs"
+        count={rows.length}
+        headers={["Type", "Tenant", "Resource", "Status", "Attempts", "Run At", "Completed", "Last Error", "Action"]}
+        rows={rows}
+        render={(j) => (
+          <tr key={j.id}>
+            <td className="mo">{j.type}</td>
+            <td className="nm">{j.tenantName}</td>
+            <td className="mo muted">{j.resource ?? "—"}</td>
+            <td><Pill status={j.status} /></td>
+            <td className="mo">
+              {j.attempts}/{j.maxAttempts}
+            </td>
+            <td className="muted">{fmt(j.runAt)}</td>
+            <td className="muted">{fmt(j.completedAt)}</td>
+            <td className="mo muted" title={j.lastError ?? undefined}>{j.lastError ?? "—"}</td>
+            <td className="mo">
+              {(j.status === "FAILED" || j.status === "CANCELLED") && (
+                <button className="btn sm" disabled={retrying === j.id} onClick={() => retry(j.id)}>
+                  {retrying === j.id ? "Retrying…" : "Retry"}
+                </button>
+              )}
+            </td>
+          </tr>
+        )}
+        empty="No background jobs match."
+      />
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Shell
 // ---------------------------------------------------------------------------
@@ -1578,6 +1663,7 @@ export default function PlatformConsole() {
           )}
           {page === "tokens" && <TokensPage />}
           {page === "suppressions" && <SuppressionsPage />}
+          {page === "jobs" && <JobsPage />}
           {page === "provider-events" && <ProviderEventsPage />}
           {page === "delivery-events" && <DeliveryEventsPage />}
           {page === "audit" && <AuditPage />}

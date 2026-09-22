@@ -89,8 +89,6 @@ export const supportStyles = `
 .support-workspace .railitem.on { background: var(--surface); color: var(--ink); border-left: 2px solid var(--accent); font-weight: 650; }
 .support-workspace .railitem .cnt { margin-left: auto; font-family: var(--mo); font-size: 9.5px; color: var(--ink3); background: var(--s3); border-radius: 9px; padding: 1px 6px; }
 .support-workspace .drawer .railitem span:not(.ico):not(.cnt) { display: inline; }
-.support-workspace .railitem.locked { opacity: 0.5; }
-.support-workspace .railitem .lk { margin-left: auto; font-size: 11px; }
 .support-workspace main { flex: 1; min-height: 0; overflow-y: auto; padding: 22px 26px 60px; }
 .support-workspace .page { max-width: 1180px; margin: 0 auto; }
 .support-workspace .crumbs { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink3); margin-bottom: 10px; }

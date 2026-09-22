@@ -968,6 +968,41 @@ export class SupportService {
     }));
   }
 
+  /**
+   * Staff requeue of a terminal background job.
+   *
+   * Only a FAILED or CANCELLED job can be retried — a live or completed job is
+   * in motion or done, and resurrecting it would be wrong. The reset clears
+   * the failure state so the worker picks the job up as if new: attempts back
+   * to zero, run time now, lock/error/completion cleared. The staff operator
+   * is the actor, so there is no single tenant to inherit a grant from; the
+   * event is attributed to the job's own tenant and the acting support user.
+   */
+  async requeue(jobId: string, actor: { userId: string; platformRole: PlatformRole }) {
+    const job = await prisma.backgroundJob.findUnique({ where: { id: jobId } });
+    if (!job) throw new AppError("Job not found", 404, ErrorCodes.NOT_FOUND);
+    if (job.status !== "FAILED" && job.status !== "CANCELLED") {
+      throw new AppError(`Only failed or cancelled jobs can be retried (job is ${job.status})`, 409, ErrorCodes.CONFLICT);
+    }
+
+    const updated = await prisma.backgroundJob.update({
+      where: { id: jobId },
+      data: { status: "PENDING", attempts: 0, runAt: new Date(), lockedAt: null, completedAt: null, lastError: null },
+    });
+
+    await auditService.record({
+      tenantId: job.tenantId,
+      actorUserId: actor.userId,
+      eventType: "JOB_RETRIED",
+      actorType: "SUPPORT",
+      targetType: "BackgroundJob",
+      targetId: jobId,
+      metadata: { retriedByRole: actor.platformRole, source: "support-console" },
+    });
+
+    return updated;
+  }
+
   async listGrants() {
     const grants = await prisma.supportAccessGrant.findMany({
       include: {

@@ -338,6 +338,42 @@ export function listPlatformAudit(params: PlatformListParams): Promise<{ events:
   return platformRequest<{ events: PlatformAuditEvent[] }>(`/support/platform/audit${listQueryString(params)}`);
 }
 
+export type PlatformJobType =
+  | "DATA_EXPORT"
+  | "DATA_DELETION"
+  | "NOTIFICATION_DIGEST"
+  | "IMAP_SYNC"
+  | "SMTP_SEND"
+  | "AI_EXTRACTION"
+  | "AI_DRAFT_GENERATION";
+
+export type PlatformJobStatus = "PENDING" | "RUNNING" | "RETRY" | "COMPLETED" | "FAILED" | "CANCELLED";
+
+export interface PlatformJob {
+  id: string;
+  type: PlatformJobType;
+  tenantId: string;
+  tenantName: string | null;
+  status: PlatformJobStatus;
+  attempts: number;
+  maxAttempts: number;
+  runAt: string | null;
+  lockedAt: string | null;
+  completedAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+  resource: string | null;
+}
+
+export function listPlatformJobs(params: PlatformListParams): Promise<{ jobs: PlatformJob[] }> {
+  return platformRequest<{ jobs: PlatformJob[] }>(`/support/platform/jobs${listQueryString(params)}`);
+}
+
+export function retryPlatformJob(jobId: string): Promise<{ job: PlatformJob }> {
+  return platformRequest<{ job: PlatformJob }>(`/support/platform/jobs/${encodeURIComponent(jobId)}/retry`, { method: "POST" });
+}
+
 // ---------------------------------------------------------------------------
 // Support tickets. Tenant members use the tenant-scoped routes under
 // /support/tickets: any ACTIVE member may view the workspace board (plain
