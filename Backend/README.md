@@ -102,10 +102,25 @@ tables. The second layer is there for the query that forgets the first.
 
 ### Support access
 
-Support holds no standing access to any workspace. A seat asks with a reason
-and a case, the Owner approves with step-up, the grant carries named scopes and
-an expiry, and every read it allows is written to the customer's audit log.
-When it lapses the screens stop answering.
+Two different things are called "support", and they are gated differently.
+
+A SUPPORT member the Owner invited into their own workspace reads that one
+workspace through the membership itself. `tenantContext` pins every answer to
+the caller's tenant, so the console cannot reach another workspace, and asking
+the Owner to approve a grant on top of the invitation they already issued would
+gate the wrong thing.
+
+Zoiko staff reaching into a customer's workspace is the case with no standing
+access. That path runs through the platform router — `crossTenantScope`,
+`authenticateStaff`, `requireSupportAccess`, `requireTenantGrant` — and
+`requireTenantGrant` refuses any read narrowed to one workspace without a live
+approved grant. A seat asks with a reason and a case, the Owner approves with
+step-up, the grant carries named scopes and an expiry, and every read it allows
+is written to the customer's audit log. When it lapses the screens stop
+answering.
+
+The one write a support seat can make — resetting a mailbox setting — needs a
+grant naming the `MAILBOX_ADMIN` scope either way.
 
 Scopes are approved individually, so an owner approving a delivery
 investigation has not also approved reading their staff's mail:

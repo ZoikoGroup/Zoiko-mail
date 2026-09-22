@@ -72,6 +72,16 @@ body {
   --crit-soft: #31150F;
 }
 
+:root {
+  /* Motion tokens. Curves and timings shared by every animation below so the
+     whole UI moves the same way instead of each component picking its own. */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --t-fast: 120ms;
+  --t-med: 220ms;
+  --t-slow: 320ms;
+}
+
 html, body, #__next { height: 100%; }
 
 body {
@@ -95,6 +105,12 @@ body {
   border-radius: 11px;
   padding: 14px 16px;
   box-shadow: var(--sh1);
+  transition: transform var(--t-med) var(--ease), box-shadow var(--t-med) var(--ease), border-color var(--t-med) var(--ease);
+}
+.zoiko-stat:hover {
+  transform: translateY(-2px);
+  border-color: var(--bstrong);
+  box-shadow: var(--sh2);
 }
 
 .zoiko-card {
@@ -103,6 +119,12 @@ body {
   border-radius: 12px;
   box-shadow: var(--sh1);
   overflow: hidden;
+  transition: transform var(--t-med) var(--ease), box-shadow var(--t-med) var(--ease), border-color var(--t-med) var(--ease);
+}
+.zoiko-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--bstrong);
+  box-shadow: var(--sh2);
 }
 
 .zoiko-btn {
@@ -113,18 +135,26 @@ body {
   font-size: 11.5px;
   font-weight: 600;
   color: var(--ink2);
-  transition: all 0.15s ease;
+  transition: color var(--t-fast) var(--ease-in-out), background-color var(--t-fast) var(--ease-in-out),
+    border-color var(--t-fast) var(--ease-in-out), box-shadow var(--t-fast) var(--ease-in-out),
+    opacity var(--t-fast) var(--ease-in-out), transform var(--t-fast) var(--ease-in-out);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
   cursor: pointer;
+  will-change: transform;
 }
-.zoiko-btn:hover { border-color: var(--bstrong); color: var(--ink); }
+.zoiko-btn:hover { border-color: var(--bstrong); color: var(--ink); transform: translateY(-1px); }
+.zoiko-btn:active { transform: translateY(0) scale(0.97); }
+.zoiko-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 .zoiko-btn.pri { background: var(--accent); border-color: var(--accent); color: #ffffff; }
 .zoiko-btn.pri:hover { opacity: 0.92; }
 .zoiko-btn.crit { background: var(--crit-soft); border-color: var(--crit-soft); color: var(--crit); }
 .zoiko-btn.sm { padding: 4px 9px; font-size: 10.8px; }
+.zoiko-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.zoiko-btn:hover, .zoiko-btn:active { box-shadow: var(--sh1); }
+.zoiko-btn.pri:active, .zoiko-btn.crit:active { box-shadow: none; }
 
 /* Text inputs, selects and textareas on the admin surface. Added with the
    invitation letter editor — the admin console had no form controls before
@@ -200,6 +230,23 @@ body {
   animation: page-enter 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/* Panels inside a freshly navigated page settle in on a short stagger so the
+   content reads sequentially instead of appearing all at once. Opacity-only
+   (never transform) so it cannot fight the hover-lift on .zoiko-card/stat. */
+.page-enter h1,
+.page-enter h2 {
+  animation: zoi-fade var(--t-med) var(--ease-in-out) both;
+  animation-delay: 70ms;
+}
+.page-enter .zoiko-stat {
+  animation: zoi-fade var(--t-med) var(--ease-in-out) both;
+  animation-delay: 120ms;
+}
+.page-enter .zoiko-card {
+  animation: zoi-fade var(--t-med) var(--ease-in-out) both;
+  animation-delay: 170ms;
+}
+
 /* ---- Top loading bar --------------------------------------------------------
    Fixed accent-colored bar shown while a navigation is in flight. */
 .route-progress {
@@ -232,7 +279,97 @@ body {
   to   { transform: scaleX(1); opacity: 0; }
 }
 
+/* ---- Micro-interactions ------------------------------------------------------
+   Shared keyframes and utility classes that give every surface a consistent
+   feel. Components opt in (modals, dropdowns, drawers, skeleton rows) and the
+   staggered list primer (.zoi-item) makes data appear in step rather than all
+   at once. All durations/curves come from the motion tokens in :root. */
+
+@keyframes zoi-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.zoi-item {
+  animation: zoi-fade-up var(--t-slow) var(--ease) both;
+}
+
+/* Safe for table rows/cells, which cannot always take transforms. */
+@keyframes zoi-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.zoi-fade {
+  animation: zoi-fade var(--t-med) var(--ease-in-out) both;
+}
+
+/* Backdrop + panel entrance used by Modal, ConfirmDialog, StepUpDialog, etc. */
+@keyframes zoi-backdrop {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.zoi-modal-mask { animation: zoi-backdrop var(--t-med) var(--ease) both; }
+
+@keyframes zoi-scale-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.zoi-modal-panel { animation: zoi-scale-in var(--t-med) var(--ease) both; }
+
+/* Popover / dropdown menus: scales out of the corner they are anchored to. */
+@keyframes zoi-pop {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.zoi-pop-lt { transform-origin: top left;   animation: zoi-pop var(--t-fast) var(--ease) both; }
+.zoi-pop-rt { transform-origin: top right;  animation: zoi-pop var(--t-fast) var(--ease) both; }
+
+/* Mobile sidebars slide out of the edge they live on. */
+@keyframes zoi-drawer-in {
+  from { opacity: 0.4; transform: translateX(-100%); }
+  to   { opacity: 1;   transform: translateX(0); }
+}
+.zoi-drawer { animation: zoi-drawer-in var(--t-med) var(--ease) both; }
+
+/* Generic fade-up for panels and inline confirmation surfaces. */
+@keyframes zoi-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.zoi-rise { animation: zoi-rise var(--t-slow) var(--ease) both; }
+
+/* Skeleton shimmer sweeps across the block instead of the default pulse. */
+@keyframes zoi-shimmer {
+  100% { transform: translateX(100%); }
+}
+.zoi-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--s3);
+}
+.zoi-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgb(from var(--surface) r g b / 0.9), transparent);
+  animation: zoi-shimmer 1.4s var(--ease-in-out) infinite;
+}
+
+/* Keyboard navigators always get a visible focus ring. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
   .page-enter { animation-duration: 0.01s; }
   .route-progress[data-phase="running"] { animation-duration: 0.6s; }
   .route-progress[data-phase="finishing"] { animation-duration: 0.01s; }

@@ -17,6 +17,7 @@ import {
   getPolicies,
   createPolicy,
   activatePolicy,
+  deactivatePolicy,
   getCurrentTenant,
   updateTenant,
   getGeneralSettings,
@@ -35,6 +36,7 @@ import {
   getAdminMailboxes,
   createAdminMailbox,
   deleteAdminMailbox,
+  updateMailboxSendingStatus,
   getLifecycleRequests,
   requestDataExport,
   requestDeletion,
@@ -202,6 +204,14 @@ export function useActivatePolicy() {
   });
 }
 
+export function useDeactivatePolicy() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (policyId: string) => deactivatePolicy(policyId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "policies"] }),
+  });
+}
+
 // ─── Tenant ───────────────────────────────────────────────────────────────────
 
 export function useTenant() {
@@ -362,6 +372,15 @@ export function useDeleteAdminMailbox() {
   });
 }
 
+export function useUpdateMailboxSendingStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ mailboxId, data }: { mailboxId: string; data: { suspended: boolean; reason?: string } }) =>
+      updateMailboxSendingStatus(mailboxId, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "admin-mailboxes"] }),
+  });
+}
+
 // ─── Lifecycle (exports & deletions) ────────────────────────────────────────
 
 export function useLifecycleRequests() {
@@ -375,7 +394,8 @@ export function useLifecycleRequests() {
 export function useRequestDataExport() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: RequestExportInput) => requestDataExport(input),
+    mutationFn: ({ input, stepUpToken }: { input: RequestExportInput; stepUpToken?: string }) =>
+      requestDataExport(input, stepUpToken),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "lifecycle"] }),
   });
 }
@@ -383,7 +403,8 @@ export function useRequestDataExport() {
 export function useRequestDeletion() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: RequestDeletionInput) => requestDeletion(input),
+    mutationFn: ({ input, stepUpToken }: { input: RequestDeletionInput; stepUpToken?: string }) =>
+      requestDeletion(input, stepUpToken),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "lifecycle"] }),
   });
 }

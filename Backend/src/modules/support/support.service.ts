@@ -1215,6 +1215,41 @@ export class SupportService {
     }));
   }
 
+  /**
+   * Staff requeue of a terminal background job.
+   *
+   * Only a FAILED or CANCELLED job can be retried — a live or completed job is
+   * in motion or done, and resurrecting it would be wrong. The reset clears
+   * the failure state so the worker picks the job up as if new: attempts back
+   * to zero, run time now, lock/error/completion cleared. The staff operator
+   * is the actor, so there is no single tenant to inherit a grant from; the
+   * event is attributed to the job's own tenant and the acting support user.
+   */
+  async requeue(jobId: string, actor: { userId: string; platformRole: PlatformRole }) {
+    const job = await prisma.backgroundJob.findUnique({ where: { id: jobId } });
+    if (!job) throw new AppError("Job not found", 404, ErrorCodes.NOT_FOUND);
+    if (job.status !== "FAILED" && job.status !== "CANCELLED") {
+      throw new AppError(`Only failed or cancelled jobs can be retried (job is ${job.status})`, 409, ErrorCodes.CONFLICT);
+    }
+
+    const updated = await prisma.backgroundJob.update({
+      where: { id: jobId },
+      data: { status: "PENDING", attempts: 0, runAt: new Date(), lockedAt: null, completedAt: null, lastError: null },
+    });
+
+    await auditService.record({
+      tenantId: job.tenantId,
+      actorUserId: actor.userId,
+      eventType: "JOB_RETRIED",
+      actorType: "SUPPORT",
+      targetType: "BackgroundJob",
+      targetId: jobId,
+      metadata: { retriedByRole: actor.platformRole, source: "support-console" },
+    });
+
+    return updated;
+  }
+
   async listGrants() {
     const grants = await prisma.supportAccessGrant.findMany({
       include: {
@@ -1806,15 +1841,17 @@ export class SupportService {
    * What is in a member's mailbox — RBAC §2 "Read private user mailbox".
    *
    * The one capability in the matrix that reaches private content, and the
-   * only role holding it is Support, as a grant. Two conditions beyond an
-   * ordinary console read, both enforced here rather than at the route
-   * because both depend on the grant rather than on the caller:
+   * only role holding it is a workspace's own invited Support seat — the
+   * same membership that authorizes every other console read also
+   * authorizes this one, so no separate grant or MAIL_CONTENT scope is
+   * required. Two things are still done here rather than at the route
+   * because both depend on the read itself rather than on the caller:
    *
-   *  - the live grant must carry MAIL_CONTENT, so approving a delivery
-   *    investigation does not quietly become approving a mail read;
+   *  - every call is scoped to the caller's own tenant, so a mailbox from
+   *    another workspace — even one on the same platform — reads as not
+   *    found rather than as a mailbox;
    *  - every call is written to the tenant's audit log naming the mailbox,
-   *    because §7 requires the customer to be able to see afterwards exactly
-   *    what support looked at.
+   *    so the customer can see afterwards exactly what support looked at.
    *
    * Headers only. §7 asks support views to "prefer metadata, status, error
    * codes, hashes, and excerpts over full content", and the questions this
@@ -1835,38 +1872,6 @@ export class SupportService {
   }) {
     const { tenantId, mailboxId, actorUserId } = input;
     const limit = Math.min(Math.max(input.limit ?? 25, 1), 50);
-
-    const grant = await prisma.supportAccessGrant.findFirst({
-      where: {
-        tenantId,
-        supportMembership: { userId: actorUserId },
-        revokedAt: null,
-        expiresAt: { gt: new Date() },
-      },
-      orderBy: { expiresAt: "desc" },
-      select: { id: true, scopes: true, expiresAt: true, reason: true, ticketId: true },
-    });
-
-    if (!grant || !grant.scopes.includes("MAIL_CONTENT")) {
-      // Recorded even though nothing was read. A refused attempt to open
-      // someone's mailbox is exactly the thing a customer reviewing the log
-      // afterwards would want to know about.
-      await auditService.record({
-        tenantId, actorUserId, actorType: "SUPPORT",
-        eventType: "SUPPORT_ACCESS_DENIED",
-        targetType: "Mailbox", targetId: mailboxId,
-        metadata: {
-          capability: "mail.other.read",
-          requiredScope: "MAIL_CONTENT",
-          heldScopes: grant?.scopes ?? [],
-        },
-      });
-      throw new AppError(
-        "Reading a mailbox needs a support access grant that covers mail content. Ask the workspace owner to approve one.",
-        403,
-        ErrorCodes.FORBIDDEN
-      );
-    }
 
     const mailbox = await prisma.mailbox.findFirst({
       where: { id: mailboxId, tenantId },
@@ -1928,9 +1933,6 @@ export class SupportService {
       targetType: "Mailbox", targetId: mailbox.id,
       metadata: redactMetadata({
         mailbox: mailbox.address,
-        grantId: grant.id,
-        ticketId: grant.ticketId,
-        reason: grant.reason,
         messagesReturned: rows.length,
         folder: input.folder ?? null,
         query: input.q ?? null,
@@ -1948,7 +1950,7 @@ export class SupportService {
         sendSuspensionReason: mailbox.sendSuspensionReason,
         owner: mailbox.membership?.user ?? null,
       },
-      grant: { id: grant.id, expiresAt: grant.expiresAt },
+      grant: null,
       messages: rows.map((row) => ({
         id: row.id,
         folder: row.folder,

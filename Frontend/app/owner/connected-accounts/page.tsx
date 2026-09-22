@@ -1,17 +1,18 @@
 "use client";
 
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { ProtectedRoute } from "@/components/owner/ProtectedRoute";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ConnectedAccountsTable } from "@/components/owner/connected-accounts/ConnectedAccountsTable";
-import { useConnectors } from "@/lib/owner-hooks";
 import { useGoogleAuth, useMicrosoftAuth } from "@/lib/connectors-hooks";
 import { useCreateConnector } from "@/lib/connectors-hooks";
 import type { CreateConnectorInput } from "@/lib/connectors-api";
-import { Link2, Loader2, AlertCircle, Check, ExternalLink } from "lucide-react";
+import { deleteConnector } from "@/lib/owner-api";
+import { Link2, Loader2, AlertCircle, X } from "lucide-react";
 
 export default function OwnerConnectedAccountsPage() {
-  const { data: connectors = [], isLoading } = useConnectors();
+  const queryClient = useQueryClient();
   const googleAuth = useGoogleAuth();
   const microsoftAuth = useMicrosoftAuth();
   const createConnector = useCreateConnector();
@@ -31,6 +32,13 @@ export default function OwnerConnectedAccountsPage() {
     setShowConnectDialog({ provider: "MICROSOFT_365" });
   };
 
+  /**
+   * The owner table reads a different cache key than connectors-hooks
+   * invalidates: this page's useConnectors is ["owner","connectors"], while
+   * the shared mutation clears ["connectors"]. The OAuth redirect masks it,
+   * but both caches must be refreshed or a cancelled handshake leaves the new
+   * row invisible until a reload.
+   */
   const handleDialogConnect = () => {
     if (!showConnectDialog) return;
     const provider = showConnectDialog.provider;
@@ -52,26 +60,24 @@ export default function OwnerConnectedAccountsPage() {
       onSuccess: (data) => {
         setShowConnectDialog(null);
         setConnectionType("org");
-        // For OAuth providers, we need to redirect to the auth URL
+        queryClient.invalidateQueries({ queryKey: ["owner", "connectors"] });
+
+        // The connector row was created empty — the OAuth callback fills it.
+        // If the handshake never lands, clean the placeholder up rather than
+        // leave a dead row the user cannot complete or remove itself.
         if (provider === "GMAIL") {
           googleAuth.mutate(undefined, {
             onSuccess: (authData) => {
               window.location.href = authData.url;
             },
-            onError: (err: any) => {
-              const msg = err?.message || "Failed to start Google OAuth.";
-              setAuthError(msg);
-            },
+            onError: () => onAuthFailed(data?.id),
           });
         } else {
           microsoftAuth.mutate(undefined, {
             onSuccess: (authData) => {
               window.location.href = authData.url;
             },
-            onError: (err: any) => {
-              const msg = err?.message || "Failed to start Microsoft OAuth.";
-              setAuthError(msg);
-            },
+            onError: () => onAuthFailed(data?.id),
           });
         }
       },
@@ -80,6 +86,15 @@ export default function OwnerConnectedAccountsPage() {
         setAuthError(msg);
       },
     });
+  };
+
+  const onAuthFailed = (connectorId?: string) => {
+    setAuthError("OAuth didn't complete, so the connection was not saved. Please try again.");
+    if (connectorId) {
+      deleteConnector(connectorId).finally(() =>
+        queryClient.invalidateQueries({ queryKey: ["owner", "connectors"] })
+      );
+    }
   };
 
   const handleCloseDialog = () => {
@@ -152,7 +167,7 @@ export default function OwnerConnectedAccountsPage() {
                   className="text-[var(--ink3)] hover:text-[var(--ink)]"
                   aria-label="Close"
                 >
-                  <ExternalLink className="h-5 w-5" />
+                  <X className="h-5 w-5" />
                 </button>
               </div>
 

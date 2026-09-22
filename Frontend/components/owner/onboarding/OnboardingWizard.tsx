@@ -507,7 +507,7 @@ function ConnectProviderStep() {
           Connect Gmail or Microsoft 365 to enable mail sync. Users can also connect their own accounts from the Connected Accounts page.
         </p>
       </div>
-      <Link href="/connected-accounts" className="zoiko-btn pri">
+      <Link href="/owner/connected-accounts" className="zoiko-btn pri">
         <Link2 className="h-3.5 w-3.5" />
         Go to Connected Accounts
         <ArrowRight className="ml-1 h-3.5 w-3.5" />

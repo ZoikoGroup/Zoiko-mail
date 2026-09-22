@@ -419,7 +419,9 @@ export interface SupportMailboxRead {
     sendSuspensionReason: string | null;
     owner: { email: string; displayName: string } | null;
   };
-  grant: { id: string; expiresAt: string };
+  // Always null: reading mail is by the SUPPORT membership itself now, not
+  // by an expiring grant, so there is no window left to report on.
+  grant: null;
   messages: SupportMailboxMessage[];
 }
 
@@ -840,6 +842,42 @@ export function listPlatformSuppressions(params: PlatformListParams): Promise<{ 
 
 export function listPlatformAudit(params: PlatformListParams): Promise<{ events: PlatformAuditEvent[] }> {
   return platformRequest<{ events: PlatformAuditEvent[] }>(`/support/platform/audit${listQueryString(params)}`);
+}
+
+export type PlatformJobType =
+  | "DATA_EXPORT"
+  | "DATA_DELETION"
+  | "NOTIFICATION_DIGEST"
+  | "IMAP_SYNC"
+  | "SMTP_SEND"
+  | "AI_EXTRACTION"
+  | "AI_DRAFT_GENERATION";
+
+export type PlatformJobStatus = "PENDING" | "RUNNING" | "RETRY" | "COMPLETED" | "FAILED" | "CANCELLED";
+
+export interface PlatformJob {
+  id: string;
+  type: PlatformJobType;
+  tenantId: string;
+  tenantName: string | null;
+  status: PlatformJobStatus;
+  attempts: number;
+  maxAttempts: number;
+  runAt: string | null;
+  lockedAt: string | null;
+  completedAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+  resource: string | null;
+}
+
+export function listPlatformJobs(params: PlatformListParams): Promise<{ jobs: PlatformJob[] }> {
+  return platformRequest<{ jobs: PlatformJob[] }>(`/support/platform/jobs${listQueryString(params)}`);
+}
+
+export function retryPlatformJob(jobId: string): Promise<{ job: PlatformJob }> {
+  return platformRequest<{ job: PlatformJob }>(`/support/platform/jobs/${encodeURIComponent(jobId)}/retry`, { method: "POST" });
 }
 
 // ---------------------------------------------------------------------------

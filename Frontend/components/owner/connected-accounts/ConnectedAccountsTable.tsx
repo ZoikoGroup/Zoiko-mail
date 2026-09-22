@@ -13,6 +13,15 @@ function formatDate(d: string | null) {
   return new Date(d).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+function providerLabel(provider: string): string {
+  switch (provider) {
+    case "GMAIL": return "Gmail";
+    case "MICROSOFT_365": return "Microsoft 365";
+    case "IMAP_SMTP": return "IMAP/SMTP";
+    default: return provider;
+  }
+}
+
 export function ConnectedAccountsTable() {
   const [confirmDisconnect, setConfirmDisconnect] = useState<any>(null);
   const { data: connectors = [], isLoading } = useConnectors();
@@ -41,7 +50,7 @@ export function ConnectedAccountsTable() {
       sortable: true,
       render: (row) => (
         <StatusBadge variant={row.provider === "GMAIL" ? "crit" : "accent"}>
-          {row.provider === "GMAIL" ? "Gmail" : "Microsoft 365"}
+          {providerLabel(row.provider)}
         </StatusBadge>
       ),
     },
@@ -110,7 +119,7 @@ export function ConnectedAccountsTable() {
           setConfirmDisconnect(null);
         }}
         title="Disconnect Account"
-        message={`Disconnect ${confirmDisconnect?.displayName}'s ${confirmDisconnect?.provider === "GMAIL" ? "Gmail" : "Microsoft 365"} account? This will stop syncing.`}
+        message={`Disconnect ${confirmDisconnect?.displayName}'s ${providerLabel(confirmDisconnect?.provider)} account? This will stop syncing.`}
         confirmLabel="Disconnect"
         variant="danger"
       />

@@ -8,7 +8,7 @@ import { useGeneralSettings, useUpdateGeneralSettings, useUpdateTenant } from "@
 import { useMfaStatus, useBeginMfaEnrolment, useConfirmMfaEnrolment, useDisableMfa, useRegenerateMfaRecoveryCodes } from "@/lib/auth-hooks";
 import type { GeneralWorkspaceSettings } from "@/lib/owner-api";
 import {
-  Bell, Palette, Globe, Clock, Save, Sun, Moon, Monitor, CheckCircle2, AlertTriangle, Shield, Key, RotateCw, Copy,
+  Bell, Palette, Globe, Clock, Save, Sun, Moon, Monitor, CheckCircle2, AlertTriangle, Shield, RotateCw, Copy,
 } from "lucide-react";
 
 type ThemePref = GeneralWorkspaceSettings["theme"];
@@ -386,8 +386,9 @@ export default function GeneralSettingsPage() {
           {mfaLoading ? (
             <div className="flex h-24 items-center justify-center text-sm text-[var(--ink3)]">Loading MFA status…</div>
           ) : mfaStatus ? (
-            mfaStatus.enrolled ? (
-              <div className="space-y-4">
+            <>
+              {mfaStatus.enrolled ? (
+                <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <div>
                       <span className="zoiko-pill ok">MFA Enabled</span>
@@ -407,78 +408,76 @@ export default function GeneralSettingsPage() {
                         {mfaStatus.remainingRecoveryCodes} remaining
                       </span>
                     </div>
-{showRecoveryCodes ? (
-                        <div className="space-y-2 mb-4">
-                          <div className="flex flex-wrap gap-2">
-                            {showRecoveryCodes.map((code) => (
-                              <span key={code} className="zoiko-pill nu text-xs font-mono">{code}</span>
-                            ))}
-                          </div>
-                          <button
-                            onClick={() => copyToClipboard(showRecoveryCodes.join("\n"))}
-                            className="zoiko-btn sm"
-                          >
-                            <Copy className="h-3.5 w-3.5" /> Copy All
-                          </button>
+                    {showRecoveryCodes ? (
+                      <div className="space-y-2 mb-4">
+                        <div className="flex flex-wrap gap-2">
+                          {showRecoveryCodes.map((code) => (
+                            <span key={code} className="zoiko-pill nu text-xs font-mono">{code}</span>
+                          ))}
                         </div>
-                      ) : (
                         <button
-                          onClick={() => setShowRecoveryCodes(null)}
-                          className="zoiko-btn"
+                          onClick={() => copyToClipboard(showRecoveryCodes.join("\n"))}
+                          className="zoiko-btn sm"
                         >
-                          <Key className="h-3.5 w-3.5" /> Show Recovery Codes
+                          <Copy className="h-3.5 w-3.5" /> Copy All
                         </button>
-                      )}
-                    </div>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-[var(--ink3)]">
+                        Recovery codes are shown only once - when they are created or regenerated.
+                        Regenerate below to reveal a new set and void the old one.
+                      </p>
+                    )}
+                  </div>
 
-                    <div className="pt-4 border-t border-[var(--border)]">
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="text-sm font-medium text-[var(--ink)]">Regenerate Recovery Codes</span>
-                        <span className="text-xs text-[var(--ink3)]">Invalidates all existing codes</span>
-                      </div>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={regenCode}
-                          onChange={(e) => setRegenCode(e.target.value)}
-                          placeholder="Enter 6-digit code from authenticator"
-                          maxLength={6}
-                          className="h-9 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
-                        />
-                        <button
-                          onClick={handleRegenerateRecoveryCodes}
-                          disabled={regenerateRecoveryCodes.isPending || !regenCode}
-                          className="zoiko-btn"
-                        >
-                          {regenerateRecoveryCodes.isPending ? "Regenerating…" : "Regenerate Codes"}
-                        </button>
-                      </div>
+                  <div className="pt-4 border-t border-[var(--border)]">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-sm font-medium text-[var(--ink)]">Regenerate Recovery Codes</span>
+                      <span className="text-xs text-[var(--ink3)]">Invalidates all existing codes</span>
                     </div>
-
-                    <div className="pt-4 border-t border-[var(--border)]">
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="text-sm font-medium text-[var(--ink)]">Disable MFA</span>
-                        <span className="text-xs text-[var(--ink3)]">Requires authenticator code</span>
-                      </div>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={disableCode}
-                          onChange={(e) => setDisableCode(e.target.value)}
-                          placeholder="Enter 6-digit code from authenticator"
-                          maxLength={6}
-                          className="h-9 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
-                        />
-                        <button
-                          onClick={handleDisableMfa}
-                          disabled={disableMfa.isPending || !disableCode}
-                          className="zoiko-btn crit"
-                        >
-                          {disableMfa.isPending ? "Disabling…" : "Disable MFA"}
-                        </button>
-                      </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={regenCode}
+                        onChange={(e) => setRegenCode(e.target.value)}
+                        placeholder="Enter 6-digit code from authenticator"
+                        maxLength={6}
+                        className="h-9 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+                      />
+                      <button
+                        onClick={handleRegenerateRecoveryCodes}
+                        disabled={regenerateRecoveryCodes.isPending || !regenCode}
+                        className="zoiko-btn"
+                      >
+                        {regenerateRecoveryCodes.isPending ? "Regenerating…" : "Regenerate Codes"}
+                      </button>
                     </div>
                   </div>
+
+                  <div className="pt-4 border-t border-[var(--border)]">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-sm font-medium text-[var(--ink)]">Disable MFA</span>
+                      <span className="text-xs text-[var(--ink3)]">Requires authenticator code</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={disableCode}
+                        onChange={(e) => setDisableCode(e.target.value)}
+                        placeholder="Enter 6-digit code from authenticator"
+                        maxLength={6}
+                        className="h-9 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+                      />
+                      <button
+                        onClick={handleDisableMfa}
+                        disabled={disableMfa.isPending || !disableCode}
+                        className="zoiko-btn crit"
+                      >
+                        {disableMfa.isPending ? "Disabling…" : "Disable MFA"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               ) : (
                 <div className="space-y-4">
                   <div className="rounded-lg bg-[var(--warn-soft)] p-4">
@@ -553,11 +552,12 @@ export default function GeneralSettingsPage() {
                           {confirmEnrolment.isPending ? "Enrolling…" : "Confirm & Enable MFA"}
                         </button>
                       </div>
-</div>
+                    </div>
                   )}
                 </div>
-              )
-            ) : null}
+              )}
+            </>
+          ) : null}
         </div>
 
         {error && (

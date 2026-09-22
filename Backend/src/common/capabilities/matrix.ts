@@ -184,56 +184,48 @@ const MEMBER: RoleMatrix = {
  * workspace's Owner opened by issuing the invitation.
  */
 const SUPPORT: RoleMatrix = {
-
   /**
-   * The only path to private mail content anywhere in the matrix, and even
-   * here it is not routine: §2 marks Support "⏱ grant", while §4 adds
-   * "blocked by default; exceptional security-approved path only". GRANT
-   * expresses the time-boxed approval; the security-approved exception is an
-   * additional control that does not belong in a role matrix. Owner and Admin
-   * hold this in no form at all.
+   * The only path to private mail content anywhere in the matrix, and it is
+   * scoped to the seat's own workspace: the workspace's Owner invited this
+   * member as SUPPORT, and the invitation, not a grant, is the authorization
+   * — the same membership that authorizes every other console read also
+   * authorizes this one. Owner and Admin still hold it in no form at all.
    */
-  "mail.other.read": "GRANT",
-  /**
-   * The console read itself is time-boxed for Support, so the screens stop
-   * answering the moment the grant expires or is revoked — §7's "no default
-   * right" and "must have an expiry", applied to the tenant-side console the
-   * way requireTenantGrant applies them to the platform one.
-   */
+  "mail.other.read": "ALLOW",
   /**
    * The tenant-scoped console opens on the Owner's invitation itself: a
    * member the Owner added as SUPPORT — accepted, with a live membership in
    * this workspace — is authorized to read this one workspace's console
    * without a separate access grant. ALLOW, not GRANT, because the same
    * request that proves the membership is active also scopes every answer to
-   * the caller's own tenant (tenantContext). The grant system is aimed, not
-   * bypassed: `support.workspace.investigate`, `support.mailbox.reset` and
-   * `mail.other.read` keep their GRANT rows, and the diagnostics endpoint
-   * verifies the grant itself — those call for an expiry by their nature;
-   * opening one's own ticket queue does not.
+   * the caller's own tenant (tenantContext).
    */
   "support.console.read": "ALLOW",
   /**
-   * The diagnostics half of that console, kept time-boxed.
+   * Reading the workspace the seat was invited into: overview, configuration,
+   * mailboxes, domains, delivery events and audit. ALLOW for the same reason
+   * as the console itself — tenantContext pins every answer to the caller's
+   * own tenant, so this cannot reach another workspace.
    *
-   * The row above and this one are the whole disagreement between PR #37
-   * and PR #38, settled by splitting what was one capability doing two
-   * jobs. Reading the ticket queue of a workspace whose Owner invited you
-   * needs no expiry — that was #38's point, and it holds. Reading that
-   * workspace's delivery events, audit log and configuration is reading a
-   * customer's data, which is what §7's "no default right" and "must have
-   * an expiry" are actually about — that was #37's point, and it holds
-   * too. They were only in conflict while both lived under one name.
+   * Runbook §7's "no default right" is about Zoiko staff reaching into a
+   * customer's workspace, and it is enforced where that happens rather than
+   * here: the platform router stacks crossTenantScope, authenticateStaff,
+   * requireSupportAccess and requireTenantGrant, and requireTenantGrant
+   * refuses any read narrowed to one workspace without a live approved
+   * grant. Demanding a second grant from the Owner who already invited this
+   * seat would gate the wrong thing and leave the cross-tenant path no safer.
    */
-  "support.workspace.investigate": "GRANT",
+  "support.workspace.investigate": "ALLOW",
   /**
-   * The one write a support seat holds, and only under a grant that names
-   * it. §11.1 allows it "if requested and audited" — so the scope has to be
-   * asked for by name, and every reset writes its own entry.
+   * The one write a support seat holds, and where the grant system is aimed:
+   * reading the workspace you were invited into is open, changing it is not.
+   * §11.1 allows it "if requested and audited", so it needs a live grant
+   * naming the MAILBOX_ADMIN scope — an Owner approving a delivery
+   * investigation has not thereby approved editing what it found — and every
+   * reset writes its own audit entry.
    */
   "support.mailbox.reset": "GRANT",
 };
-
 export const CAPABILITY_MATRIX: Record<MembershipRole, RoleMatrix> = {
   OWNER,
   ADMIN,

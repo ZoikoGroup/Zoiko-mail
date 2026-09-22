@@ -89,8 +89,6 @@ export const supportStyles = `
 .support-workspace .railitem.on { background: var(--surface); color: var(--ink); border-left: 2px solid var(--accent); font-weight: 650; }
 .support-workspace .railitem .cnt { margin-left: auto; font-family: var(--mo); font-size: 9.5px; color: var(--ink3); background: var(--s3); border-radius: 9px; padding: 1px 6px; }
 .support-workspace .drawer .railitem span:not(.ico):not(.cnt) { display: inline; }
-.support-workspace .railitem.locked { opacity: 0.5; }
-.support-workspace .railitem .lk { margin-left: auto; font-size: 11px; }
 .support-workspace main { flex: 1; min-height: 0; overflow-y: auto; padding: 22px 26px 60px; }
 .support-workspace .page { max-width: 1180px; margin: 0 auto; }
 .support-workspace .crumbs { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink3); margin-bottom: 10px; }
@@ -191,6 +189,56 @@ export const supportStyles = `
 .support-workspace .field label { display: block; font-size: 11px; color: var(--ink3); margin-bottom: 5px; font-weight: 600; }
 .support-workspace .field input, .support-workspace .field select, .support-workspace .field textarea { width: 100%; border: 1px solid var(--border); border-radius: 7px; padding: 8px 11px; font-size: 12.6px; background: var(--surface); color: var(--ink); }
 .support-workspace .field textarea { min-height: 70px; resize: vertical; }
+
+/* ---- Motion ----------------------------------------------------------------
+   The support console carries its own stylesheet (this is injected as a
+   <style> tag), so the same entrance / hover language as the other connectors
+   is mirrored here. Names are prefixed to avoid clashing with globals. */
+@keyframes supp-drawer { from { opacity: 0.4; transform: translateX(-100%); } to { opacity: 1; transform: translateX(0); } }
+@keyframes supp-pop { from { opacity: 0; transform: translateY(-4px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes supp-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes supp-page { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes supp-spin { to { transform: rotate(360deg); } }
+@keyframes supp-shimmer { to { transform: translateX(100%); } }
+
+.support-workspace .drawer .panel { animation: supp-drawer 0.22s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.support-workspace .drawer .scrim { animation: supp-fade 0.22s ease both; }
+@keyframes supp-fade { from { opacity: 0; } to { opacity: 1; } }
+.support-workspace .dropdown { transform-origin: top right; animation: supp-pop 0.15s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.support-workspace .globdd { transform-origin: top left; animation: supp-pop 0.15s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.support-workspace tbody tr { animation: supp-rise 0.24s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* The console's pages switch on internal state, so the page container is
+   keyed by page in PlatformConsole — keying remounts it and this entrance
+   replays, giving a real transition between support pages. */
+.support-workspace .page { animation: supp-page 0.3s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.support-workspace .stats .stat { animation: supp-rise 0.28s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.support-workspace .stats .stat:nth-child(n+2) { animation-delay: 40ms; }
+.support-workspace .stats .stat:nth-child(n+5) { animation-delay: 80ms; }
+.support-workspace .stats .stat:nth-child(n+9) { animation-delay: 120ms; }
+
+.support-workspace .stat, .support-workspace .card, .support-workspace .kbcatcard {
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.22s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.support-workspace .stat:hover { transform: translateY(-2px); box-shadow: var(--sh3); border-color: var(--bstrong); }
+.support-workspace .card:hover { transform: translateY(-1px); box-shadow: var(--sh3); border-color: var(--bstrong); }
+.support-workspace .kbcatcard:hover { transform: translateY(-2px); box-shadow: var(--sh3); }
+.support-workspace .btn { transition: color 0.12s ease, background-color 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease, transform 0.12s ease; }
+.support-workspace .btn:hover { border-color: var(--bstrong); transform: translateY(-1px); box-shadow: var(--sh1); }
+.support-workspace .btn:active { transform: translateY(0) scale(0.97); }
+.support-workspace .tab { transition: color 0.12s ease, border-color 0.12s ease; }
+.support-workspace .railitem { transition: background-color 0.12s ease, color 0.12s ease; }
+.support-workspace button:focus-visible, .support-workspace a:focus-visible, .support-workspace input:focus-visible, .support-workspace select:focus-visible, .support-workspace textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---- Loading ---------------------------------------------------------------
+   A compact spinner and shimmering skeleton blocks replace the bare "Loading…"
+   text that every page showed, so async fetches read as activity up front. */
+.support-workspace .sloader { display: flex; align-items: center; gap: 10px; color: var(--ink3); font-size: 12px; }
+.support-workspace .sloader .ring { width: 15px; height: 15px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: supp-spin 0.7s linear infinite; flex: none; }
+.support-workspace .skel { position: relative; overflow: hidden; background: var(--s3); border-radius: 6px; }
+.support-workspace .skel::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgb(from var(--surface) r g b / 0.9), transparent); animation: supp-shimmer 1.4s ease-in-out infinite; }
+.support-workspace .skelrows { border-top: 1px solid var(--border); }
+.support-workspace .skelrow { display: flex; align-items: center; gap: 18px; padding: 12px 17px; border-bottom: 1px solid var(--border); }
 @media (max-width: 1050px) {
   .support-workspace .split { grid-template-columns: 1fr; }
 }

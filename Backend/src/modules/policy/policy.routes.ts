@@ -30,5 +30,6 @@ policyRouter.post(
 );
 policyRouter.get("/:policyId", requireCapability("policy.write"), validate(policyIdParamsSchema, "params"), controller.get);
 policyRouter.post("/:policyId/activate", requireCapability("policy.write"), validate(policyIdParamsSchema, "params"), controller.activate);
+policyRouter.post("/:policyId/deactivate", requireCapability("policy.write"), validate(policyIdParamsSchema, "params"), controller.deactivate);
 
 export { policyRouter };

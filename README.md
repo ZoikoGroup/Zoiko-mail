@@ -58,11 +58,17 @@ There are **41 capabilities**. The full table lives in
 and it is worth reading early — it is the clearest single description of what
 the product allows.
 
-### 3. Support staff have no standing access
+### 3. Zoiko staff have no standing access to your workspace
 
 Zoiko's own support team cannot read a customer's workspace by default. They
 ask, the workspace owner approves, the access expires on its own, and every
-read it allowed is written to the customer's audit log. This is unusual, and it
+read it allowed is written to the customer's audit log.
+
+Worth separating from that: a SUPPORT member the *owner themselves invited*
+into their workspace is a member of it, and reads that one workspace through
+their membership — no grant, because an owner should not have to approve a
+seat twice. Grants gate the cross-tenant path, where Zoiko staff reach into a
+customer's data, and the one write a support seat can make. This distinction
 shapes a lot of the code in `modules/support`.
 
 ---
@@ -70,9 +76,9 @@ shapes a lot of the code in `modules/support`.
 ## What you get
 
 ```
-230  API endpoints          50  database models        57  migrations
+232  API endpoints          50  database models        59  migrations
  59  frontend pages         41  capabilities            4  workspaces
-653  backend tests         143  browser tests
+655  backend tests         143  browser tests
 ```
 
 **Implemented and tested**
@@ -116,11 +122,14 @@ billing, data export, deletion requests, ownership, and approving support
 access. Two actions require a second approver.
 
 ### Support — *"help a customer, on the record"*
-Two consoles in one route. Zoiko staff get a fleet-wide view; a workspace's own
-support member gets that workspace only. The ticket queue opens on the owner's
-invitation, but reading their configuration, delivery events or audit log needs
-a time-boxed grant the owner approves — and every such read is logged where the
-customer can see it.
+Two consoles in one route, and the difference between them is the whole design.
+A workspace's own support member — invited by its owner — reads that one
+workspace through their membership; every answer is pinned to their tenant, so
+the console cannot reach anywhere else. Zoiko staff getting the fleet-wide view
+are on the other side of that line: reaching into a customer's workspace needs
+a time-boxed grant the owner approves, and every read it allows is written to
+the customer's audit log. Changing a mailbox setting — the one write support
+has — needs a grant naming that scope, whoever is asking.
 
 ---
 

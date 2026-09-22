@@ -5,9 +5,10 @@ import { ProtectedRoute } from "@/components/owner/ProtectedRoute";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { useLifecycleRequests, useRequestDataExport, useTenant } from "@/lib/owner-hooks";
+import { StepUpDialog, useStepUp } from "@/components/admin/StepUpDialog";
+import { useLifecycleRequests, useRequestDataExport } from "@/lib/owner-hooks";
 import { downloadExport } from "@/lib/owner-api";
-import { Download, FileText, Building2, Mail } from "lucide-react";
+import { AlertTriangle, Download, FileText, Building2 } from "lucide-react";
 
 function formatDate(d: string | null) {
   if (!d) return "—";
@@ -20,66 +21,78 @@ const typeIcons: Record<string, typeof Building2> = {
 };
 
 export default function ExportDataPage() {
-  const [confirmExport, setConfirmExport] = useState<string | null>(null);
+  const [confirmExport, setConfirmExport] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const { data: requests = [], isLoading } = useLifecycleRequests();
   const requestDataExport = useRequestDataExport();
-  const { data: tenant } = useTenant();
+  // Exporting is a STEP_UP capability (RBAC §2): "Request export" and the
+  // download both need a fresh sign-in, so the refused-then-retry dance is the
+  // expected happy path rather than a dead end.
+  const stepUp = useStepUp();
 
   const exportRequests = requests.filter((r) => r.type === "EXPORT");
 
-  const handleRequestExport = (type: string) => {
-    setConfirmExport(type);
+  const handleDownload = (requestId: string) => {
+    void stepUp
+      .attempt("Download your workspace data export", (stepUpToken) =>
+        downloadExport(requestId, stepUpToken)
+      )
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "Download failed.");
+      });
   };
 
-  const handleDownload = async (requestId: string) => {
-    try {
-      const blob = await downloadExport(requestId);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `zoiko-export-${requestId}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error("Download failed:", err);
-    }
+  const handleRequestExport = () => {
+    setConfirmExport(false);
+    void stepUp
+      .attempt("Request a full workspace data export", (stepUpToken) =>
+        requestDataExport.mutateAsync({
+          input: {
+            idempotencyKey: crypto.randomUUID(),
+            reason: "Owner requested full workspace export",
+          },
+          stepUpToken,
+        })
+      )
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "Could not request the export.");
+      });
   };
 
   return (
     <ProtectedRoute allowedRoles={["OWNER"]}>
       <div className="mx-auto max-w-4xl space-y-6 px-4 py-8 sm:px-6">
+        <StepUpDialog {...stepUp.dialog} />
         <PageHeader
           title="Export Data"
           description="Request data exports for your organization."
         />
 
+        {error && (
+          <div className="flex items-center gap-2 rounded-lg border border-[var(--crit)]/30 bg-[var(--crit-soft)] px-3 py-2 text-sm text-[var(--crit)]">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            {error}
+          </div>
+        )}
+
         {/* Request new export */}
         <div className="zoiko-card p-6">
-          <h3 className="text-sm font-semibold text-[var(--ink)] mb-4">Request New Export</h3>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            {[
-              { type: "organization", label: "Organization Data", desc: "All users, settings, and configurations.", icon: Building2 },
-              { type: "user", label: "User Data", desc: "Individual user data and activity.", icon: FileText },
-              { type: "mailbox", label: "Mailbox Export", desc: "All mailbox contents and metadata.", icon: Mail },
-            ].map((item) => {
-              const Icon = item.icon;
-              return (
-                <button
-                  key={item.type}
-                  className="flex flex-col items-center rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 text-center transition hover:border-[var(--accent)] hover:shadow-[var(--sh2)]"
-                  onClick={() => handleRequestExport(item.type)}
-                >
-                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent-ink)]">
-                    <Icon className="h-5 w-5" />
-                  </span>
-                  <div className="mt-2 text-sm font-medium text-[var(--ink)]">{item.label}</div>
-                  <div className="mt-0.5 text-[11px] text-[var(--ink3)]">{item.desc}</div>
-                </button>
-              );
-            })}
-          </div>
+          <h3 className="text-sm font-semibold text-[var(--ink)] mb-4">Request Export</h3>
+          <button
+            className="flex w-full max-w-sm flex-col items-start gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 text-left transition hover:border-[var(--accent)] hover:shadow-[var(--sh2)]"
+            onClick={() => setConfirmExport(true)}
+            disabled={requestDataExport.isPending}
+          >
+            <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent-ink)]">
+              <Building2 className="h-5 w-5" />
+            </span>
+            <div>
+              <div className="text-sm font-medium text-[var(--ink)]">Full Workspace Data</div>
+              <div className="mt-0.5 text-[11px] text-[var(--ink3)]">
+                Every user, mailbox, setting and stored document in this workspace, delivered as a JSON file.
+              </div>
+            </div>
+          </button>
         </div>
 
         {/* Export history */}
@@ -128,18 +141,13 @@ export default function ExportDataPage() {
         </div>
 
         <ConfirmDialog
-          open={!!confirmExport}
-          onClose={() => setConfirmExport(null)}
-          onConfirm={() => {
-            requestDataExport.mutate({
-              idempotencyKey: crypto.randomUUID(),
-              reason: `Owner requested ${confirmExport} export`,
-            });
-            setConfirmExport(null);
-          }}
+          open={confirmExport}
+          onClose={() => setConfirmExport(false)}
+          onConfirm={handleRequestExport}
           title="Request Data Export"
-          message={`Request a ${confirmExport} data export? The export will be processed in the background and you'll be notified when it's ready.`}
+          message="Request a full export of every user, mailbox and document in this workspace? The export will be processed in the background and you'll be notified when it's ready."
           confirmLabel="Request Export"
+          loading={requestDataExport.isPending}
           variant="warning"
         />
       </div>

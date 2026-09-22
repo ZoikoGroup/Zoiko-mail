@@ -8,9 +8,8 @@ import { FilterBar } from "@/components/ui/FilterBar";
 import { DropdownMenu, DropdownItem } from "@/components/ui/DropdownMenu";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { Pause, Play, Trash2, Mail, Eye, ExternalLink } from "lucide-react";
-import { useAdminMailboxes, useDeleteAdminMailbox } from "@/lib/owner-hooks";
-import { updateMailboxSendingStatus } from "@/lib/owner-api";
+import { Pause, Play, Trash2, Mail, Eye } from "lucide-react";
+import { useAdminMailboxes, useDeleteAdminMailbox, useUpdateMailboxSendingStatus } from "@/lib/owner-hooks";
 import type { Mailbox } from "@/lib/owner-api";
 import { MailboxDetailsDrawer } from "./MailboxDetailsDrawer";
 
@@ -43,6 +42,7 @@ export function MailboxesTable({ onCreateMailbox }: MailboxesTableProps) {
 
   const { data: mailboxes = [], isLoading } = useAdminMailboxes();
   const deleteMailbox = useDeleteAdminMailbox();
+  const updateSending = useUpdateMailboxSendingStatus();
 
   const domains = useMemo(() => {
     const set = new Set(mailboxes.map((m) => m.domain).filter(Boolean));
@@ -183,7 +183,7 @@ export function MailboxesTable({ onCreateMailbox }: MailboxesTableProps) {
               </DropdownItem>
             ) : (
               <DropdownItem onClick={() => {
-                updateMailboxSendingStatus(row.id, { suspended: false });
+                updateSending.mutate({ mailboxId: row.id, data: { suspended: false } });
               }}>
                 <Play className="h-3.5 w-3.5" /> Resume Sending
               </DropdownItem>
@@ -199,7 +199,7 @@ export function MailboxesTable({ onCreateMailbox }: MailboxesTableProps) {
         mailbox={detailsMailbox}
         onClose={() => setDetailsMailbox(null)}
         onSuspend={(m) => { setDetailsMailbox(null); setConfirmSuspend(m); }}
-        onResume={(m) => updateMailboxSendingStatus(m.id, { suspended: false })}
+        onResume={(m) => updateSending.mutate({ mailboxId: m.id, data: { suspended: false } })}
         onDelete={(m) => { setDetailsMailbox(null); setConfirmDelete(m); }}
       />
 
@@ -222,9 +222,12 @@ export function MailboxesTable({ onCreateMailbox }: MailboxesTableProps) {
         onClose={() => { setConfirmSuspend(null); setSuspendReason(""); }}
         onConfirm={() => {
           if (confirmSuspend) {
-            updateMailboxSendingStatus(confirmSuspend.id, {
-              suspended: true,
-              reason: suspendReason || "Suspended by administrator",
+            updateSending.mutate({
+              mailboxId: confirmSuspend.id,
+              data: {
+                suspended: true,
+                reason: suspendReason || "Suspended by administrator",
+              },
             });
           }
           setConfirmSuspend(null);
@@ -236,7 +239,7 @@ export function MailboxesTable({ onCreateMailbox }: MailboxesTableProps) {
         variant="warning"
       >
         <div className="mt-3">
-          <label className="mb-1 block text-sm font-medium text-[var(--ink2)]">Reason (required)</label>
+          <label className="mb-1 block text-sm font-medium text-[var(--ink2)]">Reason (optional)</label>
           <input
             type="text"
             value={suspendReason}
