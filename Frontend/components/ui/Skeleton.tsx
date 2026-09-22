@@ -6,7 +6,7 @@ interface SkeletonProps {
 }
 
 export function Skeleton({ className = "", variant = "text" }: SkeletonProps) {
-  const base = "animate-pulse rounded bg-[var(--s3)]";
+  const base = "zoi-skeleton rounded";
   const variants = {
     text: "h-4 w-full",
     rect: "h-20 w-full rounded-lg",

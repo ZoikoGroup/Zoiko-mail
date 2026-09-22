@@ -278,11 +278,16 @@ export async function apiRequest<T = unknown>(
  */
 export async function apiDownload(
     path: string,
-    fallbackFilename: string
+    fallbackFilename: string,
+    stepUpToken?: string
 ): Promise<void> {
     const headers: Record<string, string> = {};
     const token = getAccessToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
+    // The export download is gated on the same STEP_UP capability as the
+    // request that produced the file (RBAC §2), so the regular download path
+    // needs the same "confirm it is you" token as the write side.
+    if (stepUpToken) headers["x-step-up-token"] = stepUpToken;
 
     let res: Response;
     try {

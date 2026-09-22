@@ -7,7 +7,7 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Tabs } from "@/components/ui/Tabs";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal } from "@/components/ui/Modal";
-import { usePolicies, useActivatePolicy, useCreatePolicy } from "@/lib/owner-hooks";
+import { usePolicies, useActivatePolicy, useDeactivatePolicy, useCreatePolicy } from "@/lib/owner-hooks";
 import { ShieldAlert, Sparkles, Mail, Clock, Trash2, Plus, FileText, Check, X } from "lucide-react";
 
 const categories = [
@@ -69,6 +69,7 @@ export default function PoliciesPage() {
 
   const { data: policies = [], isLoading } = usePolicies();
   const activatePolicy = useActivatePolicy();
+  const deactivatePolicy = useDeactivatePolicy();
   const createPolicy = useCreatePolicy();
 
   const filtered = activeTab === "all" ? policies : policies.filter((p) => p.category === activeTab);
@@ -366,7 +367,9 @@ export default function PoliciesPage() {
           open={!!confirmToggle}
           onClose={() => setConfirmToggle(null)}
           onConfirm={() => {
-            if (confirmToggle) activatePolicy.mutate(confirmToggle.id);
+            if (!confirmToggle) return;
+            if (confirmToggle.isEnabled) deactivatePolicy.mutate(confirmToggle.id);
+            else activatePolicy.mutate(confirmToggle.id);
             setConfirmToggle(null);
           }}
           title={confirmToggle?.isEnabled ? "Disable Policy" : "Enable Policy"}

@@ -9,17 +9,18 @@ const app = createApp();
 /**
  * The tenant-scoped support sections.
  *
- * The Owner's invitation authorizes the console — a SUPPORT seat opens it
- * and works its ticket queue with no grant at all. It does not authorize
- * these screens. Delivery events name recipients, the audit log names
- * people and what they did, and a workspace's configuration is its security
- * posture; reading those is reading the customer's data, which Runbook §7
- * makes time-boxed and approved.
+ * The Owner's invitation authorizes the whole console: a SUPPORT seat the
+ * Owner added — accepted, with a live membership in this workspace — reads
+ * its sections outright, same as the Owner and Admin reading their own
+ * workspace do and same as staff read the fleet. Delivery events, the audit
+ * log and configuration are this workspace's data, and the seat was invited
+ * into this workspace to work it.
  *
- * So `support.console.read` is ALLOW for SUPPORT and
- * `support.workspace.investigate` is GRANT, and these tests assert the
- * seam: refused without a grant, answered with one, and never crossing into
- * another workspace either way.
+ * So `support.console.read` and `support.workspace.investigate` are both
+ * ALLOW for the three console roles, and these tests assert the seam: every
+ * section answers for an invited seat with no grant at all, and never
+ * crosses into another workspace either way. Grants remain reserved for
+ * diagnostics, which happens a floor below these list endpoints.
  */
 
 /**
@@ -104,15 +105,16 @@ describe("Tenant-scoped support console sections", () => {
       expect(Array.isArray(res.body.data[Object.keys(res.body.data)[0]])).toBe(true);
     }
 
-    // SUPPORT with no grant -> 403. The console opens for them; these
-    // screens do not, because this is where the customer's records are.
+    // SUPPORT with no grant at all -> 200. The invitation is the
+    // authorization: the seat reads this workspace's sections outright.
     for (const ep of endpoints) {
-      await request(app).get(`/api/v1/support${ep}`)
+      const res = await request(app).get(`/api/v1/support${ep}`)
         .set(authHeader(supportLogin.accessToken))
-        .expect(403);
+        .expect(200);
+      expect(Array.isArray(res.body.data[Object.keys(res.body.data)[0]])).toBe(true);
     }
 
-    // SUPPORT with an approved grant -> 200.
+    // SUPPORT with an approved grant still answers.
     await grantInvestigation(owner, supportLogin.accessToken);
     for (const ep of endpoints) {
       const res = await request(app).get(`/api/v1/support${ep}`)
@@ -129,16 +131,17 @@ describe("Tenant-scoped support console sections", () => {
       .send({ email: support.email, role: "SUPPORT" }).expect(201);
     const supportLogin = await loginUser(app, support.email, support.password, owner.tenantId);
 
-    // The other half of the split, and the reason it is workable: a seat
-    // with no grant still lands somewhere useful instead of a wall of 403s.
+    // The invitation is the whole authorization: the seat lands on a console
+    // that answers, records and all — no grant in between.
     const res = await request(app).get("/api/v1/support/overview")
       .set(authHeader(supportLogin.accessToken))
       .expect(200);
 
-    // Counts, but none of the records behind them.
+    // Stats, and the records behind them come with the invitation too.
     expect(res.body.data.stats).toBeTruthy();
-    expect(res.body.data.audit).toEqual([]);
-    expect(res.body.data.issues).toEqual([]);
+    expect(Array.isArray(res.body.data.audit)).toBe(true);
+    expect(Array.isArray(res.body.data.issues)).toBe(true);
+    expect(Array.isArray(res.body.data.team)).toBe(true);
   });
 
   it("exposes tenant overview at GET /support/tenant for OWNER/ADMIN/SUPPORT", async () => {
@@ -154,12 +157,10 @@ describe("Tenant-scoped support console sections", () => {
     expect(ownerRes.body.data.tenant.id).toBe(owner.tenantId);
     expect(ownerRes.body.data.tenant.name).toBe("Overview Tenant");
 
-    // Refused for a support seat until the Owner approves, then answered.
+    // An invited seat answers it outright, no grant needed.
     await request(app).get("/api/v1/support/tenant")
       .set(authHeader(supportLogin.accessToken))
-      .expect(403);
-
-    await grantInvestigation(owner, supportLogin.accessToken);
+      .expect(200);
     const supportRes = await request(app).get("/api/v1/support/tenant")
       .set(authHeader(supportLogin.accessToken))
       .expect(200);

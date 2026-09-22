@@ -57,11 +57,13 @@ import type { LucideIcon } from "lucide-react";
  *
  * This is what a workspace Support member (invited by the Owner with the
  * SUPPORT role) reaches at /support. Scope is limited to the member's own
- * workspace by the backend — /support/overview and /support/diagnostics are
- * tenant-context routes gated to OWNER / ADMIN / SUPPORT, and diagnostics only
- * run against an active grant an Owner or Admin approved. Fleet-wide tools
- * (all tenants, provider events, jobs, …) are staff-only and deliberately do
- * not exist here.
+ * workspace by the backend — /support/overview and every section behind it
+ * are tenant-context routes gated to OWNER / ADMIN / SUPPORT, and the
+ * invocation itself is the authorization: an accepted SUPPORT membership in
+ * this workspace opens it, same as staff read the fleet. Grants remain for
+ * diagnostics, which runs against one approved by an Owner or Admin.
+ * Fleet-wide tools (all tenants, provider events, jobs, …) are staff-only
+ * and deliberately do not exist here.
  */
 type TabId = "tickets" | "overview" | "configuration" | "mailboxes" | "domains" | "provider-events" | "delivery-events" | "jobs" | "suppressions" | "audit" | "diagnostics" | "access";
 
@@ -70,10 +72,9 @@ const TABS: Array<{ id: TabId; label: string; icon: string }> = [
   //
   // Tickets need no grant: the workspace's own Owner invited this member as
   // SUPPORT, and the queue is the work they were invited to do. Everything
-  // below it reads the customer's data and is gated on
-  // support.workspace.investigate, which is GRANT for this role — so a seat
-  // with no live grant lands on a console that still has something to do
-  // rather than a wall of refusals.
+  // below it reads the customer's data — and the invitation is the
+  // authorization for that too: an invited seat reads this workspace the
+  // way staff read the fleet, with grants reserved for diagnostics.
   { id: "tickets", label: "Tickets", icon: "✎" },
   { id: "overview", label: "Workspace Overview", icon: "◈" },
   { id: "configuration", label: "Configuration", icon: "⚙" },
@@ -196,6 +197,7 @@ function Pill({ status }: { status: string | null | undefined }) {
 function useList<T>(
   fetchFn: (p: TenantListParams) => Promise<Record<string, T[]>>,
   key: string,
+  ns = key,
 ) {
   const [params, setParams] = useState<TenantListParams>({ limit: 50 });
 
@@ -206,11 +208,13 @@ function useList<T>(
   // place to invalidate from: a mutation elsewhere can mark these stale
   // instead of every list having to know it happened.
   //
-  // `key` names the array inside the response envelope, and also namespaces
-  // the cache entry — two lists with the same filters but different shapes
-  // must not share a key.
+  // `key` names the array inside the response envelope; `ns` namespaces the
+  // cache entry — two lists with the same filters but different shapes must
+  // not share a key. Provider events, delivery events and audit all answer
+  // under `{ events }`, so the page name — not the envelope name — is what
+  // tells the cache apart.
   const query = useQuery({
-    queryKey: ["support", "tenant-list", key, params],
+    queryKey: ["support", "tenant-list", ns, params],
     queryFn: () => fetchFn(params),
     staleTime: 15_000,
     // The previous page stays on screen while the next one loads, so
@@ -329,11 +333,6 @@ export default function TenantSupportConsole() {
   // expiry to be the control rather than a note about one.
   useLiveRefresh(loadOverview, 60_000);
 
-  // The server names the reason in the denial (requiresSupportGrant), and
-  // falls back to the message for anything that predates that detail.
-  const needsAccess =
-    Boolean(overviewError) && /support access grant|approved support/i.test(overviewError ?? "");
-
   const runDiagnostics = useCallback(
     async (grantId: string) => {
       setDiagGrant(grantId);
@@ -411,12 +410,6 @@ export default function TenantSupportConsole() {
 
           <main>
             <div className="page">
-              <div className="crumbs">
-                <span>Support Workspace</span>
-                <span>/</span>
-                <span className="cur">{TABS.find((t) => t.id === tab)?.label}</span>
-              </div>
-
               <div className="pagehd">
                 <div>
                   <h1>{TABS.find((t) => t.id === tab)?.label}</h1>
@@ -425,26 +418,14 @@ export default function TenantSupportConsole() {
               </div>
 
               {/*
-                The request panel replaces the refused tab, not the console.
-                Tickets keep working without a grant, so covering them with
-                "ask for access" would hide work the seat is authorized to
-                do and make the console look wholly shut.
+                The console answers for an invited seat outright — the
+                invitation, not a grant, is the authorization for this
+                workspace. A read failure here is a real error, so it shows
+                a retry rather than a request form.
               */}
               {tab === "overview" &&
                 (overviewLoading ? (
                   <Spinner />
-                ) : needsAccess ? (
-                  // Runbook §7: the console read is GRANT for a Support seat,
-                  // so no live grant means every panel 403s. Showing the way
-                  // to ask beats a screen of load errors with nothing to act
-                  // on — which is what this was until the request flow
-                  // existed at all.
-                  // No reload on success, deliberately. Asking does not grant
-                  // anything, so a refetch returns the same refusal — and it
-                  // would flip this back to the spinner, unmounting the
-                  // confirmation and showing the empty form again as though
-                  // nothing had been sent.
-                  <RequestAccessPanel />
                 ) : overviewError ? (
                   <LoadErr error={overviewError} onRetry={loadOverview} />
                 ) : (
@@ -640,14 +621,13 @@ function DiagnosticsView({
   if (active.length === 0) {
     return (
       <div>
-        <div className="notice">
-          <b>No active grant</b>
-          <div style={{ flex: 1 }}>
-            Diagnostics run against an access grant, approved by a workspace
-            Owner or Admin (Support &gt; Access &amp; Scope). Ask an
-            administrator to create one before support can inspect mail flow.
-          </div>
-        </div>
+        {/*
+          Every other tab answers by invitation; diagnostics is the one
+          screen that still runs against an approved, time-boxed grant.
+          Instead of a dead end, offer the request form — the owner is
+          notified and approves or refuses on the Access & Scope screen.
+        */}
+        <RequestAccessPanel />
       </div>
     );
   }
@@ -994,10 +974,10 @@ function MailboxesPage() {
                 <td className="muted">{ago(m.createdAt)}</td>
                 <td>
                   {/*
-                    Refused unless the live grant carries MAIL_CONTENT. The
-                    button is offered anyway and the server's refusal is shown
-                    verbatim, because hiding it would leave an agent unable to
-                    tell "not allowed" from "not there".
+                    Opens for an invited SUPPORT seat with no grant at all —
+                    the invitation is the authorization. The read is recorded
+                    in the workspace's audit log, which is the note in its
+                    title.
                   */}
                   <button className="btn" onClick={() => setReading(m)} title="Read headers — recorded in the audit log">
                     Open
@@ -1067,7 +1047,7 @@ function DomainsPage() {
 }
 
 function ProviderEventsPage() {
-  const { params, setParams, rows, loading, error, reload } = useList<TenantProviderEvent>(listTenantProviderEvents, "events");
+  const { params, setParams, rows, loading, error, reload } = useList<TenantProviderEvent>(listTenantProviderEvents, "events", "provider-events");
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
   const [provider, setProvider] = useState("");
@@ -1114,7 +1094,7 @@ function ProviderEventsPage() {
 }
 
 function DeliveryEventsPage() {
-  const { params, setParams, rows, loading, error, reload } = useList<TenantDeliveryEvent>(listTenantDeliveryEvents, "events");
+  const { params, setParams, rows, loading, error, reload } = useList<TenantDeliveryEvent>(listTenantDeliveryEvents, "events", "delivery-events");
   const [q, setQ] = useState("");
   const [type, setType] = useState("");
 
@@ -1237,7 +1217,7 @@ function SuppressionsPage() {
 }
 
 function AuditPage() {
-  const { params, setParams, rows, loading, error, reload } = useList<TenantAuditEvent>(listTenantAudit, "events");
+  const { params, setParams, rows, loading, error, reload } = useList<TenantAuditEvent>(listTenantAudit, "events", "audit");
   const [q, setQ] = useState("");
 
   return (
@@ -1513,13 +1493,13 @@ function ConfigJson({ title, value }: { title: string; value: Record<string, unk
 }
 
 /**
- * RBAC §2 "Read private user mailbox" — the exceptional path.
+ * RBAC §2 "Read private user mailbox" — by invitation, not grant.
  *
- * Reachable only from a mailbox row, and only opens anything if the live
- * grant carries MAIL_CONTENT; the server refuses otherwise and says so. The
- * refusal is shown as-is rather than softened, because a support agent who
- * cannot tell "no grant" from "no messages" will ask the customer the wrong
- * question.
+ * Reachable from a mailbox row: the SUPPORT membership in this workspace
+ * opens it outright, same as the rest of the console, so there is no grant
+ * check or scope left to fail. The server still scopes the read to this
+ * workspace, records every one of them in the tenant's audit log, and
+ * withholds subjects for a mailbox its owner has turned processing off.
  *
  * Headers only. The endpoint returns no bodies, so there is nothing here to
  * expand into one.
@@ -1557,8 +1537,8 @@ function MailboxMessages({ mailbox, onClose }: { mailbox: TenantMailbox; onClose
         <h2>{mailbox.address}</h2>
         <div className="sp">
           {data && (
-            <span className="pill nu" title="This read is recorded in the workspace's audit log">
-              grant ends {fmt(data.grant.expiresAt)}
+            <span className="pill nu" title="Every read is recorded in the workspace's audit log">
+              recorded in audit log
             </span>
           )}
           <button className="btn" onClick={onClose}>Close</button>

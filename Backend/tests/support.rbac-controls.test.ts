@@ -18,12 +18,13 @@ const app = createApp();
  *
  * The second is the interesting one. It is the only capability anywhere in
  * the matrix that reaches a member's own mail — Owner and Admin hold it in
- * no form at all, and Support holds it only as a grant. Security §4 adds
- * that it is "blocked by default; exceptional security-approved path only",
- * which the capability alone cannot express: a grant is a grant, and an
- * owner approving a bounce investigation would otherwise have approved mail
- * reading too. So the scope is separate, and the tests below are mostly
- * about that separation holding.
+ * no form at all, and a workspace's invited SUPPORT seat holds it through
+ * the membership itself, the same membership that opens every other console
+ * read. The grant's scopes are no longer the gate on a mail read; grants
+ * survive only for diagnostics, which the tests touching /diagnostics
+ * cover. So the tests below pin the two things that are still true of a
+ * mail read: it is scoped to the seat's own workspace, and it lands in the
+ * workspace's audit log.
  */
 
 const DIAGNOSTICS = ["TENANT_DIAGNOSTICS"] as const;
@@ -98,14 +99,16 @@ describe("view tenant configuration", () => {
     expect(Array.isArray(res.body.data.policies)).toBe(true);
   });
 
-  it("is refused without a grant, like every other console read", async () => {
+  it("answers for an invited seat with no grant at all", async () => {
     const owner = await registerUser(app, { email: `cfg-nog-o-${Date.now()}@zoiko.test` });
     const seat = await supportSeat(owner, `cfg-nog-s-${Date.now()}@zoiko.test`);
 
+    // The invitation is the authorization; a diagnostics grant is not
+    // needed to read this workspace's setup.
     await request(app)
       .get("/api/v1/support/configuration")
       .set(authHeader(seat.token))
-      .expect(403);
+      .expect(200);
   });
 
   it("does not hand a credential to a console outside the tenant", async () => {
@@ -223,21 +226,23 @@ describe("what a support seat reads is on the record", () => {
     const owner = await registerUser(app, { email: `aud-deny-o-${Date.now()}@zoiko.test` });
     const seat = await supportSeat(owner, `aud-deny-s-${Date.now()}@zoiko.test`);
 
+    // Diagnostics is the one screen a seat cannot reach without an approved
+    // grant, and the refusal comes back as a 403 — so it is the endpoint
+    // that still exercises the denial path on the tenant console.
     await request(app)
-      .get("/api/v1/support/configuration")
+      .get("/api/v1/support/diagnostics")
       .set(authHeader(seat.token))
       .expect(403);
 
-    // Recorded as a refusal — `requireCapability` guards the tenant console
-    // and writes nothing of its own, so without this a seat could be turned
-    // away repeatedly and the customer's log would be silent about it.
+    // Recorded as a refusal — without this, a seat kept trying diagnostics
+    // with no approved grant and the customer's log would be silent about it.
     const denied = await waitFor(async () =>
       prisma.auditEvent.findFirst({
         where: { tenantId: owner.tenantId, eventType: "SUPPORT_ACCESS_DENIED" },
       })
     );
     expect((denied.metadata as Record<string, unknown>)?.path).toBe(
-      "/api/v1/support/configuration"
+      "/api/v1/support/diagnostics"
     );
 
     // And not as an access. The log says what was served, not what was
@@ -253,23 +258,22 @@ describe("what a support seat reads is on the record", () => {
 });
 
 describe("read private user mailbox", () => {
-  it("is refused when the grant does not name mail content", async () => {
+  it("opens for a seat whose grant carries no MAIL_CONTENT scope", async () => {
     const { owner, mailboxId } = await ownerWithMailbox("mb-scope-o");
     const seat = await grantedSeat(owner, `mb-scope-s-${Date.now()}@zoiko.test`, DIAGNOSTICS);
 
     const mailbox = await prisma.mailbox.findUniqueOrThrow({ where: { id: mailboxId } });
 
-    // The seat holds a live grant and the console works for it — this is
-    // not "no access", it is "not this access". Without the separate scope,
-    // approving diagnostics would have opened the mailbox too.
-    await request(app).get("/api/v1/support/overview").set(authHeader(seat.token)).expect(200);
-
+    // The seat holds a live diagnostics grant — and the mailbox read does
+    // not depend on that grant or its scopes at all. The invitation into
+    // the workspace is the whole authorization, mail included.
     const res = await request(app)
       .get(`/api/v1/support/mailboxes/${mailbox.id}/messages`)
       .set(authHeader(seat.token))
-      .expect(403);
+      .expect(200);
 
-    expect(res.body.error.message).toMatch(/mail content/i);
+    expect(res.body.data.mailbox.address).toBe(mailbox.address);
+    expect(Array.isArray(res.body.data.messages)).toBe(true);
   });
 
   it("answers when the grant does name it", async () => {
@@ -361,29 +365,19 @@ describe("read private user mailbox", () => {
     expect((event?.metadata as Record<string, unknown>)?.mailbox).toBe(mailbox.address);
   });
 
-  it("records the attempt even when it is refused", async () => {
-    const { owner, mailboxId } = await ownerWithMailbox("mb-deny-o");
-    const seat = await grantedSeat(owner, `mb-deny-s-${Date.now()}@zoiko.test`, DIAGNOSTICS);
+  it("needs no grant at all — the invitation is the access", async () => {
+    const { owner, mailboxId } = await ownerWithMailbox("mb-nog-o");
+    const seat = await supportSeat(owner, `mb-nog-s-${Date.now()}@zoiko.test`);
     const mailbox = await prisma.mailbox.findUniqueOrThrow({ where: { id: mailboxId } });
 
-    await request(app)
+    // No grant, no request, no approval: the Owner's invitation to sit in
+    // this workspace as SUPPORT is the whole authorization.
+    const res = await request(app)
       .get(`/api/v1/support/mailboxes/${mailbox.id}/messages`)
       .set(authHeader(seat.token))
-      .expect(403);
+      .expect(200);
 
-    // Somebody trying to open a mailbox they were not approved for is the
-    // kind of thing a customer reviewing their log would want to see, and
-    // it is not visible anywhere else.
-    const denied = await prisma.auditEvent.findFirst({
-      where: {
-        tenantId: owner.tenantId,
-        eventType: "SUPPORT_ACCESS_DENIED",
-        targetType: "Mailbox",
-        targetId: mailbox.id,
-      },
-    });
-
-    expect(denied).not.toBeNull();
+    expect(res.body.data.mailbox.address).toBe(mailbox.address);
   });
 
   it("withholds subjects for a mailbox its owner has closed to processing", async () => {

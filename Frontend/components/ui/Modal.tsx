@@ -37,7 +37,7 @@ export function Modal({ open, onClose, title, children, footer, size = "md" }: M
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div
         ref={backdropRef}
-        className="absolute inset-0 bg-black/50"
+        className="zoi-modal-mask absolute inset-0 bg-black/50"
         onClick={onClose}
       />
       {/* A dialog has to say it is one. Without role/aria-modal a screen
@@ -48,7 +48,7 @@ export function Modal({ open, onClose, title, children, footer, size = "md" }: M
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`relative w-full ${widthClass} rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--sh3)]`}
+        className={`zoi-modal-panel relative w-full ${widthClass} rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--sh3)]`}
       >
         <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
           <h2 id={titleId} className="text-base font-semibold text-[var(--ink)]">

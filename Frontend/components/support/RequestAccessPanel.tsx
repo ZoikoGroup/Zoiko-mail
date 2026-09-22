@@ -7,12 +7,14 @@ import { requestSupportAccess, type SupportScope } from "@/lib/support-api";
 import { ApiError } from "@/lib/api-client";
 
 /**
- * What a support seat sees instead of a broken console — Runbook §7.
+ * How a support seat obtains the one thing still gated behind access.
  *
- * The workspace read is GRANT for a Support role, so a seat holding no live
- * grant gets a 403 from every panel. Before this, that surfaced as a screen
- * of load errors with nothing to do about it; the only way to obtain access
- * was for somebody to call the API directly.
+ * The workspace console answers by invitation — an accepted SUPPORT
+ * membership in the workspace IS the authorization, so every section opens
+ * without a grant. Diagnostics is the exception: it runs against a
+ * time-boxed grant an Owner or Admin approves. Before this panel existed,
+ * the only way to obtain that grant was for somebody to call the API
+ * directly.
  *
  * The attribution the server insists on is asked for here rather than
  * guessed at: a ticket in this workspace, or an incident named in the reason.
@@ -25,15 +27,6 @@ const SCOPES: Array<{ value: SupportScope; label: string; hint: string }> = [
   { value: "DNS_DIAGNOSTICS", label: "DNS and domains", hint: "MX, SPF, DKIM, DMARC" },
   { value: "DELIVERY_DIAGNOSTICS", label: "Delivery and bounces", hint: "delivery and provider events" },
   { value: "AUDIT_READ", label: "Audit log", hint: "who did what in this workspace" },
-  // Last, and described as what it is. RBAC §2 gives Support this only
-  // through a grant and Security §4 calls it an exceptional path, so the
-  // owner reading the request needs to see that this one is not like the
-  // others rather than find it sitting fourth in an even list.
-  {
-    value: "MAIL_CONTENT",
-    label: "Read inside a mailbox",
-    hint: "message headers only — exceptional, ask only if the case needs it",
-  },
 ];
 
 const WINDOWS = [15, 30, 60, 120, 240];
@@ -93,11 +86,13 @@ export function RequestAccessPanel({ onRequested }: { onRequested?: () => void }
         </div>
         <div>
           <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
-            Ask for access to this workspace
+            Ask for diagnostics access
           </h2>
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-            Support holds no standing access. The owner approves each request, it expires on its
-            own, and everything you read while it is open is recorded in their audit log.
+            Your invitation into this workspace already opens every screen here —
+            the console is not gated on a grant. Diagnostics is the one thing
+            that still runs against an owner-approved window: it expires on its
+            own, and every run is recorded in their audit log.
           </p>
         </div>
       </div>

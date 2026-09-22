@@ -159,12 +159,17 @@ export function AiActionsInbox() {
           </div>
         )}
 
-        {visible.map((a) => (
-          <ActionCard
+        {visible.map((a, i) => (
+          <div
             key={a.id}
-            action={a}
-            onClick={() => setSelected(a)}
-          />
+            className="zoi-item"
+            style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}
+          >
+            <ActionCard
+              action={a}
+              onClick={() => setSelected(a)}
+            />
+          </div>
         ))}
       </div>
 

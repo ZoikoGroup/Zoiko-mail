@@ -1,4 +1,4 @@
-import { apiRequest } from "./api-client";
+import { apiDownload, apiRequest } from "./api-client";
 
 // ─── Membership / Users ───────────────────────────────────────────────────────
 
@@ -208,17 +208,28 @@ export interface AuditEvent {
 export interface AuditEventQuery {
   page?: number;
   limit?: number;
-  action?: string;
+  eventType?: string;
+  eventTypePrefix?: string[];
+  actorType?: "USER" | "ADMIN" | "SUPPORT" | "SYSTEM" | "PROVIDER" | "AI_WORKER";
   actorId?: string;
-  startDate?: string;
-  endDate?: string;
+  targetType?: string;
+  targetId?: string;
+  from?: string;
+  to?: string;
 }
 
 export async function getAuditEvents(query: AuditEventQuery = {}): Promise<{ events: AuditEvent[]; total: number; page: number; limit: number }> {
   const params = new URLSearchParams();
-  Object.entries(query).forEach(([k, v]) => {
-    if (v !== undefined && v !== "") params.set(k, String(v));
-  });
+  if (query.page) params.set("page", String(query.page));
+  if (query.limit) params.set("limit", String(query.limit));
+  if (query.eventType) params.set("eventType", query.eventType);
+  if (query.actorType) params.set("actorType", query.actorType);
+  if (query.actorId) params.set("actorUserId", query.actorId);
+  if (query.targetType) params.set("targetType", query.targetType);
+  if (query.targetId) params.set("targetId", query.targetId);
+  if (query.from) params.set("from", query.from);
+  if (query.to) params.set("to", query.to);
+  query.eventTypePrefix?.forEach((prefix) => params.append("eventTypePrefix", prefix));
   const res = await apiRequest<{
     events: Array<{
       id: string; actorUserId: string; eventType: string; targetType: string;
@@ -321,6 +332,10 @@ export async function createPolicy(input: CreatePolicyInput): Promise<Policy> {
 
 export async function activatePolicy(policyId: string): Promise<Policy> {
   return apiRequest<Policy>(`/policies/${policyId}/activate`, { method: "POST" });
+}
+
+export async function deactivatePolicy(policyId: string): Promise<Policy> {
+  return apiRequest<Policy>(`/policies/${policyId}/deactivate`, { method: "POST" });
 }
 
 // ─── Tenant ───────────────────────────────────────────────────────────────────
@@ -702,8 +717,8 @@ export interface RequestExportInput {
   reason?: string;
 }
 
-export async function requestDataExport(input: RequestExportInput): Promise<void> {
-  await apiRequest("/lifecycle/exports", { method: "POST", body: input });
+export async function requestDataExport(input: RequestExportInput, stepUpToken?: string): Promise<void> {
+  await apiRequest("/lifecycle/exports", { method: "POST", body: input, stepUpToken });
 }
 
 export interface RequestDeletionInput {
@@ -711,8 +726,8 @@ export interface RequestDeletionInput {
   reason?: string;
 }
 
-export async function requestDeletion(input: RequestDeletionInput): Promise<void> {
-  await apiRequest("/lifecycle/deletions", { method: "POST", body: input });
+export async function requestDeletion(input: RequestDeletionInput, stepUpToken?: string): Promise<void> {
+  await apiRequest("/lifecycle/deletions", { method: "POST", body: input, stepUpToken });
 }
 
 export async function cancelLifecycleRequest(requestId: string): Promise<void> {
@@ -730,8 +745,8 @@ export async function confirmDeletion(
   await apiRequest(`/lifecycle/${requestId}/confirm-deletion`, { method: "POST", body: data });
 }
 
-export async function downloadExport(requestId: string): Promise<Blob> {
-  return apiRequest<Blob>(`/lifecycle/exports/${requestId}/download`);
+export async function downloadExport(requestId: string, stepUpToken?: string): Promise<void> {
+  return apiDownload(`/lifecycle/exports/${requestId}/download`, "zoiko-mail-export.json", stepUpToken);
 }
 
 // ─── Support access: grants, and the requests that produce them ─────────────
