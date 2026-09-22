@@ -12,3 +12,10 @@ test-results
 playwright-report
 blob-report
 .playwright
+
+# Local Python virtual environments. Nothing here is Python, but the repo is
+# only Backend/ and Frontend/, so a venv made while working has nowhere else to
+# land — and a venv is ~22MB of machine-specific binaries that must never be
+# committed. Backend/.gitignore carries the same rule.
+venv/
+.venv/
