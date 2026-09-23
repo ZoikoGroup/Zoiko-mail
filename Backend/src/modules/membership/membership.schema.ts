@@ -42,6 +42,26 @@ export const previewInvitationSchema = z.object({
   lastName: personName.optional(),
 });
 
+export const lookupInvitationSchema = z.object({
+  token: z.string().trim().min(16).max(512),
+});
+
+/**
+ * Claiming a placeholder account. The password rules are the registration
+ * rules — this is the same act, reached from a link instead of a form, and a
+ * weaker password here would be a way around them.
+ */
+export const claimInvitationSchema = z.object({
+  invitationToken: z.string().trim().min(16).max(512),
+  password: z
+    .string()
+    .min(12, "Use at least 12 characters")
+    .max(200)
+    .regex(/[a-z]/, "Include a lowercase letter")
+    .regex(/[A-Z]/, "Include an uppercase letter")
+    .regex(/[0-9]/, "Include a number"),
+});
+
 export const acceptInvitationSchema = z
   .object({
     invitationToken: z.string().min(32).max(512).optional(),

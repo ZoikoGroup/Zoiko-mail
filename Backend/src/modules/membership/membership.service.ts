@@ -367,6 +367,130 @@ export class MembershipService {
     return this.buildLetter(input, context);
   }
 
+  /**
+   * What an invitation link is for, before anyone has signed in.
+   *
+   * The accept page needs to know whether this person has an account yet,
+   * and it cannot ask an authenticated endpoint: an invitee with no password
+   * cannot sign in, so requiring a session to accept an invitation is a
+   * closed loop with no way out. The token is the credential here, exactly as
+   * it is for a password reset.
+   *
+   * Says as little as it can. Enough to address the person by the workspace
+   * they were invited to, and nothing about who else is in it.
+   */
+  async lookupInvitation(invitationToken: string) {
+    const invitation = await prisma.tenantMembership.findUnique({
+      where: { inviteToken: hashToken(invitationToken) },
+      include: { tenant: { select: { name: true, status: true } }, user: { select: { email: true, status: true } } },
+    });
+
+    if (!invitation || invitation.status !== "INVITED") {
+      throw new AppError("Invitation is invalid", 401, ErrorCodes.INVITATION_INVALID);
+    }
+    if (!invitation.inviteExpiresAt || invitation.inviteExpiresAt <= new Date()) {
+      throw new AppError("Invitation has expired", 410, ErrorCodes.INVITATION_EXPIRED);
+    }
+    if (invitation.tenant.status !== "ACTIVE") {
+      throw new AppError("Tenant is not active", 403, ErrorCodes.FORBIDDEN);
+    }
+
+    return {
+      email: invitation.user.email,
+      tenantName: invitation.tenant.name,
+      role: invitation.role,
+      // INVITED means createInvitation made a placeholder account with a
+      // random password nobody knows — that person has to choose one. An
+      // account that already existed does not, and must not be offered the
+      // chance: see claimInvitation.
+      needsPassword: invitation.user.status === "INVITED",
+    };
+  }
+
+  /**
+   * Set the password on a placeholder account and activate the membership.
+   *
+   * Unauthenticated by necessity and safe by construction: the token was
+   * delivered to the invited address, so presenting it proves control of that
+   * mailbox — the same proof a password-reset link carries, and the same
+   * proof `acceptInvitation` already relies on when it promotes the account
+   * from INVITED to ACTIVE.
+   *
+   * The refusal below is the part that matters. If the invited address
+   * already has a real account, this must not set a password on it. An admin
+   * can invite any address they like, so allowing that would turn "invite" into
+   * "take over an existing account" — the invitation would become a password
+   * reset for a mailbox the admin does not control. Those people sign in
+   * first, and accept from a session that is already theirs.
+   */
+  async claimInvitation(input: { invitationToken: string; password: string }, context: InviteeContext) {
+    return prisma.$transaction(async (tx) => {
+      const invitation = await tx.tenantMembership.findUnique({
+        where: { inviteToken: hashToken(input.invitationToken) },
+        include: { tenant: true, user: true },
+      });
+
+      if (!invitation || invitation.status !== "INVITED") {
+        throw new AppError("Invitation is invalid", 401, ErrorCodes.INVITATION_INVALID);
+      }
+      if (!invitation.inviteExpiresAt || invitation.inviteExpiresAt <= new Date()) {
+        await tx.tenantMembership.update({
+          where: { id: invitation.id },
+          data: { status: "REMOVED", inviteToken: null, inviteExpiresAt: null },
+        });
+        throw new AppError("Invitation has expired", 410, ErrorCodes.INVITATION_EXPIRED);
+      }
+      if (invitation.tenant.status !== "ACTIVE") {
+        throw new AppError("Tenant is not active", 403, ErrorCodes.FORBIDDEN);
+      }
+      if (invitation.user.status !== "INVITED") {
+        throw new AppError(
+          "This email already has an account. Sign in, then accept the invitation.",
+          409,
+          ErrorCodes.CONFLICT,
+          { reason: "ACCOUNT_ALREADY_EXISTS" }
+        );
+      }
+
+      await billingService.assertUserWithinLimit(invitation.tenantId, 1);
+
+      await tx.appUser.update({
+        where: { id: invitation.userId },
+        data: {
+          passwordHash: await hashPassword(input.password),
+          status: "ACTIVE",
+          // The link arrived in that mailbox, which is the same evidence the
+          // verification email would have produced. Asking for a code as well
+          // would be asking them to prove it twice.
+          emailVerifiedAt: invitation.user.emailVerifiedAt ?? new Date(),
+        },
+      });
+
+      const membership = await tx.tenantMembership.update({
+        where: { id: invitation.id },
+        data: { status: "ACTIVE", inviteExpiresAt: null },
+        select: memberSelect,
+      });
+
+      await auditService.record(
+        {
+          tenantId: invitation.tenantId,
+          actorUserId: invitation.userId,
+          eventType: "MEMBERSHIP_INVITATION_CLAIMED",
+          targetType: "TenantMembership",
+          targetId: invitation.id,
+          requestId: context.requestId,
+          ipAddress: context.ipAddress,
+          userAgent: context.userAgent,
+          metadata: { email: invitation.user.email, role: invitation.role },
+        },
+        tx
+      );
+
+      return { email: invitation.user.email, membership };
+    });
+  }
+
   async acceptInvitation(input: AcceptInvitationInput, context: InviteeContext) {
     return prisma.$transaction(async (tx) => {
       // Resolve the invitation — either by hashed token or by membershipId + userId ownership

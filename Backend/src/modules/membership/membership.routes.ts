@@ -1,9 +1,37 @@
 import { Router } from "express";
-import { authenticate, idempotency, requireCapability, tenantContext, validate } from "../../common/middleware/index.js";
+import { authenticate, idempotency, invitationRateLimit, requireCapability, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./membership.controller.js";
-import { acceptInvitationSchema, addMemberSchema, createInvitationSchema, listQuerySchema, membershipIdParamsSchema, previewInvitationSchema, updateMemberSchema } from "./membership.schema.js";
+import { acceptInvitationSchema, addMemberSchema, claimInvitationSchema, createInvitationSchema, listQuerySchema, lookupInvitationSchema, membershipIdParamsSchema, previewInvitationSchema, updateMemberSchema } from "./membership.schema.js";
 
 const membershipRouter = Router();
+
+/**
+ * The two routes an invitee reaches before they have a session — and they
+ * cannot have one, because createInvitation gives a new person a placeholder
+ * account with a random password nobody knows. Requiring authentication to
+ * accept an invitation is a closed loop: no password, so no sign-in; no
+ * sign-in, so no accept.
+ *
+ * The invitation token is the credential, exactly as it is for a password
+ * reset: it was delivered to the invited address, so presenting it proves
+ * control of that mailbox. Rate-limited on the same limiter for the same
+ * reason — a bearer token in a URL deserves a ceiling on guesses, even one
+ * this long.
+ *
+ * Declared before "/invitations/accept" so neither is shadowed by it.
+ */
+membershipRouter.get(
+  "/invitations/lookup",
+  invitationRateLimit,
+  validate(lookupInvitationSchema, "query"),
+  controller.lookupInvitation
+);
+membershipRouter.post(
+  "/invitations/claim",
+  invitationRateLimit,
+  validate(claimInvitationSchema),
+  controller.claimInvitation
+);
 
 membershipRouter.post(
   "/invitations/accept",

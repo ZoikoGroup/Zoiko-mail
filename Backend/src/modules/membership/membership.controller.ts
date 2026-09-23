@@ -44,6 +44,24 @@ export const previewInvitation = asyncHandler(async (req: Request, res: Response
   sendSuccess(res, 200, { letter }, req.requestId);
 });
 
+export const lookupInvitation = asyncHandler(async (req: Request, res: Response) => {
+  const token = String((req.query as { token?: string }).token ?? "");
+  sendSuccess(res, 200, await membershipService.lookupInvitation(token), req.requestId);
+});
+
+export const claimInvitation = asyncHandler(async (req: Request, res: Response) => {
+  const result = await membershipService.claimInvitation(req.body, {
+    userId: "",
+    requestId: req.requestId,
+    ipAddress: req.ip ?? null,
+    userAgent: req.header("user-agent") ?? null,
+  });
+  // No session is issued. Choosing a password and signing in with it are
+  // separate on purpose: it proves the password works before they rely on
+  // it, and it keeps MFA enrolment on the sign-in path where AC-002 puts it.
+  sendSuccess(res, 200, { email: result.email }, req.requestId);
+});
+
 export const acceptInvitation = asyncHandler(async (req: Request, res: Response) => {
   const membership = await membershipService.acceptInvitation(req.body, {
     userId: req.auth?.sub ?? "",

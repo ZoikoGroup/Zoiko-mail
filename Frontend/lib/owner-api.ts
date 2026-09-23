@@ -57,6 +57,38 @@ export async function cancelInvitation(membershipId: string): Promise<void> {
   await apiRequest(`/membership/invitations/${membershipId}`, { method: "DELETE" });
 }
 
+export interface InvitationLookup {
+  email: string;
+  tenantName: string;
+  role: string;
+  /**
+   * True when the invited address has no real account yet — the placeholder
+   * `createInvitation` made carries a random password nobody knows, so this
+   * person has to choose one before they can sign in at all.
+   *
+   * False means the address already belongs to somebody. They sign in first
+   * and accept from their own session; an invitation must never be a way to
+   * set a password on an account that already exists.
+   */
+  needsPassword: boolean;
+}
+
+/** What this link is for, asked before anyone has a session. */
+export async function lookupInvitation(token: string): Promise<InvitationLookup> {
+  return apiRequest(`/membership/invitations/lookup?token=${encodeURIComponent(token)}`);
+}
+
+/** Choose a password and join. No session is issued; the next step is signing in. */
+export async function claimInvitation(
+  invitationToken: string,
+  password: string
+): Promise<{ email: string }> {
+  return apiRequest("/membership/invitations/claim", {
+    method: "POST",
+    body: { invitationToken, password },
+  });
+}
+
 export async function acceptInvitation(invitationToken: string): Promise<{ id: string; role: string; status: string }> {
   return apiRequest("/membership/invitations/accept", {
     method: "POST",

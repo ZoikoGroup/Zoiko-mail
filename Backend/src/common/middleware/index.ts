@@ -9,5 +9,5 @@ export { requireSupportAccess } from "./requireSupportAccess.js";
 export { requireTenantGrant, logSupportAccess, logTenantSupportAccess } from "./supportAccess.js";
 export { idempotency, purgeExpiredIdempotencyRecords } from "./idempotency.js";
 export { validate } from "./validate.js";
-export { loginRateLimit, refreshRateLimit, registerRateLimit , passwordResetRateLimit } from "./authRateLimit.js";
+export { loginRateLimit, refreshRateLimit, registerRateLimit , passwordResetRateLimit, invitationRateLimit } from "./authRateLimit.js";
 export { requestLogger } from "./requestLogger.js";
