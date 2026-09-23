@@ -31,8 +31,14 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      # The checker lives in Backend/scripts rather than beside this file:
+      # the repository is meant to be two folders, and the only thing that has
+      # to sit at the root is the workflow itself — GitHub Actions reads
+      # workflows from .github/workflows at the root of the default branch and
+      # nowhere else. A workflow moved into Backend/ or Frontend/ is simply
+      # never run, with no error to say so.
       - name: Frontend and backend agree on the capability vocabulary
-        run: node .github/scripts/check-capability-parity.mjs
+        run: node Backend/scripts/check-capability-parity.mjs
 
       # A merge that leaves markers behind compiles in neither language, but
       # it has reached a branch here before, so it is worth one grep.
