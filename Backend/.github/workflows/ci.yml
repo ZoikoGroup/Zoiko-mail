@@ -182,6 +182,65 @@ jobs:
       - name: Build
         run: npm run build
 
+  # ── Contract gates ────────────────────────────────────────────────────
+  # Two checks that cost seconds and catch failures nothing else here would.
+  #
+  # The frontend keeps a hand-written union of every capability, because the
+  # type has to exist at compile time and the server's matrix does not. That
+  # copy drifted to ten missing entries and two that had been deleted from the
+  # backend — which shows up as a control the UI never offers, or one it offers
+  # and the API refuses. Neither is visible in a screenshot.
+  contract:
+    name: Contract checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Frontend and backend agree on the capability vocabulary
+        run: node Backend/scripts/check-capability-parity.mjs
+
+      # A merge that leaves markers behind compiles in neither language, but
+      # it has reached a branch here before, so it is worth one grep.
+      - name: No conflict markers
+        run: |
+          if grep -rEn '^(<<<<<<< |>>>>>>> |={7}$)'                --include='*.ts' --include='*.tsx' --include='*.prisma' --include='*.sql'                Backend/src Backend/prisma Frontend/app Frontend/lib Frontend/components; then
+            echo "::error::Conflict markers found"
+            exit 1
+          fi
+          echo "clean"
+
+  # ── Browser tests ─────────────────────────────────────────────────────
+  # These assert on what the browser sends rather than what it draws: a screen
+  # that renders a decision and never tells the server looks perfectly correct
+  # in a screenshot, and that is the class of bug they exist for. Playwright
+  # starts its own dev server, so there is nothing to orchestrate here.
+  browser-tests:
+    name: Browser tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: Frontend/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Playwright
+        run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: Frontend/playwright-report
+          retention-days: 7
+
   # ── Container build — Infrastructure §13 "Artifact" stage ──────────────
   # Proves the runtime image boots. The publish job below pushes and signs it.
   container:

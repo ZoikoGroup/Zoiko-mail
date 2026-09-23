@@ -318,11 +318,20 @@ describe("conditional resolver kinds", () => {
     expect(decision.reason).toBe("ALLOWED_OWN_RESOURCE");
   });
 
-  it("lets a Member observe settings without mutating them", () => {
-    const decision = resolveCapability("workspace.settings.read", activeMember);
-    expect(decision.allowed).toBe(true);
-    expect(decision.readOnly).toBe(true);
+  /**
+   * Was "lets a Member observe settings without mutating them", asserting a
+   * READ_ONLY row that has since been removed.
+   *
+   * The row promised a read `GET /tenants/settings/general` had always
+   * refused, and RBAC §2's "View tenant configuration" line — Owner Yes,
+   * Admin Yes, Member No — settled which half was wrong. What the resolver
+   * owes a Member here is nothing, in either direction.
+   */
+  it("gives a Member no claim on workspace settings, read or write", () => {
+    expect(can("workspace.settings.read", activeMember)).toBe(false);
     expect(can("workspace.settings.write", activeMember)).toBe(false);
+    // And the people who administer the workspace still hold the read.
+    expect(can("workspace.settings.read", activeOwner)).toBe(true);
   });
 });
 

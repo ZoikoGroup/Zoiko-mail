@@ -1,11 +1,15 @@
 import { Router } from "express";
-import { authenticate, idempotency, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
+import { authenticate, idempotency, requireCapability, tenantContext, validate } from "../../common/middleware/index.js";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
 import { actionIdSchema, createActionSchema, listActionsSchema, updateActionSchema } from "./action.schema.js";
 import { actionService } from "./action.service.js";
 export const actionRouter = Router();
-actionRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBER"), idempotency);
+// Commitments are the member's own work, which is what `commitments.own.manage`
+// says: OWN for Owner, Admin and Member, and absent for Support. Gated on the
+// capability so the matrix is the thing enforced rather than a role list that
+// happens to agree with it today.
+actionRouter.use(authenticate, tenantContext, requireCapability("commitments.own.manage"), idempotency);
 // actionRouter.get("/", asyncHandler(async (req, res) => { sendSuccess(res, 200, { actions: await actionService.list(req.tenantContext!.tenantId, req.tenantContext!.userId) }, req.requestId); }));
 
 actionRouter.get("/", validate(listActionsSchema, "query"), asyncHandler(async (req, res) => { sendSuccess(res, 200, { actions: await actionService.list(req.tenantContext!.tenantId, req.tenantContext!.userId, req.query as unknown as import("./action.schema.js").ListActionsInput) }, req.requestId); }));

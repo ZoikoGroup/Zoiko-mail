@@ -6,7 +6,10 @@ import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   useCreateMailbox,
+  useDelegateMailbox,
   useDeleteMailbox,
+  useMailboxDelegates,
+  useRevokeMailboxDelegate,
   useSetMailboxSending,
   useWorkspacePeople,
 } from "@/lib/admin-hooks";
@@ -244,5 +247,154 @@ export function DeleteMailboxDialog({
         loading={remove.isPending}
       />
     </>
+  );
+}
+
+/**
+ * Give somebody else access to one person's mailbox — RBAC §2 "Delegate
+ * mailbox access", §3, §9.1.
+ *
+ * Cover for leave, a shared responsibility, an assistant. Distinct from a
+ * shared mailbox, which belongs to the workspace: this mailbox stays Sam's,
+ * and the delegation is a named, revocable exception recorded against it.
+ *
+ * Two refusals from this screen mean different things and are shown as such.
+ * "Forbidden" alone would send an Admin to ask for a permission they already
+ * hold — what they are actually missing is a workspace policy an Owner has
+ * never activated, which §2 expresses as Admin "If policy" against the Owner's
+ * unconditional Yes.
+ */
+export function DelegateMailboxDialog({
+  mailbox,
+  onClose,
+}: {
+  mailbox: MailboxDto;
+  onClose: () => void;
+}) {
+  const { data: people } = useWorkspacePeople();
+  const { data: delegates, isLoading } = useMailboxDelegates(mailbox.id);
+  const grant = useDelegateMailbox(mailbox.id);
+  const revoke = useRevokeMailboxDelegate(mailbox.id);
+
+  const [membershipId, setMembershipId] = useState("");
+  const [canSend, setCanSend] = useState(false);
+
+  // Not the owner of this mailbox — delegating it to them grants nothing, and
+  // the server refuses with a 409 rather than writing a no-op grant.
+  const held = new Set((delegates ?? []).map((d) => d.membershipId));
+  const candidates = (people ?? []).filter(
+    (person) => person.id !== mailbox.membershipId && !held.has(person.id)
+  );
+
+  const error = grant.error ?? revoke.error;
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Delegate ${mailbox.address}`}
+      size="sm"
+      footer={
+        <button className="zoiko-btn" onClick={onClose}>
+          Done
+        </button>
+      }
+    >
+      <p className="text-[12.5px] text-[var(--ink2)]">
+        The mailbox stays with its owner. A delegate reads it — and sends from it only
+        if you say so. Every grant and removal is written to the audit log.
+      </p>
+
+      {error ? (
+        <p className="mt-3 text-[12.5px] text-[var(--crit)]">{error.message}</p>
+      ) : null}
+
+      <div className="mt-4">
+        <label
+          htmlFor="delegate-member"
+          className="font-mono-num mb-1 block text-[9.5px] uppercase tracking-[0.1em] text-[var(--ink3)]"
+        >
+          Give access to
+        </label>
+        <select
+          id="delegate-member"
+          value={membershipId}
+          disabled={grant.isPending}
+          onChange={(event) => setMembershipId(event.target.value)}
+          className="w-full rounded-lg border border-[var(--border)] bg-[var(--s2)] px-3 py-2 text-[12.6px] text-[var(--ink)]"
+        >
+          <option value="">Choose a member…</option>
+          {candidates.map((person) => (
+            <option key={person.id} value={person.id}>
+              {person.user.displayName} — {person.user.email}
+            </option>
+          ))}
+        </select>
+
+        <label className="mt-3 flex items-center gap-2 text-[12.5px] text-[var(--ink)]">
+          <input
+            type="checkbox"
+            checked={canSend}
+            disabled={grant.isPending}
+            onChange={(event) => setCanSend(event.target.checked)}
+          />
+          Also let them send as this address
+        </label>
+
+        <button
+          className="zoiko-btn pri mt-3"
+          disabled={grant.isPending || !membershipId}
+          onClick={() =>
+            grant.mutate(
+              { membershipId, canSend },
+              {
+                onSuccess: () => {
+                  setMembershipId("");
+                  setCanSend(false);
+                },
+              }
+            )
+          }
+        >
+          {grant.isPending ? "Granting…" : "Grant access"}
+        </button>
+      </div>
+
+      <div className="mt-5">
+        <p className="font-mono-num mb-2 text-[9.5px] uppercase tracking-[0.1em] text-[var(--ink3)]">
+          Current delegates
+        </p>
+        {isLoading ? (
+          <p className="text-[12.5px] text-[var(--ink3)]">Loading…</p>
+        ) : !delegates || delegates.length === 0 ? (
+          <p className="text-[12.5px] text-[var(--ink2)]">
+            Nobody else can reach this mailbox.
+          </p>
+        ) : (
+          delegates.map((d) => (
+            <div
+              key={d.id}
+              className="flex items-center justify-between border-b border-[var(--border)] py-2 last:border-0"
+            >
+              <span className="text-[12.5px] text-[var(--ink)]">
+                {d.name}
+                <span className="ml-2 text-[11.5px] text-[var(--ink3)]">
+                  {d.canSend ? "read and send" : "read only"}
+                </span>
+              </span>
+              <button
+                className="zoiko-btn sm"
+                disabled={revoke.isPending}
+                onClick={() => revoke.mutate(d.membershipId)}
+              >
+                {revoke.isPending && revoke.variables === d.membershipId
+                  ? "Removing…"
+                  : "Remove"}
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </Modal>
   );
 }

@@ -130,14 +130,19 @@ async function openAudit(
     const params = new URL(route.request().url()).searchParams;
     asked.list.push(params);
     const limit = Number(params.get("limit") ?? 25);
+    // Keyset now (API §4): the audit table is appended to while it is read,
+    // so an offset drifts between requests and page two can repeat or miss an
+    // event. `total` survives because the screen reports it; the page number
+    // does not, because keyset cannot address one.
+    const seen = asked.list.filter((p) => p.get("cursor")).length;
+    const consumed = (seen + 1) * limit;
     return route.fulfill(
       json({
         events,
         pagination: {
-          page: Number(params.get("page") ?? 1),
           limit,
           total,
-          totalPages: Math.max(1, Math.ceil(total / limit)),
+          nextCursor: consumed < total ? `cursor-${consumed}` : null,
         },
       })
     );
@@ -201,7 +206,9 @@ test.describe("filtering happens on the server", () => {
     const opening = latestList(asked)!;
     // No category, so the screen opens on the whole log rather than a slice.
     expect(opening.getAll("eventTypePrefix")).toEqual([]);
-    expect(opening.get("page")).toBe("1");
+    // No cursor on the opening read: absent means the newest page, and a
+    // cursor invented client-side would be a key the server never issued.
+    expect(opening.get("cursor")).toBeNull();
     expect(opening.get("limit")).toBe("25");
   });
 });
@@ -210,11 +217,16 @@ test.describe("paging", () => {
   test("asks for the next page rather than slicing what it already has", async ({ page }) => {
     const asked = await openAudit(page, { total: 120 });
 
-    await expect(page.getByText(/Page 1 of 5/)).toBeVisible();
+    // "of N" is gone: keyset knows there is a next page, not how many remain,
+    // and deriving one from total/limit would be wrong the moment an event
+    // lands mid-read — constantly, on this table.
+    await expect(page.getByText(/Page 1/)).toBeVisible();
     await page.getByRole("button", { name: "Next" }).click();
 
-    await expect.poll(() => latestList(asked)?.get("page")).toBe("2");
-    await expect(page.getByText(/Page 2 of 5/)).toBeVisible();
+    // The next read carries the cursor the server handed back, rather than
+    // the screen slicing rows it already holds.
+    await expect.poll(() => latestList(asked)?.get("cursor")).toBe("cursor-25");
+    await expect(page.getByText(/Page 2/)).toBeVisible();
   });
 
   test("Previous is unavailable on the first page", async ({ page }) => {
@@ -231,12 +243,13 @@ test.describe("paging", () => {
     const asked = await openAudit(page, { total: 120 });
 
     await page.getByRole("button", { name: "Next" }).click();
-    await expect.poll(() => latestList(asked)?.get("page")).toBe("2");
+    await expect.poll(() => latestList(asked)?.get("cursor")).toBe("cursor-25");
 
-    // Page 7 of a different filter is a different set of rows; staying there
-    // would show an arbitrary slice of the new result.
+    // A cursor is a position in one result set. Carrying it into a different
+    // filter would resume from a key that set may not even contain, so the
+    // stack is dropped and the read starts from the newest event again.
     await page.getByRole("button", { name: "Mail", exact: true }).click();
-    await expect.poll(() => latestList(asked)?.get("page")).toBe("1");
+    await expect.poll(() => latestList(asked)?.get("cursor")).toBeNull();
   });
 
   test("the count reported is the server's total, not the page length", async ({ page }) => {

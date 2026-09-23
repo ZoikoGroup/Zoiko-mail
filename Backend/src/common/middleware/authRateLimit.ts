@@ -24,3 +24,4 @@ export const registerRateLimit = createAuthLimiter(env.REGISTER_RATE_LIMIT_MAX);
 export const loginRateLimit = createAuthLimiter(env.LOGIN_RATE_LIMIT_MAX);
 export const refreshRateLimit = createAuthLimiter(env.REFRESH_RATE_LIMIT_MAX);
 export const passwordResetRateLimit = createAuthLimiter(env.PASSWORD_RESET_RATE_LIMIT_MAX);
+export const invitationRateLimit = createAuthLimiter(env.INVITATION_RATE_LIMIT_MAX);
