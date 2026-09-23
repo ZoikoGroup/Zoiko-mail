@@ -57,6 +57,10 @@ import {
   rotateConnectorCredentials,
   disconnectConnectorForTenant,
   fetchMailboxDelegates,
+  fetchLifecycleRequests,
+  requestDataExport,
+  requestDataDeletion,
+  downloadDataExport,
   delegateMailbox,
   revokeMailboxDelegate,
   savePolicyRules,
@@ -591,6 +595,50 @@ export function useReplayDeadLetter() {
         qc.invalidateQueries({ queryKey: ["connectors"] }),
       ]);
     },
+  });
+}
+
+/* ── data lifecycle ────────────────────────────────────────────────────── */
+
+export function useLifecycleRequests() {
+  return useQuery({
+    queryKey: ["lifecycle-requests"],
+    queryFn: fetchLifecycleRequests,
+    ...LIVE,
+  });
+}
+
+export function useRequestExport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ reason, stepUpToken }: { reason: string; stepUpToken?: string }) =>
+      requestDataExport(reason, stepUpToken),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["lifecycle-requests"] }),
+  });
+}
+
+export function useRequestDeletion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      targetType,
+      targetId,
+      reason,
+      stepUpToken,
+    }: {
+      targetType: "TENANT" | "USER";
+      targetId?: string;
+      reason: string;
+      stepUpToken?: string;
+    }) => requestDataDeletion({ targetType, targetId, reason }, stepUpToken),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["lifecycle-requests"] }),
+  });
+}
+
+export function useDownloadExport() {
+  return useMutation({
+    mutationFn: ({ requestId, stepUpToken }: { requestId: string; stepUpToken?: string }) =>
+      downloadDataExport(requestId, stepUpToken),
   });
 }
 

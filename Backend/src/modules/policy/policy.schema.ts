@@ -9,6 +9,7 @@ export const policyTypeSchema = z.enum([
   "DELETION",
   "ABUSE",
   "DELEGATION",
+  "EXPORT",
 ]);
 const effectSchema = z.enum(["ALLOW", "DENY"]);
 const scalarSchema = z.union([z.string(), z.number(), z.boolean()]);
@@ -36,6 +37,9 @@ export const policyIdParamsSchema = z.object({ policyId: z.string().uuid() });
 export const listPoliciesSchema = z.object({
   type: policyTypeSchema.optional(),
   status: z.enum(["DRAFT", "ACTIVE", "ARCHIVED"]).optional(),
+  // API §4. Filters narrow the set; these bound it.
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  cursor: z.string().trim().min(1).max(512).optional(),
 });
 export const evaluatePolicySchema = z.object({
   type: policyTypeSchema,

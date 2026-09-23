@@ -5,6 +5,7 @@ import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
 import { billingService } from "../billing/billing.service.js";
 import { can } from "../../common/capabilities/resolver.js";
+import { cursorArgs, toPage } from "../../common/utils/pagination.js";
 import { env } from "../../config/env.js";
 import { generateOpaqueToken, hashToken } from "../../common/utils/tokenHash.js";
 import { hashPassword } from "../../common/utils/password.js";
@@ -173,12 +174,22 @@ async function protectLastOwner(
 }
 
 export class MembershipService {
-  async list(context: ActorContext) {
-    return prisma.tenantMembership.findMany({
+  /**
+   * The workspace's people, a page at a time — API §4.
+   *
+   * `id` joins the sort key because `createdAt` alone is not unique: two
+   * members added in the same transaction share a timestamp, and a cursor
+   * over a non-unique order can drop one of them or serve it twice.
+   */
+  async list(context: ActorContext, options: { limit?: number; cursor?: string } = {}) {
+    const limit = options.limit ?? 50;
+    const rows = await prisma.tenantMembership.findMany({
       where: { tenantId: context.tenantId, status: { not: "REMOVED" } },
       select: memberSelect,
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      ...cursorArgs(limit, options.cursor),
     });
+    return toPage(rows, limit);
   }
 
   async add(input: AddMemberInput, context: ActorContext) {

@@ -1245,6 +1245,13 @@ enum PolicyType {
   RETENTION
   DELETION
   ABUSE
+  /// Whether an Admin may request a data export.
+  ///
+  /// RBAC §2 "Request export": Owner Yes, Admin "By policy". Same shape as
+  /// DELEGATION below — the condition is about the workspace, not the caller,
+  /// so it cannot live in a matrix row. DELETION already exists and carries
+  /// the matching condition for "Request deletion".
+  EXPORT
   /// Whether an Admin may grant one person access to another's mailbox.
   ///
   /// RBAC §2 gives "Delegate mailbox access" to Owner outright and to Admin

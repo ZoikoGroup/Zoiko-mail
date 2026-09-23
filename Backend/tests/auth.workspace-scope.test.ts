@@ -38,8 +38,20 @@ const decode = (token: string) =>
  * so it separates an owner session from an admin one — unlike /billing, which
  * admits Admin on most of its routes.
  */
+/**
+ * A surface only an Owner reaches.
+ *
+ * Was `GET /api/v1/lifecycle`, which stopped being owner-only when that
+ * router moved off `requireRole("OWNER")`: RBAC §2 records "Request export"
+ * and "Request deletion" as Admin **By policy**, so shutting an Admin out of
+ * the whole router was the bug, not the boundary.
+ *
+ * Billing is the honest replacement — `billing.read` sits in the Owner row and
+ * in no other. What this file tests is session-to-console binding, not which
+ * endpoint happens to be restricted, so it only needs a surface that really is.
+ */
 const ownerOnly = (accessToken: string) =>
-  request(app).get("/api/v1/lifecycle").set(authHeader(accessToken));
+  request(app).get("/api/v1/billing/subscription").set(authHeader(accessToken));
 
 const signInWithGoogle = () =>
   request(app).post("/api/v1/auth/google").send({ idToken: "stubbed" });

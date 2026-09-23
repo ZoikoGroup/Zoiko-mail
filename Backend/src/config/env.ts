@@ -70,6 +70,13 @@ export const envSchema = z.object({
   PROVIDER_CALLBACK_SECRET: z.string().min(32).default("change-me-provider-callback-secret-32"),
   PROVIDER_EVENT_WORKER_INTERVAL_MS: z.coerce.number().int().min(1_000).default(10_000),
   PROVIDER_EVENT_RETRY_BASE_MS: z.coerce.number().int().min(1_000).default(30_000),
+  /**
+   * Comma-separated rollout flags — QA §7 names "feature flag available" as a
+   * Feature-QA entry criterion. Read through config/featureFlags.ts rather
+   * than here, so the set stays enumerable; a flag gates rollout, never
+   * authorisation, which is the capability matrix's job.
+   */
+  FEATURE_FLAGS: z.string().default(""),
   MAIL_PROVIDER_ENABLED: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
   IMAP_HOST: z.string().min(1).default("imap.secureserver.net"),
   IMAP_PORT: z.coerce.number().int().min(1).max(65535).default(993),

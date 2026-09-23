@@ -65,3 +65,6 @@ export type UpdateMemberInput = z.infer<typeof updateMemberSchema>;
 export type CreateInvitationInput = z.infer<typeof createInvitationSchema>;
 export type PreviewInvitationInput = z.infer<typeof previewInvitationSchema>;
 export type AcceptInvitationInput = z.infer<typeof acceptInvitationSchema>;
+
+/** Cursor pagination — API §4. Shared so every list answers the same way. */
+export { paginationQuerySchema as listQuerySchema } from "../../common/utils/pagination.js";

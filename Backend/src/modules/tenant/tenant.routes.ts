@@ -15,21 +15,22 @@ tenantRouter.patch(
   controller.updateCurrent
 );
 /**
- * Deliberately a role list, and deliberately NOT `workspace.settings.read`.
+ * Gated on the capability, which now says what the role list used to.
  *
- * The matrix holds that capability as READ_ONLY for a Member, so gating this
- * route on it would let a Member read workspace settings — and RBAC §2's
- * "View tenant configuration" row says Owner Yes, Admin Yes, **Member No**.
- * The capability and the route disagree, and the spec sides with the route.
+ * This read `requireRole("OWNER", "ADMIN")` while the matrix held
+ * `workspace.settings.read` as READ_ONLY for a Member — a capability that
+ * resolved open against a route that refused. The matrix row was the wrong
+ * half: RBAC §2's "View tenant configuration" reads Member **No**. With that
+ * row removed the two agree, and the route can name the capability instead of
+ * re-listing the roles that happen to hold it.
  *
- * That disagreement is real and still open: `workspace.settings.read` is a
- * Member capability that nothing enforces, which is either a matrix row that
- * should be narrowed or a read surface that was never built. It is left here
- * as it shipped rather than resolved by widening access, because opening a
- * workspace-level read to every Member is a product decision and not a
- * tidying-up. tests/tenant-settings.test.ts pins the current answer.
+ * Writing stays on workspace.settings.write, which no Member holds either.
  */
-tenantRouter.get("/settings/general", requireRole("OWNER", "ADMIN"), controller.getGeneralSettings);
+tenantRouter.get(
+  "/settings/general",
+  requireCapability("workspace.settings.read"),
+  controller.getGeneralSettings
+);
 tenantRouter.patch(
   "/settings/general",
   requireCapability("workspace.settings.write"),

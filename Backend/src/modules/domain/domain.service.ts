@@ -5,6 +5,7 @@ import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
+import { cursorArgs, toPage } from "../../common/utils/pagination.js";
 
 interface DnsResult<T> {
   values: T;
@@ -41,8 +42,14 @@ async function mx(name: string): Promise<DnsResult<Awaited<ReturnType<typeof res
 }
 
 export class DomainService {
-  list(tenantId: string) {
-    return prisma.mailDomain.findMany({ where: { tenantId }, orderBy: { createdAt: "desc" } });
+  async list(tenantId: string, options: { limit?: number; cursor?: string } = {}) {
+    const limit = options.limit ?? 50;
+    const rows = await prisma.mailDomain.findMany({
+      where: { tenantId },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      ...cursorArgs(limit, options.cursor),
+    });
+    return toPage(rows, limit);
   }
   async add(domainName: string, tenantId: string, userId: string) {
     const existing = await prisma.mailDomain.findFirst({ where: { tenantId, domainName } });

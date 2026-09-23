@@ -1,5 +1,7 @@
 import type { AuditActorType, Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
+import { AppError } from "../../common/errors/AppError.js";
+import { ErrorCodes } from "../../common/errors/errorCodes.js";
 
 export interface RecordAuditEventInput {
   tenantId: string;
@@ -41,7 +43,8 @@ export interface AuditExportFilters {
 }
 
 export interface AuditEventFilters extends AuditExportFilters {
-  page: number;
+  /** Opaque keyset cursor. Absent means the first page. */
+  cursor?: string;
   limit: number;
   actorUserId?: string;
   targetType?: string;
@@ -166,6 +169,38 @@ export function redactMetadata(value: unknown): unknown {
   return value;
 }
 
+/**
+ * The audit cursor carries both ordering columns, because `createdAt` alone is
+ * not unique — several events share a millisecond under load, and a cursor on
+ * a non-unique key drops or repeats exactly those.
+ *
+ * Opaque to the client: a caller that parses it starts depending on the sort
+ * key, and the sort key is ours.
+ */
+function encodeAuditCursor(createdAt: Date, id: string): string {
+  return Buffer.from(`${createdAt.toISOString()}|${id}`, "utf8").toString("base64url");
+}
+
+function decodeAuditCursor(cursor?: string): { createdAt: Date; id: string } | null {
+  if (!cursor) return null;
+  let raw = "";
+  try {
+    raw = Buffer.from(cursor, "base64url").toString("utf8");
+  } catch {
+    raw = "";
+  }
+  const [iso, id] = raw.split("|");
+  const createdAt = iso ? new Date(iso) : new Date(Number.NaN);
+  if (!id || Number.isNaN(createdAt.getTime())) {
+    // A wrong cursor is the caller's error. Falling back to the first page
+    // would loop them over it forever while they believed they were advancing.
+    throw new AppError("That audit cursor is not valid", 400, ErrorCodes.VALIDATION_ERROR, {
+      parameter: "cursor",
+    });
+  }
+  return { createdAt, id };
+}
+
 export class AuditService {
   async record(
     input: RecordAuditEventInput,
@@ -196,18 +231,44 @@ export class AuditService {
   ) {
     const where = auditWhere(tenantId, filters, readerRole);
 
-    const [events, total] = await prisma.$transaction([
+    // Keyset, for the same reason exportRows below uses it: this table is
+    // append-only and written to constantly, so `skip` shifts every later page
+    // by however many rows arrived in between — page two silently repeats or
+    // misses events. On an evidence log that is the one failure that must not
+    // happen quietly. API §4 asks for cursors anyway.
+    //
+    // `total` stays: it costs one count and it is what the screen displays.
+    // What keyset gives up is jumping to an arbitrary page, which this screen
+    // never offered — it walks forward and back.
+    const keyset = decodeAuditCursor(filters.cursor);
+    const [rows, total] = await prisma.$transaction([
       prisma.auditEvent.findMany({
-        where,
+        where: keyset
+          ? {
+              AND: [
+                where,
+                {
+                  OR: [
+                    { createdAt: { lt: keyset.createdAt } },
+                    { createdAt: keyset.createdAt, id: { lt: keyset.id } },
+                  ],
+                },
+              ],
+            }
+          : where,
         include: {
           actor: { select: { id: true, email: true, displayName: true } },
         },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-        skip: (filters.page - 1) * filters.limit,
-        take: filters.limit,
+        // One more than asked for, purely to answer "is there another page?"
+        take: filters.limit + 1,
       }),
       prisma.auditEvent.count({ where }),
     ]);
+
+    const hasMore = rows.length > filters.limit;
+    const events = hasMore ? rows.slice(0, filters.limit) : rows;
+    const last = events[events.length - 1];
 
     return {
       events: events.map((event) => ({
@@ -215,10 +276,9 @@ export class AuditService {
         metadata: redactMetadata(event.metadata),
       })),
       pagination: {
-        page: filters.page,
         limit: filters.limit,
         total,
-        totalPages: Math.ceil(total / filters.limit),
+        nextCursor: hasMore && last ? encodeAuditCursor(last.createdAt, last.id) : null,
       },
     };
   }

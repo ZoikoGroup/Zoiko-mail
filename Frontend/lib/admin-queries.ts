@@ -81,9 +81,45 @@ interface ApiMembership {
   };
 }
 
+/**
+ * Walk a cursor-paginated list to the end.
+ *
+ * The server now bounds every list (API §4) — three of these used to be
+ * unbounded `findMany` calls that grew with the customer until a screen timed
+ * out. Bounding the query is the part that matters; these admin screens are
+ * sized in hundreds, not millions, and a pager on each of them would be UI
+ * nobody asked for.
+ *
+ * So the wire is paged and the screen is not. The cap is the honest part: it
+ * stops a bug on either side from turning into an endless fetch loop, and when
+ * it trips the screen shows what it has rather than nothing.
+ */
+const MAX_PAGES = 40;
+
+async function fetchAllPages<T>(
+  path: string,
+  key: string,
+  pageSize = 200
+): Promise<T[]> {
+  const out: T[] = [];
+  let cursor: string | null = null;
+
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const sep: string = path.includes("?") ? "&" : "?";
+    const suffix: string = cursor ? `&cursor=${encodeURIComponent(cursor)}` : "";
+    const query: string = `${path}${sep}limit=${pageSize}${suffix}`;
+    const res: Record<string, unknown> = await apiRequest<Record<string, unknown>>(query);
+    const rows = (res[key] as T[] | undefined) ?? [];
+    out.push(...rows);
+    cursor = (res.nextCursor as string | null) ?? null;
+    if (!cursor || rows.length === 0) break;
+  }
+  return out;
+}
+
 export async function fetchMembers(): Promise<MemberDto[]> {
-  const res = await apiRequest<{ members: ApiMembership[] }>("/membership/members");
-  return (res.members ?? []).map((m) => ({
+  const members = await fetchAllPages<ApiMembership>("/membership/members", "members");
+  return members.map((m) => ({
     id: m.id,
     role: m.role,
     status: m.status,
@@ -111,8 +147,10 @@ export async function fetchMembers(): Promise<MemberDto[]> {
  * membership in INVITED status, so there is no second endpoint to call.
  */
 export async function fetchInvitations(): Promise<InvitationDto[]> {
-  const res = await apiRequest<{ members: ApiMembership[] }>("/membership/members");
-  return (res.members ?? [])
+  // Same paged list as fetchMembers. Reading it unpaged would quietly show
+  // only the invitations that happened to land in the first page.
+  const members = await fetchAllPages<ApiMembership>("/membership/members", "members");
+  return members
     .filter((m) => m.status === "INVITED")
     .map((m) => ({
       id: m.id,
@@ -302,8 +340,8 @@ interface ApiDomain {
 }
 
 export async function fetchDomains(): Promise<DomainDto[]> {
-  const res = await apiRequest<{ domains: ApiDomain[] }>("/domains");
-  return (res.domains ?? []).map((d) => ({
+  const domains = await fetchAllPages<ApiDomain>("/domains", "domains");
+  return domains.map((d) => ({
     id: d.id,
     domainName: d.domainName,
     type: d.type,
@@ -387,7 +425,8 @@ function toAuditEvent(e: ApiAuditEvent): AuditEventDto {
  * the matching rows were older than that.
  */
 export interface AuditQuery {
-  page?: number;
+  /** Opaque keyset cursor. Absent means the newest page. */
+  cursor?: string;
   limit?: number;
   /** Event-type prefixes, OR-ed. A category is a set of them, not one type. */
   eventTypePrefix?: string[];
@@ -400,12 +439,18 @@ export interface AuditQuery {
 
 export interface AuditPage {
   events: AuditEventDto[];
-  pagination: { page: number; limit: number; total: number; totalPages: number };
+  /**
+   * `total` survives the move to keyset because it is what the screen reports
+   * and it costs one count. `nextCursor` replaces page arithmetic: the audit
+   * table is appended to while you read it, so an offset drifts and page two
+   * can repeat or miss an event — on an evidence log, quietly.
+   */
+  pagination: { limit: number; total: number; nextCursor: string | null };
 }
 
 function auditSearchParams(query: AuditQuery): URLSearchParams {
   const params = new URLSearchParams();
-  if (query.page) params.set("page", String(query.page));
+  if (query.cursor) params.set("cursor", query.cursor);
   if (query.limit) params.set("limit", String(query.limit));
   // Repeated rather than joined: the server reads them as a list, and a comma
   // would become part of one prefix.
@@ -419,7 +464,7 @@ function auditSearchParams(query: AuditQuery): URLSearchParams {
 }
 
 export async function fetchAuditEvents(query: AuditQuery = {}): Promise<AuditPage> {
-  const params = auditSearchParams({ limit: 25, page: 1, ...query });
+  const params = auditSearchParams({ limit: 25, ...query });
   const res = await apiRequest<{
     events: ApiAuditEvent[];
     pagination?: AuditPage["pagination"];
@@ -431,10 +476,9 @@ export async function fetchAuditEvents(query: AuditQuery = {}): Promise<AuditPag
     // A server that sends no pagination block still gets a truthful one rather
     // than a fabricated total: what came back is all that is known to exist.
     pagination: res.pagination ?? {
-      page: query.page ?? 1,
       limit: query.limit ?? 25,
       total: events.length,
-      totalPages: 1,
+      nextCursor: null,
     },
   };
 }
@@ -446,7 +490,7 @@ export async function fetchAuditEvents(query: AuditQuery = {}): Promise<AuditPag
  * the defect it exists to fix.
  */
 export async function exportAuditEvents(query: AuditQuery = {}): Promise<void> {
-  const params = auditSearchParams({ ...query, page: undefined, limit: undefined });
+  const params = auditSearchParams({ ...query, cursor: undefined, limit: undefined });
   const suffix = params.toString();
   await apiDownload(
     `/audit/events/export${suffix ? `?${suffix}` : ""}`,
@@ -670,7 +714,7 @@ async function composeDashboard(windowHours: number): Promise<DashboardDto> {
   // The dashboard wants the rows, not the page metadata.
   const events = settled<AuditPage>("audit", audit, {
     events: [],
-    pagination: { page: 1, limit: 6, total: 0, totalPages: 0 },
+    pagination: { limit: 6, total: 0, nextCursor: null },
   }).events;
   const deliveryFailures = asFailureSummary(
     settled<DeliveryFailureSummaryDto | null>("deliveryFailures", failures, null)
@@ -742,10 +786,10 @@ function conditionValue(value: unknown): string {
  * than an empty screen.
  */
 export async function fetchPolicies(): Promise<PolicyDto[]> {
-  const res = await apiRequest<{ policies: ApiPolicy[] }>("/policies");
+  const policies = await fetchAllPages<ApiPolicy>("/policies", "policies");
 
   const byType: Record<string, ApiPolicy[]> = {};
-  for (const policy of res.policies ?? []) {
+  for (const policy of policies) {
     byType[policy.type] = [...(byType[policy.type] ?? []), policy];
   }
 
@@ -1231,6 +1275,86 @@ export async function markNotificationRead(notificationId: string): Promise<void
  */
 export async function replayDeadLetter(eventId: string): Promise<void> {
   await apiRequest(`/connectors/dead-letter/${eventId}/replay`, { method: "POST" });
+}
+
+/* ── data lifecycle — RBAC §2, PRD §16 "Export/deletion" ───────────────── */
+
+export interface LifecycleRequestDto {
+  id: string;
+  type: "EXPORT" | "DELETION";
+  status: string;
+  reason: string | null;
+  createdAt: string;
+  hardDeleteDeadline: string | null;
+}
+
+interface ApiLifecycleRequest {
+  id: string;
+  type: "EXPORT" | "DELETION";
+  status: string;
+  reason: string | null;
+  createdAt: string;
+  hardDeleteDeadline?: string | null;
+}
+
+/**
+ * The workspace's export and deletion requests.
+ *
+ * An Admin could not reach any of this until the lifecycle router stopped
+ * being `requireRole("OWNER")` for its whole surface — which is why no admin
+ * screen existed to call it. RBAC §2 records both as Admin "By policy" and
+ * PRD §16 lists them among the console's requirements.
+ */
+export async function fetchLifecycleRequests(): Promise<LifecycleRequestDto[]> {
+  const res = await apiRequest<{ requests: ApiLifecycleRequest[] }>("/lifecycle/");
+  return (res.requests ?? []).map((r) => ({
+    id: r.id,
+    type: r.type,
+    status: r.status,
+    reason: r.reason ?? null,
+    createdAt: r.createdAt,
+    hardDeleteDeadline: r.hardDeleteDeadline ?? null,
+  }));
+}
+
+/**
+ * Ask for a tenant data export. Step-up, because §5 counts any export as
+ * high-risk — the token arrives from `useStepUp` after the server refuses.
+ *
+ * Two refusals mean different things here and both reach the screen intact.
+ * A 403 naming NO_ACTIVE_POLICY is not "you may not"; it is "this workspace
+ * has not enabled exports for administrators", which an Owner can change and
+ * which an Owner never sees, because §2 gives them the unconditional column.
+ */
+export async function requestDataExport(
+  reason: string,
+  stepUpToken?: string
+): Promise<void> {
+  await apiRequest("/lifecycle/exports", {
+    method: "POST",
+    body: { reason },
+    stepUpToken,
+  });
+}
+
+/** Raise a deletion request. The Owner still decides it; this only starts it. */
+export async function requestDataDeletion(
+  input: { targetType: "TENANT" | "USER"; targetId?: string; reason: string },
+  stepUpToken?: string
+): Promise<void> {
+  await apiRequest("/lifecycle/deletions", {
+    method: "POST",
+    body: input,
+    stepUpToken,
+  });
+}
+
+export async function downloadDataExport(requestId: string, stepUpToken?: string): Promise<void> {
+  return apiDownload(
+    `/lifecycle/exports/${encodeURIComponent(requestId)}/download`,
+    "zoiko-mail-export.json",
+    stepUpToken
+  );
 }
 
 /* ── mailbox delegation — RBAC §2, §3, §9.1 ────────────────────────────── */

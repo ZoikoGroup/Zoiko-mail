@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { authenticate, idempotency, requireCapability, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./membership.controller.js";
-import { acceptInvitationSchema, addMemberSchema, createInvitationSchema, membershipIdParamsSchema, previewInvitationSchema, updateMemberSchema } from "./membership.schema.js";
+import { acceptInvitationSchema, addMemberSchema, createInvitationSchema, listQuerySchema, membershipIdParamsSchema, previewInvitationSchema, updateMemberSchema } from "./membership.schema.js";
 
 const membershipRouter = Router();
 
@@ -17,7 +17,7 @@ membershipRouter.post(
 // is what makes a role check feel like a permission model without being one.
 membershipRouter.use(authenticate, tenantContext, requireCapability("people.read"), idempotency);
 
-membershipRouter.get("/members", controller.list);
+membershipRouter.get("/members", validate(listQuerySchema, "query"), controller.list);
 
 membershipRouter.post(
   "/members",

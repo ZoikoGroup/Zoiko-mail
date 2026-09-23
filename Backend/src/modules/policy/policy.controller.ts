@@ -10,7 +10,8 @@ function context(req: Request) {
 }
 
 export const list = asyncHandler(async (req: Request, res: Response) => {
-  sendSuccess(res, 200, { policies: await policyService.list(req.tenantContext!.tenantId, req.query as never) }, req.requestId);
+  const page = await policyService.list(req.tenantContext!.tenantId, req.query as never);
+  sendSuccess(res, 200, { policies: page.items, nextCursor: page.nextCursor }, req.requestId);
 });
 export const get = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await policyService.get(req.tenantContext!.tenantId, String(req.params.policyId)), req.requestId);

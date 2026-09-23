@@ -16,8 +16,15 @@ function requestContext(req: Request) {
 }
 
 export const list = asyncHandler(async (req: Request, res: Response) => {
-  const members = await membershipService.list(requestContext(req));
-  sendSuccess(res, 200, { members }, req.requestId);
+  const q = req.query as { limit?: number; cursor?: string };
+  const page = await membershipService.list(requestContext(req), {
+    limit: q.limit,
+    cursor: q.cursor,
+  });
+  // `members` keeps its name and stays an array — every existing caller reads
+  // it that way, and a page object under the same key would be a silent
+  // breaking change that renders as an empty table rather than an error.
+  sendSuccess(res, 200, { members: page.items, nextCursor: page.nextCursor }, req.requestId);
 });
 
 export const add = asyncHandler(async (req: Request, res: Response) => {

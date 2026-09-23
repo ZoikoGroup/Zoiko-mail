@@ -19,14 +19,19 @@ describe("Audit log API", () => {
 
     const response = await request(app)
       .get("/api/v1/audit/events")
-      .query({ eventType: "USER_PROFILE_UPDATED", page: 1, limit: 1 })
+      .query({ eventType: "USER_PROFILE_UPDATED", limit: 1 })
       .set(authHeader(owner.accessToken))
       .expect(200);
 
     expect(response.body.data.events).toHaveLength(1);
     expect(response.body.data.events[0].tenantId).toBe(owner.tenantId);
     expect(response.body.data.events[0].actor.email).toBe(owner.email);
-    expect(response.body.data.pagination).toMatchObject({ page: 1, limit: 1, total: 1 });
+    // Keyset now (API §4): `total` still says how many events match, and
+    // `nextCursor` replaces the page number. It is null here because one
+    // event matched and one was asked for, so there is no further page.
+    expect(response.body.data.pagination).toMatchObject({ limit: 1, total: 1 });
+    expect(response.body.data.pagination.nextCursor).toBeNull();
+    expect(response.body.data.pagination).not.toHaveProperty("page");
     expect(response.body.data.events.some((event: { tenantId: string }) => event.tenantId === other.tenantId)).toBe(false);
   });
 
