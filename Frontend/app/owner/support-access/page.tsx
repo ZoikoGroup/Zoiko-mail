@@ -538,8 +538,8 @@ export default function SupportAccessPage() {
                 type="number"
                 value={formData.expiresInMinutes}
                 onChange={(e) => setFormData({ ...formData, expiresInMinutes: parseInt(e.target.value) || 60 })}
-                min={15}
-                max={10080}
+                min={5}
+                max={240}
                 className="h-9 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
               />
             </div>

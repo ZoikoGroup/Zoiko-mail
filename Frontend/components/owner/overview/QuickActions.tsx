@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { UserPlus, Mail, Globe, Link2, FileText } from "lucide-react";
+import { UserPlus, Mail, Globe, Link2, FileText, ShieldCheck } from "lucide-react";
 
 const actions = [
   { label: "Invite User", href: "/owner/users", icon: UserPlus, color: "bg-[var(--accent-soft)] text-[var(--accent-ink)]" },
@@ -9,6 +9,7 @@ const actions = [
   { label: "Add Domain", href: "/owner/domains", icon: Globe, color: "bg-[var(--ai-soft)] text-[var(--ai)]" },
   { label: "Connect Account", href: "/owner/connected-accounts", icon: Link2, color: "bg-[var(--warn-soft)] text-[var(--warn)]" },
   { label: "View Audit Logs", href: "/owner/audit-logs", icon: FileText, color: "bg-[var(--s3)] text-[var(--ink3)]" },
+  { label: "Support Access", href: "/owner/support-access", icon: ShieldCheck, color: "bg-[var(--warn-soft)] text-[var(--warn)]" },
 ];
 
 export function QuickActions() {
@@ -17,7 +18,7 @@ export function QuickActions() {
       <h2 className="mb-3 font-mono-num text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
         Quick Actions
       </h2>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
         {actions.map((a) => {
           const Icon = a.icon;
           return (

@@ -568,6 +568,7 @@ interface ApiDashboard {
   counts: DashboardDto["counts"];
   mfa: DashboardDto["mfa"];
   deliveryFailures: DeliveryFailureSummaryDto | null;
+  supportGrants: number;
   recentAudit: ApiAuditEvent[];
   providerSync: ApiConnectedAccount[];
   degraded: string[];
@@ -617,6 +618,7 @@ export async function fetchDashboard(windowHours = 24): Promise<DashboardDto> {
         requiredTotal: res.mfa.requiredTotal ?? 0,
       },
       deliveryFailures: asFailureSummary(res.deliveryFailures),
+      supportGrants: res.supportGrants ?? 0,
       recentAudit: (res.recentAudit ?? []).map(toAuditEvent),
       providerSync: (res.providerSync ?? []).map(toConnector),
       degraded: res.degraded ?? [],
@@ -638,7 +640,7 @@ export async function fetchDashboard(windowHours = 24): Promise<DashboardDto> {
  * failing the whole screen.
  */
 async function composeDashboard(windowHours: number): Promise<DashboardDto> {
-  const [tenant, members, mailboxes, domains, connectors, audit, failures] =
+  const [tenant, members, mailboxes, domains, connectors, audit, failures, supportGrants] =
     await Promise.allSettled([
       fetchTenant(),
       fetchMembers(),
@@ -647,6 +649,7 @@ async function composeDashboard(windowHours: number): Promise<DashboardDto> {
       fetchConnectors(),
       fetchAuditEvents({ limit: 6 }),
       fetchDeliveryFailures(windowHours),
+      fetchSupportGrantsCount(),
     ]);
 
   // The tenant is the one section with nothing sensible to render without.
@@ -676,6 +679,7 @@ async function composeDashboard(windowHours: number): Promise<DashboardDto> {
     settled<DeliveryFailureSummaryDto | null>("deliveryFailures", failures, null)
   );
   const people = members.value;
+  const supportGrantsCount = settled<number>("supportGrants", supportGrants, 0);
 
   return {
     tenant: {
@@ -709,6 +713,7 @@ async function composeDashboard(windowHours: number): Promise<DashboardDto> {
       requiredTotal: 0,
     },
     deliveryFailures,
+    supportGrants: supportGrantsCount,
     recentAudit: events.slice(0, 6),
     providerSync: conns.slice(0, 6),
     degraded,
@@ -951,6 +956,8 @@ interface ApiGrant {
   revokedAt: string | null;
   createdAt: string;
   approvedByUserId: string | null;
+  supportMembership?: { user: { id: string; email: string; displayName: string } };
+  approvedBy?: { id: string; email: string; displayName: string } | null;
 }
 
 /**
@@ -978,12 +985,36 @@ export async function fetchActiveSupportGrant(): Promise<SupportGrantDto | null>
   return {
     id: active.id,
     ticket: active.reason ?? "Support access",
-    holderName: "Zoiko support",
+    holderName: active.supportMembership?.user?.displayName ?? "Zoiko support",
     scopeLabel: active.scopes?.join(", ") || "scoped access",
-    approvedByName: active.approvedByUserId ? "an Owner" : "—",
+    approvedByName: active.approvedBy?.displayName ?? (active.approvedByUserId ? "an Owner" : "—"),
     openedAtLabel: ago(active.createdAt),
     expiresInLabel: hours > 0 ? `${hours}h ${minsLeft % 60}m left` : `${minsLeft}m left`,
   };
+}
+
+/**
+ * Revoke the given support grant — the "End session" action on the shell
+ * banner. Ends at the API the same way an Owner's Revoke does.
+ */
+export async function revokeSupportGrant(grantId: string): Promise<void> {
+  await apiRequest(`/support/access-grants/${encodeURIComponent(grantId)}`, {
+    method: "DELETE",
+  });
+}
+
+/**
+ * Count of active (unrevoked, unexpired) support grants for this workspace.
+ */
+export async function fetchSupportGrantsCount(): Promise<number> {
+  try {
+    const res = await apiRequest<{ grants: ApiGrant[] }>("/support/access-grants");
+    const grants = res.grants ?? [];
+    const now = Date.now();
+    return grants.filter((g) => !g.revokedAt && new Date(g.expiresAt).getTime() > now).length;
+  } catch {
+    return 0;
+  }
 }
 
 /* ── groups ────────────────────────────────────────────────────────────── */
