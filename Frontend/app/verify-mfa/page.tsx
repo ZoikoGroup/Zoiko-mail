@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { MfaQrCode } from "@/components/auth/MfaQrCode";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import {
@@ -213,14 +214,22 @@ export default function VerifyMfaPage() {
               {reason
                 ? `Required for ${reason.toLowerCase()} accounts.`
                 : "Required for this account."}{" "}
-              Add the key below to an authenticator app, then enter the code it
-              shows.
+              Scan this code with an authenticator app, then enter the six
+              digits it shows.
             </p>
 
             {offer ? (
               <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900">
-                <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Setup key
+                <MfaQrCode uri={offer.uri} />
+
+                {/*
+                  The key stays below it. A QR is the fast path, not the only
+                  one — a desktop authenticator, a password manager, or a
+                  phone whose camera will not focus all need the characters,
+                  and finding that out after the code is gone is a dead end.
+                */}
+                <p className="mt-4 text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Or enter this key by hand
                 </p>
                 <p className="mt-1 break-all font-mono text-sm text-slate-900 dark:text-slate-100">
                   {offer.secret}
@@ -229,7 +238,7 @@ export default function VerifyMfaPage() {
                   className="mt-3 inline-block text-xs text-slate-600 underline dark:text-slate-300"
                   href={offer.uri}
                 >
-                  Open in an authenticator app
+                  Open in an authenticator app on this device
                 </a>
               </div>
             ) : (
