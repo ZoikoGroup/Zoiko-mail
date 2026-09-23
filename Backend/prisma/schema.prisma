@@ -1245,6 +1245,15 @@ enum PolicyType {
   RETENTION
   DELETION
   ABUSE
+  /// Whether an Admin may grant one person access to another's mailbox.
+  ///
+  /// RBAC §2 gives "Delegate mailbox access" to Owner outright and to Admin
+  /// only "If policy" (§9.1, "where tenant policy permits"). A policy type is
+  /// how that condition is expressed, and it lands deny-by-default: evaluate()
+  /// returns DENY with NO_ACTIVE_POLICY when a workspace has never set one, so
+  /// an Admin cannot delegate until an Owner decides they may. The Owner's own
+  /// path does not consult this — their column is an unconditional Yes.
+  DELEGATION
 }
 
 enum PolicyStatus {

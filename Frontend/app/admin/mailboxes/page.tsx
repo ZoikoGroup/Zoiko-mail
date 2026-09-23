@@ -15,6 +15,7 @@ import { useCan } from "@/lib/admin-capabilities";
 import { StepUpDialog, useStepUp } from "@/components/admin/StepUpDialog";
 import {
   CreateMailboxDialog,
+  DelegateMailboxDialog,
   DeleteMailboxDialog,
   SendingDialog,
 } from "@/components/admin/MailboxDialogs";
@@ -43,9 +44,10 @@ export default function AdminMailboxesPage() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   /** The mailbox whose sending or deletion is being decided, and which. */
-  const [acting, setActing] = useState<{ id: string; kind: "sending" | "delete" } | null>(
-    null
-  );
+  const [acting, setActing] = useState<{
+    id: string;
+    kind: "sending" | "delete" | "delegate";
+  } | null>(null);
   const actingOn = mailboxes?.find((m) => m.id === acting?.id) ?? null;
   const suspended = mailboxes?.filter((m) => m.status === "SUSPENDED") ?? [];
 
@@ -64,6 +66,9 @@ export default function AdminMailboxesPage() {
       )}
       {actingOn && acting?.kind === "delete" && (
         <DeleteMailboxDialog mailbox={actingOn} onClose={() => setActing(null)} />
+      )}
+      {actingOn && acting?.kind === "delegate" && (
+        <DelegateMailboxDialog mailbox={actingOn} onClose={() => setActing(null)} />
       )}
 
       <PageHeader
@@ -204,6 +209,28 @@ export default function AdminMailboxesPage() {
                               onClick={() => setActing({ id: mailbox.id, kind: "delete" })}
                             >
                               Delete
+                            </button>
+                          </>
+                        )}
+                        {/*
+                          Delegation is a different permission from managing a
+                          mailbox — §9.1 makes it conditional on tenant policy
+                          while managing is not — so it is gated on its own
+                          capability rather than folded into canManage.
+
+                          Offered only for an individual mailbox: a shared one
+                          already has assignees, and the server refuses a
+                          delegation against it.
+                        */}
+                        {can("mailbox.delegate") && mailbox.type === "INDIVIDUAL" && (
+                          <>
+                            <button
+                              type="button"
+                              className="zoiko-btn sm"
+                              onClick={() => setActing({ id: mailbox.id, kind: "delegate" })}
+                              title="Give another member access to this mailbox"
+                            >
+                              Delegate
                             </button>
                           </>
                         )}

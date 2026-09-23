@@ -1,6 +1,15 @@
 import { z } from "zod";
 
-export const policyTypeSchema = z.enum(["AI", "SENDING", "RETENTION", "DELETION", "ABUSE"]);
+// Mirrors Prisma's PolicyType. DELEGATION is what RBAC §2's "Admin: If
+// policy" for mailbox delegation evaluates against — see §9.1.
+export const policyTypeSchema = z.enum([
+  "AI",
+  "SENDING",
+  "RETENTION",
+  "DELETION",
+  "ABUSE",
+  "DELEGATION",
+]);
 const effectSchema = z.enum(["ALLOW", "DENY"]);
 const scalarSchema = z.union([z.string(), z.number(), z.boolean()]);
 

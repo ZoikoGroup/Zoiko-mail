@@ -4,6 +4,7 @@ import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
 import { billingService } from "../billing/billing.service.js";
+import { can } from "../../common/capabilities/resolver.js";
 import { env } from "../../config/env.js";
 import { generateOpaqueToken, hashToken } from "../../common/utils/tokenHash.js";
 import { hashPassword } from "../../common/utils/password.js";
@@ -59,13 +60,58 @@ const memberSelect = {
   },
 } satisfies Prisma.TenantMembershipSelect;
 
-function assertAdminBoundary(actorRole: MembershipRole, role: MembershipRole): void {
-  if (actorRole === "ADMIN" && role === "OWNER") {
-    throw new AppError(
-      "Administrators cannot manage owner memberships",
-      403,
-      ErrorCodes.FORBIDDEN
-    );
+/**
+ * Which capability it takes to act on a membership of a given role.
+ *
+ * The matrix already carries this: `people.owner.manage` sits in the Owner
+ * row and nowhere else, `people.admin.manage` and `people.member.manage` sit
+ * in both. Reading it here is what makes the admin/owner boundary a fact about
+ * the matrix rather than a second opinion kept beside it.
+ *
+ * This used to be `actorRole === "ADMIN" && role === "OWNER"` — correct, and
+ * tested, but hardcoded: the four capabilities written to express exactly this
+ * were never read by anything, so the matrix described enforcement it did not
+ * perform, and a fifth role would have needed this line found and edited.
+ */
+const MANAGE_CAPABILITY: Record<MembershipRole, string> = {
+  OWNER: "people.owner.manage",
+  ADMIN: "people.admin.manage",
+  MEMBER: "people.member.manage",
+  // A Support seat is a workspace membership like any other to the people who
+  // administer it; it carries no elevated claim on being managed.
+  SUPPORT: "people.member.manage",
+};
+
+/** Which capability it takes to bring somebody in at a given role. */
+const INVITE_CAPABILITY: Record<MembershipRole, string> = {
+  OWNER: "people.invite.owner",
+  ADMIN: "people.invite.admin",
+  MEMBER: "people.invite.member",
+  SUPPORT: "people.invite.member",
+};
+
+function refuse(actorRole: MembershipRole, role: MembershipRole, capability: string): never {
+  throw new AppError(
+    `A ${actorRole.toLowerCase()} cannot act on ${role.toLowerCase()} memberships`,
+    403,
+    ErrorCodes.FORBIDDEN,
+    { required: capability, targetRole: role }
+  );
+}
+
+/** Acting on somebody who is already here. */
+function assertCanManageRole(actorRole: MembershipRole, role: MembershipRole): void {
+  const capability = MANAGE_CAPABILITY[role];
+  if (!can(capability, { role: actorRole, membershipActive: true })) {
+    refuse(actorRole, role, capability);
+  }
+}
+
+/** Bringing somebody in, or moving them to a new role. */
+function assertCanInviteRole(actorRole: MembershipRole, role: MembershipRole): void {
+  const capability = INVITE_CAPABILITY[role];
+  if (!can(capability, { role: actorRole, membershipActive: true })) {
+    refuse(actorRole, role, capability);
   }
 }
 
@@ -136,7 +182,7 @@ export class MembershipService {
   }
 
   async add(input: AddMemberInput, context: ActorContext) {
-    assertAdminBoundary(context.role, input.role);
+    assertCanInviteRole(context.role, input.role);
     // Enforce the tenant-level user limit before activating a new member.
     await billingService.assertUserWithinLimit(context.tenantId, 1);
     return prisma.$transaction(async (tx) => {
@@ -174,7 +220,7 @@ export class MembershipService {
   }
 
   async createInvitation(input: CreateInvitationInput, context: ActorContext) {
-    assertAdminBoundary(context.role, input.role);
+    assertCanInviteRole(context.role, input.role);
     const invitationToken = generateOpaqueToken();
     const inviteToken = hashToken(invitationToken);
     const inviteExpiresAt = new Date(
@@ -306,7 +352,7 @@ export class MembershipService {
     input: PreviewInvitationInput,
     context: ActorContext
   ): Promise<InvitationLetter> {
-    assertAdminBoundary(context.role, input.role);
+    assertCanInviteRole(context.role, input.role);
     return this.buildLetter(input, context);
   }
 
@@ -416,7 +462,7 @@ export class MembershipService {
       if (!invitation) {
         throw new AppError("Pending invitation not found", 404, ErrorCodes.NOT_FOUND);
       }
-      assertAdminBoundary(context.role, invitation.role);
+      assertCanManageRole(context.role, invitation.role);
       await tx.tenantMembership.update({
         where: { id: invitation.id },
         data: { status: "REMOVED", inviteToken: null, inviteExpiresAt: null },
@@ -435,8 +481,8 @@ export class MembershipService {
       });
       if (!target) throw new AppError("Membership not found", 404, ErrorCodes.NOT_FOUND);
 
-      assertAdminBoundary(context.role, target.role);
-      if (input.role) assertAdminBoundary(context.role, input.role);
+      assertCanManageRole(context.role, target.role);
+      if (input.role) assertCanInviteRole(context.role, input.role);
       const nextRole = input.role ?? target.role;
       const nextStatus = input.status ?? target.status;
       // Promoting a user to SUPPORT in this workspace is only allowed if they
@@ -507,7 +553,7 @@ export class MembershipService {
       // not act on an Owner. Reset is if anything the most attractive
       // action to abuse — it is the one that ends with somebody enrolling a
       // new factor of their choosing.
-      assertAdminBoundary(context.role, target.role);
+      assertCanManageRole(context.role, target.role);
 
       // Resetting your own is not an administrative act; it is the
       // self-service path, and that one asks for a code you can only supply
@@ -561,7 +607,7 @@ export class MembershipService {
       });
       if (!target) throw new AppError("Membership not found", 404, ErrorCodes.NOT_FOUND);
 
-      assertAdminBoundary(context.role, target.role);
+      assertCanManageRole(context.role, target.role);
       await protectLastOwner(tx, context.tenantId, target, "MEMBER", "REMOVED");
       await tx.refreshToken.deleteMany({
         where: { tenantId: context.tenantId, userId: target.userId },

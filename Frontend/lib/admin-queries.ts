@@ -1233,6 +1233,122 @@ export async function replayDeadLetter(eventId: string): Promise<void> {
   await apiRequest(`/connectors/dead-letter/${eventId}/replay`, { method: "POST" });
 }
 
+/* ── mailbox delegation — RBAC §2, §3, §9.1 ────────────────────────────── */
+
+export interface MailboxDelegateDto {
+  id: string;
+  membershipId: string;
+  email: string;
+  name: string;
+  canRead: boolean;
+  canSend: boolean;
+  canManage: boolean;
+}
+
+interface ApiMailboxDelegate {
+  id: string;
+  membershipId: string;
+  canRead: boolean;
+  canSend: boolean;
+  canManage: boolean;
+  membership?: { user?: { email: string; displayName: string | null } } | null;
+}
+
+function toDelegate(d: ApiMailboxDelegate): MailboxDelegateDto {
+  const user = d.membership?.user;
+  return {
+    id: d.id,
+    membershipId: d.membershipId,
+    email: user?.email ?? "—",
+    name: user ? personName(user) : "—",
+    canRead: d.canRead,
+    canSend: d.canSend,
+    canManage: d.canManage,
+  };
+}
+
+/** Who currently holds delegated access to one person's mailbox. */
+export async function fetchMailboxDelegates(
+  mailboxId: string
+): Promise<MailboxDelegateDto[]> {
+  const res = await apiRequest<{ delegates: ApiMailboxDelegate[] }>(
+    `/mail/admin/mailboxes/${encodeURIComponent(mailboxId)}/delegates`
+  );
+  return (res.delegates ?? []).map(toDelegate);
+}
+
+/**
+ * Give one member access to another's mailbox.
+ *
+ * Two different refusals are worth telling apart on the screen. A 403 naming
+ * NO_ACTIVE_POLICY is not "you may not" — it is "this workspace has not
+ * enabled delegation for administrators yet", which an Owner can fix, and
+ * which an Owner does not hit at all because §2 gives them the unconditional
+ * column. The server says which, and the dialog repeats it rather than
+ * flattening both into "Forbidden".
+ */
+export async function delegateMailbox(
+  mailboxId: string,
+  input: { membershipId: string; canRead?: boolean; canSend?: boolean; canManage?: boolean }
+): Promise<void> {
+  await apiRequest(`/mail/admin/mailboxes/${encodeURIComponent(mailboxId)}/delegates`, {
+    method: "POST",
+    body: input,
+  });
+}
+
+export async function revokeMailboxDelegate(
+  mailboxId: string,
+  membershipId: string
+): Promise<void> {
+  await apiRequest(
+    `/mail/admin/mailboxes/${encodeURIComponent(mailboxId)}/delegates/${encodeURIComponent(membershipId)}`,
+    { method: "DELETE" }
+  );
+}
+
+/**
+ * Force a fresh access token for one connected account — RBAC §2 "Rotate
+ * provider credentials", Step-up per §5.
+ *
+ * The route existed with nothing calling it: rotation was reachable only as a
+ * side effect of a sync that happened to find an expired token, so an operator
+ * who suspected a leaked credential had no way to act on the suspicion. This
+ * is the way to act on it.
+ *
+ * Rotation, not reconnection — it exchanges the stored refresh token rather
+ * than sending the member back through consent, so it fails with a 502 when
+ * the provider has forgotten the refresh token, and the screen says so.
+ */
+export async function rotateConnectorCredentials(
+  accountId: string,
+  stepUpToken?: string
+): Promise<{ id: string; provider: string; rotatedAt: string }> {
+  return apiRequest(`/connectors/admin/${encodeURIComponent(accountId)}/rotate`, {
+    method: "POST",
+    stepUpToken,
+  });
+}
+
+/**
+ * Disconnect somebody else's connected account — the tenant-scope half of
+ * RBAC §2 "Disconnect connected account" (Admin: "Tenant scope").
+ *
+ * `DELETE /connectors/:accountId` looks like it would do this and does not:
+ * it scopes by membershipId, so it only ever reaches your own account. The
+ * admin surface needs the route that can reach anyone's, which is why this
+ * is a separate call rather than the same one with a different argument.
+ *
+ * Refused with a 409 for a workspace-level connection, which belongs to the
+ * workspace rather than to a person and is disconnected from connector
+ * settings instead.
+ */
+export async function disconnectConnectorForTenant(accountId: string): Promise<void> {
+  await apiRequest(`/connectors/admin/${encodeURIComponent(accountId)}`, {
+    method: "DELETE",
+  });
+}
+
 /* ── domains — §6.11 ───────────────────────────────────────────────────── */
 
 /**

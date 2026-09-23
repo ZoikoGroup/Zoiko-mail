@@ -54,6 +54,11 @@ import {
   replayDeadLetter,
   resetMemberMfa,
   reviewSecurityAlert,
+  rotateConnectorCredentials,
+  disconnectConnectorForTenant,
+  fetchMailboxDelegates,
+  delegateMailbox,
+  revokeMailboxDelegate,
   savePolicyRules,
   sendInvitation,
   setMailboxAi,
@@ -586,6 +591,70 @@ export function useReplayDeadLetter() {
         qc.invalidateQueries({ queryKey: ["connectors"] }),
       ]);
     },
+  });
+}
+
+/* ── mailbox delegation ────────────────────────────────────────────────── */
+
+export function useMailboxDelegates(mailboxId: string | null) {
+  return useQuery({
+    queryKey: ["mailbox-delegates", mailboxId],
+    queryFn: () => fetchMailboxDelegates(mailboxId!),
+    enabled: Boolean(mailboxId),
+  });
+}
+
+export function useDelegateMailbox(mailboxId: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      membershipId: string;
+      canRead?: boolean;
+      canSend?: boolean;
+      canManage?: boolean;
+    }) => delegateMailbox(mailboxId!, input),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["mailbox-delegates", mailboxId] }),
+  });
+}
+
+export function useRevokeMailboxDelegate(mailboxId: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (membershipId: string) => revokeMailboxDelegate(mailboxId!, membershipId),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["mailbox-delegates", mailboxId] }),
+  });
+}
+
+/**
+ * Rotate one account's provider credentials. Step-up, so the caller passes the
+ * token through after `useStepUp` has collected it.
+ *
+ * The list is refetched because rotation moves the account's status — a
+ * REAUTH_REQUIRED row that rotates cleanly becomes ACTIVE, and that is the
+ * whole point of pressing it.
+ */
+export function useRotateConnector() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      accountId,
+      stepUpToken,
+    }: {
+      accountId: string;
+      stepUpToken?: string;
+    }) => rotateConnectorCredentials(accountId, stepUpToken),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["connectors"] }),
+  });
+}
+
+/** Disconnect another member's connected account — tenant scope, not own. */
+export function useDisconnectConnector() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (accountId: string) => disconnectConnectorForTenant(accountId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["connectors"] }),
   });
 }
 
