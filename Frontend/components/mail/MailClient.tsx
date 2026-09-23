@@ -650,7 +650,7 @@ function ReadingPane({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Toolbar */}
-      <div className="flex items-center gap-1.5 border-b border-[var(--border)] p-3">
+      <div className="flex items-center gap-1.5 border-b border-[var(--border)] p-3 overflow-x-auto min-w-0">
         <button onClick={onClose} className="zoiko-btn sm md:hidden">
           <ArrowLeft className="h-4 w-4" />
         </button>
@@ -663,12 +663,12 @@ function ReadingPane({
         </button>
         {canTriage && folder !== "ARCHIVE" && (
           <button onClick={() => { update.mutate({ messageId, folder: "ARCHIVE" }); onClose(); }} className="zoiko-btn sm">
-            <Archive className="h-4 w-4" /> <span className="hidden sm:inline">Archive</span>
+            <Archive className="h-4 w-4" /> <span className="hidden lg:inline">Archive</span>
           </button>
         )}
         {canTriage && folder !== "TRASH" && (
           <button onClick={() => { update.mutate({ messageId, folder: "TRASH" }); onClose(); }} className="zoiko-btn crit sm">
-            <Trash2 className="h-4 w-4" /> <span className="hidden sm:inline">Trash</span>
+            <Trash2 className="h-4 w-4" /> <span className="hidden lg:inline">Trash</span>
           </button>
         )}
         {folder === "TRASH" && (
@@ -678,14 +678,15 @@ function ReadingPane({
         )}
         {folder === "TRASH" && (
           <button onClick={() => setConfirmDelete(true)} disabled={permanentlyDelete.isPending} className="zoiko-btn crit sm" title="Delete forever">
-            <X className="h-4 w-4" /> <span className="hidden sm:inline">Delete forever</span>
+            <X className="h-4 w-4" /> <span className="hidden lg:inline">Delete forever</span>
           </button>
         )}
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 shrink-0">
           <DropdownMenu
             trigger={
               <span className="zoiko-btn sm">
-                <Tag className="h-3 w-3" /> <span className="hidden sm:inline">Labels</span>
+                <Tag className="h-3 w-3" /> 
+                {/* <span className="hidden lg:inline">Labels</span> */}
               </span>
             }
           >
@@ -734,14 +735,14 @@ function ReadingPane({
                 title="Send this draft now"
               >
                 <Send className="h-4 w-4" />
-                <span className="hidden sm:inline">Send</span>
+                <span className="hidden lg:inline">Send</span>
               </button>
               <div className="mx-1 h-5 w-px bg-[var(--border)]" />
             </>
           )}
 
           <button onClick={() => onCompose("reply", item)} className="zoiko-btn sm" title="Reply">
-            <Reply className="h-4 w-4" /> <span className="hidden sm:inline">Reply</span>
+            <Reply className="h-4 w-4" />
           </button>
           <button onClick={() => onCompose("replyAll", item)} className="zoiko-btn sm" title="Reply all">
             <ReplyAll className="h-4 w-4" />
@@ -765,7 +766,7 @@ function ReadingPane({
             title="Extract actions (commitments, deadlines, approvals)"
           >
             <Sparkles className="h-4 w-4" />
-            <span className="hidden sm:inline">
+            <span className="hidden lg:inline">
               {aiTriggered === "extract" ? "Sent to AI ✓" : "Extract"}
             </span>
           </button>
@@ -783,7 +784,7 @@ function ReadingPane({
             title="AI draft reply"
           >
             <BrainCircuit className="h-4 w-4" />
-            <span className="hidden sm:inline">
+            <span className="hidden lg:inline">
               {aiTriggered === "draft" ? "Drafting ✓" : "AI Draft"}
             </span>
           </button>
