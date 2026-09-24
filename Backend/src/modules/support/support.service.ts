@@ -1873,6 +1873,12 @@ export class SupportService {
     const { tenantId, mailboxId, actorUserId } = input;
     const limit = Math.min(Math.max(input.limit ?? 25, 1), 50);
 
+    // Reading inside a mailbox is exactly what the MAIL_CONTENT scope is
+    // approved for (RBAC §11.1). Without a live grant covering it the read
+    // refuses and the audit trail reports the denial — the same enforcement
+    // as resetMailboxSetting's MAILBOX_ADMIN.
+    await this.grantWithScope(tenantId, actorUserId, "MAIL_CONTENT", "support.mailbox.read");
+
     const mailbox = await prisma.mailbox.findFirst({
       where: { id: mailboxId, tenantId },
       select: {

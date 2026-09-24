@@ -16,7 +16,7 @@ import { prisma } from "../src/config/prisma.js";
 
 async function seedTenantWithAuditRow() {
   const tenant = await prisma.tenant.create({
-    data: { name: `Append Only ${Date.now()}`, planCode: "starter" },
+    data: { name: `Append Only ${Date.now()}`, planCode: "free" },
     select: { id: true },
   });
   const event = await prisma.auditEvent.create({

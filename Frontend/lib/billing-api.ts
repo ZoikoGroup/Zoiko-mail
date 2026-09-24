@@ -6,10 +6,12 @@ export interface Plan {
   id: string;
   code: string;
   name: string;
-  priceMonthly: number; // cents
+  tagline: string | null;
+  priceMonthly: number; // cents, per user / month
   userLimit: number;
   mailboxLimit: number;
   storageLimitGb: number;
+  features: string[];
 }
 
 export interface WorkspaceInfo {

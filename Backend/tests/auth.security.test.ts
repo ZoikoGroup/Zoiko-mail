@@ -49,7 +49,7 @@ describe("Auth security", () => {
       data: {
         name: "Other Tenant",
         status: "ACTIVE",
-        planCode: "starter",
+        planCode: "free",
       },
     });
 
@@ -235,7 +235,7 @@ describe("Auth flows", () => {
       data: {
         name: "Tenant Two",
         status: "ACTIVE",
-        planCode: "starter",
+        planCode: "free",
       },
     });
 
