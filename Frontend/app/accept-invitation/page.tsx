@@ -69,32 +69,54 @@ function AcceptInvitationInner() {
     if (!token || attempted.current === token) return;
     attempted.current = token;
 
-    // Somebody already signed in keeps the original path: their session is
-    // the proof, and the server still checks the invitation is theirs.
-    if (isLoggedIn()) {
-      setPhase("accepting");
-      acceptInvitation(token)
-        .then(async () => {
-          sessionStorage.removeItem("pendingInvitationToken");
-          // Sign out so they come back with the new membership on their token.
-          await logout();
-          window.location.href = "/login";
-        })
-        .catch((e: Error) => {
-          setErrorMsg(e.message || "Something went wrong");
-          setPhase("error");
-        });
-      return;
-    }
-
+    /**
+     * Look the invitation up first, always — before looking at any session.
+     *
+     * The obvious order is the wrong one. `isLoggedIn()` only reports that a
+     * token is *stored*, not that it still works, and the browser that opens
+     * an invitation link is very often the one the inviter used: it holds a
+     * stale or expired session belonging to somebody else entirely. Trusting
+     * it sends a brand-new invitee down the authenticated path, where the
+     * server answers 401 and the screen reads "Authentication required" — to
+     * a person who has never had an account to authenticate with.
+     *
+     * The lookup needs no session and cannot leak into one, so asking it
+     * first costs a request and removes the whole class of failure.
+     */
     lookupInvitation(token)
-      .then((found) => {
+      .then(async (found) => {
         setInvite(found);
-        setPhase(found.needsPassword ? "set-password" : "needs-signin");
-        if (!found.needsPassword) {
-          // So /login can finish the job once they are authenticated.
-          sessionStorage.setItem("pendingInvitationToken", token);
+
+        // No account behind this address yet: a password is the only way
+        // forward, and no session — stale, valid or otherwise — changes that.
+        if (found.needsPassword) {
+          setPhase("set-password");
+          return;
         }
+
+        // The address already has an account. A live session that belongs to
+        // that person can accept right now; anything else signs in first.
+        if (isLoggedIn()) {
+          setPhase("accepting");
+          try {
+            await acceptInvitation(token);
+            sessionStorage.removeItem("pendingInvitationToken");
+            // Sign out so they return with the new membership on their token.
+            await logout();
+            window.location.href = "/login";
+            return;
+          } catch {
+            // Expired, or belonging to someone else. Either way this is not
+            // an error to show — it is the sign-in the invitation needs, and
+            // the stored token is what was misleading us.
+            sessionStorage.setItem("pendingInvitationToken", token);
+            setPhase("needs-signin");
+            return;
+          }
+        }
+
+        sessionStorage.setItem("pendingInvitationToken", token);
+        setPhase("needs-signin");
       })
       .catch((e: Error) => {
         setErrorMsg(e.message || "Something went wrong");
