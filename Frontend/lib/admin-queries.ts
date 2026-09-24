@@ -231,11 +231,20 @@ export async function setMailboxAi(
  * after the member's own email, so the two cannot drift apart and an admin
  * cannot create `dana@acme.com` for somebody who is not Dana.
  */
-export async function createMailbox(membershipId: string): Promise<void> {
-  await apiRequest("/mail/admin/mailboxes", {
-    method: "POST",
-    body: { membershipId },
-  });
+/**
+ * Provision a member's mailbox on one of the workspace's own domains.
+ *
+ * `domainId` is what makes the address theirs rather than whatever they
+ * happened to register with. Without it the server falls back to the signup
+ * email — which is how a workspace with a verified domain ended up handing
+ * out mailboxes at gmail.com, on a domain it can never publish SPF for.
+ */
+export async function createMailbox(input: {
+  membershipId: string;
+  domainId?: string;
+  localPart?: string;
+}): Promise<void> {
+  await apiRequest("/mail/admin/mailboxes", { method: "POST", body: input });
 }
 
 /** Remove a mailbox. Step-up per RBAC §2; suspend first and offer an export. */

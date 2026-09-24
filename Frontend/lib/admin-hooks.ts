@@ -807,7 +807,10 @@ function useMailboxMutation<TInput>(fn: (input: TInput) => Promise<void>) {
 }
 
 export function useCreateMailbox() {
-  return useMailboxMutation((membershipId: string) => createMailbox(membershipId));
+  return useMailboxMutation(
+    (input: { membershipId: string; domainId?: string; localPart?: string }) =>
+      createMailbox(input)
+  );
 }
 
 export function useDeleteMailbox() {

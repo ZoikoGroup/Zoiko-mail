@@ -2,7 +2,7 @@ import { Router } from "express";
 import { requireCapabilityWhen, authenticate, idempotency, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./mail.controller.js";
 import { attachmentUpload } from "./attachment.middleware.js";
-import { adminDeliveryEventsQuerySchema, adminDeliverySummaryQuerySchema,updateSignatureSchema, adminUpdateMailboxSchema, assignMailboxSchema, delegateMailboxSchema, createSharedMailboxSchema, mailboxAssigneeParamsSchema, createAliasSchema, createForwardingSchema, aliasParamsSchema, forwardingParamsSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, mailboxScopeSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
+import { adminDeliveryEventsQuerySchema, adminDeliverySummaryQuerySchema,updateSignatureSchema, adminUpdateMailboxSchema, adminCreateMailboxSchema, assignMailboxSchema, delegateMailboxSchema, createSharedMailboxSchema, mailboxAssigneeParamsSchema, createAliasSchema, createForwardingSchema, aliasParamsSchema, forwardingParamsSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, mailboxScopeSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
 
 const mailRouter = Router();
 // `mail.own.rw` rather than the three role names it used to list. The matrix
@@ -152,7 +152,7 @@ mailRouter.delete(
   controller.deleteForwarding
 );
 mailRouter.get("/admin/mailboxes", requireCapability("workspace.mailboxes.manage"), controller.listAllMailboxes);
-mailRouter.post("/admin/mailboxes", requireCapability("workspace.mailboxes.manage"), controller.adminCreateMailbox);
+mailRouter.post("/admin/mailboxes", requireCapability("workspace.mailboxes.manage"), validate(adminCreateMailboxSchema), controller.adminCreateMailbox);
 // Destructive, and step-up per RBAC §2. The mailbox is expected to be
 // suspended first and an export offered; that sequencing is the console's,
 // but the fresh authentication is enforced here.

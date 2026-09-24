@@ -313,6 +313,15 @@ model Mailbox {
   membershipId         String?          @unique @map("membership_id") @db.Uuid
   /// Data Model §6.16 mailbox_type.
   type                 MailboxType      @default(USER)
+  /// The verified domain this address belongs to.
+  ///
+  /// Nullable because mailboxes created before this existed took their address
+  /// straight from the member's registration email — which could be any domain
+  /// at all, including one this workspace does not own. Those rows keep
+  /// working; new ones are created against a domain that has passed
+  /// verification, which is the "Domain readiness check" the hosted mail flow
+  /// puts between the entitlement check and provisioning.
+  domainId             String?          @map("domain_id") @db.Uuid
   address              String
   storageUsed          BigInt           @default(0) @map("storage_used")
   storageLimit         BigInt           @default(1073741824) @map("storage_limit")
@@ -343,6 +352,9 @@ model Mailbox {
   updatedAt            DateTime         @updatedAt @map("updated_at")
   tenant               Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   membership           TenantMembership? @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  // Restrict rather than Cascade: removing a domain must not silently delete
+  // the mailboxes on it, and their mail with them.
+  domain               MailDomain?      @relation(fields: [domainId], references: [id], onDelete: Restrict)
   items                MailboxMessage[]
   labels               MailLabel[]
   access               MailboxAccess[]
@@ -724,6 +736,7 @@ model MailDomain {
   updatedAt          DateTime                 @updatedAt @map("updated_at")
   tenant             Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   checks             DomainDnsCheck[]
+  mailboxes          Mailbox[]
 
   @@unique([tenantId, domainName])
   @@index([tenantId, verificationStatus])

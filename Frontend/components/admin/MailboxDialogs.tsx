@@ -7,6 +7,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   useCreateMailbox,
   useDelegateMailbox,
+  useDomains,
   useDeleteMailbox,
   useMailboxDelegates,
   useRevokeMailboxDelegate,
@@ -32,13 +33,35 @@ export function CreateMailboxDialog({
   onClose: () => void;
 }) {
   const { data: people, isLoading, error } = useWorkspacePeople();
+  const { data: domains } = useDomains();
   const create = useCreateMailbox();
   const [membershipId, setMembershipId] = useState("");
+  const [domainId, setDomainId] = useState("");
+  const [localPart, setLocalPart] = useState("");
+
+  /**
+   * Only verified domains are offered.
+   *
+   * The server refuses the rest, and naming them here without saying why
+   * would be an invitation to pick one and read a 409. Verified means
+   * ownership is proven and MX points at us, so mail can arrive; sending is
+   * a separate switch on the Domains screen and deliberately later.
+   */
+  const usable = (domains ?? []).filter((d) => d.verificationStatus === "VERIFIED");
+  const pending = (domains ?? []).filter((d) => d.verificationStatus !== "VERIFIED");
 
   // A member already holding a mailbox is not a candidate — the server
   // refuses a second one with a 409, so offering them would be inviting it.
   const taken = new Set(existing.map((mailbox) => mailbox.membershipId).filter(Boolean));
   const candidates = (people ?? []).filter((person) => !taken.has(person.id));
+
+  const chosen = candidates.find((person) => person.id === membershipId);
+  // What they already use, which is what somebody expects when they invite
+  // dana@old-company.com and then pick acme.com.
+  const suggested = chosen?.user.email.split("@")[0] ?? "";
+  const effectiveLocal = (localPart || suggested).trim().toLowerCase();
+  const chosenDomain = usable.find((d) => d.id === domainId);
+  const preview = chosenDomain ? `${effectiveLocal}@${chosenDomain.domainName}` : null;
 
   return (
     <Modal
@@ -53,8 +76,20 @@ export function CreateMailboxDialog({
           </button>
           <button
             className="zoiko-btn pri"
-            disabled={create.isPending || !membershipId}
-            onClick={() => create.mutate(membershipId, { onSuccess: onClose })}
+            disabled={create.isPending || !membershipId || (usable.length > 0 && !domainId)}
+            onClick={() =>
+              create.mutate(
+                {
+                  membershipId,
+                  // Absent when the workspace has no verified domain yet, and
+                  // the server falls back to the member's signup address —
+                  // the old behaviour, kept so a workspace mid-setup is not
+                  // blocked from provisioning anything at all.
+                  ...(domainId ? { domainId, localPart: effectiveLocal } : {}),
+                },
+                { onSuccess: onClose }
+              )
+            }
           >
             {create.isPending ? "Creating…" : "Create mailbox"}
           </button>
@@ -94,10 +129,69 @@ export function CreateMailboxDialog({
               </option>
             ))}
           </select>
-          <p className="mt-2 text-[11.5px] text-[var(--ink3)]">
-            The mailbox takes the address on their account. Nothing is sent from it until
-            a verified domain is active for sending.
-          </p>
+          {usable.length > 0 ? (
+            <>
+              <label
+                htmlFor="mailbox-domain"
+                className="font-mono-num mb-1 mt-4 block text-[9.5px] uppercase tracking-[0.1em] text-[var(--ink3)]"
+              >
+                Domain
+              </label>
+              <select
+                id="mailbox-domain"
+                value={domainId}
+                disabled={create.isPending}
+                onChange={(event) => setDomainId(event.target.value)}
+                className="w-full rounded-lg border border-[var(--border)] bg-[var(--s2)] px-3 py-2 text-[12.6px] text-[var(--ink)]"
+              >
+                <option value="">Choose a domain…</option>
+                {usable.map((domain) => (
+                  <option key={domain.id} value={domain.id}>
+                    {domain.domainName}
+                  </option>
+                ))}
+              </select>
+
+              <label
+                htmlFor="mailbox-local"
+                className="font-mono-num mb-1 mt-4 block text-[9.5px] uppercase tracking-[0.1em] text-[var(--ink3)]"
+              >
+                Mailbox name
+              </label>
+              <input
+                id="mailbox-local"
+                value={localPart}
+                placeholder={suggested}
+                disabled={create.isPending}
+                onChange={(event) => setLocalPart(event.target.value)}
+                className="w-full rounded-lg border border-[var(--border)] bg-[var(--s2)] px-3 py-2 text-[12.6px] text-[var(--ink)] placeholder:text-[var(--ink3)]"
+              />
+
+              {preview && (
+                <p className="mt-2 font-mono-num text-[12px] text-[var(--ink)]">{preview}</p>
+              )}
+              <p className="mt-1 text-[11.5px] text-[var(--ink3)]">
+                Receiving works as soon as the mailbox exists. Sending stays off until the
+                domain is activated on the Domains screen.
+              </p>
+
+              {pending.length > 0 && (
+                // Named rather than hidden: an admin who just added a domain
+                // and cannot find it here needs to know it is waiting on DNS,
+                // not wonder whether the screen is broken.
+                <p className="mt-2 text-[11.5px] text-[var(--ink3)]">
+                  {pending.map((d) => d.domainName).join(", ")}{" "}
+                  {pending.length === 1 ? "is" : "are"} not verified yet, so not offered here.
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="mt-2 text-[11.5px] text-[var(--ink3)]">
+              {pending.length > 0
+                ? "No domain has passed its DNS checks yet, so this mailbox will take the address on the member's account. Verify a domain on the Domains screen to create addresses on it."
+                : "This workspace has no domains yet, so the mailbox takes the address on the member's account. Add one on the Domains screen to create addresses on your own domain."}
+            </p>
+          )}
           {create.error && (
             <p className="mt-2 text-[11.5px] text-[var(--crit)]">{create.error.message}</p>
           )}
