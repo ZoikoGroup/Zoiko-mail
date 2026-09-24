@@ -26,6 +26,7 @@ process.env.RATE_LIMIT_MAX = "10000";
 process.env.REGISTER_RATE_LIMIT_MAX = "10000";
 process.env.LOGIN_RATE_LIMIT_MAX = "10000";
 process.env.REFRESH_RATE_LIMIT_MAX = "10000";
+process.env.INVITATION_RATE_LIMIT_MAX = "10000";
 process.env.PROVIDER_CALLBACK_SECRET =
   "test-provider-callback-secret-minimum-32";
 // Google sign-in ships behind a kill switch that defaults to false, so its

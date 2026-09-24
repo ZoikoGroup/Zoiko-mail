@@ -96,7 +96,15 @@ function AuditLog() {
   const [actor, setActor] = useState<string>(ACTORS[0]!.label);
   const [fromDay, setFromDay] = useState("");
   const [toDay, setToDay] = useState("");
-  const [page, setPage] = useState(1);
+  /**
+   * The cursors that opened each page, newest last.
+   *
+   * Keyset walks forward from a key and cannot address "page 7", so Previous
+   * works by popping the cursor we arrived on. Empty is the first page, which
+   * needs no cursor.
+   */
+  const [cursors, setCursors] = useState<string[]>([]);
+  const cursor = cursors[cursors.length - 1];
 
   const filters = useMemo<AuditQuery>(() => {
     const prefixes = CATEGORIES.find((c) => c.label === category)?.prefixes ?? [];
@@ -108,12 +116,12 @@ function AuditLog() {
     };
   }, [category, actor, fromDay, toDay]);
 
-  const { data, isLoading, error } = useAuditEvents({ ...filters, page, limit: PAGE_SIZE });
+  const { data, isLoading, error } = useAuditEvents({ ...filters, cursor, limit: PAGE_SIZE });
   const exporter = useExportAuditEvents();
 
   const events = data?.events ?? [];
   const pagination = data?.pagination;
-  const totalPages = pagination?.totalPages ?? 1;
+  const nextCursor = pagination?.nextCursor ?? null;
   // The server refuses a range that ends before it starts, so say so here
   // rather than sending it and rendering the rejection as a failed read.
   const rangeInverted = Boolean(fromDay && toDay && fromDay > toDay);
@@ -121,7 +129,7 @@ function AuditLog() {
   /** Any filter change restarts at page one; page 7 of a new filter is meaningless. */
   const reset = <T,>(set: (value: T) => void) => (value: T) => {
     set(value);
-    setPage(1);
+    setCursors([]);
   };
 
   return (
@@ -176,7 +184,7 @@ function AuditLog() {
             onClick={() => {
               setFromDay("");
               setToDay("");
-              setPage(1);
+              setCursors([]);
             }}
           >
             Clear dates
@@ -232,22 +240,25 @@ function AuditLog() {
       {pagination && pagination.total > 0 && (
         <div className="flex items-center justify-between gap-3 px-1 py-2">
           <span className="font-mono-num text-[11px] text-[var(--ink3)]">
-            Page {pagination.page} of {Math.max(1, totalPages)}
+            {/* No "of N". Keyset knows there is a next page, not how many
+                remain, and deriving one from total/limit would be wrong the
+                moment an event is written mid-read — constantly, here. */}
+            Page {cursors.length + 1}
           </span>
           <div className="flex gap-2">
             <button
               type="button"
               className="zoiko-btn sm"
-              disabled={page <= 1}
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              disabled={cursors.length === 0}
+              onClick={() => setCursors((stack) => stack.slice(0, -1))}
             >
               Previous
             </button>
             <button
               type="button"
               className="zoiko-btn sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage((current) => current + 1)}
+              disabled={!nextCursor}
+              onClick={() => nextCursor && setCursors((stack) => [...stack, nextCursor])}
             >
               Next
             </button>

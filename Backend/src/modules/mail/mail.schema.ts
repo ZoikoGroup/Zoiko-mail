@@ -105,6 +105,27 @@ export const mailboxAssigneeParamsSchema = z.object({
   membershipId: z.string().uuid(),
 });
 
+/**
+ * Delegating one person's mailbox to another — RBAC §2, §3, §9.1.
+ *
+ * `canAssign` is absent rather than optional: the service refuses to grant it
+ * on a personal mailbox, because a delegate who can re-delegate turns one
+ * decision into a chain nobody approved. Leaving it out of the schema means
+ * the refusal is a 400 naming the field instead of a silently dropped one.
+ */
+export const delegateMailboxSchema = z
+  .object({
+    membershipId: z.string().uuid(),
+    canRead: z.boolean().optional(),
+    canSend: z.boolean().optional(),
+    canManage: z.boolean().optional(),
+  })
+  // Strict on purpose. Zod's default is to strip what it does not know, so a
+  // caller asking for `canAssign` would get a 200 and a grant without it —
+  // reading as "delegation can re-delegate" to anyone who tried it once and
+  // saw success. Refusing by name is the honest answer.
+  .strict();
+
 /* ── aliases and forwarding — Data Model §6.17, §6.18 ────────────────── */
 
 export const createAliasSchema = z.object({ address: emailSchema });

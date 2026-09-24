@@ -2,10 +2,15 @@ import { Router } from "express";
 import { requireCapabilityWhen, authenticate, idempotency, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./mail.controller.js";
 import { attachmentUpload } from "./attachment.middleware.js";
-import { adminDeliveryEventsQuerySchema, adminDeliverySummaryQuerySchema,updateSignatureSchema, adminUpdateMailboxSchema, assignMailboxSchema, createSharedMailboxSchema, mailboxAssigneeParamsSchema, createAliasSchema, createForwardingSchema, aliasParamsSchema, forwardingParamsSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, mailboxScopeSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
+import { adminDeliveryEventsQuerySchema, adminDeliverySummaryQuerySchema,updateSignatureSchema, adminUpdateMailboxSchema, assignMailboxSchema, delegateMailboxSchema, createSharedMailboxSchema, mailboxAssigneeParamsSchema, createAliasSchema, createForwardingSchema, aliasParamsSchema, forwardingParamsSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, mailboxScopeSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
 
 const mailRouter = Router();
-mailRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN", "MEMBER"), idempotency);
+// `mail.own.rw` rather than the three role names it used to list. The matrix
+// holds it as OWN for Owner, Admin and Member and gives it to Support in no
+// form, so this is the same gate stated once in the place that defines it —
+// and the admin paths below still add their own capability on top. The role
+// list was a second copy of a matrix row, which is how the two drift.
+mailRouter.use(authenticate, tenantContext, requireCapability("mail.own.rw"), idempotency);
 // Admin literal paths MUST be registered before any /:messageId routes,
 // otherwise "/admin/delivery-events" is captured as messageId="admin".
 // The count goes before the feed: both are exact literals so Express would
@@ -94,6 +99,31 @@ mailRouter.get(
   requireCapability("workspace.mailboxes.manage"),
   validate(mailboxIdParamsSchema, "params"),
   controller.listMailboxRouting
+);
+// ─── Delegation — RBAC §2 "Delegate mailbox access", §3, §9.1 ───────────
+// Its own capability rather than workspace.mailboxes.manage: managing a
+// mailbox is changing the thing, delegating it is handing someone else the
+// contents, and §9.1 makes the second conditional on tenant policy while the
+// first is not. One gate cannot say both. Registered before the
+// "/admin/mailboxes/:mailboxId" patch route so the nested path survives.
+mailRouter.get(
+  "/admin/mailboxes/:mailboxId/delegates",
+  requireCapability("mailbox.delegate"),
+  validate(mailboxIdParamsSchema, "params"),
+  controller.listMailboxDelegates
+);
+mailRouter.post(
+  "/admin/mailboxes/:mailboxId/delegates",
+  requireCapability("mailbox.delegate"),
+  validate(mailboxIdParamsSchema, "params"),
+  validate(delegateMailboxSchema),
+  controller.delegateMailbox
+);
+mailRouter.delete(
+  "/admin/mailboxes/:mailboxId/delegates/:membershipId",
+  requireCapability("mailbox.delegate"),
+  validate(mailboxAssigneeParamsSchema, "params"),
+  controller.revokeMailboxDelegate
 );
 mailRouter.post(
   "/admin/mailboxes/:mailboxId/aliases",

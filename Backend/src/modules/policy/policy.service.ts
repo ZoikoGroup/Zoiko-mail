@@ -4,6 +4,7 @@ import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
+import { cursorArgs, toPage } from "../../common/utils/pagination.js";
 import { policyRulesSchema, type CreatePolicyInput, type EvaluatePolicyInput, type PolicyRules } from "./policy.schema.js";
 
 interface Context {
@@ -60,11 +61,19 @@ function hashRules(value: unknown): string {
 }
 
 export class PolicyService {
-  async list(tenantId: string, filters: { type?: PolicyType; status?: PolicyStatus }) {
-    return prisma.tenantPolicy.findMany({
+  async list(
+    tenantId: string,
+    filters: { type?: PolicyType; status?: PolicyStatus; limit?: number; cursor?: string }
+  ) {
+    const limit = filters.limit ?? 50;
+    const rows = await prisma.tenantPolicy.findMany({
       where: { tenantId, type: filters.type, status: filters.status },
-      orderBy: [{ type: "asc" }, { version: "desc" }],
+      // Type and version are what a reader scans by; id only breaks ties so
+      // the cursor lands on exactly one row.
+      orderBy: [{ type: "asc" }, { version: "desc" }, { id: "asc" }],
+      ...cursorArgs(limit, filters.cursor),
     });
+    return toPage(rows, limit);
   }
 
   async get(tenantId: string, policyId: string) {

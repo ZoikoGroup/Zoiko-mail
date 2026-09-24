@@ -40,7 +40,21 @@ export type Capability =
   | "workspace.mailboxes.manage"
   | "workspace.domains.manage"
   | "workspace.groups.manage"
+  // The destructive three, all STEP_UP in the matrix. Listed so a screen can
+  // disable the control rather than let the server refuse a press.
+  | "workspace.domains.remove"
+  | "workspace.mailboxes.delete"
+  | "workspace.mailboxes.sending"
+  // Provider credentials. Rotation is STEP_UP (§5 counts a credential action
+  // as high-risk); the tenant-scope disconnect is the half of RBAC §2
+  // "Disconnect connected account" that reaches somebody else's account.
+  | "connector.credentials.rotate"
+  | "connector.tenant.disconnect"
+  // Granting one person access to another's mailbox, where policy permits.
+  | "mailbox.delegate"
   | "policy.write"
+  | "policy.ai.write"
+  | "mailbox.ai.enable"
   | "policy.security.write"
   | "audit.read"
   | "security-alert.read"
@@ -52,8 +66,6 @@ export type Capability =
   | "tenant.ownership.transfer"
   | "tenant.delete"
   // Support
-  | "support.standing"
-  | "support.workspace.access"
   | "support.grant.end"
   // Approving support access: STEP_UP and Owner-only (RBAC §2). Listed so the
   // owner screen can hide a control an Admin would only be refused.
@@ -64,7 +76,13 @@ export type Capability =
   | "support.console.read"
   // Seeing who currently holds access. Deliberately separate from
   // support.console.read so a granted Support member cannot read it.
-  | "support.grant.read";
+  | "support.grant.read"
+  // Reading the workspace a Support seat was invited into: configuration,
+  // mailboxes, domains, delivery, audit.
+  | "support.workspace.investigate"
+  // The one write a Support seat holds, and the only GRANT row left in that
+  // column — clearing forwarding, or lifting a send suspension.
+  | "support.mailbox.reset";
 
 export interface CapabilityState {
   data: Set<Capability> | undefined;

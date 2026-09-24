@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { MfaQrCode } from "@/components/auth/MfaQrCode";
 import { ShieldCheck } from "lucide-react";
 
 import {
@@ -163,8 +164,13 @@ export function MfaSettings() {
         <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900">
           {begin.data ? (
             <>
-              <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                Setup key
+              <MfaQrCode uri={begin.data.uri} />
+
+              {/* Same order as the sign-in enrolment screen: scan first, type
+                  only if you have to. The key is kept because a desktop
+                  authenticator has no camera to point. */}
+              <p className="mt-4 text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Or enter this key by hand
               </p>
               <p className="mt-1 break-all font-mono text-[13px] text-slate-900 dark:text-slate-100">
                 {begin.data.secret}
@@ -173,7 +179,7 @@ export function MfaSettings() {
                 className="mt-2 inline-block text-[12px] text-slate-600 underline dark:text-slate-300"
                 href={begin.data.uri}
               >
-                Open in an authenticator app
+                Open in an authenticator app on this device
               </a>
             </>
           ) : (

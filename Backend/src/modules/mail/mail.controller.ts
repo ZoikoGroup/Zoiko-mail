@@ -240,6 +240,48 @@ export const unassignMailbox = asyncHandler(async (req: Request, res: Response) 
   );
 });
 
+/* ── delegation — RBAC §2 "Delegate mailbox access" ─────────────────────── */
+
+export const listMailboxDelegates = asyncHandler(async (req: Request, res: Response) => {
+  const ctx = context(req);
+  sendSuccess(
+    res,
+    200,
+    {
+      delegates: await sharedMailboxService.listDelegates(
+        ctx.tenantId,
+        String(req.params.mailboxId)
+      ),
+    },
+    req.requestId
+  );
+});
+
+export const delegateMailbox = asyncHandler(async (req: Request, res: Response) => {
+  const ctx = context(req);
+  sendSuccess(
+    res,
+    200,
+    await sharedMailboxService.delegate(ctx.tenantId, String(req.params.mailboxId), req.body, ctx),
+    req.requestId
+  );
+});
+
+export const revokeMailboxDelegate = asyncHandler(async (req: Request, res: Response) => {
+  const ctx = context(req);
+  sendSuccess(
+    res,
+    200,
+    await sharedMailboxService.revokeDelegate(
+      ctx.tenantId,
+      String(req.params.mailboxId),
+      String(req.params.membershipId),
+      ctx
+    ),
+    req.requestId
+  );
+});
+
 export const updateSendingStatus = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(
     res,

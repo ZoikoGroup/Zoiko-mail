@@ -6,7 +6,9 @@ export const auditEventParamsSchema = z.object({
 
 export const auditEventQuerySchema = z
   .object({
-    page: z.coerce.number().int().min(1).default(1),
+    // Keyset cursor, not a page number — API §4, and the audit table is
+    // appended to while you read it, so an offset drifts between requests.
+    cursor: z.string().trim().min(1).max(512).optional(),
     limit: z.coerce.number().int().min(1).max(100).default(25),
     eventType: z.string().trim().min(1).max(100).optional(),
     /**
