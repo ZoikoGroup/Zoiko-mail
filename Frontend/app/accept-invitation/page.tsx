@@ -3,58 +3,127 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { useSearchParams } from "next/navigation";
-import { acceptInvitation } from "@/lib/owner-api";
+import { useRouter, useSearchParams } from "next/navigation";
+import {
+  acceptInvitation,
+  claimInvitation,
+  lookupInvitation,
+  type InvitationLookup,
+} from "@/lib/owner-api";
 import { isLoggedIn } from "@/lib/auth-storage";
 import { logout } from "@/lib/auth-api";
 
+/**
+ * Accepting an invitation.
+ *
+ * This page used to require a session before it would do anything, which was
+ * a closed loop for the people it exists for: `createInvitation` gives a new
+ * invitee a placeholder account with a random password nobody knows, so they
+ * could not sign in, so they could not accept. Clicking the link in the same
+ * browser as the inviter produced the other half — a session belonging to
+ * somebody else, and "Invitation belongs to another user".
+ *
+ * The token in the link is the credential now, the way a password-reset link
+ * is: it was delivered to the invited address, so presenting it proves
+ * control of that mailbox. What happens next depends on whether that address
+ * already has an account, which the server answers before anyone signs in:
+ *
+ *   no account yet  → choose a password here, then sign in
+ *   account exists  → sign in first, then accept from their own session
+ *
+ * The second branch is not a convenience. An admin can invite any address, so
+ * a link that could set a password on an existing account would make "invite"
+ * a way to take one over.
+ */
+
+type Phase =
+  | "loading"
+  | "set-password"   // no account yet: choose one
+  | "needs-signin"   // account exists: sign in and accept
+  | "accepting"      // signed in already: the original path
+  | "done"
+  | "error"
+  | "no-token";
+
 function AcceptInvitationInner() {
   const params = useSearchParams();
+  const router = useRouter();
   const token = params.get("token") ?? "";
 
-  const [status, setStatus] = useState<"loading" | "success" | "error" | "no-token" | "need-login">(
-    !token ? "no-token" : "loading"
-  );
+  const [phase, setPhase] = useState<Phase>(!token ? "no-token" : "loading");
+  const [invite, setInvite] = useState<InvitationLookup | null>(null);
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  // Acceptance is a one-time server action, so it must fire exactly once per
-  // token. React StrictMode double-invokes effects in development — without
-  // this guard the first request consumes the token and the second one fails,
-  // which surfaced to users as "Invitation is invalid" right after a
-  // successful accept.
-  //
-  // The ref alone is the single-fire mechanism; there is deliberately NO
-  // cancelled flag. A cleanup-time cancel combined with the ref guard left
-  // the first (and only) request's response unhandled, parking the page on
-  // "Loading…" forever. Late setState after an unmount is a harmless no-op.
-  const attemptedToken = useRef<string | null>(null);
+  // One attempt per token. React StrictMode double-invokes effects in
+  // development, and without this guard the first request consumed the token
+  // while the second reported "Invitation is invalid" — right after a
+  // successful accept. No cancelled flag: a cleanup-time cancel combined with
+  // this ref once parked the page on "Loading…" forever, because the only
+  // request's response went unhandled. A late setState is a harmless no-op.
+  const attempted = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || attempted.current === token) return;
+    attempted.current = token;
 
-    if (attemptedToken.current === token) return;
-    attemptedToken.current = token;
-
-    const wasLoggedIn = isLoggedIn();
-
-    if (!wasLoggedIn) {
-      sessionStorage.setItem("pendingInvitationToken", token);
-      setStatus("need-login");
+    // Somebody already signed in keeps the original path: their session is
+    // the proof, and the server still checks the invitation is theirs.
+    if (isLoggedIn()) {
+      setPhase("accepting");
+      acceptInvitation(token)
+        .then(async () => {
+          sessionStorage.removeItem("pendingInvitationToken");
+          // Sign out so they come back with the new membership on their token.
+          await logout();
+          window.location.href = "/login";
+        })
+        .catch((e: Error) => {
+          setErrorMsg(e.message || "Something went wrong");
+          setPhase("error");
+        });
       return;
     }
 
-    acceptInvitation(token)
-      .then(async () => {
-        sessionStorage.removeItem("pendingInvitationToken");
-        // Clear the session so the user re-authenticates and picks up the new SUPPORT workspace.
-        await logout();
-        window.location.href = "/login";
+    lookupInvitation(token)
+      .then((found) => {
+        setInvite(found);
+        setPhase(found.needsPassword ? "set-password" : "needs-signin");
+        if (!found.needsPassword) {
+          // So /login can finish the job once they are authenticated.
+          sessionStorage.setItem("pendingInvitationToken", token);
+        }
       })
       .catch((e: Error) => {
-        setStatus("error");
         setErrorMsg(e.message || "Something went wrong");
+        setPhase("error");
       });
   }, [token]);
+
+  const submit = async () => {
+    setErrorMsg("");
+    if (password !== confirm) {
+      setErrorMsg("Those passwords do not match.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await claimInvitation(token, password);
+      setPhase("done");
+      // To the sign-in page, with the password they just chose. Kept separate
+      // from claiming on purpose: it proves the password works before they
+      // depend on it, and it puts them on the path where MFA enrolment lives.
+      setTimeout(() => router.push("/login"), 1400);
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : "Could not set your password.");
+      setBusy(false);
+    }
+  };
+
+  const field =
+    "w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-teal-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100";
 
   return (
     <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-xl dark:border-slate-800 dark:bg-slate-950">
@@ -69,21 +138,99 @@ function AcceptInvitationInner() {
         />
       </div>
 
-      {status === "loading" && (
+      {(phase === "loading" || phase === "accepting") && (
         <div className="text-center">
           <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-teal-600" />
-          <p className="text-sm text-slate-500 dark:text-slate-400">Accepting your invitation…</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            {phase === "accepting" ? "Accepting your invitation…" : "Checking your invitation…"}
+          </p>
         </div>
       )}
 
-      {status === "need-login" && (
+      {phase === "set-password" && invite && (
+        <div>
+          <h2 className="text-center text-lg font-semibold text-slate-900 dark:text-white">
+            Create your password
+          </h2>
+          <p className="mt-2 text-center text-sm text-slate-500 dark:text-slate-400">
+            You have been invited to <strong>{invite.tenantName}</strong> as{" "}
+            {invite.role.toLowerCase()}. Choose a password for{" "}
+            <strong className="break-all">{invite.email}</strong>.
+          </p>
+
+          <div className="mt-6 space-y-3">
+            <div>
+              <label
+                htmlFor="new-password"
+                className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
+              >
+                Password
+              </label>
+              <input
+                id="new-password"
+                type="password"
+                autoComplete="new-password"
+                className={field}
+                value={password}
+                disabled={busy}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+              <p className="mt-1 text-[11px] text-slate-400">
+                At least 12 characters, with an uppercase letter, a lowercase letter and a
+                number.
+              </p>
+            </div>
+
+            <div>
+              <label
+                htmlFor="confirm-password"
+                className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
+              >
+                Confirm password
+              </label>
+              <input
+                id="confirm-password"
+                type="password"
+                autoComplete="new-password"
+                className={field}
+                value={confirm}
+                disabled={busy}
+                onChange={(event) => setConfirm(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && password && confirm) void submit();
+                }}
+              />
+            </div>
+
+            {errorMsg && <p className="text-xs text-red-600 dark:text-red-400">{errorMsg}</p>}
+
+            <button
+              type="button"
+              className="w-full rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+              disabled={busy || password.length < 12 || confirm.length === 0}
+              onClick={() => void submit()}
+            >
+              {busy ? "Setting your password…" : "Create password and continue"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {phase === "needs-signin" && (
         <div className="text-center">
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-blue-100 text-2xl dark:bg-blue-900/30">
             🔒
           </div>
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Sign in required</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Sign in to accept</h2>
           <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-            Please sign in to accept this invitation.
+            {invite?.email ? (
+              <>
+                <strong className="break-all">{invite.email}</strong> already has an account.
+                Sign in and this invitation will be accepted for you.
+              </>
+            ) : (
+              "Please sign in to accept this invitation."
+            )}
           </p>
           <Link
             href="/login"
@@ -94,19 +241,21 @@ function AcceptInvitationInner() {
         </div>
       )}
 
-      {status === "success" && (
+      {phase === "done" && (
         <div className="text-center">
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-green-100 text-2xl dark:bg-green-900/30">
             ✓
           </div>
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">You&apos;re in!</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+            You&apos;re in!
+          </h2>
           <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-            Your invitation has been accepted. Signing you in…
+            Your password is set. Taking you to sign in…
           </p>
         </div>
       )}
 
-      {status === "error" && (
+      {phase === "error" && (
         <div className="text-center">
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-red-100 text-2xl dark:bg-red-900/30">
             ✗
@@ -114,7 +263,7 @@ function AcceptInvitationInner() {
           <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Invitation failed</h2>
           <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
             {errorMsg === "Invitation is invalid"
-              ? "This invitation link is no longer valid. It may have already been accepted, or a newer invitation email was sent — please use the most recent one."
+              ? "This invitation link is no longer valid. It may have already been used, or a newer invitation email was sent — please use the most recent one."
               : errorMsg || "Something went wrong"}
           </p>
           <Link
@@ -126,7 +275,7 @@ function AcceptInvitationInner() {
         </div>
       )}
 
-      {status === "no-token" && (
+      {phase === "no-token" && (
         <div className="text-center">
           <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Invalid link</h2>
           <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">

@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   ShieldAlert,
   RefreshCw,
+  Database,
   FileText,
   Bell,
   Settings,
@@ -73,6 +74,11 @@ export const ADMIN_NAV: AdminNavGroup[] = [
     group: "Trust & access",
     items: [
       { label: "Roles & permissions", href: "/admin/permissions", icon: KeyRound },
+      // PRD §16 lists "Export/deletion" among the console's requirements, and
+      // RBAC §2 records both as Admin "By policy". Gated on data.export so an
+      // Admin who holds neither is not shown a screen that would refuse them
+      // twice — once at the capability, once at the workspace policy.
+      { label: "Data", href: "/admin/data", icon: Database, capability: "data.export" },
       { label: "Policies", href: "/admin/policies", icon: ShieldCheck, capability: "policy.write" },
       // Gated: this reads every connected account in the workspace, which is
       // what /connectors/admin serves behind workspace.mailboxes.manage. The

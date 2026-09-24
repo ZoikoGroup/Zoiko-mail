@@ -14,7 +14,23 @@ tenantRouter.patch(
   validate(updateTenantSchema),
   controller.updateCurrent
 );
-tenantRouter.get("/settings/general", requireRole("OWNER", "ADMIN"), controller.getGeneralSettings);
+/**
+ * Gated on the capability, which now says what the role list used to.
+ *
+ * This read `requireRole("OWNER", "ADMIN")` while the matrix held
+ * `workspace.settings.read` as READ_ONLY for a Member — a capability that
+ * resolved open against a route that refused. The matrix row was the wrong
+ * half: RBAC §2's "View tenant configuration" reads Member **No**. With that
+ * row removed the two agree, and the route can name the capability instead of
+ * re-listing the roles that happen to hold it.
+ *
+ * Writing stays on workspace.settings.write, which no Member holds either.
+ */
+tenantRouter.get(
+  "/settings/general",
+  requireCapability("workspace.settings.read"),
+  controller.getGeneralSettings
+);
 tenantRouter.patch(
   "/settings/general",
   requireCapability("workspace.settings.write"),

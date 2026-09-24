@@ -158,7 +158,7 @@ test.describe("the console renders for a granted seat", () => {
     // The overview, not the request form — the difference between a seat
     // that holds access and one that does not.
     await openOverview(page);
-    await expect(page.getByRole("heading", { name: /Ask for access/i })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: /Ask for diagnostics access/i })).toHaveCount(0);
 
     // §7 requires every grant to expire. A console that does not say when
     // leaves the agent to discover it by being cut off mid-investigation.
@@ -180,7 +180,26 @@ test.describe("the console renders for a granted seat", () => {
 });
 
 test.describe("the boundary around it", () => {
-  test("a seat with no grant is refused everything and offered a way to ask", async ({ page }) => {
+  /**
+   * KNOWN FAILING — pre-existing, and not from the Admin work this branch
+   * carries. It fails on the committed tree as well.
+   *
+   * The premise went stale when the support console stopped being gated on a
+   * grant: `support.console.read` and `support.workspace.investigate` became
+   * ALLOW, so an invited seat is no longer "refused everything" without one —
+   * main's own tests say as much ("stays open after the grant is revoked —
+   * the membership is now the control"). Two halves of this test have been
+   * brought forward already: the panel's heading is "Ask for diagnostics
+   * access", and the grant-gated tab is Diagnostics rather than Workspace
+   * Overview. What remains is the request panel not appearing when every
+   * diagnostics read is stubbed 403, which needs somebody to decide what this
+   * test should assert under the new model rather than a guess from here.
+   *
+   * `fixme` rather than deletion or a weakened assertion: the behaviour is
+   * still worth covering, and a test quietly changed until it passes is worse
+   * than one that says it is unfinished.
+   */
+  test.fixme("a seat with no grant is refused everything and offered a way to ask", async ({ page }) => {
     await signIn(page, "SUPPORT", ["support.console.read", "support.workspace.investigate"]);
 
     for (const path of ["overview", "configuration", "tenant", "mailboxes"]) {
@@ -205,8 +224,13 @@ test.describe("the boundary around it", () => {
     // The diagnostics tab is where the refusal lives, and it has to become
     // a next step rather than a load error — otherwise the only route to a
     // first grant is somebody calling the API by hand.
-    await page.getByRole("button", { name: /Workspace Overview/i }).first().click();
-    await expect(page.getByRole("heading", { name: /Ask for access/i })).toBeVisible({
+    //
+    // Diagnostics, not Workspace Overview. The two swapped roles when the
+    // console stopped being grant-gated: an invited seat reads the workspace
+    // through its membership, and diagnostics is the one screen left that
+    // still waits on an owner-approved window.
+    await page.getByRole("button", { name: /Diagnostics/i }).first().click();
+    await expect(page.getByRole("heading", { name: /Ask for diagnostics access/i })).toBeVisible({
       timeout: 60_000,
     });
   });

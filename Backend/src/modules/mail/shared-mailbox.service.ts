@@ -1,8 +1,9 @@
-import type { MailboxType, Prisma } from "@prisma/client";
+import type { MailboxType, MembershipRole, Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
+import { policyService } from "../policy/policy.service.js";
 
 /**
  * Shared and distribution mailboxes — Security §10 and §9.1.
@@ -310,6 +311,205 @@ export class SharedMailboxService {
     }
 
     return mailbox;
+  }
+
+  /* ── delegation — RBAC §2 "Delegate mailbox access", §3, §9.1 ─────────── */
+
+  /**
+   * A personal mailbox, confirmed to belong to this workspace.
+   *
+   * Delegation is the one mailbox operation that is *about* personal
+   * mailboxes. `sharedMailbox` above filters to SHARED/DISTRIBUTION, which is
+   * why assigning an assignee could never express "let Dana cover Sam's inbox
+   * while Sam is on leave" — the route it would go through refuses a USER
+   * mailbox before it reads the body.
+   */
+  private async personalMailbox(tenantId: string, mailboxId: string) {
+    const mailbox = await prisma.mailbox.findFirst({
+      where: { id: mailboxId, tenantId, type: "USER" },
+      select: { id: true, address: true, membershipId: true },
+    });
+    if (!mailbox) {
+      throw new AppError("Mailbox not found", 404, ErrorCodes.NOT_FOUND);
+    }
+    return mailbox;
+  }
+
+  /** Who currently holds delegated access to one person's mailbox. */
+  async listDelegates(tenantId: string, mailboxId: string) {
+    await this.personalMailbox(tenantId, mailboxId);
+    return prisma.mailboxAccess.findMany({
+      where: { tenantId, mailboxId },
+      select: assigneeSelect,
+      orderBy: { createdAt: "asc" },
+    });
+  }
+
+  /**
+   * Grant one member access to another member's mailbox.
+   *
+   * Two things decide this, and they are deliberately separate:
+   *
+   * 1. `mailbox.delegate`, checked at the route, says the caller is the kind
+   *    of person who may delegate at all.
+   * 2. Tenant policy, checked here, says whether *this workspace* permits it —
+   *    RBAC §2 gives Owner an unconditional Yes and Admin "If policy" (§9.1,
+   *    "where tenant policy permits"), which is a condition about the
+   *    workspace rather than about the caller, so it cannot live in a matrix
+   *    row.
+   *
+   * The Owner path does not consult policy. An Owner who had to write a policy
+   * granting themselves a capability their column already gives outright would
+   * be answering to a rule they alone can edit, which is not a control.
+   *
+   * For an Admin the gate is closed until an Owner opens it: `evaluate`
+   * returns DENY/NO_ACTIVE_POLICY for a workspace that has never set a
+   * DELEGATION policy. That is the intended reading of "If policy" — not
+   * "unless policy forbids".
+   */
+  async delegate(
+    tenantId: string,
+    mailboxId: string,
+    input: { membershipId: string } & Partial<MailboxPermissions>,
+    context: ActorContext & { role: MembershipRole }
+  ) {
+    const mailbox = await this.personalMailbox(tenantId, mailboxId);
+
+    const membership = await prisma.tenantMembership.findFirst({
+      where: { id: input.membershipId, tenantId, status: "ACTIVE" },
+      select: { id: true, user: { select: { email: true } } },
+    });
+    if (!membership) {
+      throw new AppError("Active membership not found", 404, ErrorCodes.NOT_FOUND);
+    }
+
+    // Delegating a mailbox to the person whose mailbox it is grants nothing
+    // and reads, in the audit log, as an access grant that never happened.
+    if (mailbox.membershipId && mailbox.membershipId === input.membershipId) {
+      throw new AppError(
+        "That mailbox already belongs to this member.",
+        409,
+        ErrorCodes.CONFLICT,
+        { reason: "DELEGATE_TO_OWNER" }
+      );
+    }
+
+    if (context.role !== "OWNER") {
+      const decision = await policyService.evaluate(
+        {
+          type: "DELEGATION",
+          context: {
+            mailbox: { address: mailbox.address },
+            delegate: { email: membership.user.email },
+            actor: { role: context.role },
+          },
+        },
+        { tenantId, userId: context.userId, role: context.role, requestId: context.requestId }
+      );
+      if (decision.effect === "DENY") {
+        await auditService.record({
+          tenantId,
+          actorUserId: context.userId,
+          eventType: "MAILBOX_DELEGATION_POLICY_DENIED",
+          targetType: "Mailbox",
+          targetId: mailboxId,
+          requestId: context.requestId,
+          ipAddress: context.ipAddress,
+          userAgent: context.userAgent,
+          metadata: {
+            address: mailbox.address,
+            delegate: membership.user.email,
+            reason: decision.reason,
+          },
+        });
+        throw new AppError(
+          decision.reason === "NO_ACTIVE_POLICY"
+            ? "This workspace has not enabled delegation for administrators. An Owner can delegate, or activate a DELEGATION policy."
+            : `Delegation denied by tenant policy (${decision.reason})`,
+          403,
+          ErrorCodes.FORBIDDEN,
+          { reason: decision.reason }
+        );
+      }
+    }
+
+    // Read is the point of delegating; the rest stay off unless asked for.
+    // canAssign is never granted here — letting a delegate re-delegate turns
+    // one Owner decision into an unbounded chain nobody approved.
+    const permissions = {
+      canRead: input.canRead ?? true,
+      canSend: input.canSend ?? false,
+      canManage: input.canManage ?? false,
+      canAssign: false,
+    };
+
+    const existing = await prisma.mailboxAccess.findUnique({
+      where: { mailboxId_membershipId: { mailboxId, membershipId: input.membershipId } },
+      select: { canRead: true, canSend: true, canManage: true, canAssign: true },
+    });
+
+    const access = await prisma.mailboxAccess.upsert({
+      where: { mailboxId_membershipId: { mailboxId, membershipId: input.membershipId } },
+      create: {
+        tenantId,
+        mailboxId,
+        membershipId: input.membershipId,
+        grantedByUserId: context.userId,
+        ...permissions,
+      },
+      update: permissions,
+      select: assigneeSelect,
+    });
+
+    await auditService.record({
+      tenantId,
+      actorUserId: context.userId,
+      eventType: existing ? "MAILBOX_DELEGATION_CHANGED" : "MAILBOX_DELEGATION_GRANTED",
+      targetType: "Mailbox",
+      targetId: mailboxId,
+      requestId: context.requestId,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+      metadata: {
+        address: mailbox.address,
+        delegate: membership.user.email,
+        before: existing ?? null,
+        after: permissions,
+      },
+    });
+
+    return access;
+  }
+
+  /** Take delegated access away. The next request fails the lookup. */
+  async revokeDelegate(
+    tenantId: string,
+    mailboxId: string,
+    membershipId: string,
+    context: ActorContext
+  ) {
+    const mailbox = await this.personalMailbox(tenantId, mailboxId);
+    const existing = await prisma.mailboxAccess.findUnique({
+      where: { mailboxId_membershipId: { mailboxId, membershipId } },
+      select: { id: true, membership: { select: { user: { select: { email: true } } } } },
+    });
+    if (!existing) throw new AppError("Delegation not found", 404, ErrorCodes.NOT_FOUND);
+
+    await prisma.mailboxAccess.delete({ where: { id: existing.id } });
+
+    await auditService.record({
+      tenantId,
+      actorUserId: context.userId,
+      eventType: "MAILBOX_DELEGATION_REVOKED",
+      targetType: "Mailbox",
+      targetId: mailboxId,
+      requestId: context.requestId,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+      metadata: { address: mailbox.address, delegate: existing.membership.user.email },
+    });
+
+    return { mailboxId, membershipId };
   }
 }
 

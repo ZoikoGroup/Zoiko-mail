@@ -172,7 +172,15 @@ const MEMBER: RoleMatrix = {
   "mail.own.rw": "OWN",
   "commitments.own.manage": "OWN",
   "connector.own.connect": "OWN",
-  "workspace.settings.read": "READ_ONLY",
+  // `workspace.settings.read` is deliberately absent. It sat here as
+  // READ_ONLY while GET /tenants/settings/general denied a Member through a
+  // role list — so the matrix promised a read the server refused, and the
+  // only way to find out was to be a Member and try.
+  //
+  // RBAC §2's "View tenant configuration" row reads Owner Yes, Admin Yes,
+  // Member **No**, so the route was right and this row was wrong. Removed
+  // rather than honoured: opening a workspace-level read to every member is a
+  // product decision, and nothing in the specification asks for it.
 };
 
 /**

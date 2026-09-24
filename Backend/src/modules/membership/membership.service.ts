@@ -4,6 +4,8 @@ import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
 import { billingService } from "../billing/billing.service.js";
+import { can } from "../../common/capabilities/resolver.js";
+import { cursorArgs, toPage } from "../../common/utils/pagination.js";
 import { env } from "../../config/env.js";
 import { generateOpaqueToken, hashToken } from "../../common/utils/tokenHash.js";
 import { hashPassword } from "../../common/utils/password.js";
@@ -59,13 +61,58 @@ const memberSelect = {
   },
 } satisfies Prisma.TenantMembershipSelect;
 
-function assertAdminBoundary(actorRole: MembershipRole, role: MembershipRole): void {
-  if (actorRole === "ADMIN" && role === "OWNER") {
-    throw new AppError(
-      "Administrators cannot manage owner memberships",
-      403,
-      ErrorCodes.FORBIDDEN
-    );
+/**
+ * Which capability it takes to act on a membership of a given role.
+ *
+ * The matrix already carries this: `people.owner.manage` sits in the Owner
+ * row and nowhere else, `people.admin.manage` and `people.member.manage` sit
+ * in both. Reading it here is what makes the admin/owner boundary a fact about
+ * the matrix rather than a second opinion kept beside it.
+ *
+ * This used to be `actorRole === "ADMIN" && role === "OWNER"` — correct, and
+ * tested, but hardcoded: the four capabilities written to express exactly this
+ * were never read by anything, so the matrix described enforcement it did not
+ * perform, and a fifth role would have needed this line found and edited.
+ */
+const MANAGE_CAPABILITY: Record<MembershipRole, string> = {
+  OWNER: "people.owner.manage",
+  ADMIN: "people.admin.manage",
+  MEMBER: "people.member.manage",
+  // A Support seat is a workspace membership like any other to the people who
+  // administer it; it carries no elevated claim on being managed.
+  SUPPORT: "people.member.manage",
+};
+
+/** Which capability it takes to bring somebody in at a given role. */
+const INVITE_CAPABILITY: Record<MembershipRole, string> = {
+  OWNER: "people.invite.owner",
+  ADMIN: "people.invite.admin",
+  MEMBER: "people.invite.member",
+  SUPPORT: "people.invite.member",
+};
+
+function refuse(actorRole: MembershipRole, role: MembershipRole, capability: string): never {
+  throw new AppError(
+    `A ${actorRole.toLowerCase()} cannot act on ${role.toLowerCase()} memberships`,
+    403,
+    ErrorCodes.FORBIDDEN,
+    { required: capability, targetRole: role }
+  );
+}
+
+/** Acting on somebody who is already here. */
+function assertCanManageRole(actorRole: MembershipRole, role: MembershipRole): void {
+  const capability = MANAGE_CAPABILITY[role];
+  if (!can(capability, { role: actorRole, membershipActive: true })) {
+    refuse(actorRole, role, capability);
+  }
+}
+
+/** Bringing somebody in, or moving them to a new role. */
+function assertCanInviteRole(actorRole: MembershipRole, role: MembershipRole): void {
+  const capability = INVITE_CAPABILITY[role];
+  if (!can(capability, { role: actorRole, membershipActive: true })) {
+    refuse(actorRole, role, capability);
   }
 }
 
@@ -127,16 +174,26 @@ async function protectLastOwner(
 }
 
 export class MembershipService {
-  async list(context: ActorContext) {
-    return prisma.tenantMembership.findMany({
+  /**
+   * The workspace's people, a page at a time — API §4.
+   *
+   * `id` joins the sort key because `createdAt` alone is not unique: two
+   * members added in the same transaction share a timestamp, and a cursor
+   * over a non-unique order can drop one of them or serve it twice.
+   */
+  async list(context: ActorContext, options: { limit?: number; cursor?: string } = {}) {
+    const limit = options.limit ?? 50;
+    const rows = await prisma.tenantMembership.findMany({
       where: { tenantId: context.tenantId, status: { not: "REMOVED" } },
       select: memberSelect,
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      ...cursorArgs(limit, options.cursor),
     });
+    return toPage(rows, limit);
   }
 
   async add(input: AddMemberInput, context: ActorContext) {
-    assertAdminBoundary(context.role, input.role);
+    assertCanInviteRole(context.role, input.role);
     // Enforce the tenant-level user limit before activating a new member.
     await billingService.assertUserWithinLimit(context.tenantId, 1);
     return prisma.$transaction(async (tx) => {
@@ -174,7 +231,7 @@ export class MembershipService {
   }
 
   async createInvitation(input: CreateInvitationInput, context: ActorContext) {
-    assertAdminBoundary(context.role, input.role);
+    assertCanInviteRole(context.role, input.role);
     const invitationToken = generateOpaqueToken();
     const inviteToken = hashToken(invitationToken);
     const inviteExpiresAt = new Date(
@@ -306,8 +363,132 @@ export class MembershipService {
     input: PreviewInvitationInput,
     context: ActorContext
   ): Promise<InvitationLetter> {
-    assertAdminBoundary(context.role, input.role);
+    assertCanInviteRole(context.role, input.role);
     return this.buildLetter(input, context);
+  }
+
+  /**
+   * What an invitation link is for, before anyone has signed in.
+   *
+   * The accept page needs to know whether this person has an account yet,
+   * and it cannot ask an authenticated endpoint: an invitee with no password
+   * cannot sign in, so requiring a session to accept an invitation is a
+   * closed loop with no way out. The token is the credential here, exactly as
+   * it is for a password reset.
+   *
+   * Says as little as it can. Enough to address the person by the workspace
+   * they were invited to, and nothing about who else is in it.
+   */
+  async lookupInvitation(invitationToken: string) {
+    const invitation = await prisma.tenantMembership.findUnique({
+      where: { inviteToken: hashToken(invitationToken) },
+      include: { tenant: { select: { name: true, status: true } }, user: { select: { email: true, status: true } } },
+    });
+
+    if (!invitation || invitation.status !== "INVITED") {
+      throw new AppError("Invitation is invalid", 401, ErrorCodes.INVITATION_INVALID);
+    }
+    if (!invitation.inviteExpiresAt || invitation.inviteExpiresAt <= new Date()) {
+      throw new AppError("Invitation has expired", 410, ErrorCodes.INVITATION_EXPIRED);
+    }
+    if (invitation.tenant.status !== "ACTIVE") {
+      throw new AppError("Tenant is not active", 403, ErrorCodes.FORBIDDEN);
+    }
+
+    return {
+      email: invitation.user.email,
+      tenantName: invitation.tenant.name,
+      role: invitation.role,
+      // INVITED means createInvitation made a placeholder account with a
+      // random password nobody knows — that person has to choose one. An
+      // account that already existed does not, and must not be offered the
+      // chance: see claimInvitation.
+      needsPassword: invitation.user.status === "INVITED",
+    };
+  }
+
+  /**
+   * Set the password on a placeholder account and activate the membership.
+   *
+   * Unauthenticated by necessity and safe by construction: the token was
+   * delivered to the invited address, so presenting it proves control of that
+   * mailbox — the same proof a password-reset link carries, and the same
+   * proof `acceptInvitation` already relies on when it promotes the account
+   * from INVITED to ACTIVE.
+   *
+   * The refusal below is the part that matters. If the invited address
+   * already has a real account, this must not set a password on it. An admin
+   * can invite any address they like, so allowing that would turn "invite" into
+   * "take over an existing account" — the invitation would become a password
+   * reset for a mailbox the admin does not control. Those people sign in
+   * first, and accept from a session that is already theirs.
+   */
+  async claimInvitation(input: { invitationToken: string; password: string }, context: InviteeContext) {
+    return prisma.$transaction(async (tx) => {
+      const invitation = await tx.tenantMembership.findUnique({
+        where: { inviteToken: hashToken(input.invitationToken) },
+        include: { tenant: true, user: true },
+      });
+
+      if (!invitation || invitation.status !== "INVITED") {
+        throw new AppError("Invitation is invalid", 401, ErrorCodes.INVITATION_INVALID);
+      }
+      if (!invitation.inviteExpiresAt || invitation.inviteExpiresAt <= new Date()) {
+        await tx.tenantMembership.update({
+          where: { id: invitation.id },
+          data: { status: "REMOVED", inviteToken: null, inviteExpiresAt: null },
+        });
+        throw new AppError("Invitation has expired", 410, ErrorCodes.INVITATION_EXPIRED);
+      }
+      if (invitation.tenant.status !== "ACTIVE") {
+        throw new AppError("Tenant is not active", 403, ErrorCodes.FORBIDDEN);
+      }
+      if (invitation.user.status !== "INVITED") {
+        throw new AppError(
+          "This email already has an account. Sign in, then accept the invitation.",
+          409,
+          ErrorCodes.CONFLICT,
+          { reason: "ACCOUNT_ALREADY_EXISTS" }
+        );
+      }
+
+      await billingService.assertUserWithinLimit(invitation.tenantId, 1);
+
+      await tx.appUser.update({
+        where: { id: invitation.userId },
+        data: {
+          passwordHash: await hashPassword(input.password),
+          status: "ACTIVE",
+          // The link arrived in that mailbox, which is the same evidence the
+          // verification email would have produced. Asking for a code as well
+          // would be asking them to prove it twice.
+          emailVerifiedAt: invitation.user.emailVerifiedAt ?? new Date(),
+        },
+      });
+
+      const membership = await tx.tenantMembership.update({
+        where: { id: invitation.id },
+        data: { status: "ACTIVE", inviteExpiresAt: null },
+        select: memberSelect,
+      });
+
+      await auditService.record(
+        {
+          tenantId: invitation.tenantId,
+          actorUserId: invitation.userId,
+          eventType: "MEMBERSHIP_INVITATION_CLAIMED",
+          targetType: "TenantMembership",
+          targetId: invitation.id,
+          requestId: context.requestId,
+          ipAddress: context.ipAddress,
+          userAgent: context.userAgent,
+          metadata: { email: invitation.user.email, role: invitation.role },
+        },
+        tx
+      );
+
+      return { email: invitation.user.email, membership };
+    });
   }
 
   async acceptInvitation(input: AcceptInvitationInput, context: InviteeContext) {
@@ -416,7 +597,7 @@ export class MembershipService {
       if (!invitation) {
         throw new AppError("Pending invitation not found", 404, ErrorCodes.NOT_FOUND);
       }
-      assertAdminBoundary(context.role, invitation.role);
+      assertCanManageRole(context.role, invitation.role);
       await tx.tenantMembership.update({
         where: { id: invitation.id },
         data: { status: "REMOVED", inviteToken: null, inviteExpiresAt: null },
@@ -435,8 +616,8 @@ export class MembershipService {
       });
       if (!target) throw new AppError("Membership not found", 404, ErrorCodes.NOT_FOUND);
 
-      assertAdminBoundary(context.role, target.role);
-      if (input.role) assertAdminBoundary(context.role, input.role);
+      assertCanManageRole(context.role, target.role);
+      if (input.role) assertCanInviteRole(context.role, input.role);
       const nextRole = input.role ?? target.role;
       const nextStatus = input.status ?? target.status;
       // Promoting a user to SUPPORT in this workspace is only allowed if they
@@ -507,7 +688,7 @@ export class MembershipService {
       // not act on an Owner. Reset is if anything the most attractive
       // action to abuse — it is the one that ends with somebody enrolling a
       // new factor of their choosing.
-      assertAdminBoundary(context.role, target.role);
+      assertCanManageRole(context.role, target.role);
 
       // Resetting your own is not an administrative act; it is the
       // self-service path, and that one asks for a code you can only supply
@@ -561,7 +742,7 @@ export class MembershipService {
       });
       if (!target) throw new AppError("Membership not found", 404, ErrorCodes.NOT_FOUND);
 
-      assertAdminBoundary(context.role, target.role);
+      assertCanManageRole(context.role, target.role);
       await protectLastOwner(tx, context.tenantId, target, "MEMBER", "REMOVED");
       await tx.refreshToken.deleteMany({
         where: { tenantId: context.tenantId, userId: target.userId },

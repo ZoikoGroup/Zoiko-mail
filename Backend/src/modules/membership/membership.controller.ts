@@ -16,8 +16,15 @@ function requestContext(req: Request) {
 }
 
 export const list = asyncHandler(async (req: Request, res: Response) => {
-  const members = await membershipService.list(requestContext(req));
-  sendSuccess(res, 200, { members }, req.requestId);
+  const q = req.query as { limit?: number; cursor?: string };
+  const page = await membershipService.list(requestContext(req), {
+    limit: q.limit,
+    cursor: q.cursor,
+  });
+  // `members` keeps its name and stays an array — every existing caller reads
+  // it that way, and a page object under the same key would be a silent
+  // breaking change that renders as an empty table rather than an error.
+  sendSuccess(res, 200, { members: page.items, nextCursor: page.nextCursor }, req.requestId);
 });
 
 export const add = asyncHandler(async (req: Request, res: Response) => {
@@ -35,6 +42,24 @@ export const createInvitation = asyncHandler(async (req: Request, res: Response)
 export const previewInvitation = asyncHandler(async (req: Request, res: Response) => {
   const letter = await membershipService.previewInvitation(req.body, requestContext(req));
   sendSuccess(res, 200, { letter }, req.requestId);
+});
+
+export const lookupInvitation = asyncHandler(async (req: Request, res: Response) => {
+  const token = String((req.query as { token?: string }).token ?? "");
+  sendSuccess(res, 200, await membershipService.lookupInvitation(token), req.requestId);
+});
+
+export const claimInvitation = asyncHandler(async (req: Request, res: Response) => {
+  const result = await membershipService.claimInvitation(req.body, {
+    userId: "",
+    requestId: req.requestId,
+    ipAddress: req.ip ?? null,
+    userAgent: req.header("user-agent") ?? null,
+  });
+  // No session is issued. Choosing a password and signing in with it are
+  // separate on purpose: it proves the password works before they rely on
+  // it, and it keeps MFA enrolment on the sign-in path where AC-002 puts it.
+  sendSuccess(res, 200, { email: result.email }, req.requestId);
 });
 
 export const acceptInvitation = asyncHandler(async (req: Request, res: Response) => {

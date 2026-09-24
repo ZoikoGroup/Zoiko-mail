@@ -152,7 +152,7 @@ export class DashboardService {
       // and reimplementing that here would have quietly widened it.
       audit: () =>
         context.canReadAudit
-          ? auditService.list(tenantId, { page: 1, limit: 6 }, role)
+          ? auditService.list(tenantId, { limit: 6 }, role)
           : Promise.resolve(null),
 
       deliveryFailures: () => deliveryFailureSummary(tenantId, windowHours),

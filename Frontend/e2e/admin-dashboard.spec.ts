@@ -163,7 +163,11 @@ async function openDashboard(
       })
     )
   );
-  await page.route(`${API}/membership/members`, (route) =>
+  // Trailing `*` because the members list is paginated now (API §4) and the
+  // client asks with `?limit=`. A pattern without it stops matching, the
+  // catch-all answers instead, and the tile reads zero — which looks like a
+  // counting bug rather than a stub that no longer fires.
+  await page.route(`${API}/membership/members*`, (route) =>
     route.fulfill(
       json({
         members: Array.from({ length: fanout?.members ?? 2 }, (_, i) => ({
@@ -195,7 +199,7 @@ async function openDashboard(
       })
     )
   );
-  await page.route(`${API}/domains`, (route) => route.fulfill(json({ domains: [] })));
+  await page.route(`${API}/domains*`, (route) => route.fulfill(json({ domains: [] })));
   await page.route(/\/connectors\/admin/, (route) => route.fulfill(json({ accounts: [] })));
   await page.route(/\/audit\/events/, (route) => route.fulfill(json({ events: [] })));
   await page.route(/\/mail\/admin\/delivery-events\/summary/, (route) =>

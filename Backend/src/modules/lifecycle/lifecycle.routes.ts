@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { MembershipRole } from "@prisma/client";
 import { z } from "zod";
 import { authenticate, idempotency, requireCapability, requireRole, tenantContext, validate } from "../../common/middleware/index.js";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
@@ -8,6 +9,7 @@ import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
 import { jobService } from "../job/job.service.js";
+import { policyService } from "../policy/policy.service.js";
 import { exportStorage } from "./export.storage.js";
 import { HARD_DELETE_SLA_DAYS, hardDeleteDeadlineFrom, lifecycleService } from "./lifecycle.service.js";
 export const lifecycleRouter = Router();
@@ -60,10 +62,61 @@ const confirmDeletionBody = z.object({
  * change closes for export, and it stays open until a second-approver
  * mechanism exists.
  */
-lifecycleRouter.use(authenticate, tenantContext, requireRole("OWNER"), idempotency);
+/**
+ * RBAC §2 gives "Request export" and "Request deletion" to the Owner outright
+ * and to an Admin "By policy". That condition is about the workspace rather
+ * than about the caller, so it cannot live in a matrix row — the matrix opens
+ * the route, and this decides whether this workspace permits it.
+ *
+ * Deny-by-default, because `evaluate` answers DENY/NO_ACTIVE_POLICY for a
+ * workspace that has never set one. That is the intended reading of "By
+ * policy": an Admin may not until an Owner says so, not "unless forbidden".
+ *
+ * The Owner never consults it. An Owner writing a policy to grant themselves
+ * a capability their own column already gives outright would be answering to
+ * a rule only they can edit, which is not a control.
+ */
+async function assertWorkspacePermits(
+  type: "EXPORT" | "DELETION",
+  c: { tenantId: string; userId: string; role: MembershipRole },
+  requestId?: string
+): Promise<void> {
+  if (c.role === "OWNER") return;
+
+  const decision = await policyService.evaluate(
+    { type, context: { actor: { role: c.role } } },
+    { tenantId: c.tenantId, userId: c.userId, role: c.role, requestId }
+  );
+  if (decision.effect === "DENY") {
+    await auditService.record({
+      tenantId: c.tenantId,
+      actorUserId: c.userId,
+      eventType: type === "EXPORT" ? "DATA_EXPORT_POLICY_DENIED" : "DATA_DELETION_POLICY_DENIED",
+      targetType: "Tenant",
+      targetId: c.tenantId,
+      requestId,
+      metadata: { reason: decision.reason, role: c.role },
+    });
+    throw new AppError(
+      decision.reason === "NO_ACTIVE_POLICY"
+        ? `This workspace has not enabled ${type === "EXPORT" ? "exports" : "deletion requests"} for administrators. An Owner can do this, or activate a ${type} policy.`
+        : `Refused by tenant policy (${decision.reason})`,
+      403,
+      ErrorCodes.FORBIDDEN,
+      { reason: decision.reason }
+    );
+  }
+}
+
+// Owner and Admin both reach this router; what each may *do* is decided per
+// route below. It was requireRole("OWNER") for the whole router, which is why
+// `data.export` sat in the Admin matrix row with nothing behind it — the
+// capability resolved and the router had already refused.
+lifecycleRouter.use(authenticate, tenantContext, requireRole("OWNER", "ADMIN"), idempotency);
 lifecycleRouter.get("/", asyncHandler(async (req, res) => { sendSuccess(res, 200, { requests: await prisma.dataLifecycleRequest.findMany({ where: { tenantId: req.tenantContext!.tenantId }, include: { job: true }, orderBy: { createdAt: "desc" } }) }, req.requestId); }));
 lifecycleRouter.post("/exports", requireCapability("data.export"), validate(body), asyncHandler(async (req, res) => {
   const c=req.tenantContext!;
+  await assertWorkspacePermits("EXPORT", c, req.requestId);
   const result=await prisma.$transaction(async tx => {
     const job=await jobService.enqueue({ tenantId:c.tenantId,userId:c.userId,type:"DATA_EXPORT",payload:{scope:"TENANT"},idempotencyKey:`export:${req.body.idempotencyKey ?? req.header("Idempotency-Key")}` },tx);
     const existing=await tx.dataLifecycleRequest.findFirst({where:{tenantId:c.tenantId,jobId:job.id}});
@@ -98,6 +151,7 @@ lifecycleRouter.get("/exports/:requestId/download", requireCapability("data.expo
 }));
 lifecycleRouter.post("/deletions", validate(deletionBody), asyncHandler(async (req, res) => {
   const c = req.tenantContext!;
+  await assertWorkspacePermits("DELETION", c, req.requestId);
   const targetType = req.body.targetType as "TENANT" | "USER";
   // Refused rather than accepted and never run: a request for a target with no
   // executor would sit in the queue accruing an SLA it can never meet.
@@ -136,7 +190,7 @@ lifecycleRouter.post("/deletions", validate(deletionBody), asyncHandler(async (r
  * The deadline is computed here and never read from the request body: "the
  * scheduler enforces 30 days" is only true if the server owns the number.
  */
-lifecycleRouter.post("/:requestId/approve", validate(params, "params"), asyncHandler(async (req, res) => {
+lifecycleRouter.post("/:requestId/approve", requireRole("OWNER"), validate(params, "params"), asyncHandler(async (req, res) => {
   const c = req.tenantContext!;
   const item = await prisma.dataLifecycleRequest.findFirst({
     where: { id: String(req.params.requestId), tenantId: c.tenantId, type: "DELETION", status: "REQUESTED" },
@@ -189,21 +243,21 @@ lifecycleRouter.get("/sla", asyncHandler(async (req, res) => {
   sendSuccess(res, 200, await lifecycleService.slaReport(req.tenantContext!.tenantId), req.requestId);
 }));
 
-lifecycleRouter.post("/:requestId/block", validate(params, "params"), validate(blockBody), asyncHandler(async (req, res) => {
+lifecycleRouter.post("/:requestId/block", requireRole("OWNER"), validate(params, "params"), validate(blockBody), asyncHandler(async (req, res) => {
   const c = req.tenantContext!;
   sendSuccess(res, 200, await lifecycleService.block(c.tenantId, String(req.params.requestId), req.body.reason, c), req.requestId);
 }));
 
-lifecycleRouter.post("/:requestId/unblock", validate(params, "params"), asyncHandler(async (req, res) => {
+lifecycleRouter.post("/:requestId/unblock", requireRole("OWNER"), validate(params, "params"), asyncHandler(async (req, res) => {
   const c = req.tenantContext!;
   sendSuccess(res, 200, await lifecycleService.unblock(c.tenantId, String(req.params.requestId), c), req.requestId);
 }));
 
-lifecycleRouter.post("/:requestId/schedule", validate(params, "params"), validate(scheduleBody), asyncHandler(async (req, res) => {
+lifecycleRouter.post("/:requestId/schedule", requireRole("OWNER"), validate(params, "params"), validate(scheduleBody), asyncHandler(async (req, res) => {
   const c = req.tenantContext!;
   sendSuccess(res, 200, await lifecycleService.schedule(c.tenantId, String(req.params.requestId), req.body.scheduledFor, c), req.requestId);
 }));
-lifecycleRouter.post("/:requestId/confirm-deletion", validate(params, "params"), validate(confirmDeletionBody), asyncHandler(async (req, res) => {
+lifecycleRouter.post("/:requestId/confirm-deletion", requireRole("OWNER"), validate(params, "params"), validate(confirmDeletionBody), asyncHandler(async (req, res) => {
   const context = req.tenantContext!;
   const tenant = await prisma.tenant.findFirst({ where: { id: context.tenantId }, select: { name: true } });
   if (!tenant || tenant.name !== req.body.tenantName) {
@@ -247,7 +301,7 @@ lifecycleRouter.post("/:requestId/confirm-deletion", validate(params, "params"),
   });
   sendSuccess(res, 202, result, req.requestId);
 }));
-lifecycleRouter.post("/:requestId/cancel", validate(params, "params"), asyncHandler(async (req, res) => {
+lifecycleRouter.post("/:requestId/cancel", requireRole("OWNER"), validate(params, "params"), asyncHandler(async (req, res) => {
   const context = req.tenantContext!;
   const item = await prisma.dataLifecycleRequest.findFirst({
     where: {
