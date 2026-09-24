@@ -17,7 +17,7 @@ export function useAiActions() {
     queryFn: listAiActions,
     staleTime: 15_000,
     // Light polling keeps new extractions appearing without a websocket layer.
-    refetchInterval: 30_000,
+    // Polling removed — SSE AI_EXTRACTION_DONE invalidates this cache.
   });
 }
 

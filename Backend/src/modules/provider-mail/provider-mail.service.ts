@@ -4,6 +4,7 @@ import { env } from "../../config/env.js";
 import { auditService } from "../audit/audit.service.js";
 import { normalizeSubject, uniqueParticipants } from "../message/message.utils.js";
 import { imapSmtpAdapter, type ImapSmtpAdapter } from "./imap-smtp.adapter.js";
+import { sseManager } from "../../common/sse/sse.manager.js";
 
 export class ProviderMailService {
   constructor(private readonly adapter: ImapSmtpAdapter = imapSmtpAdapter) {}
@@ -214,6 +215,15 @@ export class ProviderMailService {
       targetId: account.id,
       metadata: { fetched: fetched.length, imported },
     });
+    // Push real-time event if new mail was imported
+    if (imported > 0) {
+      sseManager.sendToUser(mapping.userId, {
+        type: "NEW_MAIL",
+        tenantId: mapping.tenantId,
+        userId: mapping.userId,
+        payload: { count: imported, folder: "INBOX" },
+      });
+    }
     return { fetched: fetched.length, imported };
   }
 

@@ -45,8 +45,8 @@ export function useMailList(params: ListMailParams) {
     queryKey: listKey(params),
     queryFn: () => listMail(params),
     staleTime: 15_000,
-    // Light polling keeps the inbox fresh without a websocket layer.
-    refetchInterval: 30_000,
+    // Polling removed — SSE pushes NEW_MAIL events to invalidate this cache.
+    // Keep refetchOnWindowFocus so switching tabs still refreshes.
   });
 }
 
@@ -55,7 +55,7 @@ export function useUnreadCounts() {
     queryKey: ["mail", "unread-counts"],
     queryFn: fetchUnreadCounts,
     staleTime: 15_000,
-    refetchInterval: 30_000,
+    // Polling removed — SSE pushes UNREAD_COUNT events to invalidate.
   });
 }
 
@@ -337,4 +337,3 @@ export function useUpdateSignature() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["mail", "signature"] }),
   });
 }
- 

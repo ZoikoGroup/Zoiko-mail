@@ -21,6 +21,12 @@ const server = app.listen(PORT, () => {
 });
 
 let schedulerRunning = false;
+import { sseManager } from "./common/sse/sse.manager.js";
+
+// Heartbeat ping every 30s to keep SSE connections alive
+const sseHeartbeat = setInterval(() => sseManager.ping(), 30_000);
+sseHeartbeat.unref();
+
 const scheduler = setInterval(() => {
   if (schedulerRunning) return;
   schedulerRunning = true;

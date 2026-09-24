@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useCallback, type ReactNode } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { Menu, X, LogOut } from "lucide-react";
-// import { isLoggedIn } from "@/lib/auth-storage";
 import {
   clearTokens,
   getPlatformToken,
@@ -17,6 +16,9 @@ import type { MeResponse } from "@/lib/auth-api";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { DASHBOARD_ITEM, MEMBER_NAV, sectionsFor } from "@/lib/nav";
 import { resolveWorkspaceHref, workspaceDenialNotice } from "@/lib/workspace";
+import { useSSE } from "@/lib/sse-client";
+import { useToast, ToastContainer } from "@/components/ui/Toast";
+import { useQueryClient } from "@tanstack/react-query";
 import { NetworkBanner } from "@/components/ui/NetworkBanner";
 
 /** This shell is the member workspace; only sessions opened for it belong. */
@@ -24,7 +26,7 @@ const MEMBER_WORKSPACE = "MEMBER" as const;
 import { AccessDenied } from "@/components/ui/AccessDenied";
 
 // Roles that belong on the member dashboard. SUPPORT has its own dashboard
-// at /support and should never land here.
+// at /support-workspace and should never land here.
 const MEMBER_DASHBOARD_ROLES = ["OWNER", "ADMIN", "MEMBER"];
 
 function initials(name?: string, email?: string) {
@@ -36,26 +38,67 @@ function initials(name?: string, email?: string) {
 export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { data, isLoading: meLoading, isError } = useMe();
+  const { data, isLoading: meLoading } = useMe();
   const me = data as MeResponse | undefined;
   const logout = useLogout();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const qc = useQueryClient();
+  const { toasts, add: addToast, dismiss } = useToast();
+
+  // ── SSE real-time event handlers ──────────────────────────────────────────
+  useSSE({
+    NEW_MAIL: useCallback((e) => {
+      // Invalidate mail list + unread counts so inbox refreshes instantly
+      qc.invalidateQueries({ queryKey: ["mail"] });
+      qc.invalidateQueries({ queryKey: ["mail", "unread"] });
+      const count = e.payload?.count ?? 1;
+      addToast({
+        type: "mail",
+        title: `${count} new email${count > 1 ? "s" : ""} arrived`,
+        duration: 4000,
+      });
+    }, [qc, addToast]),
+
+    AI_EXTRACTION_DONE: useCallback((e) => {
+      // Invalidate AI actions so /ai page updates immediately
+      qc.invalidateQueries({ queryKey: ["ai", "actions"] });
+      const count = e.payload?.actionCount ?? 0;
+      if (count > 0) {
+        addToast({
+          type: "ai",
+          title: `AI found ${count} action${count > 1 ? "s" : ""}`,
+          body: "Go to AI drafting & summaries to review",
+          duration: 5000,
+        });
+      }
+    }, [qc, addToast]),
+
+    AI_DRAFT_READY: useCallback(() => {
+      // Invalidate mail list so Drafts folder shows the new draft
+      qc.invalidateQueries({ queryKey: ["mail"] });
+      addToast({
+        type: "draft",
+        title: "AI draft is ready",
+        body: "Check your Drafts folder",
+        duration: 5000,
+      });
+    }, [qc, addToast]),
+
+    NOTIFICATION: useCallback((e) => {
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+      addToast({
+        type: "notification",
+        title: e.payload?.title ?? "New notification",
+        body: e.payload?.body,
+        duration: 4000,
+      });
+    }, [qc, addToast]),
+  });
 
   // Auth guard for every page that uses the shell.
   useEffect(() => {
     if (!isLoggedIn()) router.replace("/login");
   }, [router]);
-
-  // Session guard: the shell only renders for a session /auth/me validated.
-  // If that call fails — token refused, or the backend unreachable — there is
-  // nothing to show, and the loading gate below would sit on a spinner with no
-  // way onward. Treat it as signed out and return to the login form.
-  useEffect(() => {
-    if (isError) {
-      clearTokens();
-      router.replace("/login");
-    }
-  }, [isError, router]);
 
   // Staff-token guard: a user with a platform token (staff) has no tenant
   // membership, so useMe() will never resolve on this page and the loading
@@ -73,8 +116,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   // session that belongs elsewhere is ended rather than left usable.
   //
   // A tenant support member is covered by this too: their session is
-  // SUPPORT-scoped, so it is turned away here and they land on the support
-  // console at /support after re-authenticating for that workspace.
+  // SUPPORT-scoped, so it is turned away here rather than quietly redirected
+  // to /tenant-support, because reaching another workspace takes a sign-in.
   //
   // Skipped for staff, whose platform token has no tenant membership and no
   // workspace scope; the effect above has already sent them to /support.
@@ -133,7 +176,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             className="absolute inset-0 bg-black/50"
             onClick={() => setMobileOpen(false)}
           />
-          <aside className="zoi-drawer absolute left-0 top-0 flex h-full w-64 flex-col border-r border-[var(--border)] bg-[var(--surface)]">
+          <aside className="absolute left-0 top-0 flex h-full w-64 flex-col border-r border-[var(--border)] bg-[var(--surface)]">
             <div className="flex justify-end p-2">
               <button
                 onClick={() => setMobileOpen(false)}
@@ -188,6 +231,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             while the sidebar/header stay mounted (see .page-enter CSS). */}
         <main key={pathname} className="page-enter flex-1 overflow-y-auto">{children}</main>
       </div>
+
+      {/* Toast notifications — rendered outside main so they float above everything */}
+      <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>
   );
 }
