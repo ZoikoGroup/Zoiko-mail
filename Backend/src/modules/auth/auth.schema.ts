@@ -11,7 +11,7 @@ export const registerSchema = z.object({
 
 export const createWorkspaceSchema = z.object({
   tenantName: z.string().trim().min(1).max(120),
-  planCode: z.string().trim().min(1).max(64).default("starter"),
+  planCode: z.string().trim().min(1).max(64).default("free"),
 });
 
 export const loginSchema = z.object({

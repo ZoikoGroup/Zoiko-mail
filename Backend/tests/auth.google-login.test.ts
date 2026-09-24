@@ -138,7 +138,7 @@ describe("Google sign-in opens a session in one step", () => {
     const createdRaw = await request(app)
       .post("/api/v1/auth/create-workspace")
       .set("Authorization", `Bearer ${start.body.data.pendingToken}`)
-      .send({ tenantName: "Devon's Workspace", planCode: "starter" })
+      .send({ tenantName: "Devon's Workspace", planCode: "free" })
       .expect(201);
     expect(createdRaw.body.data.state).toBe("MFA_ENROLLMENT_REQUIRED");
     const created = await throughMfa(app, createdRaw);

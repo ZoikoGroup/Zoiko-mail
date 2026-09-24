@@ -1605,10 +1605,12 @@ model Plan {
   id            String         @id @default(uuid()) @db.Uuid
   code          String         @unique
   name          String
+  tagline       String?
   priceMonthly  Int
   userLimit     Int
   mailboxLimit  Int
   storageLimitGb Int
+  features      String[]  @default([])
   stripePriceId String?        @map("stripe_price_id")
   active        Boolean        @default(true)
   createdAt     DateTime       @default(now()) @map("created_at")
