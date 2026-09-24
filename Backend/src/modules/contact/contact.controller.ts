@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
 import { contactService } from "./contact.service.js";
+import { listContactsSchema } from "./contact.schema.js";
 
 // function context(req: Request) {
 //   return {
@@ -26,7 +27,7 @@ function context(req: Request) {
 }
 
 export const list = asyncHandler(async (req: Request, res: Response) => {
-  sendSuccess(res, 200, await contactService.list(req.query as any, context(req)), req.requestId);
+  sendSuccess(res, 200, await contactService.list(listContactsSchema.parse(req.query), context(req)), req.requestId);
 });
 
 export const getById = asyncHandler(async (req: Request, res: Response) => {

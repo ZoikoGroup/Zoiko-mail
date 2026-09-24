@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
-import { authHeader, registerUser, stepUpHeader, type RegisteredUser } from "./helpers.js";
+import { authHeader, registerUser, type RegisteredUser } from "./helpers.js";
 import { REDACTED_SUBJECT } from "../src/modules/support/redaction.js";
 
 const app = createApp();

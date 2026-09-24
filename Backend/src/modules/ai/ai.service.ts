@@ -255,7 +255,7 @@ export class AIService {
 
     // Update the original PENDING action that triggered this extraction
     const sourceActionId = typeof payload === "object" && payload !== null && !Array.isArray(payload)
-      && typeof (payload as any).sourceActionId === "string" ? (payload as any).sourceActionId : null;
+      && typeof payload.sourceActionId === "string" ? payload.sourceActionId : null;
     if (sourceActionId) {
       const firstResult = extracted[0];
       await prisma.aIAction.update({

@@ -5,7 +5,6 @@ import { prisma } from "../src/config/prisma.js";
 import {
   authHeader,
   loginUser,
-  mfaCodeFor,
   registerUser,
   stepUpHeader,
   type RegisteredUser,

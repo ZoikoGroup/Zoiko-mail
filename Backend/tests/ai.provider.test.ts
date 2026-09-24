@@ -57,7 +57,10 @@ describe("OpenAIProvider failure handling", () => {
   });
 
   it("throws a clean configuration error when the API key is missing", async () => {
-    const provider = await loadOpenAIProvider();
+    // Empty string: a blank key is read as unset (env schema preprocesses
+    // blanks to undefined), so the check does not depend on whether the
+    // developer's .env happens to carry a real key.
+    const provider = await loadOpenAIProvider("");
     await expect(provider.extractActions(extractInput)).rejects.toMatchObject({
       statusCode: 503,
       code: "AI_PROVIDER_NOT_CONFIGURED",
