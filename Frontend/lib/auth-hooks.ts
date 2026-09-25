@@ -78,11 +78,34 @@ export function sessionWorkspace(data: AuthResponse): string | undefined {
   return typeof data.workspace === "string" ? data.workspace : undefined;
 }
 
+/**
+ * Where a sign-in lands — and the point at which the previous account's data
+ * stops existing in this tab.
+ *
+ * The cache is cleared here rather than in each caller because every way into
+ * the product funnels through this function: password, Google, workspace
+ * creation, workspace join. One of them forgetting is the whole failure.
+ *
+ * `useLogout` already clears on the way out, which covers somebody who signs
+ * out deliberately. It does not cover the two ways a session actually ends in
+ * practice — it expires, or the person simply navigates to /login — and in
+ * both of those the QueryClient survives with the last account's rows in it.
+ * `staleTime` is 60s and `refetchOnWindowFocus` is off, so the next account
+ * would render the previous one's members, mailboxes and domains immediately
+ * and without a single request, for up to a minute.
+ *
+ * The server is not the problem here: every one of those endpoints is
+ * tenant-scoped and answers correctly. The stale rows never come back over
+ * the wire — they are already in the tab.
+ */
 export function routeAuthState(
   data: AuthResponse,
   router: AppRouterInstance,
-  opts?: { signedInHref?: string }
+  opts?: { signedInHref?: string; queryClient?: { clear: () => void } }
 ): void {
+  // Before routing, so nothing renders between the clear and the navigation.
+  opts?.queryClient?.clear();
+
   let href: string;
 
   if (data.state === "STAFF_CONSOLE") {
@@ -167,8 +190,9 @@ export function useLogin() {
   return useMutation({
     mutationFn: (input: LoginInput) => login(input),
     onSuccess: async (data) => {
-      await qc.invalidateQueries({ queryKey: ["me"] });
-      routeAuthState(data, router);
+      // clear(), not invalidate(["me"]): invalidating one key leaves every
+      // other cached list holding whichever account was signed in before.
+      routeAuthState(data, router, { queryClient: qc });
     },
   });
 }
@@ -197,8 +221,9 @@ export function useGoogleLogin() {
     mutationFn: ({ idToken }: { idToken: string }) => googleLogin(idToken),
 
     onSuccess: async (data) => {
-      await qc.invalidateQueries({ queryKey: ["me"] });
-      routeAuthState(data, router);
+      // clear(), not invalidate(["me"]): invalidating one key leaves every
+      // other cached list holding whichever account was signed in before.
+      routeAuthState(data, router, { queryClient: qc });
     },
   });
 }
@@ -244,7 +269,7 @@ export function useCreateWorkspace() {
       // where each state goes; onboarding is only reachable once one exists.
       const state = (data as { state?: string }).state;
       if (state && state !== "SIGNED_IN") {
-        routeAuthState(data as unknown as AuthResponse, router);
+        routeAuthState(data as unknown as AuthResponse, router, { queryClient: qc });
         return;
       }
 
@@ -273,7 +298,7 @@ export function useJoinWorkspace() {
       // same way a sign-in is gated.
       const state = (data as { state?: string }).state;
       if (state && state !== "SIGNED_IN") {
-        routeAuthState(data as unknown as AuthResponse, router);
+        routeAuthState(data as unknown as AuthResponse, router, { queryClient: qc });
         return;
       }
 

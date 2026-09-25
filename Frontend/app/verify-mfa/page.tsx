@@ -10,6 +10,7 @@ import {
   verifyMfaChallenge,
   type MfaEnrolmentOffer,
 } from "@/lib/auth-api";
+import { useQueryClient } from "@tanstack/react-query";
 import { routeAuthState } from "@/lib/auth-hooks";
 import { ApiError } from "@/lib/api-client";
 
@@ -30,6 +31,11 @@ type Phase = "code" | "enrol" | "recovery";
 
 export default function VerifyMfaPage() {
   const router = useRouter();
+  // Handed to routeAuthState so the previous account's cached rows do not
+  // survive into this one. AC-002 makes this the path every Owner, Admin
+  // and Support actor signs in through, so missing it here would leave the
+  // fix covering only the accounts that need it least.
+  const queryClient = useQueryClient();
   const [token, setToken] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [reason, setReason] = useState("");
@@ -117,7 +123,7 @@ export default function VerifyMfaPage() {
     try {
       const auth = await verifyMfaChallenge(token, code.trim());
       clearStash();
-      routeAuthState(auth, router);
+      routeAuthState(auth, router, { queryClient });
     } catch (err) {
       fail(err);
       setCode("");
@@ -149,7 +155,7 @@ export default function VerifyMfaPage() {
     const stored = sessionStorage.getItem("zoiko.mfa_signed_in");
     clearStash();
     sessionStorage.removeItem("zoiko.mfa_signed_in");
-    if (stored) routeAuthState(JSON.parse(stored), router);
+    if (stored) routeAuthState(JSON.parse(stored), router, { queryClient });
     else router.replace("/login");
   };
 
