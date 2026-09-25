@@ -49,7 +49,22 @@ export class AIService {
     if (decision.effect === "DENY") throw new AppError(`AI processing denied by tenant policy (${decision.reason})`, 403, ErrorCodes.FORBIDDEN);
     const action = await prisma.aIAction.create({ data: { tenantId: context.tenantId, createdByUserId: context.userId, actionType: input.actionType, messageId: input.messageId, threadId: input.threadId, inputHash: inputHash(context.tenantId, input.actionType, input.messageId, input.threadId) } });
     await auditService.record({ tenantId: context.tenantId, actorUserId: context.userId, eventType: "AI_ACTION_REQUESTED", targetType: "AIAction", targetId: action.id });
+    const { jobService } = await import("../job/job.service.js");
+    await jobService.enqueue({
+      tenantId: context.tenantId,
+      userId: context.userId,
+      type: "AI_EXTRACTION",
+      payload: {
+        messageId: input.messageId,
+        threadId: input.threadId,
+        originatingActionId: action.id,
+      },
+      idempotencyKey: `ai-extract-${action.id}`,
+    });
+
     return action;
+    // return action;
+
   }
 
   list(tenantId: string, userId: string, status?: string) {
@@ -201,6 +216,17 @@ export class AIService {
       const existing = await prisma.aIAction.findFirst({ where: { tenantId, inputHash: hash } });
       if (existing) {
         alreadyPresent += 1;
+        if (existing.status === "PENDING") {
+          await prisma.aIAction.update({
+            where: { id: existing.id, tenantId },
+            data: {
+              status: "COMPLETED",
+              output: { text: action.text, dueAt: action.dueAt ?? null, priority: action.priority },
+              confidenceScore: action.confidence,
+              sourceExcerpt: action.excerpt,
+            },
+          });
+        }
         continue;
       }
       await prisma.aIAction.create({
@@ -219,6 +245,13 @@ export class AIService {
       });
       created += 1;
     }
+
+    // Close out any placeholder rows for this message that the loop above
+    // never touched — e.g. the provider found nothing at all this run.
+    await prisma.aIAction.updateMany({
+      where: { tenantId, messageId: message.id, status: "PENDING" },
+      data: { status: "COMPLETED", output: { text: null, note: "No items found" } },
+    });
 
     await auditService.record({
       tenantId,
@@ -262,15 +295,15 @@ export class AIService {
 
     const sourceMessage = action.messageId
       ? await prisma.emailMessage.findFirst({
-          where: { id: action.messageId, tenantId },
-          include: { thread: true, recipients: true },
-        })
+        where: { id: action.messageId, tenantId },
+        include: { thread: true, recipients: true },
+      })
       : null;
     const participants = sourceMessage
       ? uniqueSorted([
-          ...(sourceMessage.fromAddress ? [sourceMessage.fromAddress] : []),
-          ...sourceMessage.recipients.map((recipient) => recipient.email),
-        ])
+        ...(sourceMessage.fromAddress ? [sourceMessage.fromAddress] : []),
+        ...sourceMessage.recipients.map((recipient) => recipient.email),
+      ])
       : [];
     const membership = await prisma.tenantMembership.findFirst({
       where: { tenantId, userId: actorUserId, status: "ACTIVE" },

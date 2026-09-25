@@ -72,11 +72,7 @@ class SSEManager {
 
     const message = this.format({ ...event, timestamp: new Date().toISOString() });
     for (const client of set) {
-      try {
-        client.res.write(message);
-      } catch {
-        // Connection may have closed — cleanup happens via the close event
-      }
+      this.writeToClient(client, message);
     }
   }
 
@@ -89,11 +85,7 @@ class SSEManager {
     for (const [, set] of this.clients) {
       for (const client of set) {
         if (client.tenantId === tenantId) {
-          try {
-            client.res.write(message);
-          } catch {
-            // Connection may have closed
-          }
+          this.writeToClient(client, message);
         }
       }
     }
@@ -107,11 +99,7 @@ class SSEManager {
     const message = this.format({ type: "PING", timestamp: new Date().toISOString() });
     for (const [, set] of this.clients) {
       for (const client of set) {
-        try {
-          client.res.write(message);
-        } catch {
-          // Ignore — cleanup happens via close event
-        }
+        this.writeToClient(client, message);
       }
     }
   }
@@ -120,6 +108,21 @@ class SSEManager {
     let total = 0;
     for (const set of this.clients.values()) total += set.size;
     return total;
+  }
+
+  /**
+   * Force-flush a write past any buffering middleware (gzip, compression).
+   * SSE requires bytes to reach the browser immediately.
+   */
+  private writeToClient(client: SSEClient, message: string): void {
+    try {
+      client.res.write(message);
+      if (typeof (client.res as any).flush === "function") {
+        (client.res as any).flush();
+      }
+    } catch {
+      // Connection closed — cleanup happens via the close event
+    }
   }
 
   /**

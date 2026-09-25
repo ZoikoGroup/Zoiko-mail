@@ -16,7 +16,7 @@ import type { MeResponse } from "@/lib/auth-api";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { DASHBOARD_ITEM, MEMBER_NAV, sectionsFor } from "@/lib/nav";
 import { resolveWorkspaceHref, workspaceDenialNotice } from "@/lib/workspace";
-import { useSSE } from "@/lib/sse-client";
+import { useSSE, type SSEEvent } from "@/lib/sse-client";
 import { useToast, ToastContainer } from "@/components/ui/Toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { NetworkBanner } from "@/components/ui/NetworkBanner";
@@ -47,7 +47,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   // ── SSE real-time event handlers ──────────────────────────────────────────
   useSSE({
-    NEW_MAIL: useCallback((e) => {
+    NEW_MAIL: useCallback((e: SSEEvent) => {
       // Invalidate mail list + unread counts so inbox refreshes instantly
       qc.invalidateQueries({ queryKey: ["mail"] });
       qc.invalidateQueries({ queryKey: ["mail", "unread"] });
@@ -59,7 +59,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       });
     }, [qc, addToast]),
 
-    AI_EXTRACTION_DONE: useCallback((e) => {
+    AI_EXTRACTION_DONE: useCallback((e: SSEEvent) => {
       // Invalidate AI actions so /ai page updates immediately
       qc.invalidateQueries({ queryKey: ["ai", "actions"] });
       const count = e.payload?.actionCount ?? 0;
@@ -84,7 +84,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       });
     }, [qc, addToast]),
 
-    NOTIFICATION: useCallback((e) => {
+    NOTIFICATION: useCallback((e: SSEEvent) => {
       qc.invalidateQueries({ queryKey: ["notifications"] });
       addToast({
         type: "notification",

@@ -41,6 +41,10 @@ eventsRouter.get(
         timestamp: new Date().toISOString(),
       })}\n\n`
     );
+    // Force flush — needed when compression middleware is present
+    if (typeof (res as any).flush === "function") {
+      (res as any).flush();
+    }
 
     // ── Cleanup on disconnect ──────────────────────────────────────────────
     req.on("close", cleanup);

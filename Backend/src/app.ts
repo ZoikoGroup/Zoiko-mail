@@ -40,7 +40,16 @@ export function createApp() {
   app.use(requestIdMiddleware);
   app.use(requestLogger);
   app.use(helmet());
-  app.use(compression({ threshold: env.COMPRESSION_THRESHOLD }));
+  // app.use(compression({ threshold: env.COMPRESSION_THRESHOLD }));
+  app.use(compression({
+    threshold: env.COMPRESSION_THRESHOLD,
+    filter: (req, res) => {
+      // Never compress SSE streams — compression buffers the response
+      // which breaks the real-time event delivery.
+      if (req.path.includes("/events/stream")) return false;
+      return compression.filter(req, res);
+    },
+  }));
   app.use(
     cors({
       // Security §6 requires an allow-list, not a single origin: several
