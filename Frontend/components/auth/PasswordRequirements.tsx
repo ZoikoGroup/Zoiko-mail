@@ -47,7 +47,7 @@ export default function PasswordRequirements({
           {rule.ok ? (
             <Check className="h-3 w-3 text-teal-600" />
           ) : (
-            <X className="h-3 w-3 text-[var(--ink4)]" />
+            <X className="h-3 w-3 text-[var(--ink3)]" />
           )}
           {rule.label}
         </li>

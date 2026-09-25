@@ -212,7 +212,7 @@ export default function UsagePage() {
                         label="Failed"
                         count={usage.emails.failed}
                         total={emailTotal}
-                        color="var(--err)"
+                        color="var(--crit)"
                       />
                       <BreakdownRow
                         icon={Clock}
@@ -280,7 +280,7 @@ export default function UsagePage() {
                                   }%`,
                                   backgroundColor:
                                     m.limit > 0 && m.used / m.limit > 0.8
-                                      ? "var(--err)"
+                                      ? "var(--crit)"
                                       : "var(--accent)",
                                 }}
                               />
@@ -365,7 +365,7 @@ function SummaryCard({
             style={{
               width: `${Math.min(progress, 100)}%`,
               backgroundColor:
-                progress > 80 ? "var(--err)" : "var(--accent)",
+                progress > 80 ? "var(--crit)" : "var(--accent)",
             }}
           />
         </div>
@@ -466,8 +466,8 @@ function StackedVolumeChart({
                   <stop offset="100%" stopColor="var(--ok)" stopOpacity={0} />
                 </linearGradient>
                 <linearGradient id="grad-ev-failed" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="var(--err)" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="var(--err)" stopOpacity={0} />
+                  <stop offset="0%" stopColor="var(--crit)" stopOpacity={0.3} />
+                  <stop offset="100%" stopColor="var(--crit)" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -513,7 +513,7 @@ function StackedVolumeChart({
                 type="monotone"
                 dataKey="failed"
                 stackId="1"
-                stroke="var(--err)"
+                stroke="var(--crit)"
                 fill="url(#grad-ev-failed)"
                 strokeWidth={2}
               />
@@ -583,14 +583,14 @@ function DeliveryHealthCard({
               label="Bounced"
               count={delivery.bounced}
               total={total}
-              color="var(--err)"
+              color="var(--crit)"
             />
             <BreakdownRow
               icon={XCircle}
               label="Failed"
               count={delivery.failed}
               total={total}
-              color="var(--err)"
+              color="var(--crit)"
             />
             <BreakdownRow
               icon={ThumbsDown}

@@ -194,7 +194,7 @@ function Assignees({ mailboxId }: { mailboxId: string }) {
   const addable = (people ?? []).filter((p) => !assignedIds.has(p.id));
 
   return (
-    <div className="border-t border-[var(--line)] bg-[var(--s1)] px-4 py-3">
+    <div className="border-t border-[var(--border)] bg-[var(--s2)] px-4 py-3">
       {error ? (
         <InlineError message={error.message} />
       ) : isLoading || !assignees ? (

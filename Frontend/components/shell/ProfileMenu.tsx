@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronRight, LogOut, MonitorSmartphone } from "lucide-react";
+import { Building2, ChevronRight, LogOut, MonitorSmartphone } from "lucide-react";
 
 import { useLogout, useLogoutAll, useMe } from "@/lib/auth-hooks";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -10,14 +10,14 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 /**
  * The account menu behind the avatar.
  *
- * Replaces a block that was not a menu at all: the avatar and name were
- * static text with a permanent "Log out" button beside them, and the whole
- * thing was `hidden sm:flex` — so on a phone there was no identity on screen
- * and no way to sign out.
+ * Replaces a block that was not a menu at all: the avatar, the name and a
+ * permanent "Log out" button sat side by side, and the whole thing was
+ * `hidden sm:flex` — so a phone showed no identity and offered no way to
+ * sign out.
  *
- * Three things earn their place here, and nothing else does. Workspace
- * settings, billing and audit are workspace scope and already in the nav;
- * duplicating them blurs "my account" against "this company".
+ * Only personal scope belongs here. Workspace settings, billing and audit
+ * are the workspace's, they are already in the nav, and repeating them under
+ * somebody's own name blurs "my account" against "this company".
  */
 
 function initials(name?: string, email?: string): string {
@@ -43,12 +43,10 @@ export function ProfileMenu() {
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   /**
-   * Close on Escape and on a click elsewhere.
+   * Close on Escape and on a click elsewhere, returning focus to the trigger.
    *
-   * Not decoration: this menu is the only route to signing out on a phone,
-   * so one that can be opened and not dismissed traps the person inside it.
-   * Focus returns to the trigger so a keyboard user is not dropped at the
-   * top of the document.
+   * Not a nicety: at phone width this menu is the only route to signing out,
+   * so one that opens and will not dismiss traps the person inside it.
    */
   useEffect(() => {
     if (!open) return;
@@ -73,13 +71,15 @@ export function ProfileMenu() {
 
   if (!me) return null;
 
-  // Offered only when there is somewhere to go. `/select-workspace` exists but
-  // nothing in the product links to it, so a person in two workspaces has had
+  // Offered only when there is somewhere to go. `/select-workspace` exists and
+  // nothing in the product links to it, so somebody in two workspaces has had
   // no way to move between them without signing out.
   const canSwitch = (me.workspaceCount ?? 1) > 1;
 
-  const item =
-    "flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[13px] text-[var(--ink)] hover:bg-[var(--s2)] disabled:opacity-60";
+  const row =
+    "flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-[var(--ink)] " +
+    "transition-colors hover:bg-[var(--s2)] focus-visible:bg-[var(--s2)] focus-visible:outline-none " +
+    "disabled:pointer-events-none disabled:opacity-55";
 
   return (
     <div className="relative" ref={containerRef}>
@@ -91,7 +91,7 @@ export function ProfileMenu() {
           logoutAll.mutate();
         }}
         title="Sign out on every device?"
-        message="Every session for this account ends, on every browser and device — including this one. Anyone using it will have to sign in again."
+        message="Every session for this account ends, on every browser and device — including this one. Anyone signed in elsewhere will have to sign in again."
         confirmLabel="Sign out everywhere"
         loading={logoutAll.isPending}
       />
@@ -103,35 +103,58 @@ export function ProfileMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Account menu"
-        className="flex items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-[var(--s2)]"
+        className={`flex items-center gap-2 rounded-full py-1 pl-1 pr-1 transition-colors sm:pr-2.5 ${
+          open ? "bg-[var(--s2)]" : "hover:bg-[var(--s2)]"
+        }`}
       >
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--ai)] text-xs font-semibold text-white">
+        <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--ai)] text-[11px] font-semibold tracking-wide text-white">
           {initials(me.displayName, me.email)}
         </span>
-        {/* The name hides on a phone; the avatar never does, because it is
-            the only way to reach sign-out there. */}
-        <span className="hidden text-sm text-[var(--ink2)] sm:inline">{me.displayName}</span>
+        {/* The name hides on a phone; the avatar never does, because it is the
+            only way to reach sign-out at that width. */}
+        <span className="hidden max-w-[12rem] truncate text-[13px] font-medium text-[var(--ink2)] sm:inline">
+          {me.displayName}
+        </span>
       </button>
 
       {open && (
         <div
           role="menu"
-          className="absolute right-0 z-50 mt-2 w-64 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--s1)] shadow-lg"
+          aria-label="Account"
+          /*
+            `--surface` and `--sh3`, the tokens the Modal uses. The first
+            version reached for `--s1`, which is defined nowhere — so the
+            background resolved to nothing and the menu rendered transparent,
+            with the page showing straight through it.
+          */
+          className="absolute right-0 z-50 mt-2 w-[17.5rem] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--sh3)]"
         >
           {/*
-            Identity, and not a menu item — nothing here is clickable.
-            The third line is the one that earns its place: sessions are bound
-            to one workspace, and "why can't I see X" is usually the wrong
-            workspace rather than the wrong permission.
+            Identity, and nothing here is clickable. The third line earns its
+            place: a session is bound to one workspace and an account can hold
+            several, so "why can't I see X" is usually the wrong workspace
+            rather than the wrong permission.
           */}
-          <div className="border-b border-[var(--border)] px-3 py-3">
-            <p className="truncate text-[13px] font-semibold text-[var(--ink)]">
-              {me.displayName}
-            </p>
-            <p className="truncate text-[12px] text-[var(--ink3)]">{me.email}</p>
-            <p className="mt-1 truncate text-[11.5px] text-[var(--ink2)]">
-              {titleCase(me.membership.role)} · {me.tenant.name}
-            </p>
+          <div className="flex items-start gap-3 border-b border-[var(--border)] px-3.5 py-3.5">
+            <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--ai)] text-[13px] font-semibold text-white">
+              {initials(me.displayName, me.email)}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[13.5px] font-semibold leading-tight text-[var(--ink)]">
+                {me.displayName}
+              </p>
+              {/* Truncated rather than wrapped — a long address must not push
+                  the menu wider than the button it hangs from. */}
+              <p className="mt-0.5 truncate text-[12px] leading-tight text-[var(--ink3)]">
+                {me.email}
+              </p>
+              <span className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--accent-ink)]">
+                <Building2 className="h-3 w-3 shrink-0" />
+                <span className="truncate">
+                  {titleCase(me.membership.role)} · {me.tenant.name}
+                </span>
+              </span>
+            </div>
           </div>
 
           {canSwitch && (
@@ -139,14 +162,15 @@ export function ProfileMenu() {
               <button
                 type="button"
                 role="menuitem"
-                className={item}
+                className={row}
                 onClick={() => {
                   setOpen(false);
                   router.push("/select-workspace");
                 }}
               >
-                <span>Switch workspace</span>
-                <ChevronRight className="h-4 w-4 text-[var(--ink3)]" />
+                <Building2 className="h-4 w-4 shrink-0 text-[var(--ink3)]" />
+                <span className="flex-1">Switch workspace</span>
+                <ChevronRight className="h-4 w-4 shrink-0 text-[var(--ink3)]" />
               </button>
             </div>
           )}
@@ -155,35 +179,37 @@ export function ProfileMenu() {
             <button
               type="button"
               role="menuitem"
-              className={item}
+              className={row}
               disabled={logout.isPending}
               onClick={() => {
                 setOpen(false);
                 logout.mutate();
               }}
             >
+              <LogOut className="h-4 w-4 shrink-0 text-[var(--ink3)]" />
               <span>{logout.isPending ? "Signing out…" : "Log out"}</span>
-              <LogOut className="h-4 w-4 text-[var(--ink3)]" />
             </button>
 
             {/*
-              `logoutAll` existed and nothing exposed it. For a product where
-              a session is the key to a customer's mail, "I signed in on a
-              shared machine" needs an answer that does not involve support.
-              Confirmed first: it ends this session too.
+              `logoutAll` existed and nothing exposed it. For a product where a
+              session is the key to a customer's mail, "I signed in on a shared
+              machine" needed an answer that was not a support ticket.
+              Confirmed first, because it ends this session too.
             */}
             <button
               type="button"
               role="menuitem"
-              className={item}
+              className={row}
               disabled={logoutAll.isPending}
               onClick={() => {
                 setOpen(false);
                 setConfirmingEverywhere(true);
               }}
             >
-              <span>{logoutAll.isPending ? "Signing out…" : "Sign out everywhere"}</span>
-              <MonitorSmartphone className="h-4 w-4 text-[var(--ink3)]" />
+              <MonitorSmartphone className="h-4 w-4 shrink-0 text-[var(--ink3)]" />
+              <span className="flex-1">
+                {logoutAll.isPending ? "Signing out…" : "Sign out everywhere"}
+              </span>
             </button>
           </div>
         </div>

@@ -244,7 +244,7 @@ export default function AdminMailboxesPage() {
                   .filter((mailbox) => mailbox.id === openId)
                   .map((mailbox) => (
                     <tr key={`${mailbox.id}-routing`}>
-                      <td colSpan={6} className="bg-[var(--s1)] px-4 py-3">
+                      <td colSpan={6} className="bg-[var(--s2)] px-4 py-3">
                         <Routing mailboxId={mailbox.id} address={mailbox.address} />
                       </td>
                     </tr>
