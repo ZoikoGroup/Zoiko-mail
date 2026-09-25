@@ -197,7 +197,7 @@ export const logoutAll = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const me = asyncHandler(async (req: Request, res: Response) => {
-  const result = authService.getCurrentUser(req);
+  const result = await authService.getCurrentUser(req);
   sendSuccess(res, 200, result, req.requestId);
 });
 

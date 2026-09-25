@@ -141,6 +141,15 @@ export interface MeResponse {
    * session belongs to, because one role can sign into more than one.
    */
   workspace?: "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT";
+  /**
+   * How many workspaces this account can sign into.
+   *
+   * The profile menu offers "Switch workspace" only when there is somewhere
+   * to switch to. Optional so an older server that does not send it leaves
+   * the item hidden rather than offering a page that would tell the person
+   * they belong to one workspace.
+   */
+  workspaceCount?: number;
   platformRole: "NONE" | "SUPPORT" | "SUPER_ADMIN";
   platformAccess: {
     isSupportStaff: boolean;
