@@ -11,7 +11,7 @@ import type { MeResponse } from "@/lib/auth-api";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { useCan, useCapabilities } from "@/lib/admin-capabilities";
 import { visibleNav, type AdminNavItem } from "@/lib/admin-nav";
-import { useActiveSupportGrant, useAdminNavCounts } from "@/lib/admin-hooks";
+import { useActiveSupportGrant, useAdminNavCounts, useEndSupportSession } from "@/lib/admin-hooks";
 import { Pill } from "@/components/admin/ui";
 
 /**
@@ -146,9 +146,18 @@ export function AdminShell({ children }: { children: ReactNode }) {
 function SupportGrantBanner() {
   const can = useCan();
   const { data: grant } = useActiveSupportGrant();
+  const endSession = useEndSupportSession();
   const [dismissed, setDismissed] = useState(false);
 
   if (!grant || dismissed) return null;
+
+  const busy = endSession.isPending;
+  const onEnd = () => {
+    if (busy || !grant) return;
+    endSession.mutate(grant.id, {
+      onSuccess: () => setDismissed(true),
+    });
+  };
 
   return (
     <div className="flex flex-wrap items-center gap-3 border-b border-[var(--border)] bg-[var(--warn-soft)] px-4 py-2 text-[12px] font-semibold text-[var(--warn)] sm:px-6">
@@ -158,8 +167,13 @@ function SupportGrantBanner() {
       </span>
       <span className="font-mono-num ml-auto">{grant.expiresInLabel}</span>
       {can("support.grant.end") && (
-        <button type="button" onClick={() => setDismissed(true)} className="zoiko-btn crit sm">
-          End session
+        <button
+          type="button"
+          onClick={onEnd}
+          disabled={busy}
+          className="zoiko-btn crit sm"
+        >
+          {busy ? "Ending…" : "End session"}
         </button>
       )}
     </div>

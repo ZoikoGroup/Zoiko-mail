@@ -4,7 +4,6 @@ import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
 import {
   authHeader,
-  loginUser,
   platformSignIn,
   registerUser,
   stepUpHeader,

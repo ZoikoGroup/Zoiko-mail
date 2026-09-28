@@ -66,7 +66,7 @@ export const openApiDocument = {
           required: ["tenantName", "planCode"],
           properties: {
             tenantName: { type: "string", example: "Acme Inc" },
-            planCode: { type: "string", example: "starter" },
+            planCode: { type: "string", example: "free" },
           },
         }),
         responses: {
@@ -1545,7 +1545,7 @@ export const openApiDocument = {
     schemas: {
       RegisterRequest: {
         type: "object", required: ["email", "password", "displayName", "tenantName"],
-        properties: { email: { type: "string", format: "email" }, password: { type: "string", format: "password", minLength: 8 }, displayName: { type: "string" }, tenantName: { type: "string" }, planCode: { type: "string", default: "starter" } },
+        properties: { email: { type: "string", format: "email" }, password: { type: "string", format: "password", minLength: 8 }, displayName: { type: "string" }, tenantName: { type: "string" }, planCode: { type: "string", default: "free" } },
       },
       LoginRequest: {
         type: "object", required: ["email", "password"],
@@ -1620,11 +1620,11 @@ export const openApiDocument = {
       },
       CheckoutRequest: {
         type: "object", required: ["planCode"],
-        properties: { planCode: { type: "string", enum: ["starter", "business_starter", "business_pro", "enterprise"], example: "business_pro" } },
+        properties: { planCode: { type: "string", enum: ["free", "professional", "team", "business"], example: "business" } },
       },
       Plan: {
         type: "object",
-        properties: { id: { type: "string" }, code: { type: "string" }, name: { type: "string" }, priceMonthly: { type: "integer", description: "Price in cents" }, userLimit: { type: "integer" }, mailboxLimit: { type: "integer" }, storageLimitGb: { type: "integer" } },
+        properties: { id: { type: "string" }, code: { type: "string" }, name: { type: "string" }, tagline: { type: "string", nullable: true }, priceMonthly: { type: "integer", description: "Price in cents, per user / month" }, userLimit: { type: "integer" }, mailboxLimit: { type: "integer" }, storageLimitGb: { type: "integer" }, features: { type: "array", items: { type: "string" } } },
       },
       SubscriptionInfo: {
         type: "object",

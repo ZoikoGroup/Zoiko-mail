@@ -3,7 +3,6 @@ import {
   authenticate,
   idempotency,
   requireCapability,
-  requireRole,
   tenantContext,
   validate,
 } from "../../common/middleware/index.js";

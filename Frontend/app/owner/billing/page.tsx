@@ -22,7 +22,6 @@ import {
 import { useMembers, useAdminMailboxes } from "@/lib/owner-hooks";
 import {
   CreditCard,
-  ArrowUpRight,
   ExternalLink,
   Receipt,
   Users,
@@ -30,6 +29,7 @@ import {
   HardDrive,
   Loader2,
   Building2,
+  Check,
 } from "lucide-react";
 
 function formatMoney(cents: number, currency = "usd") {
@@ -261,7 +261,9 @@ function BillingPageInner() {
                         </StatusBadge>
                         {currentPlan && (
                           <span className="text-[11px] text-[var(--ink3)]">
-                            {formatMoney(currentPlan.priceMonthly)}/month
+                            {currentPlan.priceMonthly === 0
+                              ? "No charge"
+                              : `${formatMoney(currentPlan.priceMonthly)} / user / month`}
                           </span>
                         )}
                       </div>
@@ -306,7 +308,7 @@ function BillingPageInner() {
                             <ExternalLink className="h-3.5 w-3.5" /> Manage Billing
                           </button>
                         )}
-                        {isActiveish && (
+                        {isActiveish && hasStripeCustomer && (
                           <button
                             onClick={() => setCancelOpen(true)}
                             className="zoiko-btn sm crit"
@@ -391,19 +393,31 @@ function BillingPageInner() {
                   <Skeleton className="h-16 w-full" />
                 </div>
               ) : (
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                   {plans.map((plan) => {
                     const isCurrent = plan.code === currentPlan?.code;
+                    const isFree = plan.priceMonthly === 0;
+                    const ctaLabel = isFree ? "Start free" : "Start trial";
                     return (
-                      <button
+                      <div
                         key={plan.id}
-                        onClick={() => handleSelectPlan(plan.code)}
-                        disabled={
-                          isCurrent ||
-                          checkout.isPending ||
-                          portal.isPending
-                        }
-                        className={`flex flex-col rounded-xl border p-4 text-left transition ${
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => {
+                          if (!isCurrent && !checkout.isPending && !portal.isPending) {
+                            handleSelectPlan(plan.code);
+                          }
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            if (!isCurrent && !checkout.isPending && !portal.isPending) {
+                              handleSelectPlan(plan.code);
+                            }
+                          }
+                        }}
+                        aria-disabled={isCurrent || checkout.isPending || portal.isPending}
+                        className={`flex cursor-pointer flex-col rounded-xl border p-5 text-left transition ${
                           isCurrent
                             ? "border-[var(--accent)] bg-[var(--accent-soft)]"
                             : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)]"
@@ -417,33 +431,48 @@ function BillingPageInner() {
                             <StatusBadge variant="accent">Current</StatusBadge>
                           )}
                         </div>
-                        <div className="mt-1 font-mono-num text-xl font-semibold text-[var(--ink)]">
-                          {formatMoney(plan.priceMonthly)}
-                          <span className="text-xs font-normal text-[var(--ink3)]">
-                            /mo
+                        <p className="mt-1 min-h-[2.5em] text-[11px] leading-relaxed text-[var(--ink3)]">
+                          {plan.tagline}
+                        </p>
+                        <div className="mt-2 font-mono-num text-xl font-semibold text-[var(--ink)]">
+                          {isFree ? "No charge" : formatMoney(plan.priceMonthly)}
+                          <span className="block text-[10px] font-normal tracking-wide text-[var(--ink3)]">
+                            per user / month
                           </span>
                         </div>
-                        <div className="mt-3 space-y-1 text-xs text-[var(--ink3)]">
-                          <div>{plan.userLimit} users</div>
-                          <div>{plan.mailboxLimit} mailboxes</div>
-                          <div>{plan.storageLimitGb} GB storage</div>
+
+                        <ul className="mt-3 flex-1 space-y-1.5 border-t border-[var(--border)] pt-3">
+                          {plan.features?.map((feature) => (
+                            <li
+                              key={feature}
+                              className="flex items-start gap-1.5 text-xs leading-snug text-[var(--ink2)]"
+                            >
+                              <Check className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-[var(--ok)]" />
+                              <span>{feature}</span>
+                            </li>
+                          ))}
+                        </ul>
+
+                        <div
+                          className={`mt-4 rounded-lg px-3 py-2 text-center text-xs font-semibold ${
+                            isCurrent
+                              ? "bg-[var(--s2)] text-[var(--ink3)]"
+                              : "bg-[var(--accent)] text-white"
+                          }`}
+                        >
+                          {checkout.isPending &&
+                          checkout.variables === plan.code ? (
+                            <span className="inline-flex items-center justify-center gap-1.5">
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              Starting…
+                            </span>
+                          ) : isCurrent ? (
+                            "Current plan"
+                          ) : (
+                            ctaLabel
+                          )}
                         </div>
-                        {!isCurrent && (
-                          <span className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-[var(--accent-ink)]">
-                            {checkout.isPending &&
-                            checkout.variables === plan.code ? (
-                              <>
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                Redirecting…
-                              </>
-                            ) : (
-                              <>
-                                Switch <ArrowUpRight className="h-3.5 w-3.5" />
-                              </>
-                            )}
-                          </span>
-                        )}
-                      </button>
+                      </div>
                     );
                   })}
                 </div>

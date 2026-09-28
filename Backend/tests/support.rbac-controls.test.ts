@@ -18,13 +18,11 @@ const app = createApp();
  *
  * The second is the interesting one. It is the only capability anywhere in
  * the matrix that reaches a member's own mail — Owner and Admin hold it in
- * no form at all, and a workspace's invited SUPPORT seat holds it through
- * the membership itself, the same membership that opens every other console
- * read. The grant's scopes are no longer the gate on a mail read; grants
- * survive only for diagnostics, which the tests touching /diagnostics
- * cover. So the tests below pin the two things that are still true of a
- * mail read: it is scoped to the seat's own workspace, and it lands in the
- * workspace's audit log.
+ * no form at all. Reading inside a mailbox additionally needs a live grant
+ * naming the MAIL_CONTENT scope: the same rule as the MAILBOX_ADMIN scope on
+ * the mailbox write, so an owner approving a delivery investigation does not
+ * read mail by accident and a grant without that scope is not the door to
+ * it. The tests pin that gate, the workspace scoping, and the audit write.
  */
 
 const DIAGNOSTICS = ["TENANT_DIAGNOSTICS"] as const;
@@ -258,22 +256,36 @@ describe("what a support seat reads is on the record", () => {
 });
 
 describe("read private user mailbox", () => {
-  it("opens for a seat whose grant carries no MAIL_CONTENT scope", async () => {
+  it("refuses a seat whose grant carries no MAIL_CONTENT scope", async () => {
     const { owner, mailboxId } = await ownerWithMailbox("mb-scope-o");
     const seat = await grantedSeat(owner, `mb-scope-s-${Date.now()}@zoiko.test`, DIAGNOSTICS);
 
     const mailbox = await prisma.mailbox.findUniqueOrThrow({ where: { id: mailboxId } });
 
-    // The seat holds a live diagnostics grant — and the mailbox read does
-    // not depend on that grant or its scopes at all. The invitation into
-    // the workspace is the whole authorization, mail included.
+    // A diagnostics grant is not a license to read mail. Reading inside a
+    // mailbox needs the MAIL_CONTENT scope named on a live grant, exactly
+    // like resetMailboxSetting needs MAILBOX_ADMIN — the membership alone
+    // opens the console, not the mail.
     const res = await request(app)
       .get(`/api/v1/support/mailboxes/${mailbox.id}/messages`)
       .set(authHeader(seat.token))
-      .expect(200);
+      .expect(403);
 
-    expect(res.body.data.mailbox.address).toBe(mailbox.address);
-    expect(Array.isArray(res.body.data.messages)).toBe(true);
+    expect(res.body.error.code).toBe("FORBIDDEN");
+
+    // Recorded as a refusal, with the scope that was missing — the customer
+    // reviewing their log afterwards sees why it was refused.
+    const denied = await waitFor(async () =>
+      prisma.auditEvent.findFirst({
+        where: {
+          tenantId: owner.tenantId,
+          eventType: "SUPPORT_ACCESS_DENIED",
+          targetType: "Tenant",
+          targetId: owner.tenantId,
+        },
+      })
+    );
+    expect((denied.metadata as Record<string, unknown>)?.requiredScope).toBe("MAIL_CONTENT");
   });
 
   it("answers when the grant does name it", async () => {
@@ -365,19 +377,18 @@ describe("read private user mailbox", () => {
     expect((event?.metadata as Record<string, unknown>)?.mailbox).toBe(mailbox.address);
   });
 
-  it("needs no grant at all — the invitation is the access", async () => {
+  it("refuses a seat with no grant at all", async () => {
     const { owner, mailboxId } = await ownerWithMailbox("mb-nog-o");
     const seat = await supportSeat(owner, `mb-nog-s-${Date.now()}@zoiko.test`);
     const mailbox = await prisma.mailbox.findUniqueOrThrow({ where: { id: mailboxId } });
 
-    // No grant, no request, no approval: the Owner's invitation to sit in
-    // this workspace as SUPPORT is the whole authorization.
-    const res = await request(app)
+    // The invitation opens the support console, but reading inside a mailbox
+    // needs a grant that names MAIL_CONTENT — an invitation is not, and
+    // never was meant to be, the whole authorization for mail.
+    await request(app)
       .get(`/api/v1/support/mailboxes/${mailbox.id}/messages`)
       .set(authHeader(seat.token))
-      .expect(200);
-
-    expect(res.body.data.mailbox.address).toBe(mailbox.address);
+      .expect(403);
   });
 
   it("withholds subjects for a mailbox its owner has closed to processing", async () => {

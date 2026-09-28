@@ -8,9 +8,10 @@ interface StatCardProps {
   icon?: LucideIcon;
   trend?: { value: string; positive: boolean };
   href?: string;
+  color?: string;
 }
 
-export function StatCard({ label, value, icon: Icon, trend }: StatCardProps) {
+export function StatCard({ label, value, icon: Icon, trend, color }: StatCardProps) {
   return (
     <div className="zoiko-stat group">
       <div className="flex items-center justify-between">
@@ -18,7 +19,7 @@ export function StatCard({ label, value, icon: Icon, trend }: StatCardProps) {
           {label}
         </div>
         {Icon && (
-          <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-[var(--accent-soft)] text-[var(--accent-ink)] transition-transform duration-[var(--t-med)] ease-[var(--ease)] group-hover:scale-110 group-hover:-rotate-6">
+          <span className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-transform duration-[var(--t-med)] ease-[var(--ease)] group-hover:scale-110 group-hover:-rotate-6 ${color || "bg-[var(--accent-soft)] text-[var(--accent-ink)]"}`}>
             <Icon className="h-3.5 w-3.5" />
           </span>
         )}

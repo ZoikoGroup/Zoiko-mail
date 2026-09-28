@@ -250,6 +250,21 @@ export interface AuditEventQuery {
   to?: string;
 }
 
+/**
+ * The audit log has no status column; a failed attempt is told by the event
+ * carrying a failure in its type (`LOGIN_FAILED`, `MFA_CHALLENGE_FAILED`,
+ * …) or in the metadata the service attached. Reporting `SUCCESS` always
+ * would dress up refusals as approvals, so derive it from those two signals.
+ */
+function deriveAuditStatus(eventType: string, metadata: Record<string, unknown>): "SUCCESS" | "FAILURE" {
+  if (/_FAILED$/.test(eventType) || /_(FAILED|DENIED|REJECTED|BLOCKED)$/.test(eventType)) return "FAILURE";
+  const metaResult = metadata?.result;
+  const metaStatus = metadata?.status;
+  if (typeof metaResult === "string" && metaResult.toUpperCase() === "FAILURE") return "FAILURE";
+  if (typeof metaStatus === "string" && metaStatus.toUpperCase() === "FAILURE") return "FAILURE";
+  return "SUCCESS";
+}
+
 export async function getAuditEvents(query: AuditEventQuery = {}): Promise<{ events: AuditEvent[]; total: number; page: number; limit: number }> {
   const params = new URLSearchParams();
   if (query.page) params.set("page", String(query.page));
@@ -282,7 +297,7 @@ export async function getAuditEvents(query: AuditEventQuery = {}): Promise<{ eve
       targetId: e.targetId,
       targetName: String(e.metadata?.targetName ?? e.targetId),
       ipAddress: e.ipAddress ?? "",
-      status: "SUCCESS" as const,
+      status: deriveAuditStatus(e.eventType, e.metadata),
       metadata: e.metadata,
       createdAt: e.createdAt,
     })),
@@ -647,7 +662,6 @@ export async function deleteConnector(accountId: string): Promise<void> {
 export interface ConnectorHealth {
   provider: string;
   healthy: boolean;
-  lastCheck: string;
 }
 
 export async function getConnectorHealth(): Promise<ConnectorHealth[]> {
@@ -655,7 +669,6 @@ export async function getConnectorHealth(): Promise<ConnectorHealth[]> {
   return res.accounts.map((a) => ({
     provider: a.provider,
     healthy: a.status === "ACTIVE",
-    lastCheck: new Date().toISOString(),
   }));
 }
 
@@ -685,8 +698,8 @@ export async function getAdminMailboxes(): Promise<Mailbox[]> {
     displayName: m.membership?.user?.displayName ?? m.address,
     userId: m.membership?.userId ?? "",
     domain: m.address.split("@")[1] ?? "",
-    storageUsedMb: Math.round(m.storageUsed / 1024),
-    storageLimitMb: Math.round(m.storageLimit / 1024),
+    storageUsedMb: Math.round(m.storageUsed / 1048576),
+    storageLimitMb: Math.round(m.storageLimit / 1048576),
     sendSuspendedAt: m.sendSuspendedAt,
     createdAt: m.createdAt,
   }));
@@ -707,8 +720,8 @@ export async function createAdminMailbox(membershipId: string): Promise<Mailbox>
     displayName: m.membership?.user?.displayName ?? m.address,
     userId: m.membership?.userId ?? "",
     domain: m.address.split("@")[1] ?? "",
-    storageUsedMb: Math.round(m.storageUsed / 1024),
-    storageLimitMb: Math.round(m.storageLimit / 1024),
+    storageUsedMb: Math.round(m.storageUsed / 1048576),
+    storageLimitMb: Math.round(m.storageLimit / 1048576),
     sendSuspendedAt: m.sendSuspendedAt,
     createdAt: m.createdAt,
   };
@@ -792,6 +805,8 @@ export type SupportScopeType =
   | "DNS_DIAGNOSTICS"
   | "DELIVERY_DIAGNOSTICS"
   | "AUDIT_READ"
+  /** Putting one of a mailbox's own settings back. The only support write. */
+  | "MAILBOX_ADMIN"
   /** Reading inside a mailbox. Asked for by name, approved by name. */
   | "MAIL_CONTENT";
 
@@ -942,8 +957,37 @@ export interface CreateSupportGrantInput {
 }
 
 export async function getSupportGrants(): Promise<SupportGrant[]> {
-  const res = await apiRequest<{ grants: SupportGrant[] }>("/support/access-grants");
-  return res.grants;
+  const res = await apiRequest<{ grants: Array<{
+    id: string;
+    supportMembershipId: string;
+    approvedByUserId: string | null;
+    reason: string | null;
+    ticketId: string | null;
+    scopes: string[];
+    expiresAt: string;
+    revokedAt: string | null;
+    createdAt: string;
+    supportMembership: { user: { id: string; email: string; displayName: string } };
+    approvedBy: { id: string; email: string; displayName: string } | null;
+  }> }>("/support/access-grants");
+  // The backend ships the support member and approver under their Prisma
+  // relation names (`supportMembership.user`, `approvedBy`); the owner screen
+  // expects `supportUser` / `approver`. Mapping here rather than in the page
+  // keeps the page rendering the shape it always assumed (which previously
+  // crashed on the raw payload with a TypeError on `supportUser`).
+  return res.grants.map((g) => ({
+    id: g.id,
+    supportMembershipId: g.supportMembershipId,
+    supportUser: g.supportMembership.user,
+    approvedByUserId: g.approvedByUserId,
+    approver: g.approvedBy,
+    reason: g.reason ?? "",
+    ticketId: g.ticketId,
+    scopes: g.scopes as SupportScopeType[],
+    expiresAt: g.expiresAt,
+    revokedAt: g.revokedAt,
+    createdAt: g.createdAt,
+  }));
 }
 
 export async function createSupportGrant(input: CreateSupportGrantInput): Promise<SupportGrant> {

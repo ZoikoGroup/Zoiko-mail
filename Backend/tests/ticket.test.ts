@@ -159,11 +159,10 @@ describe("Ticket module (restored)", () => {
     const ticket1Id = create1.body.data.id;
 
     // Staff2 creates a ticket for tenant B
-    const create2 = await request(app).post("/api/v1/support/platform/tickets")
+    await request(app).post("/api/v1/support/platform/tickets")
       .set(authHeader(staff2Token))
       .send({ tenantId: ownerB.tenantId, subject: "Staff-created for B", description: "Platform staff opened", category: "BILLING", severity: "HIGH" })
       .expect(201);
-    const ticket2Id = create2.body.data.id;
 
     // Platform list all (no filters) — both tickets visible
     const allList = await request(app).get("/api/v1/support/platform/tickets")

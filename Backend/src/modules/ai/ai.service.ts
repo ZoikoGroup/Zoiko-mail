@@ -272,6 +272,23 @@ export class AIService {
       userId: actorUserId,
       payload: { messageId: messageId ?? undefined, actionCount: created, provider: aiProvider.name },
     });
+
+    // Update the original PENDING action that triggered this extraction
+    const sourceActionId = typeof payload === "object" && payload !== null && !Array.isArray(payload)
+      && typeof payload.sourceActionId === "string" ? payload.sourceActionId : null;
+    if (sourceActionId) {
+      const firstResult = extracted[0];
+      await prisma.aIAction.update({
+        where: { id: sourceActionId, tenantId },
+        data: {
+          status: "COMPLETED",
+          output: firstResult ? { text: firstResult.text, dueAt: firstResult.dueAt ?? null, priority: firstResult.priority } : { text: "No actionable items found" },
+          confidenceScore: firstResult?.confidence ?? 0,
+          sourceExcerpt: firstResult?.excerpt ?? null,
+        },
+      });
+    }
+
     logger.info({ jobId, messageId, provider: aiProvider.name, created }, "AI extraction completed");
     return { extracted: created, alreadyPresent, provider: aiProvider.name };
   }

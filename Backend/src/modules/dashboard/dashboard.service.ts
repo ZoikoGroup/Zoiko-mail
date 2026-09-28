@@ -179,6 +179,11 @@ export class DashboardService {
             },
           }),
         ]),
+
+      supportGrants: () =>
+        prisma.supportAccessGrant.count({
+          where: { tenantId, revokedAt: null, expiresAt: { gt: new Date() } },
+        }),
     });
 
     // The tenant is the one section with nothing sensible to render without.
@@ -240,6 +245,7 @@ export class DashboardService {
         };
       })(),
       deliveryFailures: values.deliveryFailures,
+      supportGrants: values.supportGrants ?? 0,
       // Shaped exactly as GET /audit/events and GET /connectors/admin return
       // them, so the client keeps one set of mappers rather than growing a
       // second for the aggregate.
