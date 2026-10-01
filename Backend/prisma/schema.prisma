@@ -47,6 +47,9 @@ model Tenant {
   providerEvents      ProviderEvent[]
   suppressionEntries  SuppressionEntry[]
   domainDnsChecks     DomainDnsCheck[]
+  domainDnsRecords    DomainDnsRecord[]
+  domainDkimKeys      DomainDkimKey[]
+  dnsProviderCredentials DnsProviderCredential[]
   subscriptions       Subscription[]
   invoices            Invoice[]
   contacts            Contact[]
@@ -732,15 +735,137 @@ model MailDomain {
   errorDetails       Json?                    @map("error_details")
   sendingEnabled     Boolean                  @default(false) @map("sending_enabled")
   activatedAt        DateTime?                @map("activated_at")
+  /// Where the domain is in its lifecycle. The per-record statuses above are
+  /// a projection of domain_dns_records, kept because mail sending, mailbox
+  /// provisioning and the support console already read them.
+  status              DomainLifecycleStatus @default(PENDING_VERIFICATION)
+  // ── configuration: what the generated records are derived from ──
+  dnsProvider         DnsProviderKind       @default(MANUAL) @map("dns_provider")
+  dnsCredentialId     String?               @map("dns_credential_id") @db.Uuid
+  /// Route inbound mail here. Off means the MX records are not generated and
+  /// the domain keeps whatever mail host it already uses.
+  receivingEnabled    Boolean               @default(true) @map("receiving_enabled")
+  /// When publishing through a provider, replace the domain's existing MX
+  /// set instead of adding beside it. Off by default: it redirects mail.
+  replaceExistingMx   Boolean               @default(false) @map("replace_existing_mx")
+  autoActivateSending Boolean               @default(true) @map("auto_activate_sending")
+  dmarcPolicy         DmarcPolicy           @default(NONE) @map("dmarc_policy")
+  dmarcReportEmail    String?               @map("dmarc_report_email")
+  /// Bumped whenever the expected record set changes.
+  configVersion       Int                   @default(1) @map("config_version")
+  // ── synchronization ──
+  nextCheckAt         DateTime?             @map("next_check_at")
+  lastVerifiedAt      DateTime?             @map("last_verified_at")
+  lastPublishedAt     DateTime?             @map("last_published_at")
+  lastSyncError       String?               @map("last_sync_error")
+  /// Consecutive checks in which a required record definitively failed.
+  consecutiveFailures Int                   @default(0) @map("consecutive_failures")
+  /// Failures do not suspend sending before this instant. Set when the
+  /// expected records change, so the owner has time to publish them.
+  graceUntil          DateTime?             @map("grace_until")
+  verificationDeadlineAt DateTime?          @map("verification_deadline_at")
+  sendingSuspendedAt  DateTime?             @map("sending_suspended_at")
+  suspensionReason    String?               @map("suspension_reason")
   createdAt          DateTime                 @default(now()) @map("created_at")
   updatedAt          DateTime                 @updatedAt @map("updated_at")
   tenant             Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  dnsCredential      DnsProviderCredential?   @relation(fields: [dnsCredentialId], references: [id], onDelete: SetNull)
   checks             DomainDnsCheck[]
+  records            DomainDnsRecord[]
+  dkimKeys           DomainDkimKey[]
   mailboxes          Mailbox[]
 
   @@unique([tenantId, domainName])
   @@index([tenantId, verificationStatus])
+  @@index([nextCheckAt])
+  @@index([domainName])
   @@map("mail_domains")
+}
+
+/// One DNS record the platform requires (or recommends) for a domain, with
+/// its expected value and what the last lookup actually found.
+model DomainDnsRecord {
+  id                  String            @id @default(uuid()) @db.Uuid
+  tenantId            String            @map("tenant_id") @db.Uuid
+  domainId            String            @map("domain_id") @db.Uuid
+  /// Stable identity within the domain: "SPF", "MX:mx1.example.net",
+  /// "DKIM:zm202609". Regeneration matches on it.
+  recordKey           String            @map("record_key")
+  purpose             DnsRecordPurpose
+  type                DnsRecordType
+  /// Host relative to the domain, as DNS dashboards want it: "@", "_dmarc".
+  name                String
+  fqdn                String
+  value               String
+  priority            Int?
+  ttl                 Int               @default(3600)
+  required            Boolean           @default(true)
+  dkimKeyId           String?           @map("dkim_key_id") @db.Uuid
+  state               DnsRecordState    @default(PENDING)
+  observed            Json?
+  diagnosis           String?
+  lastErrorCode       String?           @map("last_error_code")
+  lastCheckedAt       DateTime?         @map("last_checked_at")
+  lastVerifiedAt      DateTime?         @map("last_verified_at")
+  publishState        DnsPublishState   @default(NOT_APPLICABLE) @map("publish_state")
+  publishedAt         DateTime?         @map("published_at")
+  publishError        String?           @map("publish_error")
+  createdAt           DateTime          @default(now()) @map("created_at")
+  updatedAt           DateTime          @updatedAt @map("updated_at")
+  tenant              Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  domain              MailDomain        @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  dkimKey             DomainDkimKey?    @relation(fields: [dkimKeyId], references: [id], onDelete: SetNull)
+
+  @@unique([domainId, recordKey])
+  @@index([tenantId, domainId])
+  @@map("domain_dns_records")
+}
+
+/// A DKIM signing key. The private half lives in the secret store under
+/// `privateKeySecretRef`; only the public half is in the database.
+model DomainDkimKey {
+  id                  String         @id @default(uuid()) @db.Uuid
+  tenantId            String         @map("tenant_id") @db.Uuid
+  domainId            String         @map("domain_id") @db.Uuid
+  selector            String
+  keyBits             Int            @map("key_bits")
+  publicKey           String         @map("public_key")
+  privateKeySecretRef String         @map("private_key_secret_ref")
+  status              DkimKeyStatus  @default(PENDING)
+  activatedAt         DateTime?      @map("activated_at")
+  retiringAt          DateTime?      @map("retiring_at")
+  retiredAt           DateTime?      @map("retired_at")
+  createdAt           DateTime       @default(now()) @map("created_at")
+  tenant              Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  domain              MailDomain     @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  records             DomainDnsRecord[]
+
+  @@unique([domainId, selector])
+  @@index([tenantId, domainId, status])
+  @@map("domain_dkim_keys")
+}
+
+/// API access to a workspace's DNS host, so records can be published without
+/// anybody copying them by hand. The credential itself is in the secret store.
+model DnsProviderCredential {
+  id               String                @id @default(uuid()) @db.Uuid
+  tenantId         String                @map("tenant_id") @db.Uuid
+  provider         DnsProviderKind
+  label            String
+  secretRef        String                @map("secret_ref")
+  /// Non-secret provider options, such as GoDaddy's OTE environment.
+  settings         Json?
+  status           DnsCredentialStatus   @default(ACTIVE)
+  lastValidatedAt  DateTime?             @map("last_validated_at")
+  lastError        String?               @map("last_error")
+  createdByUserId  String?               @map("created_by_user_id") @db.Uuid
+  createdAt        DateTime              @default(now()) @map("created_at")
+  updatedAt        DateTime              @updatedAt @map("updated_at")
+  tenant           Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  domains          MailDomain[]
+
+  @@index([tenantId])
+  @@map("dns_provider_credentials")
 }
 
 model DomainDnsCheck {
@@ -753,6 +878,12 @@ model DomainDnsCheck {
   dkimStatus         DnsRecordStatus          @map("dkim_status")
   dmarcStatus        DnsRecordStatus          @map("dmarc_status")
   errorDetails       Json?                    @map("error_details")
+  trigger            DnsCheckTrigger          @default(MANUAL)
+  /// The domain's lifecycle status after this check.
+  resultStatus       DomainLifecycleStatus?   @map("result_status")
+  /// Per-record outcome: recordKey, state, observed values, diagnosis.
+  results            Json?
+  durationMs         Int?                     @map("duration_ms")
   checkedAt          DateTime                 @default(now()) @map("checked_at")
   tenant             Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   domain             MailDomain               @relation(fields: [domainId], references: [id], onDelete: Cascade)
@@ -1390,6 +1521,87 @@ enum DnsRecordStatus {
   PENDING
   VALID
   INVALID
+}
+
+enum DomainLifecycleStatus {
+  /// Records generated; ownership or a required record not yet seen.
+  PENDING_VERIFICATION
+  /// Everything required passes; sending not switched on.
+  VERIFIED
+  /// Sending enabled.
+  ACTIVE
+  /// A required record broke after the domain was sending; sending was
+  /// suspended automatically and resumes by itself once the record is back.
+  DEGRADED
+  /// Ownership never appeared within the verification window.
+  FAILED
+}
+
+enum DnsRecordPurpose {
+  OWNERSHIP
+  MX
+  SPF
+  DKIM
+  DMARC
+  AUTODISCOVER
+  AUTOCONFIG
+}
+
+enum DnsRecordType {
+  TXT
+  MX
+  CNAME
+}
+
+enum DnsRecordState {
+  PENDING
+  VERIFIED
+  MISSING
+  MISMATCH
+  CONFLICT
+  /// The resolver failed. Not a verdict about the record.
+  LOOKUP_ERROR
+}
+
+enum DnsProviderKind {
+  MANUAL
+  CLOUDFLARE
+  GODADDY
+}
+
+enum DnsPublishState {
+  NOT_APPLICABLE
+  PENDING
+  PUBLISHED
+  FAILED
+}
+
+enum DnsCredentialStatus {
+  ACTIVE
+  INVALID
+}
+
+enum DkimKeyStatus {
+  /// Generated and published, waiting for DNS before it signs anything.
+  PENDING
+  ACTIVE
+  /// Replaced by a newer key; its record stays up briefly for mail in flight.
+  RETIRING
+  RETIRED
+}
+
+enum DmarcPolicy {
+  NONE
+  QUARANTINE
+  REJECT
+}
+
+enum DnsCheckTrigger {
+  CREATED
+  MANUAL
+  SCHEDULED
+  CONFIG_CHANGE
+  PUBLISH
 }
 
 enum AIActionType {

@@ -469,11 +469,53 @@ export const openApiDocument = {
       },
     },
     "/api/v1/domains": {
-      get: { tags: ["Domains"], summary: "List tenant domains", security: bearer, responses: { "200": ok("Domains returned") } },
-      post: { tags: ["Domains"], summary: "Add a custom domain", security: bearer, responses: { "201": ok("Domain and verification record created") } },
+      get: { tags: ["Domains"], summary: "List tenant domains with their generated DNS records and readiness", security: bearer, responses: { "200": ok("Domains returned") } },
+      post: {
+        tags: ["Domains"], summary: "Add a custom domain",
+        description: "Generates the ownership token, a DKIM key pair (private half in the secret store) and every required DNS record. With a DNS provider credential the records are published immediately; the first verification is scheduled at once either way.",
+        security: bearer,
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["domainName"], properties: {
+          domainName: { type: "string", example: "acme.com" },
+          dnsProvider: { type: "string", enum: ["MANUAL", "CLOUDFLARE", "GODADDY"] },
+          dnsCredentialId: { type: "string", format: "uuid", nullable: true },
+          receivingEnabled: { type: "boolean" },
+          replaceExistingMx: { type: "boolean" },
+          autoActivateSending: { type: "boolean" },
+          dmarcPolicy: { type: "string", enum: ["NONE", "QUARANTINE", "REJECT"] },
+          dmarcReportEmail: { type: "string", format: "email", nullable: true },
+        } } } } },
+        responses: { "201": ok("Domain and its DNS records created"), "400": { $ref: "#/components/responses/ValidationError" }, "409": { $ref: "#/components/responses/Conflict" } },
+      },
+    },
+    "/api/v1/domains/dns-providers": {
+      get: { tags: ["Domains"], summary: "List DNS provider credentials (never the secret)", security: bearer, responses: { "200": ok("Credentials returned") } },
+      post: {
+        tags: ["Domains"], summary: "Connect a DNS provider (step-up)",
+        description: "Proves the credential against the provider, then stores it in the secret store. Requires connector.credentials.rotate, which is step-up.",
+        security: bearer,
+        responses: { "201": ok("Credential connected"), "403": { $ref: "#/components/responses/Forbidden" }, "422": ok("The provider rejected the credential") },
+      },
+    },
+    "/api/v1/domains/dns-providers/{credentialId}/verify": {
+      post: { tags: ["Domains"], summary: "Re-verify a stored DNS provider credential", security: bearer, responses: { "200": ok("Credential status updated") } },
+    },
+    "/api/v1/domains/dns-providers/{credentialId}": {
+      delete: { tags: ["Domains"], summary: "Remove a DNS provider credential (step-up)", security: bearer, responses: { "200": ok("Credential removed"), "409": { $ref: "#/components/responses/Conflict" } } },
+    },
+    "/api/v1/domains/{domainId}/records": {
+      get: { tags: ["Domains"], summary: "The domain's expected DNS records, each with its verification state", security: bearer, responses: { "200": ok("Records returned"), "404": { $ref: "#/components/responses/NotFound" } } },
+    },
+    "/api/v1/domains/{domainId}/zone-file": {
+      get: { tags: ["Domains"], summary: "Download the records as a BIND zone file for import into a DNS host", security: bearer, responses: { "200": { description: "Zone file", content: { "text/plain": { schema: { type: "string" } } } } } },
     },
     "/api/v1/domains/{domainId}/diagnostics": {
-      post: { tags: ["Domains"], summary: "Retry TXT, MX, SPF, DKIM and DMARC checks and store history", security: bearer, responses: { "200": ok("DNS diagnostics returned") } },
+      post: { tags: ["Domains"], summary: "Reconcile, publish and verify the domain's records now, and store the check", security: bearer, responses: { "200": ok("DNS diagnostics returned"), "429": ok("Checked a moment ago") } },
+    },
+    "/api/v1/domains/{domainId}/publish": {
+      post: { tags: ["Domains"], summary: "Re-publish every record through the domain's DNS provider", security: bearer, responses: { "200": ok("Publish result returned"), "409": { $ref: "#/components/responses/Conflict" } } },
+    },
+    "/api/v1/domains/{domainId}/dkim/rotate": {
+      post: { tags: ["Domains"], summary: "Start a DKIM key rotation; the new key signs once its record verifies", security: bearer, responses: { "200": ok("Rotation started"), "409": { $ref: "#/components/responses/Conflict" } } },
     },
     "/api/v1/domains/{domainId}/checks": {
       get: { tags: ["Domains"], summary: "List tenant-scoped DNS check history", security: bearer, responses: { "200": ok("DNS check history returned"), "404": { $ref: "#/components/responses/NotFound" } } },
@@ -481,9 +523,14 @@ export const openApiDocument = {
     "/api/v1/domains/{domainId}/activate": {
       post: { tags: ["Domains"], summary: "Enable sending after TXT, SPF, DKIM and DMARC pass", security: bearer, responses: { "200": ok("Domain sending activated"), "409": { $ref: "#/components/responses/Conflict" } } },
     },
+    "/api/v1/domains/{domainId}/deactivate": {
+      post: { tags: ["Domains"], summary: "Disable sending (and automatic re-activation) for a domain", security: bearer, responses: { "200": ok("Domain sending disabled"), "409": { $ref: "#/components/responses/Conflict" } } },
+    },
     "/api/v1/domains/{domainId}": {
       parameters: [{ name: "domainId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
-      delete: { tags: ["Domains"], summary: "Delete a domain that is not active for sending", security: bearer, responses: { "200": ok("Domain removed"), "404": { $ref: "#/components/responses/NotFound" }, "409": { $ref: "#/components/responses/Conflict" } } },
+      get: { tags: ["Domains"], summary: "One domain with its records, DKIM keys and readiness", security: bearer, responses: { "200": ok("Domain returned"), "404": { $ref: "#/components/responses/NotFound" } } },
+      patch: { tags: ["Domains"], summary: "Change the configuration the records are generated from", security: bearer, responses: { "200": ok("Domain updated; records regenerated"), "400": { $ref: "#/components/responses/ValidationError" } } },
+      delete: { tags: ["Domains"], summary: "Delete a domain that is not active for sending; removes its published records", security: bearer, responses: { "200": ok("Domain removed"), "404": { $ref: "#/components/responses/NotFound" }, "409": { $ref: "#/components/responses/Conflict" } } },
     },
     "/api/v1/ai/actions": {
       get: { tags: ["AI"], summary: "List the user's governed AI actions", security: bearer, responses: { "200": ok("AI actions returned") } },

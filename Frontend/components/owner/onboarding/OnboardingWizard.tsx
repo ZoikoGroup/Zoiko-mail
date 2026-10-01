@@ -17,6 +17,7 @@ import {
   useInviteMember,
 } from "@/lib/owner-hooks";
 import type { OnboardingSteps } from "@/lib/owner-api";
+import { DnsRecordsTable } from "@/components/domains/DnsRecordsTable";
 import {
   CheckCircle2,
   Building2,
@@ -389,15 +390,16 @@ function VerifyDomainStep({ onComplete }: { onComplete: () => void }) {
           DNS Configuration Required
         </div>
         <p className="mt-2 text-sm text-[var(--ink3)]">
-          Add the following DNS records to your domain provider. Changes may take up to 48 hours to propagate.
+          Add these records for {unverifiedDomain?.domain ?? "your domain"} at your DNS host. They are checked every few minutes, and
+          changes can take up to an hour to be seen. The Domains page can publish them automatically through Cloudflare or GoDaddy.
         </p>
-        <div className="mt-3 rounded-md bg-[var(--surface)] p-3 font-mono text-xs text-[var(--ink2)] space-y-1">
-          <div>MX: mail.zoiko.dev (priority 10)</div>
-          <div>SPF: v=spf1 include:zoiko.dev ~all</div>
-          <div>DKIM: selector._domainkey.zoiko.dev</div>
-          <div>DMARC: _dmarc.zoiko.dev — v=DMARC1; p=quarantine</div>
-        </div>
       </div>
+      {unverifiedDomain && (
+        <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)]">
+          {/* Generated per domain by the server — the same records it verifies. */}
+          <DnsRecordsTable records={unverifiedDomain.records} provider="MANUAL" />
+        </div>
+      )}
       {unverifiedDomain && (
         <button
           onClick={() => {

@@ -126,20 +126,20 @@ describe("creating a mailbox on a workspace domain", () => {
 
   it("refuses an address the workspace already uses", async () => {
     const w = await workspace("clash");
-    const domainId = await domain(w.owner.accessToken, w.owner.tenantId, "clash-acme.test", true);
+    const second = await workspace("clash2");
+    // Both add the domain before either verifies it: an unverified claim
+    // never blocks another workspace, or anyone could squat a domain by
+    // adding it first. (Once one verifies, a new claim is refused — below.)
+    const domainId = await domain(w.owner.accessToken, w.owner.tenantId, "clash-acme.test", false);
+    const otherDomain = await domain(second.owner.accessToken, second.owner.tenantId, "clash-acme.test", false);
+    await prisma.mailDomain.updateMany({ where: { id: { in: [domainId, otherDomain] } }, data: { verificationStatus: "VERIFIED", mxStatus: "VALID" } });
+    const third = await registerUser(app, { email: "md-owner-clash3@zoiko.test" });
+    await request(app).post("/api/v1/domains").set(authHeader(third.accessToken)).send({ domainName: "clash-acme.test" }).expect(409);
     await createMailbox(w.owner.accessToken, {
       membershipId: w.membershipId,
       domainId,
       localPart: "shared",
     }).expect(201);
-
-    const second = await workspace("clash2");
-    const otherDomain = await domain(
-      second.owner.accessToken,
-      second.owner.tenantId,
-      "clash-acme.test",
-      true
-    );
     // Same local part, different workspace — allowed, because addresses are
     // unique per tenant and these are two different companies.
     await createMailbox(second.owner.accessToken, {
