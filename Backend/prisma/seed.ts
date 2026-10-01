@@ -124,18 +124,81 @@ async function main(): Promise<void> {
   // here; operators set it in the DB (or via a Stripe Dashboard sync) so the
   // checkout derives the real Stripe price, never one trusted from the client.
   const plans = [
-    { code: "starter", name: "Starter", priceMonthly: 4900, userLimit: 10, mailboxLimit: 10, storageLimitGb: 10 },
-    { code: "business_starter", name: "Business Starter", priceMonthly: 14900, userLimit: 25, mailboxLimit: 25, storageLimitGb: 50 },
-    { code: "business_pro", name: "Business Pro", priceMonthly: 24900, userLimit: 50, mailboxLimit: 75, storageLimitGb: 100 },
-    { code: "enterprise", name: "Enterprise", priceMonthly: 49900, userLimit: 200, mailboxLimit: 200, storageLimitGb: 500 },
+    {
+      code: "free",
+      name: "Free",
+      tagline: "For individuals getting started with governed email.",
+      priceMonthly: 0,
+      userLimit: 10,
+      mailboxLimit: 10,
+      storageLimitGb: 25,
+      features: [
+        "Intelligent Inbox & Calendar",
+        "Core governed AI (limited)",
+        "Personal commitments",
+        "One connected provider",
+      ],
+    },
+    {
+      code: "professional",
+      name: "Professional",
+      tagline: "For professionals who want deeper AI and follow-through.",
+      priceMonthly: 7000,
+      userLimit: 25,
+      mailboxLimit: 25,
+      storageLimitGb: 100,
+      features: [
+        "Everything in Free",
+        "Expanded governed AI",
+        "Commitment tracking & Action Review",
+        "Multiple providers",
+      ],
+    },
+    {
+      code: "team",
+      name: "Team",
+      tagline: "For teams sharing addresses and coordinating replies.",
+      priceMonthly: 10000,
+      userLimit: 50,
+      mailboxLimit: 75,
+      storageLimitGb: 500,
+      features: [
+        "Everything in Professional",
+        "Shared inboxes & collaboration",
+        "Team commitments & routing",
+        "Shared activity history",
+      ],
+    },
+    {
+      code: "business",
+      name: "Business",
+      tagline: "For organizations that need administration and controls.",
+      priceMonthly: 15000,
+      userLimit: 200,
+      mailboxLimit: 200,
+      storageLimitGb: 2000,
+      features: [
+        "Everything in Team",
+        "Policy, DLP & admin controls",
+        "Advanced security & audit",
+        "Priority support",
+      ],
+    },
   ];
   for (const plan of plans) {
     await prisma.plan.upsert({
       where: { code: plan.code },
-      update: { name: plan.name, priceMonthly: plan.priceMonthly, userLimit: plan.userLimit, mailboxLimit: plan.mailboxLimit, storageLimitGb: plan.storageLimitGb, active: true },
+      update: { ...plan, active: true },
       create: { ...plan, active: true },
     });
   }
+  // Plans that predate the current tiering are retired, not deleted — a plan
+  // row may still be referenced by old subscriptions, and deleting it would
+  // cascade into billing history.
+  await prisma.plan.updateMany({
+    where: { code: { notIn: plans.map((p) => p.code) } },
+    data: { active: false },
+  });
 
   await resetAcmeFixture();
 
@@ -144,7 +207,7 @@ async function main(): Promise<void> {
       id: ACME_TENANT_ID,
       name: "Acme Corp",
       status: "ACTIVE",
-      planCode: "business_pro",
+      planCode: "business",
       timezone: "Europe/London",
       language: "en",
       allowedDomains: ["acme.test"],

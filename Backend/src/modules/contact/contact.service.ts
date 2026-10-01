@@ -1,12 +1,11 @@
 import { prisma } from "../../config/prisma.js";
+import type { Prisma } from "@prisma/client";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
 import type { CreateContactInput, UpdateContactInput, ListContactsInput } from "./contact.schema.js";
 
-// The generated Prisma client does not expose the model in its static type.
-// Keep the service compatible with the configured Contact model at runtime.
-const contactModel = (prisma as typeof prisma & { contact: any }).contact;
+const contactModel = prisma.contact;
 
 interface ContactContext {
   tenantId: string;
@@ -34,7 +33,7 @@ const contactSelect = {
 
 export class ContactService {
   async list(filters: ListContactsInput, context: ContactContext) {
-    const where = {
+    const where: Prisma.ContactWhereInput = {
       tenantId: context.tenantId,
       membershipId: context.membershipId,
       ...(filters.q
@@ -203,7 +202,7 @@ export class ContactService {
       select: { tags: true },
     });
     const tagSet = new Set<string>();
-    contacts.forEach((c: { tags: any[]; }) => c.tags.forEach((t) => tagSet.add(t)));
+    contacts.forEach((c) => c.tags.forEach((t) => tagSet.add(t)));
     return Array.from(tagSet).sort();
   }
 

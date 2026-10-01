@@ -160,7 +160,7 @@ export async function registerUser(
     password: overrides.password ?? "Password123!",
     displayName: overrides.displayName ?? "Test User",
     tenantName: overrides.tenantName ?? "Test Tenant",
-    planCode: overrides.planCode ?? "starter",
+    planCode: overrides.planCode ?? "free",
   };
 
   // Register the user (pending token flow)

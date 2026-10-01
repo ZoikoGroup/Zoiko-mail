@@ -162,7 +162,7 @@ describe("Membership invitations", () => {
     await request(app)
       .post("/api/v1/auth/create-workspace")
       .set(authHeader(verified.body.data.pendingToken))
-      .send({ tenantName: "Should Not Exist", planCode: "starter" })
+      .send({ tenantName: "Should Not Exist", planCode: "free" })
       .expect(409);
 
     // 5. …and joining an Admin seat stops at the MFA gate, because AC-002

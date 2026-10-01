@@ -47,7 +47,7 @@ function timeAgo(ts: string) {
 }
 
 export function RecentActivity() {
-  const { data, isLoading } = useAuditEvents({ limit: 10 });
+  const { data, isLoading, error } = useAuditEvents({ limit: 10 });
   const events = data?.events ?? [];
 
   return (
@@ -59,7 +59,12 @@ export function RecentActivity() {
         {isLoading && (
           <div className="px-4 py-8 text-center text-sm text-[var(--ink3)]">Loading…</div>
         )}
-        {!isLoading && events.length === 0 && (
+        {!isLoading && error && (
+          <div className="px-4 py-6 text-center text-sm text-[var(--crit)]">
+            Recent activity could not be loaded.
+          </div>
+        )}
+        {!isLoading && !error && events.length === 0 && (
           <div className="px-4 py-8 text-center text-sm text-[var(--ink3)]">No recent activity.</div>
         )}
         {events.map((event) => {

@@ -825,7 +825,7 @@ export class ConnectorService {
         where: { id: accountId },
         data: { status: "REAUTH_REQUIRED", lastErrorCode: "NO_REFRESH_TOKEN" },
       });
-      throw new AppError("No refresh token available — reauthorization required", 401, ErrorCodes.UNAUTHORIZED);
+      throw new AppError("No refresh credential stored — reauthorization required", 401, ErrorCodes.UNAUTHORIZED);
     }
 
     const { microsoftConnector } = await import("./m365/m365.connector.js");
@@ -863,7 +863,7 @@ export class ConnectorService {
         where: { id: accountId },
         data: { status: "REAUTH_REQUIRED", lastErrorCode: "NO_ACCESS_TOKEN" },
       });
-      throw new AppError("No access token available", 401, ErrorCodes.UNAUTHORIZED);
+      throw new AppError("No access credential stored", 401, ErrorCodes.UNAUTHORIZED);
     }
     return tokens.accessToken;
   }
@@ -885,7 +885,7 @@ export class ConnectorService {
         where: { id: accountId },
         data: { status: "REAUTH_REQUIRED", lastErrorCode: "NO_REFRESH_TOKEN" },
       });
-      throw new AppError("No refresh token available — reauthorization required", 401, ErrorCodes.UNAUTHORIZED);
+      throw new AppError("No refresh credential stored — reauthorization required", 401, ErrorCodes.UNAUTHORIZED);
     }
 
     const tokenResponse = await fetch(GOOGLE_TOKEN_URL, {
@@ -905,7 +905,7 @@ export class ConnectorService {
         where: { id: accountId },
         data: { status: "REAUTH_REQUIRED", lastErrorCode: "TOKEN_REFRESH_FAILED" },
       });
-      throw new AppError("Token refresh failed — reauthorization required", 401, ErrorCodes.UNAUTHORIZED);
+      throw new AppError("Credential refresh failed — reauthorization required", 401, ErrorCodes.UNAUTHORIZED);
     }
 
     const refreshed = await tokenResponse.json() as {
@@ -948,7 +948,7 @@ export class ConnectorService {
         where: { id: accountId },
         data: { status: "REAUTH_REQUIRED", lastErrorCode: "NO_ACCESS_TOKEN" },
       });
-      throw new AppError("No access token available", 401, ErrorCodes.UNAUTHORIZED);
+      throw new AppError("No access credential stored", 401, ErrorCodes.UNAUTHORIZED);
     }
     return tokens.accessToken;
   }

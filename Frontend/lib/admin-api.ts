@@ -170,6 +170,7 @@ export interface DashboardDto {
   };
   /** Null while the read is in flight or refused; the tile then shows "—". */
   deliveryFailures: DeliveryFailureSummaryDto | null;
+  supportGrants: number;
   recentAudit: AuditEventDto[];
   providerSync: ConnectorDto[];
   /**

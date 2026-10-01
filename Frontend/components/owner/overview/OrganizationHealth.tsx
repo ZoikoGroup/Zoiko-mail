@@ -16,9 +16,24 @@ const statusConfig: Record<HealthItem["status"], { icon: typeof CheckCircle2; co
 };
 
 export function OrganizationHealth() {
-  const { data: domains = [] } = useDomains();
-  const { data: mailboxes = [] } = useAdminMailboxes();
-  const { data: healthData = [] } = useConnectorHealth();
+  const { data: domains = [], error: domainsError } = useDomains();
+  const { data: mailboxes = [], error: mailboxesError } = useAdminMailboxes();
+  const { data: healthData = [], error: healthError } = useConnectorHealth();
+
+  const error = domainsError ?? mailboxesError ?? healthError;
+
+  if (error) {
+    return (
+      <div className="zoiko-card">
+        <div className="border-b border-[var(--border)] px-4 py-3">
+          <h2 className="text-sm font-semibold text-[var(--ink)]">Organization Health</h2>
+        </div>
+        <div className="px-4 py-6 text-center text-sm text-[var(--crit)]">
+          Health checks could not be loaded.
+        </div>
+      </div>
+    );
+  }
 
   const verifiedDomains = domains.filter((d) => d.verificationStatus === "VERIFIED").length;
   const totalDomains = domains.length;

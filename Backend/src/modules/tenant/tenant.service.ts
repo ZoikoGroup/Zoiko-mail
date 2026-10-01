@@ -503,6 +503,25 @@ export class TenantService {
         });
       }
 
+      // A workspace joins on its advertised tier. When that tier is free,
+      // the subscription row is minted here so the billing surface has a
+      // real plan to show from the first request — a workspace that arrives
+      // advertising a paid plan stays subscription-less until checkout
+      // establishes one, because a subscription is never written for money
+      // that has not been taken.
+      const baselinePlan = input.planCode
+        ? await tx.plan.findUnique({ where: { code: input.planCode } })
+        : null;
+      if (baselinePlan?.active && baselinePlan.priceMonthly === 0) {
+        await tx.subscription.create({
+          data: {
+            tenantId: tenant.id,
+            planId: baselinePlan.id,
+            status: "active",
+          },
+        });
+      }
+
       await auditService.record(
         {
           tenantId: tenant.id,

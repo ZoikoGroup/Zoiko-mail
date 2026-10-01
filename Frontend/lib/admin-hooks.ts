@@ -53,6 +53,7 @@ import {
   removeMember,
   replayDeadLetter,
   resetMemberMfa,
+  revokeSupportGrant,
   reviewSecurityAlert,
   rotateConnectorCredentials,
   disconnectConnectorForTenant,
@@ -361,6 +362,18 @@ export function useActiveSupportGrant(): QueryLike<SupportGrantDto | null> {
       ...LIVE,
     })
   );
+}
+
+/**
+ * Ends the active support session from the shell banner. Invalidates the
+ * grant read so the banner clears once the server confirms the revoke.
+ */
+export function useEndSupportSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (grantId: string) => revokeSupportGrant(grantId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["support-grant"] }),
+  });
 }
 
 /* ── still static, and marked as such ──────────────────────────────────── */

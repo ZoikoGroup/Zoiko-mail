@@ -9,6 +9,16 @@ import { tmpdir } from "node:os";
 loadEnv({ path: resolve(process.cwd(), ".env") });
 
 process.env.NODE_ENV = "test";
+// The extraction/draft pipeline tests exercise deterministic heuristics, not a
+// live model. AI_PROVIDER is inherited from .env (and a developer's .env
+// usually points at a real key); pin it so the suite never hits a network
+// provider or depends on model output.
+process.env.AI_PROVIDER = "mock";
+// AC-002 makes MFA mandatory for Owners, Admins and Support. A developer's
+// .env often has FLAG_MFA_ENFORCEMENT_ENABLED=false so logins stay quick
+// locally; the suite then has to decide which side of the mandate it tests.
+// Forcing it on keeps the suites honest regardless of local .env.
+process.env.FLAG_MFA_ENFORCEMENT_ENABLED = "true";
 // Connector OAuth tokens are written to the local secret store in tests; point
 // it at a throwaway temp dir so the working directory stays clean.
 process.env.SECRET_FILE_DIR ||= mkdtempSync(resolve(tmpdir(), "zoiko-secrets-"));

@@ -19,10 +19,12 @@ const PUBLIC_PLAN_SELECT = {
   id: true,
   code: true,
   name: true,
+  tagline: true,
   priceMonthly: true,
   userLimit: true,
   mailboxLimit: true,
   storageLimitGb: true,
+  features: true,
 } satisfies Prisma.PlanSelect;
 
 const PUBLIC_INVOICE_SELECT = {
@@ -155,17 +157,9 @@ export class BillingService {
    * limits are always resolved from the DB, never from the request.
    */
   async createCheckout(input: { planCode: string }, context: TenantContext) {
-    const stripe = stripeClient();
     const plan = await prisma.plan.findUnique({ where: { code: input.planCode } });
     if (!plan || !plan.active) {
       throw new AppError("Plan not found", 404, ErrorCodes.NOT_FOUND);
-    }
-    if (!plan.stripePriceId) {
-      throw new AppError(
-        `Plan "${plan.code}" has no Stripe Price ID configured. Set stripePriceId on the plan row.`,
-        503,
-        "BILLING_NOT_CONFIGURED"
-      );
     }
 
     const tenant = await prisma.tenant.findUnique({ where: { id: context.tenantId } });
@@ -183,12 +177,36 @@ export class BillingService {
       );
     }
 
+    // The Free tier is activated locally — there is nothing for Stripe to bill.
+    if (plan.priceMonthly === 0) {
+      await this.activateFreePlan(plan, context);
+      return { url: `${env.APP_URL}/owner/billing?checkout=success` };
+    }
+
+    const stripe = stripeClient();
+    if (!plan.stripePriceId) {
+      throw new AppError(
+        `Plan "${plan.code}" has no Stripe Price ID configured. Set stripePriceId on the plan row.`,
+        503,
+        "BILLING_NOT_CONFIGURED"
+      );
+    }
+
     const customerId = await this.ensureCustomer(tenant.id, stripe, tenant.name);
+
+    // Prices are per user / month, so the checkout quantity is the number of
+    // active members (never below one), not a flat 1.
+    const quantity = Math.max(
+      1,
+      await prisma.tenantMembership.count({
+        where: { tenantId: tenant.id, status: "ACTIVE" },
+      })
+    );
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
-      line_items: [{ price: plan.stripePriceId, quantity: 1 }],
+      line_items: [{ price: plan.stripePriceId, quantity }],
       success_url: `${env.APP_URL}/owner/billing?checkout=success`,
       cancel_url: `${env.APP_URL}/owner/billing?checkout=cancelled`,
       metadata: { tenantId: tenant.id, planCode: plan.code },
@@ -209,6 +227,46 @@ export class BillingService {
     });
 
     return { url: session.url };
+  }
+
+  /**
+   * Points the tenant's active subscription at the given (paid-free) plan and
+   * syncs the tenant planCode to match. The row is created when the workspace
+   * has no active subscription (registration and cancellation both land here
+   * with the Free tier); otherwise the current active row is rewritten in
+   * place so a tenant never carries two active subscriptions.
+   */
+  private async ensureBaselinePlan(plan: Prisma.PlanGetPayload<{}>, tenantId: string) {
+    const current = await this.getCurrentSubscription(tenantId);
+    if (current) {
+      await prisma.subscription.update({
+        where: { id: current.id },
+        data: { planId: plan.id, status: "active", cancelAtPeriodEnd: false },
+      });
+    } else {
+      await prisma.subscription.create({
+        data: { tenantId, planId: plan.id, status: "active" },
+      });
+    }
+    await this.syncTenantPlan(tenantId, plan.code);
+  }
+
+  /**
+   * Activates the Free tier without Stripe: writes a local subscription row and
+   * syncs the tenant's planCode. Idempotent — if a subscription already exists
+   * it is updated rather than duplicated.
+   */
+  private async activateFreePlan(plan: Prisma.PlanGetPayload<{}>, context: TenantContext) {
+    await this.ensureBaselinePlan(plan, context.tenantId);
+    await auditService.record({
+      tenantId: context.tenantId,
+      actorUserId: context.userId,
+      eventType: "SUBSCRIPTION_ACTIVATED",
+      targetType: "Plan",
+      targetId: plan.id,
+      requestId: context.requestId,
+      metadata: { planCode: plan.code, price: 0 },
+    });
   }
 
   async getPortalUrl(context: TenantContext) {
@@ -513,15 +571,13 @@ export class BillingService {
       data: { status: "canceled", cancelAtPeriodEnd: false },
     });
 
-    const current = await this.getCurrentSubscription(existing.tenantId);
-    if (current && current.plan) {
-      await this.syncTenantPlan(existing.tenantId, current.plan.code);
-    } else {
-      // No active subscription remains — fall back to the default plan.
-      const defaultPlan = await prisma.plan.findUnique({ where: { code: "starter" } });
-      if (defaultPlan) {
-        await this.syncTenantPlan(existing.tenantId, defaultPlan.code);
-      }
+    // Cancellation reverts the workspace to the Free baseline. The row is
+    // created explicitly — never left to the "no active subscription" guess —
+    // so the billing surface shows a real current plan the instant the period
+    // ends, not a null state that reads as "unsubscribed".
+    const defaultPlan = await prisma.plan.findUnique({ where: { code: "free" } });
+    if (defaultPlan) {
+      await this.ensureBaselinePlan(defaultPlan, existing.tenantId);
     }
   }
 
