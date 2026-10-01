@@ -5,6 +5,7 @@ import { auditService } from "../audit/audit.service.js";
 import { normalizeSubject, uniqueParticipants } from "../message/message.utils.js";
 import { imapSmtpAdapter, type ImapSmtpAdapter } from "./imap-smtp.adapter.js";
 import { sseManager } from "../../common/sse/sse.manager.js";
+import { dkimService } from "../domain/dkim.service.js";
 
 export class ProviderMailService {
   constructor(private readonly adapter: ImapSmtpAdapter = imapSmtpAdapter) {}
@@ -240,6 +241,10 @@ export class ProviderMailService {
       message.recipients.filter((recipient) => recipient.type === type).map((recipient) => recipient.email);
     const to = byType("TO");
     if (to.length === 0) throw new Error("Message has no TO recipients");
+    // The From address's domain signs with its own key when it is a verified,
+    // sending custom domain. That is the signature DMARC aligns on.
+    const fromDomain = mapping.address.split("@")[1];
+    const dkim = fromDomain ? await dkimService.signingKeyFor(tenantId, fromDomain) : null;
     const result = await this.adapter.send({
       to,
       cc: byType("CC"),
@@ -247,6 +252,7 @@ export class ProviderMailService {
       subject: message.subject,
       text: message.textBody,
       html: message.htmlBody,
+      dkim,
     });
     const accepted = new Set(result.accepted.map((address: string) => address.toLowerCase()));
     const sentAt = new Date();

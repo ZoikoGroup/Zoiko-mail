@@ -100,6 +100,20 @@ export const assignMailboxSchema = z.object({
   canAssign: z.boolean().optional(),
 });
 
+/**
+ * Provisioning a member's mailbox.
+ *
+ * `domainId` is optional so callers that predate it keep working, and the
+ * service falls back to the member's registration address when it is absent.
+ * The local part is validated in the service against what an address can
+ * actually carry, next to the domain it will be joined to.
+ */
+export const adminCreateMailboxSchema = z.object({
+  membershipId: z.string().uuid(),
+  domainId: z.string().uuid().optional(),
+  localPart: z.string().trim().min(1).max(64).optional(),
+});
+
 export const mailboxAssigneeParamsSchema = z.object({
   mailboxId: z.string().uuid(),
   membershipId: z.string().uuid(),

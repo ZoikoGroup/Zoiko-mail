@@ -10,6 +10,7 @@ import { lifecycleService } from "../lifecycle/lifecycle.service.js";
 import { createHash } from "node:crypto";
 import { providerMailService } from "../provider-mail/provider-mail.service.js";
 import { aiService } from "../ai/ai.service.js";
+import { deleteSecret } from "../../common/secrets/secrets.js";
 export class JobService {
   enqueue(input: { tenantId: string; userId: string; type: JobType; payload: Prisma.InputJsonValue; idempotencyKey: string }, tx: Prisma.TransactionClient = prisma) {
     return tx.backgroundJob.upsert({
@@ -287,7 +288,7 @@ export class JobService {
       return outcome;
     }
 
-    const [tenant, request, attachmentRows, jobs, counts] = await Promise.all([
+    const [tenant, request, attachmentRows, jobs, secretRows, counts] = await Promise.all([
       prisma.tenant.findFirst({ where: { id: tenantId }, select: { id: true, name: true } }),
       prisma.dataLifecycleRequest.findFirst({
         where: { id: requestId, tenantId, type: "DELETION", status: "PROCESSING", jobId },
@@ -295,6 +296,15 @@ export class JobService {
       }),
       prisma.messageAttachment.findMany({ where: { tenantId }, select: { storageKey: true } }),
       prisma.backgroundJob.findMany({ where: { tenantId, type: "DATA_EXPORT" }, select: { result: true } }),
+      // The rows cascade with the tenant; the secrets they name live outside
+      // the database and would otherwise outlive it.
+      Promise.all([
+        prisma.domainDkimKey.findMany({ where: { tenantId }, select: { privateKeySecretRef: true } }),
+        prisma.dnsProviderCredential.findMany({ where: { tenantId }, select: { secretRef: true } }),
+      ]).then(([keys, credentials]) => [
+        ...keys.map((key) => key.privateKeySecretRef),
+        ...credentials.map((credential) => credential.secretRef),
+      ]),
       Promise.all([
         prisma.tenantMembership.count({ where: { tenantId } }),
         prisma.emailMessage.count({ where: { tenantId } }),
@@ -338,6 +348,7 @@ export class JobService {
     await Promise.allSettled([
       ...attachmentRows.map((attachment) => attachmentStorage.delete(attachment.storageKey)),
       ...exportKeys.map((storageKey) => exportStorage.delete(storageKey)),
+      ...secretRows.map((ref) => deleteSecret(ref, { purpose: "Tenant deletion", tenantId })),
     ]);
     return { receiptId: receipt.id, deletedAt: receipt.deletedAt, deletedRecordCounts };
   }

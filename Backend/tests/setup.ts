@@ -24,6 +24,19 @@ process.env.FLAG_MFA_ENFORCEMENT_ENABLED = "true";
 process.env.SECRET_FILE_DIR ||= mkdtempSync(resolve(tmpdir(), "zoiko-secrets-"));
 // Never touch real SMTP from tests — the system mailer falls back to log-only.
 process.env.SYSTEM_MAIL_ENABLED = "false";
+// Suites re-check a domain several times in a row; the cooldown that stops an
+// admin hammering the resolver is asserted on its own in domain.test.ts.
+process.env.DNS_MANUAL_CHECK_COOLDOWN_MS ??= "0";
+// Deterministic platform infrastructure, whatever a developer's .env says,
+// so record assertions do not depend on local configuration.
+process.env.DNS_MX_HOSTS = "mx1.zoikomail.test:10,mx2.zoikomail.test:20";
+process.env.DNS_SPF_INCLUDE = "_spf.zoikomail.test";
+process.env.DNS_DMARC_RUA = "";
+process.env.DNS_AUTOCONFIG_HOST = "";
+process.env.DNS_RESOLVER_SERVERS = "";
+// 1024-bit keys generate several times faster; the key size is not what these
+// suites are testing.
+process.env.DNS_DKIM_KEY_BITS = "1024";
 process.env.JWT_ACCESS_SECRET ??=
   "test-access-secret-minimum-32-characters-long";
 process.env.JWT_REFRESH_SECRET ??=

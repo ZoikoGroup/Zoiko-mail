@@ -45,6 +45,7 @@ export interface MailboxDto {
   sendSuspensionReason: string | null;
 }
 
+/** Summary shape for the dashboard; the domains screen uses lib/domains-api. */
 export interface DnsRecordDto {
   type: "TXT" | "MX" | "CNAME";
   host: string;

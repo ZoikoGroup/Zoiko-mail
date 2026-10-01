@@ -49,7 +49,7 @@ export default function ThreadsPage() {
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Search threads by subject or content..."
-              className="w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] py-2 pl-10 pr-3 text-sm text-[var(--ink)] placeholder:text-[var(--ink3)] focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] py-2 pl-10 pr-3 text-sm text-[var(--ink)] placeholder:text-[var(--ink3)] focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
             />
           </div>
           <button
@@ -62,7 +62,7 @@ export default function ThreadsPage() {
             <button
               type="button"
               onClick={clearSearch}
-              className="rounded-lg border border-[var(--line)] px-4 py-2 text-sm text-[var(--ink2)] hover:bg-[var(--surface)]"
+              className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm text-[var(--ink2)] hover:bg-[var(--surface)]"
             >
               Clear
             </button>
@@ -100,7 +100,7 @@ export default function ThreadsPage() {
         {/* Threads list */}
         {data && data.threads.length > 0 && (
           <>
-            <ul className="divide-y divide-[var(--line)] rounded-lg border border-[var(--line)] bg-[var(--surface)]">
+            <ul className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)] bg-[var(--surface)]">
               {data.threads.map((thread) => (
                 <ThreadRow key={thread.id} thread={thread} />
               ))}
@@ -179,7 +179,7 @@ function Pagination({
       <button
         onClick={() => onPageChange(page - 1)}
         disabled={page === 1}
-        className="rounded-md border border-[var(--line)] px-3 py-1.5 text-sm text-[var(--ink2)] hover:bg-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-40"
+        className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--ink2)] hover:bg-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-40"
       >
         Prev
       </button>
@@ -193,7 +193,7 @@ function Pagination({
             className={`min-w-[36px] rounded-md border px-2 py-1.5 text-sm ${
               p === page
                 ? "border-[var(--accent)] bg-[var(--accent)] text-white"
-                : "border-[var(--line)] text-[var(--ink2)] hover:bg-[var(--surface)]"
+                : "border-[var(--border)] text-[var(--ink2)] hover:bg-[var(--surface)]"
             }`}
           >
             {p}
@@ -203,7 +203,7 @@ function Pagination({
       <button
         onClick={() => onPageChange(page + 1)}
         disabled={page === totalPages}
-        className="rounded-md border border-[var(--line)] px-3 py-1.5 text-sm text-[var(--ink2)] hover:bg-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-40"
+        className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--ink2)] hover:bg-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-40"
       >
         Next
       </button>

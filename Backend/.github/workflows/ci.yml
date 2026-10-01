@@ -202,6 +202,13 @@ jobs:
       - name: Frontend and backend agree on the capability vocabulary
         run: node Backend/scripts/check-capability-parity.mjs
 
+      # An undefined custom property does not error or fall back — it resolves
+      # to nothing and the declaration is dropped, so a dropdown reaches
+      # production fully transparent with the page showing through it. Neither
+      # the build nor the type checker says a word, which is why it is checked.
+      - name: Every CSS token used is defined
+        run: node Backend/scripts/check-css-tokens.mjs
+
       # A merge that leaves markers behind compiles in neither language, but
       # it has reached a branch here before, so it is worth one grep.
       - name: No conflict markers

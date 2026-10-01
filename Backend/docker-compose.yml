@@ -61,6 +61,28 @@ services:
       MAIL_PROVIDER_MEMBERSHIP_ID: ${MAIL_PROVIDER_MEMBERSHIP_ID:-}
       MAIL_PROVIDER_SYNC_INTERVAL_MS: ${MAIL_PROVIDER_SYNC_INTERVAL_MS:-300000}
       MAIL_PROVIDER_CONNECTION_TIMEOUT_MS: ${MAIL_PROVIDER_CONNECTION_TIMEOUT_MS:-15000}
+      # Where secrets live: DKIM private keys, DNS provider credentials and
+      # connector tokens. The file store's default is inside the image, which
+      # a rebuild wipes — so it sits on the persistent storage volume here.
+      # Production should use SECRET_STORE=gcp (Secret Manager) instead.
+      SECRET_STORE: ${SECRET_STORE:-env}
+      SECRET_FILE_DIR: ${SECRET_FILE_DIR:-/app/storage/secrets}
+      SECRET_MANAGER_PROJECT: ${SECRET_MANAGER_PROJECT:-}
+      # Custom-domain DNS. The MX hosts and SPF include must be real
+      # platform infrastructure: every customer domain is told to point at
+      # them, and the SPF include must publish the sending IPs itself.
+      DNS_MX_HOSTS: ${DNS_MX_HOSTS:-mail.zoikomail.com:10}
+      DNS_SPF_INCLUDE: ${DNS_SPF_INCLUDE:-_spf.zoikomail.com}
+      DNS_SPF_ALL: ${DNS_SPF_ALL:-~all}
+      DNS_DKIM_SELECTOR_PREFIX: ${DNS_DKIM_SELECTOR_PREFIX:-zm}
+      DNS_DKIM_KEY_BITS: ${DNS_DKIM_KEY_BITS:-2048}
+      DNS_DMARC_RUA: ${DNS_DMARC_RUA:-}
+      DNS_AUTOCONFIG_HOST: ${DNS_AUTOCONFIG_HOST:-}
+      DNS_RESOLVER_SERVERS: ${DNS_RESOLVER_SERVERS:-}
+      DNS_SYNC_INTERVAL_MS: ${DNS_SYNC_INTERVAL_MS:-30000}
+      DNS_RECHECK_VERIFIED_MS: ${DNS_RECHECK_VERIFIED_MS:-21600000}
+      DNS_FAILURE_THRESHOLD: ${DNS_FAILURE_THRESHOLD:-3}
+      DNS_VERIFICATION_WINDOW_HOURS: ${DNS_VERIFICATION_WINDOW_HOURS:-72}
     ports:
       - "${API_PORT:-5000}:5000"
     volumes:

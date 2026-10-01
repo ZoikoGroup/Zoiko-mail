@@ -1655,7 +1655,34 @@ export class MailService {
 
   // ─── Admin: Provision a mailbox for an existing member ──────────────────────
 
-  async adminCreateMailbox(tenantId: string, membershipId: string, context: MailContext) {
+  /**
+   * Provision a member's mailbox.
+   *
+   * The address is composed from a domain this workspace has verified, not
+   * taken from whatever address the member happened to register with. That
+   * was the old behaviour and it was wrong twice over: somebody who signed up
+   * as dana@gmail.com got a "hosted mailbox" at dana@gmail.com, on a domain
+   * the workspace does not own and can never publish SPF or DKIM for — so it
+   * could never legitimately send. It also meant adding a custom domain had
+   * no effect on the mailboxes created afterwards.
+   *
+   * The domain must be VERIFIED: ownership proven and MX pointing here, so
+   * mail can actually arrive. Sending is a separate gate (`sendingEnabled`)
+   * and deliberately later — a mailbox can receive while the workspace is
+   * still working through SPF, DKIM and DMARC.
+   *
+   * `domainId` is optional only for callers that predate it, which fall back
+   * to the old derivation. New callers pass one.
+   */
+  async adminCreateMailbox(
+    tenantId: string,
+    input: string | { membershipId: string; domainId?: string; localPart?: string },
+    context: MailContext
+  ) {
+    const membershipId = typeof input === "string" ? input : input.membershipId;
+    const domainId = typeof input === "string" ? undefined : input.domainId;
+    const requestedLocalPart = typeof input === "string" ? undefined : input.localPart;
+
     const membership = await prisma.tenantMembership.findFirst({
       where: { id: membershipId, tenantId, status: "ACTIVE" },
       include: { user: { select: { id: true, email: true } }, mailbox: true },
@@ -1666,11 +1693,64 @@ export class MailService {
     // Enforce the tenant-level mailbox limit before provisioning a new mailbox.
     await billingService.assertMailboxWithinLimit(tenantId);
 
+    // ── Domain readiness check ──────────────────────────────────────────
+    let address = membership.user.email.toLowerCase();
+    let resolvedDomainId: string | null = null;
+
+    if (domainId) {
+      const domain = await prisma.mailDomain.findFirst({
+        where: { id: domainId, tenantId },
+        select: { id: true, domainName: true, verificationStatus: true },
+      });
+      // Scoped to the tenant, so a domain id belonging to another workspace
+      // reads as absent rather than as a permission error.
+      if (!domain) throw new AppError("Domain not found", 404, ErrorCodes.NOT_FOUND);
+      if (domain.verificationStatus !== "VERIFIED") {
+        throw new AppError(
+          `${domain.domainName} is not verified yet. Finish its DNS checks before creating mailboxes on it.`,
+          409,
+          ErrorCodes.CONFLICT,
+          { reason: "DOMAIN_NOT_VERIFIED", domainName: domain.domainName }
+        );
+      }
+
+      // Defaults to the local part they already use, which is what somebody
+      // expects when they invite dana@old-company.com and pick acme.com.
+      const localPart = (requestedLocalPart ?? membership.user.email.split("@")[0] ?? "")
+        .trim()
+        .toLowerCase();
+      if (!/^[a-z0-9._%+-]{1,64}$/.test(localPart)) {
+        throw new AppError(
+          "That mailbox name contains characters an address cannot carry",
+          422,
+          ErrorCodes.VALIDATION_ERROR,
+          { parameter: "localPart" }
+        );
+      }
+
+      address = `${localPart}@${domain.domainName.toLowerCase()}`;
+      resolvedDomainId = domain.id;
+
+      const clash = await prisma.mailbox.findFirst({
+        where: { tenantId, address },
+        select: { id: true },
+      });
+      if (clash) {
+        throw new AppError(
+          `${address} already exists in this workspace`,
+          409,
+          ErrorCodes.CONFLICT,
+          { reason: "ADDRESS_TAKEN" }
+        );
+      }
+    }
+
     const mailbox = await prisma.mailbox.create({
       data: {
         tenantId,
         membershipId,
-        address: membership.user.email.toLowerCase(),
+        domainId: resolvedDomainId,
+        address,
       },
       include: {
         membership: {

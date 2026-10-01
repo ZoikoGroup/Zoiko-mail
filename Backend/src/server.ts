@@ -12,6 +12,7 @@ import { purgeExpiredIdempotencyRecords } from "./common/middleware/idempotency.
 import { gmailConnector } from "./modules/connector/gmail/gmail.connector.js";
 import { microsoftConnector } from "./modules/connector/m365/m365.connector.js";
 import { withTenant } from "./config/tenantScope.js";
+import { runDueDomainSyncs } from "./modules/domain/domain.sync.js";
 
 const app = createApp();
 const PORT = env.PORT;
@@ -129,6 +130,29 @@ const complianceSweep = setInterval(() => {
     });
 }, env.COMPLIANCE_SWEEP_INTERVAL_MS);
 complianceSweep.unref();
+
+// ─── Custom-domain DNS synchronization ──────────────────────────────────────
+//
+// Reconciles, publishes and verifies every domain whose next check is due,
+// then reschedules it: minutes apart while an owner is publishing records,
+// hours apart once the domain is healthy. This is what turns "add the records
+// and press re-check" into records that verify themselves, and what notices
+// when a record someone deleted breaks a domain that was working.
+
+let domainSyncRunning = false;
+const domainSync = setInterval(() => {
+  if (domainSyncRunning) return;
+  domainSyncRunning = true;
+  void runDueDomainSyncs()
+    .then((result) => {
+      if (result.claimed > 0) logger.info(result, "Domain DNS synchronization completed");
+    })
+    .catch((error: unknown) => logger.error({ error }, "Domain DNS synchronization sweep failed"))
+    .finally(() => {
+      domainSyncRunning = false;
+    });
+}, env.DNS_SYNC_INTERVAL_MS);
+domainSync.unref();
 
 // ─── Gmail watch renewal (ZM-BE-005) ────────────────────────────────────────
 
@@ -263,6 +287,7 @@ async function shutdown(signal: string): Promise<void> {
   clearInterval(providerEventWorker);
   clearInterval(complianceSweep);
   clearInterval(providerSync);
+  clearInterval(domainSync);
   clearInterval(gmailCatchUp);
   clearInterval(microsoftRenew);
   clearInterval(microsoftCatchUp);

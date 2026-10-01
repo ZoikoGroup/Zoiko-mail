@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { API_BASE } from "@/lib/config";
+import { useQueryClient } from "@tanstack/react-query";
 import { routeAuthState } from "@/lib/auth-hooks";
 import type { AuthResponse } from "@/lib/auth-api";
 import { resolveWorkspaceHref } from "@/lib/workspace";
@@ -24,6 +25,9 @@ interface Workspace {
 
 export default function SelectWorkspacePage() {
   const router = useRouter();
+  // Picking a second workspace is a change of account for every screen that
+  // follows, so the first one's rows go before the navigation does.
+  const queryClient = useQueryClient();
   const [token, setToken] = useState<string | null>(null);
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null);
   const [ready, setReady] = useState(false);
@@ -132,7 +136,7 @@ export default function SelectWorkspacePage() {
         }
 
         clearStash();
-        routeAuthState(data as AuthResponse, router);
+        routeAuthState(data as AuthResponse, router, { queryClient });
       } catch (e) {
         setError("Network error, please try again.");
         setSubmitting(false);

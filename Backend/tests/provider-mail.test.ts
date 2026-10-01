@@ -104,4 +104,15 @@ describe("SecureServer IMAP/SMTP adapter", () => {
     expect(result).toMatchObject({ messageId: "smtp-message-1", accepted: ["accepted@example.test"] });
     expect(JSON.stringify(result)).not.toContain(config.password);
   });
+
+  it("signs with the sending domain's DKIM key when one is given, and not otherwise", async () => {
+    const mock = mocks();
+    const adapter = new ImapSmtpAdapter(config, mock.imapFactory, mock.smtpFactory);
+    const dkim = { domainName: "example.test", keySelector: "zm202609", privateKey: "-----BEGIN PRIVATE KEY-----" };
+    await adapter.send({ to: ["accepted@example.test"], subject: "Signed", text: "x", dkim });
+    expect(mock.sendMail).toHaveBeenLastCalledWith(expect.objectContaining({ dkim }));
+
+    await adapter.send({ to: ["accepted@example.test"], subject: "Unsigned", text: "x", dkim: null });
+    expect(mock.sendMail).toHaveBeenLastCalledWith(expect.not.objectContaining({ dkim: expect.anything() }));
+  });
 });

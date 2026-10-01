@@ -247,6 +247,8 @@ export class ImapSmtpAdapter {
     subject: string;
     text?: string | null;
     html?: string | null;
+    /** Signs with the From domain's own DKIM key when it has one. */
+    dkim?: { domainName: string; keySelector: string; privateKey: string } | null;
   }) {
     const config = this.requireConfig();
     const result = await this.smtpFactory(config).sendMail({
@@ -257,6 +259,7 @@ export class ImapSmtpAdapter {
       subject: input.subject,
       text: input.text ?? undefined,
       html: input.html ?? undefined,
+      ...(input.dkim ? { dkim: input.dkim } : {}),
     });
     return {
       messageId: result.messageId,

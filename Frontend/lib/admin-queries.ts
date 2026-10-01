@@ -23,6 +23,7 @@ import type {
   ConnectorDto,
   DashboardDto,
   DeliveryFailureSummaryDto,
+  DnsRecordDto,
   DomainCheckDto,
   DomainDto,
   GroupDto,
@@ -231,11 +232,20 @@ export async function setMailboxAi(
  * after the member's own email, so the two cannot drift apart and an admin
  * cannot create `dana@acme.com` for somebody who is not Dana.
  */
-export async function createMailbox(membershipId: string): Promise<void> {
-  await apiRequest("/mail/admin/mailboxes", {
-    method: "POST",
-    body: { membershipId },
-  });
+/**
+ * Provision a member's mailbox on one of the workspace's own domains.
+ *
+ * `domainId` is what makes the address theirs rather than whatever they
+ * happened to register with. Without it the server falls back to the signup
+ * email — which is how a workspace with a verified domain ended up handing
+ * out mailboxes at gmail.com, on a domain it can never publish SPF for.
+ */
+export async function createMailbox(input: {
+  membershipId: string;
+  domainId?: string;
+  localPart?: string;
+}): Promise<void> {
+  await apiRequest("/mail/admin/mailboxes", { method: "POST", body: input });
 }
 
 /** Remove a mailbox. Step-up per RBAC §2; suspend first and offer an export. */
@@ -337,6 +347,7 @@ interface ApiDomain {
   lastCheckedAt: string | null;
   sendingEnabled: boolean;
   verificationToken: string | null;
+  records?: Array<{ type: DnsRecordDto["type"]; name: string; value: string; purpose: string; status: DnsRecordDto["status"] }>;
 }
 
 export async function fetchDomains(): Promise<DomainDto[]> {
@@ -353,20 +364,16 @@ export async function fetchDomains(): Promise<DomainDto[]> {
     lastCheckedAt: d.lastCheckedAt ? ago(d.lastCheckedAt) : "never",
     sendingEnabled: d.sendingEnabled,
     warmupNote: null,
-    // The API returns aggregate per-record *statuses* but not the record
-    // values themselves, so there is nothing to list here yet. The one value
-    // it does return is the ownership token, which is worth showing.
-    records: d.verificationToken
-      ? [
-          {
-            type: "TXT",
-            host: "@",
-            value: d.verificationToken,
-            purpose: "Domain ownership",
-            status: d.verificationStatus === "VERIFIED" ? "VALID" : "PENDING",
-          },
-        ]
-      : [],
+    // Generated per domain by the server. The domains screen itself reads
+    // the richer shape from lib/domains-api; this summary feeds the
+    // dashboard and sidebar.
+    records: (d.records ?? []).map((record) => ({
+      type: record.type,
+      host: record.name,
+      value: record.value,
+      purpose: record.purpose,
+      status: record.status,
+    })),
   }));
 }
 
@@ -1565,11 +1572,12 @@ export async function fetchDomainChecks(domainId: string): Promise<DomainCheckDt
     spfStatus: check.spfStatus,
     dkimStatus: check.dkimStatus,
     dmarcStatus: check.dmarcStatus,
-    // errorDetails is keyed by record type — { dkim: "NXDOMAIN" } — so the
-    // resolver's own message is shown rather than restated as a red pill.
-    errors: Object.entries(check.errorDetails ?? {}).map(
-      ([record, message]) => `${record.toUpperCase()}: ${String(message)}`
-    ),
+    // errorDetails is keyed by record group. Current rows hold
+    // { code, message }; String() on those printed "[object Object]".
+    errors: Object.entries(check.errorDetails ?? {}).map(([record, detail]) => {
+      const message = typeof detail === "string" ? detail : (detail as { message?: string } | null)?.message ?? JSON.stringify(detail);
+      return `${record.toUpperCase()}: ${message}`;
+    }),
   }));
 }
 
