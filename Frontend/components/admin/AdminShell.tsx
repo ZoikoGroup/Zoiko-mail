@@ -4,7 +4,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { LogOut, Menu, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
+import { ProfileMenu } from "@/components/shell/ProfileMenu";
 import { useWorkspaceAccess } from "@/lib/workspace-access";
 import { useMe, useLogout } from "@/lib/auth-hooks";
 import type { MeResponse } from "@/lib/auth-api";
@@ -109,22 +110,13 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
           <div className="flex items-center gap-3">
             <ThemeToggle />
-            {me && (
-              <div className="hidden items-center gap-2 sm:flex">
-                <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--ai)] text-xs font-semibold text-white">
-                  {initials(me.displayName, me.email)}
-                </span>
-                <span className="text-sm text-[var(--ink2)]">{me.displayName}</span>
-              </div>
-            )}
-            <button
-              onClick={() => logout.mutate()}
-              disabled={logout.isPending}
-              className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-[var(--ink2)] ring-1 ring-inset ring-[var(--border)] hover:bg-[var(--s2)] disabled:opacity-60"
-            >
-              <LogOut className="h-4 w-4" />
-              <span className="hidden sm:inline">{logout.isPending ? "…" : "Log out"}</span>
-            </button>
+            {/*
+              The avatar, the name and sign-out were three separate things
+              here, and the whole block was `hidden sm:flex` — so a phone
+              showed no identity and offered no way out. One menu now, and it
+              is reachable at every width.
+            */}
+            <ProfileMenu />
           </div>
         </header>
 

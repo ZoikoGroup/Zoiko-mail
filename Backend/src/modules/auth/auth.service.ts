@@ -2280,24 +2280,41 @@ export class AuthService {
     });
   }
 
-  getCurrentUser(req: Request): AuthSessionResponse["user"] & {
+  async getCurrentUser(req: Request): Promise<AuthSessionResponse["user"] & {
     tenant: AuthSessionResponse["tenant"];
     membership: AuthSessionResponse["membership"];
     workspace: WorkspaceScope;
     platformRole: PlatformRole;
+    /**
+     * How many workspaces this account can sign into.
+     *
+     * The profile menu offers "Switch workspace" only when there is somewhere
+     * to switch to — showing it to the great majority who belong to exactly
+     * one leads to a page telling them so.
+     *
+     * Counted, not listed: the names are the selection screen's job, and a
+     * list here would put every workspace a person belongs to into a response
+     * the shell holds for a minute.
+     */
+    workspaceCount: number;
     platformAccess: {
       isSupportStaff: boolean;
       scope: "PLATFORM" | "TENANT" | "NONE";
       status: "ACTIVE" | "EXPIRED" | "REVOKED" | "NONE";
       expiresAt: string | null;
     };
-  } {
+  }> {
     if (!req.tenantContext) {
       throw new AppError("Tenant context required", 403, ErrorCodes.FORBIDDEN);
     }
 
     const { user, tenant, membershipId, role, workspace } = req.tenantContext;
 
+    // One indexed count (@@index([userId])) on a response the client caches
+    // for a minute, so this is not on any hot path.
+    const workspaceCount = await prisma.tenantMembership.count({
+      where: { userId: user.id, status: "ACTIVE" },
+    });
     const platformRole = user.platformRole;
     const isSupportStaff = platformRole === "SUPPORT" || platformRole === "SUPER_ADMIN";
 
@@ -2319,6 +2336,7 @@ export class AuthService {
       // Which console this session belongs to. The shells gate on this, so it
       // has to come from the server rather than be inferred from the role.
       workspace,
+      workspaceCount,
       platformRole,
       platformAccess: {
         isSupportStaff,

@@ -42,19 +42,80 @@ interface DomainOverrides {
   sendingEnabled?: boolean;
 }
 
+/** A server record in the shape GET /domains returns. */
+function dnsRecord(purpose: string, name: string, value: string, legacy: string, extra: Record<string, unknown> = {}) {
+  const state = legacy === "VALID" || legacy === "VERIFIED" ? "VERIFIED" : legacy === "PENDING" ? "PENDING" : "MISSING";
+  return {
+    id: `r-${purpose}`,
+    recordKey: purpose,
+    purpose,
+    type: purpose === "MX" ? "MX" : "TXT",
+    name,
+    fqdn: name === "@" ? "acme.test" : `${name}.acme.test`,
+    value,
+    priority: purpose === "MX" ? 10 : null,
+    ttl: 3600,
+    required: true,
+    state,
+    status: state === "VERIFIED" ? "VALID" : state === "PENDING" ? "PENDING" : "INVALID",
+    observed: null,
+    diagnosis: null,
+    lastErrorCode: null,
+    lastCheckedAt: "2026-09-01T09:00:00.000Z",
+    lastVerifiedAt: null,
+    publishState: "NOT_APPLICABLE",
+    publishedAt: null,
+    publishError: null,
+    ...extra,
+  };
+}
+
 function domain(over: DomainOverrides = {}) {
+  const verificationStatus = over.verificationStatus ?? "PENDING";
+  const spfStatus = over.spfStatus ?? "PENDING";
+  const dkimStatus = over.dkimStatus ?? "PENDING";
+  const dmarcStatus = over.dmarcStatus ?? "PENDING";
+  const sendingEnabled = over.sendingEnabled ?? false;
+  const sendReady = verificationStatus === "VERIFIED" && spfStatus === "VALID" && dkimStatus === "VALID" && dmarcStatus === "VALID";
   return {
     id: over.id ?? "d1",
     domainName: over.domainName ?? "acme.test",
     type: "CUSTOM",
-    verificationStatus: over.verificationStatus ?? "PENDING",
+    status: sendingEnabled ? "ACTIVE" : sendReady ? "VERIFIED" : "PENDING_VERIFICATION",
+    verificationStatus,
     mxStatus: "VALID",
-    spfStatus: over.spfStatus ?? "PENDING",
-    dkimStatus: over.dkimStatus ?? "PENDING",
-    dmarcStatus: over.dmarcStatus ?? "PENDING",
+    spfStatus,
+    dkimStatus,
+    dmarcStatus,
     lastCheckedAt: "2026-09-01T09:00:00.000Z",
-    sendingEnabled: over.sendingEnabled ?? false,
+    nextCheckAt: "2026-09-01T09:02:00.000Z",
+    sendingEnabled,
     verificationToken: "zoiko-mail-verification=abc123",
+    dnsProvider: "MANUAL",
+    dnsCredentialId: null,
+    dnsCredential: null,
+    receivingEnabled: true,
+    replaceExistingMx: false,
+    autoActivateSending: true,
+    dmarcPolicy: "NONE",
+    dmarcReportEmail: null,
+    configVersion: 1,
+    consecutiveFailures: 0,
+    graceUntil: null,
+    sendingSuspendedAt: null,
+    suspensionReason: null,
+    lastSyncError: null,
+    errorDetails: {},
+    records: [
+      dnsRecord("OWNERSHIP", "@", "zoiko-mail-verification=abc123", verificationStatus),
+      dnsRecord("MX", "@", "mx1.zoikomail.com", "VALID"),
+      dnsRecord("SPF", "@", "v=spf1 include:_spf.zoikomail.com ~all", spfStatus),
+      dnsRecord("DKIM", "zm202609._domainkey", "v=DKIM1; k=rsa; p=MIIB", dkimStatus),
+      dnsRecord("DMARC", "_dmarc", "v=DMARC1; p=none; adkim=r; aspf=r", dmarcStatus),
+    ],
+    dkimKeys: [{ id: "k1", selector: "zm202609", keyBits: 2048, status: "ACTIVE", activatedAt: null, retiringAt: null, createdAt: "2026-09-01T09:00:00.000Z" }],
+    readiness: { sendReady, fullyReady: sendReady, blocking: sendReady ? [] : ["OWNERSHIP", "SPF", "DKIM", "DMARC"] },
+    createdAt: "2026-09-01T09:00:00.000Z",
   };
 }
 
@@ -151,6 +212,9 @@ async function openDomains(
           {
             id: "c1",
             checkedAt: "2026-09-01T09:00:00.000Z",
+            trigger: "SCHEDULED",
+            resultStatus: "PENDING_VERIFICATION",
+            durationMs: 120,
             verificationStatus: "FAILED",
             mxStatus: "VALID",
             spfStatus: "VALID",
@@ -162,7 +226,10 @@ async function openDomains(
       })
     )
   );
-  await page.route(/\/api\/v1\/domains\/[^/]+\/(diagnostics|activate)$/, record);
+  await page.route(/\/api\/v1\/domains\/dns-providers$/, (route) =>
+    route.request().method() === "GET" ? route.fulfill(json({ credentials: [] })) : record(route)
+  );
+  await page.route(/\/api\/v1\/domains\/[^/]+\/(diagnostics|activate|deactivate|publish|dkim\/rotate)$/, record);
   await page.route(/\/api\/v1\/domains\/[^/]+$/, record);
   await page.route(/\/api\/v1\/domains(\?|$)/, (route) =>
     route.request().method() === "GET"
@@ -192,9 +259,10 @@ test.describe("adding a domain", () => {
     await page.getByLabel("Domain name").fill("ACME.Example");
     await page.getByRole("button", { name: "Add domain", exact: true }).last().click();
 
+    // Manual publishing is the default, so no provider fields are sent.
     await expect
       .poll(() => wrote(calls, "POST", "/domains")?.body)
-      .toEqual({ domainName: "acme.example" });
+      .toEqual({ domainName: "acme.example", receivingEnabled: true });
   });
 
   test("refuses something that is not a domain without asking the server", async ({
@@ -295,17 +363,47 @@ test.describe("check history", () => {
     // The domain row carries only the latest result, so it answers "is it
     // failing" and not "since when" — which is the difference between DNS that
     // has not propagated and a record that was never published.
-    await page.getByRole("button", { name: "History" }).click();
+    await page.getByRole("tab", { name: "history" }).click();
 
-    await expect(page.getByRole("heading", { name: "Check history" })).toBeVisible();
+    // Older rows stored bare strings; they still read as the resolver's words.
     await expect(page.getByText("DKIM: NXDOMAIN")).toBeVisible();
   });
 
   test("says so when nothing has been checked yet", async ({ page }) => {
     await openDomains(page, { checks: [] });
 
-    await page.getByRole("button", { name: "History" }).click();
+    await page.getByRole("tab", { name: "history" }).click();
 
     await expect(page.getByText("No checks recorded yet")).toBeVisible();
+  });
+});
+
+test.describe("DNS records", () => {
+  test("shows the server's generated records, not a hardcoded template", async ({ page }) => {
+    await openDomains(page);
+
+    // The values come from the API response. The old screen printed
+    // mail.zoiko.dev and a "<provided by Zoiko support>" placeholder here.
+    await expect(page.getByText("v=spf1 include:_spf.zoikomail.com ~all")).toBeVisible();
+    await expect(page.getByText("zm202609._domainkey")).toBeVisible();
+    await expect(page.getByText("mail.zoiko.dev")).toHaveCount(0);
+  });
+
+  test("downloads the zone file from the server", async ({ page }) => {
+    await openDomains(page);
+    // Registered after openDomains: Playwright tries the newest route first,
+    // and openDomains ends with a catch-all for the rest of the API.
+    await page.route(/\/api\/v1\/domains\/[^/]+\/zone-file$/, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/plain",
+        headers: { "Content-Disposition": 'attachment; filename="acme.test.zone"' },
+        body: "$ORIGIN acme.test.\n",
+      })
+    );
+
+    const download = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Zone file" }).click();
+    expect((await download).suggestedFilename()).toBe("acme.test.zone");
   });
 });

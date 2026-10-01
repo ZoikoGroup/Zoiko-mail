@@ -969,6 +969,16 @@ export class SupportService {
         id: true, domainName: true, type: true, verificationToken: true, verificationStatus: true,
         mxStatus: true, spfStatus: true, dkimStatus: true, dmarcStatus: true,
         firstCheckedAt: true, lastCheckedAt: true, errorDetails: true, sendingEnabled: true, activatedAt: true, createdAt: true, updatedAt: true,
+        status: true, dnsProvider: true, nextCheckAt: true, lastVerifiedAt: true, consecutiveFailures: true,
+        graceUntil: true, sendingSuspendedAt: true, suspensionReason: true, lastSyncError: true,
+        // What support is actually asked: which record, and why. Values are
+        // public DNS data; no key material is stored on these rows.
+        records: {
+          select: {
+            recordKey: true, purpose: true, type: true, name: true, value: true, priority: true, required: true,
+            state: true, diagnosis: true, lastErrorCode: true, lastCheckedAt: true, publishState: true, publishError: true,
+          },
+        },
       },
     });
     if (!domain) throw new AppError("Domain not found", 404, ErrorCodes.NOT_FOUND);

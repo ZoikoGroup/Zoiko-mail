@@ -107,7 +107,7 @@ function MessageCard({
   const bcc = message.recipients.filter((r) => r.type === "BCC").map((r) => r.email);
 
   return (
-    <li className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
+    <li className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4">
       {/* From / To / date */}
       <div className="mb-3 flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1 text-sm">
@@ -159,7 +159,7 @@ function MessageCard({
 
       {/* Attachments */}
       {message.attachments.length > 0 && (
-        <div className="mt-3 border-t border-[var(--line)] pt-3">
+        <div className="mt-3 border-t border-[var(--border)] pt-3">
           <p className="mb-2 text-xs font-medium uppercase text-[var(--ink3)]">
             Attachments
           </p>
@@ -168,7 +168,7 @@ function MessageCard({
               <li key={att.id}>
                 <button
                   onClick={() => onAttachmentClick(message, att)}
-                  className="inline-flex items-center gap-2 rounded-md border border-[var(--line)] bg-[var(--ground)] px-3 py-1.5 text-xs text-[var(--ink2)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                  className="inline-flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--ground)] px-3 py-1.5 text-xs text-[var(--ink2)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
                 >
                   <Paperclip className="h-3.5 w-3.5" />
                   <span>{att.fileName}</span>

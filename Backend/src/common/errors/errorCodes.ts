@@ -38,6 +38,9 @@ export const ErrorCodes = {
   IDEMPOTENCY_KEY_REQUIRED: "IDEMPOTENCY_KEY_REQUIRED",
   IDEMPOTENCY_PAYLOAD_MISMATCH: "IDEMPOTENCY_PAYLOAD_MISMATCH",
   IDEMPOTENCY_REQUEST_IN_PROGRESS: "IDEMPOTENCY_REQUEST_IN_PROGRESS",
+  // A DNS host's API refused or failed a request. Separate from a validation
+  // error: the input was fine, and the fix is on the provider's side.
+  DNS_PROVIDER_ERROR: "DNS_PROVIDER_ERROR",
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];

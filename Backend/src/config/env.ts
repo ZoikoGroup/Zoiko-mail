@@ -164,6 +164,44 @@ export const envSchema = z.object({
   // automatically; exhausted retries surface as a retryable job failure.
   OPENAI_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(300_000).default(30_000),
   OPENAI_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
+  // ── Custom-domain DNS ────────────────────────────────────────────────────
+  // The platform's own mail infrastructure. Every record a customer domain is
+  // asked to publish is derived from these, so they must name hosts that
+  // exist: the MX hosts must accept mail for customer domains, and the SPF
+  // include must itself publish an SPF record listing the sending IPs.
+  /** `host:priority` pairs, comma-separated. */
+  DNS_MX_HOSTS: z.string()
+    .regex(/^[a-z0-9.-]+:\d{1,5}(,[a-z0-9.-]+:\d{1,5})*$/i, "use host:priority[,host:priority]")
+    .default("mail.zoikomail.com:10"),
+  DNS_SPF_INCLUDE: z.string().regex(/^[a-z0-9._-]+$/i).default("_spf.zoikomail.com"),
+  /** How the generated SPF record ends. ~all is the safe default while a domain migrates. */
+  DNS_SPF_ALL: z.enum(["~all", "-all"]).default("~all"),
+  DNS_DKIM_SELECTOR_PREFIX: z.string().regex(/^[a-z][a-z0-9]{0,15}$/).default("zm"),
+  DNS_DKIM_KEY_BITS: z.coerce.number().int().refine((bits) => bits === 1024 || bits === 2048, "1024 or 2048").default(2048),
+  /** How long a replaced DKIM key's record stays published for mail in flight. */
+  DNS_DKIM_RETIRE_GRACE_MS: z.coerce.number().int().min(0).default(7 * 24 * 3_600_000),
+  /** Default DMARC aggregate-report mailbox, when a domain does not set its own. */
+  DNS_DMARC_RUA: z.preprocess(blankAsUndefined, z.string().email().optional()),
+  /** Mail-client autoconfiguration target. Unset means no autodiscover records. */
+  DNS_AUTOCONFIG_HOST: z.preprocess(blankAsUndefined, z.string().regex(/^[a-z0-9.-]+$/i).optional()),
+  DNS_RECORD_TTL: z.coerce.number().int().min(300).max(86_400).default(3600),
+  /** Comma-separated resolver IPs. Unset uses the system resolver. */
+  DNS_RESOLVER_SERVERS: z.preprocess(blankAsUndefined, z.string().optional()),
+  DNS_RESOLVER_TIMEOUT_MS: z.coerce.number().int().min(500).max(30_000).default(5_000),
+  /** How often the synchronizer looks for domains that are due a check. */
+  DNS_SYNC_INTERVAL_MS: z.coerce.number().int().min(1_000).default(30_000),
+  DNS_SYNC_BATCH_SIZE: z.coerce.number().int().min(1).max(200).default(20),
+  /** Re-check cadence once a domain is healthy. */
+  DNS_RECHECK_VERIFIED_MS: z.coerce.number().int().min(60_000).default(6 * 3_600_000),
+  /** Ownership must appear within this window, or the domain is marked FAILED. */
+  DNS_VERIFICATION_WINDOW_HOURS: z.coerce.number().int().min(1).max(24 * 30).default(72),
+  /** Consecutive definitive failures before a sending domain is suspended. */
+  DNS_FAILURE_THRESHOLD: z.coerce.number().int().min(1).max(20).default(3),
+  /** Time an owner gets to publish records after the expected set changes. */
+  DNS_CHANGE_GRACE_HOURS: z.coerce.number().int().min(0).max(24 * 30).default(72),
+  /** Minimum gap between two admin-triggered checks of one domain. */
+  DNS_MANUAL_CHECK_COOLDOWN_MS: z.coerce.number().int().min(0).default(5_000),
+  DNS_PROVIDER_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(15_000),
    FLAG_MFA_ENFORCEMENT_ENABLED: boolFlag("true"),
   FLAG_HOSTED_MAIL_PILOT_ENABLED: boolFlag("false"),
   FLAG_OUTBOUND_SENDING_ENABLED: boolFlag("true"),
