@@ -636,21 +636,21 @@ export class MailService {
     const reservation = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
       UPDATE "mailboxes"
       SET "send_recipient_count" = CASE
-            WHEN "send_window_started_at" <= CURRENT_TIMESTAMP - (${env.MAIL_SEND_WINDOW_MS} * INTERVAL '1 millisecond')
+            WHEN "send_window_started_at" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - (${env.MAIL_SEND_WINDOW_MS} * INTERVAL '1 millisecond')
             THEN ${draft.recipients.length}
             ELSE "send_recipient_count" + ${draft.recipients.length}
           END,
           "send_window_started_at" = CASE
-            WHEN "send_window_started_at" <= CURRENT_TIMESTAMP - (${env.MAIL_SEND_WINDOW_MS} * INTERVAL '1 millisecond')
-            THEN CURRENT_TIMESTAMP
+            WHEN "send_window_started_at" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - (${env.MAIL_SEND_WINDOW_MS} * INTERVAL '1 millisecond')
+            THEN (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
             ELSE "send_window_started_at"
           END,
-          "updated_at" = CURRENT_TIMESTAMP
+          "updated_at" = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
       WHERE "id" = ${senderMailbox.id}::uuid
         AND "tenant_id" = ${context.tenantId}::uuid
         AND "send_suspended_at" IS NULL
         AND (
-          "send_window_started_at" <= CURRENT_TIMESTAMP - (${env.MAIL_SEND_WINDOW_MS} * INTERVAL '1 millisecond')
+          "send_window_started_at" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - (${env.MAIL_SEND_WINDOW_MS} * INTERVAL '1 millisecond')
           OR "send_recipient_count" + ${draft.recipients.length} <= ${env.MAIL_MAX_RECIPIENTS_PER_WINDOW}
         )
       RETURNING "id"
@@ -1502,7 +1502,7 @@ export class MailService {
         const reserved = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
           UPDATE "mailboxes"
           SET "storage_used" = "storage_used" + ${file.size},
-              "updated_at" = CURRENT_TIMESTAMP
+              "updated_at" = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
           WHERE "id" = ${mailbox.id}::uuid
             AND "tenant_id" = ${context.tenantId}::uuid
             AND "storage_used" + ${file.size} <= "storage_limit"

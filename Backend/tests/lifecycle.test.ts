@@ -24,6 +24,19 @@ async function stepUpToken(user: { accessToken: string; password: string }) {
   return res.body.data.stepUpToken as string;
 }
 
+/**
+ * The worker sweeps every workspace, so "nothing is claimable" is only
+ * meaningful once the earlier cases in this file have had their turns. Claims
+ * are discarded rather than completed: the assertions below are about which
+ * rows the due-date predicate selects, not about what the job does.
+ */
+async function drainDueWork(claim: () => Promise<unknown>) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (!(await claim())) return;
+  }
+  throw new Error("claim queue never drained; the timezone assertions below would be vacuous");
+}
+
 describe("Background jobs and data lifecycle", () => {
   it("creates idempotent exports and approval-gated deletion jobs", async () => {
     const owner = await registerUser(app, { email: "lifecycle@zoiko.test" });
@@ -133,5 +146,56 @@ describe("Background jobs and data lifecycle", () => {
     expect(receipt).not.toBeNull();
     expect(receipt?.tenantNameHash).not.toContain("Permanent Deletion Tenant");
     await request(app).get("/api/v1/auth/me").set(authHeader(owner.accessToken)).expect(403);
+  });
+
+  it("leaves a scheduled job alone until its runAt actually arrives", async () => {
+    const owner = await registerUser(app, { email: "future-export@zoiko.test" });
+    await drainDueWork(() => jobService.claim());
+    const scheduled = await prisma.backgroundJob.create({
+      data: {
+        tenantId: owner.tenantId,
+        createdByUserId: owner.userId,
+        type: "DATA_EXPORT",
+        payload: { scope: "TENANT" },
+        idempotencyKey: `future-export-${Date.now()}`,
+        runAt: new Date(Date.now() + 3_600_000),
+      },
+    });
+
+    // run_at is a naive column that Prisma fills with UTC, so comparing it
+    // against a session-local CURRENT_TIMESTAMP would read an hour from now as
+    // already overdue whenever the database sits east of UTC.
+    expect(await jobService.claim()).toBeNull();
+    expect(await prisma.backgroundJob.findUniqueOrThrow({ where: { id: scheduled.id } }))
+      .toMatchObject({ status: "PENDING", attempts: 0, lockedAt: null });
+
+    // And it is still claimable once the moment genuinely arrives.
+    await prisma.backgroundJob.update({
+      where: { id: scheduled.id },
+      data: { runAt: new Date(Date.now() - 1_000) },
+    });
+    expect((await jobService.claim())?.id).toBe(scheduled.id);
+  });
+
+  it("defers a confirmed deletion job whose runAt is still in the future", async () => {
+    const owner = await registerUser(app, { email: "future-deletion@zoiko.test" });
+    await drainDueWork(() => jobService.claimSupported());
+    const scheduled = await prisma.backgroundJob.create({
+      data: {
+        tenantId: owner.tenantId,
+        createdByUserId: owner.userId,
+        type: "DATA_DELETION",
+        payload: { requestId: "future-deletion-request", confirmed: true },
+        idempotencyKey: `future-deletion-${Date.now()}`,
+        runAt: new Date(Date.now() + 3_600_000),
+      },
+    });
+
+    // The payload clears the confirmed gate, so the only thing holding this job
+    // back is the run_at comparison. Claiming it now would erase a tenant an
+    // hour before it was scheduled to go.
+    expect(await jobService.claimSupported()).toBeNull();
+    expect(await prisma.backgroundJob.findUniqueOrThrow({ where: { id: scheduled.id } }))
+      .toMatchObject({ status: "PENDING", attempts: 0, lockedAt: null });
   });
 });

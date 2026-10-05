@@ -188,6 +188,70 @@ describe("Mail module", () => {
       .expect(404);
   });
 
+  it("keeps a half-spent sending window open instead of reading it as expired", async () => {
+    const owner = await registerUser(app, { email: "send-window-utc@zoiko.test" });
+    await activateAllowSendingPolicy(owner.accessToken);
+    const draft = await request(app)
+      .post("/api/v1/mail/drafts")
+      .set(authHeader(owner.accessToken))
+      .send({ subject: "Half spent window", recipients: { to: ["outside@example.com"] } })
+      .expect(201);
+    const mailbox = await prisma.mailbox.findUniqueOrThrow({
+      where: { membershipId: owner.membershipId },
+    });
+    expect(env.MAIL_SEND_WINDOW_MS).toBe(3_600_000);
+    await prisma.mailbox.update({
+      where: { id: mailbox.id },
+      data: {
+        sendRecipientCount: env.MAIL_MAX_RECIPIENTS_PER_WINDOW,
+        sendWindowStartedAt: new Date(Date.now() - 30 * 60_000),
+      },
+    });
+
+    // Thirty minutes into a one-hour window, the cap is still live and the send
+    // has to be refused. send_window_started_at is UTC, so reading it against a
+    // session-local CURRENT_TIMESTAMP would see this row as 30m + 5h30m old,
+    // declare the window over and hand out a fresh allowance early.
+    await request(app)
+      .post(`/api/v1/mail/drafts/${draft.body.data.id}/send`)
+      .set(authHeader(owner.accessToken))
+      .expect(429);
+    const refused = await prisma.mailbox.findUniqueOrThrow({ where: { id: mailbox.id } });
+    expect(refused.sendRecipientCount).toBe(env.MAIL_MAX_RECIPIENTS_PER_WINDOW);
+    // The refused reservation matched no rows, so the window start is still the
+    // half-hour-old one that was put there rather than a reset to now.
+    expect(Math.abs(refused.sendWindowStartedAt.getTime() - Date.now())).toBeGreaterThan(29 * 60_000);
+    expect(Math.abs(refused.sendWindowStartedAt.getTime() - Date.now())).toBeLessThan(31 * 60_000);
+  });
+
+  it("stamps mailbox updated_at in UTC when it reserves attachment storage", async () => {
+    const owner = await registerUser(app, { email: "attachment-utc@zoiko.test" });
+    const draft = await request(app)
+      .post("/api/v1/mail/drafts")
+      .set(authHeader(owner.accessToken))
+      .send({ subject: "Storage stamp", recipients: { to: ["outside@example.com"] } })
+      .expect(201);
+    const mailbox = await prisma.mailbox.findUniqueOrThrow({
+      where: { membershipId: owner.membershipId },
+    });
+
+    await request(app)
+      .post(`/api/v1/mail/drafts/${draft.body.data.id}/attachments`)
+      .set(authHeader(owner.accessToken))
+      .attach("file", Buffer.from("utc stamp"), {
+        filename: "stamp.txt",
+        contentType: "text/plain",
+      })
+      .expect(201);
+
+    // This statement writes updated_at itself, so Prisma's own @updatedAt never
+    // gets the chance to correct it. A session-local stamp would surface here
+    // as a timestamp hours in the future.
+    const after = await prisma.mailbox.findUniqueOrThrow({ where: { id: mailbox.id } });
+    expect(after.storageUsed).toBeGreaterThan(0);
+    expect(Math.abs(after.updatedAt.getTime() - Date.now())).toBeLessThan(60_000);
+  });
+
   it("rejects unsafe types and enforces mailbox storage quota", async () => {
     const owner = await registerUser(app, { email: "attachment-quota@zoiko.test" });
     const draft = await request(app)
