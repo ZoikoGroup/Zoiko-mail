@@ -598,6 +598,26 @@ export class DomainService {
         retryAfterMs: cooldown - (Date.now() - domain.lastCheckedAt.getTime()),
       });
     }
+    // An admin re-checking a domain that timed out is working on it right
+    // now, which is exactly when daily checks are too slow. Give it a fresh
+    // window and the fast schedule; if the records are already there, the
+    // check below verifies it on the spot.
+    if (domain.status === "FAILED") {
+      await prisma.$transaction(async (tx) => {
+        await tx.mailDomain.update({
+          where: { id: domain.id, tenantId: context.tenantId },
+          data: {
+            status: "PENDING_VERIFICATION",
+            verificationDeadlineAt: new Date(Date.now() + env.DNS_VERIFICATION_WINDOW_HOURS * HOUR),
+          },
+        });
+        await auditService.record({
+          tenantId: context.tenantId, actorUserId: context.userId, actorType: "ADMIN",
+          eventType: "DOMAIN_VERIFICATION_RESTARTED", targetType: "MailDomain", targetId: domain.id,
+          requestId: context.requestId, metadata: { windowHours: env.DNS_VERIFICATION_WINDOW_HOURS },
+        }, tx);
+      });
+    }
     return serializeDomain(await this.synchronize(domainId, context.tenantId, { trigger: "MANUAL", actorUserId: context.userId, requestId: context.requestId }));
   }
 
