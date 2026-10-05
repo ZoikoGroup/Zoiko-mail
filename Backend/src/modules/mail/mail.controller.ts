@@ -310,7 +310,7 @@ export const listAllMailboxes = asyncHandler(async (req: Request, res: Response)
 export const adminCreateMailbox = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 201, await mailService.adminCreateMailbox(
     req.tenantContext!.tenantId,
-    { membershipId: req.body.membershipId, domainId: req.body.domainId, localPart: req.body.localPart },
+    { membershipId: req.body.membershipId, newMember: req.body.newMember, domainId: req.body.domainId, localPart: req.body.localPart },
     context(req)
   ), req.requestId);
 });

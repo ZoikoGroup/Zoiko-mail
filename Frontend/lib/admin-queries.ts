@@ -235,18 +235,26 @@ export async function setMailboxAi(
 /**
  * Provision a member's mailbox on one of the workspace's own domains.
  *
+ * Either an existing member (`membershipId`) or somebody new (`newMember`):
+ * a new person is invited at their own address, and the mailbox is ready for
+ * them when they accept.
+ *
  * `domainId` is what makes the address theirs rather than whatever they
  * happened to register with. Without it the server falls back to the signup
  * email — which is how a workspace with a verified domain ended up handing
  * out mailboxes at gmail.com, on a domain it can never publish SPF for.
  */
-export async function createMailbox(input: {
-  membershipId: string;
-  domainId?: string;
-  localPart?: string;
-}): Promise<void> {
+export async function createMailbox(input: CreateMailboxInput): Promise<void> {
   await apiRequest("/mail/admin/mailboxes", { method: "POST", body: input });
 }
+
+export type CreateMailboxInput = {
+  domainId?: string;
+  localPart?: string;
+} & (
+  | { membershipId: string; newMember?: never }
+  | { newMember: { email: string; firstName?: string; lastName?: string }; membershipId?: never }
+);
 
 /** Remove a mailbox. Step-up per RBAC §2; suspend first and offer an export. */
 export async function deleteMailbox(

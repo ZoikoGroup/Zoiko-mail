@@ -149,6 +149,64 @@ describe("creating a mailbox on a workspace domain", () => {
     }).expect(201);
   });
 
+  it("accepts the whole address typed into the name field, on that domain only", async () => {
+    const w = await workspace("fulladdr");
+    const domainId = await domain(w.owner.accessToken, w.owner.tenantId, "full-acme.test", true);
+
+    // What the screen showed as vivek@full-acme.test@full-acme.test.
+    const res = await createMailbox(w.owner.accessToken, { membershipId: w.membershipId, domainId, localPart: "Vivek@Full-Acme.test" }).expect(201);
+    expect(res.body.data.address).toBe("vivek@full-acme.test");
+
+    const other = await workspace("fulladdr2");
+    const otherDomain = await domain(other.owner.accessToken, other.owner.tenantId, "other-acme.test", true);
+    const wrong = await createMailbox(other.owner.accessToken, { membershipId: other.membershipId, domainId: otherDomain, localPart: "vivek@gmail.com" }).expect(422);
+    expect(wrong.body.error.message).toContain("other-acme.test");
+  });
+
+  it("adds a new person: invites them and has their mailbox ready", async () => {
+    const owner = await registerUser(app, { email: "md-owner-newperson@zoiko.test" });
+    const domainId = await domain(owner.accessToken, owner.tenantId, "new-acme.test", true);
+
+    const res = await createMailbox(owner.accessToken, {
+      newMember: { email: "Vivek.Personal@Gmail.test", firstName: "Vivek", lastName: "Kumar" },
+      domainId,
+      localPart: "vivek",
+    }).expect(201);
+    expect(res.body.data.address).toBe("vivek@new-acme.test");
+
+    // Invited at their own address, so they choose their password.
+    const membership = await prisma.tenantMembership.findUniqueOrThrow({
+      where: { id: res.body.data.membershipId },
+      include: { user: true },
+    });
+    expect(membership).toMatchObject({ status: "INVITED", role: "MEMBER" });
+    expect(membership.user).toMatchObject({ email: "vivek.personal@gmail.test", displayName: "Vivek Kumar", status: "INVITED" });
+  });
+
+  it("checks the address before inviting anyone", async () => {
+    const w = await workspace("newclash");
+    const domainId = await domain(w.owner.accessToken, w.owner.tenantId, "newclash-acme.test", true);
+    await createMailbox(w.owner.accessToken, { membershipId: w.membershipId, domainId, localPart: "taken" }).expect(201);
+
+    await createMailbox(w.owner.accessToken, {
+      newMember: { email: "stranger@elsewhere.test" },
+      domainId,
+      localPart: "taken",
+    }).expect(409);
+    // Nobody was invited for a mailbox that could not be created.
+    expect(await prisma.appUser.findUnique({ where: { email: "stranger@elsewhere.test" } })).toBeNull();
+  });
+
+  it("needs a domain for a new person, and refuses someone already in the workspace", async () => {
+    const w = await workspace("newrules");
+    const domainId = await domain(w.owner.accessToken, w.owner.tenantId, "newrules-acme.test", true);
+    await createMailbox(w.owner.accessToken, { newMember: { email: "x@elsewhere.test" } }).expect(400);
+    await createMailbox(w.owner.accessToken, { membershipId: w.membershipId, newMember: { email: "x@elsewhere.test" }, domainId }).expect(400);
+
+    const dup = await createMailbox(w.owner.accessToken, { newMember: { email: w.email }, domainId, localPart: "dup" }).expect(409);
+    expect(dup.body.error.details.reason).toBe("ALREADY_A_MEMBER");
+  });
+
   it("rejects a local part an address cannot carry", async () => {
     const w = await workspace("badlocal");
     const domainId = await domain(w.owner.accessToken, w.owner.tenantId, "bad-acme.test", true);

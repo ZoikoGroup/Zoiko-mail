@@ -109,9 +109,18 @@ export const assignMailboxSchema = z.object({
  * actually carry, next to the domain it will be joined to.
  */
 export const adminCreateMailboxSchema = z.object({
-  membershipId: z.string().uuid(),
+  membershipId: z.string().uuid().optional(),
+  /** Someone not in the workspace yet: invited, with the mailbox ready for them. */
+  newMember: z.object({
+    email: z.string().trim().toLowerCase().email().max(254),
+    firstName: z.string().trim().min(1).max(80).optional(),
+    lastName: z.string().trim().min(1).max(80).optional(),
+  }).strict().optional(),
   domainId: z.string().uuid().optional(),
-  localPart: z.string().trim().min(1).max(64).optional(),
+  localPart: z.string().trim().min(1).max(320).optional(),
+}).refine((value) => Boolean(value.membershipId) !== Boolean(value.newMember), {
+  message: "Choose an existing member or describe a new one, not both",
+  path: ["membershipId"],
 });
 
 export const mailboxAssigneeParamsSchema = z.object({

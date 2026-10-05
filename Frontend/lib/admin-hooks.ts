@@ -74,6 +74,7 @@ import {
 import type {
   AuditPage,
   AuditQuery,
+  CreateMailboxInput,
   GroupAssigneeDto,
   MailboxRoutingDto,
   InvitationDraftInput,
@@ -821,8 +822,7 @@ function useMailboxMutation<TInput>(fn: (input: TInput) => Promise<void>) {
 
 export function useCreateMailbox() {
   return useMailboxMutation(
-    (input: { membershipId: string; domainId?: string; localPart?: string }) =>
-      createMailbox(input)
+    (input: CreateMailboxInput) => createMailbox(input)
   );
 }
 

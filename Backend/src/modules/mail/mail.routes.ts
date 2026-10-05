@@ -152,7 +152,16 @@ mailRouter.delete(
   controller.deleteForwarding
 );
 mailRouter.get("/admin/mailboxes", requireCapability("workspace.mailboxes.manage"), controller.listAllMailboxes);
-mailRouter.post("/admin/mailboxes", requireCapability("workspace.mailboxes.manage"), validate(adminCreateMailboxSchema), controller.adminCreateMailbox);
+// Adding a new person here also invites them, so it needs the invite
+// capability too — a mailbox screen must not be a way around the Users one.
+const inviteCapability = requireCapability("people.invite.member");
+mailRouter.post(
+  "/admin/mailboxes",
+  requireCapability("workspace.mailboxes.manage"),
+  validate(adminCreateMailboxSchema),
+  (req, res, next) => (req.body?.newMember ? inviteCapability(req, res, next) : next()),
+  controller.adminCreateMailbox
+);
 // Destructive, and step-up per RBAC §2. The mailbox is expected to be
 // suspended first and an export offered; that sequencing is the console's,
 // but the fresh authentication is enforced here.

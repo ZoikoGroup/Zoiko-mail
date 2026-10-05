@@ -18,6 +18,7 @@ import { deliveryProtectionService } from "../delivery-protection/delivery-prote
 import { sharedMailboxService } from "./shared-mailbox.service.js";
 import { participantService } from "../participant/participant.service.js";
 import { jobService } from "../job/job.service.js";
+import { membershipService } from "../membership/membership.service.js";
 import type { BulkMailboxActionInput, CreateDraftInput, CreateLabelInput, ListMailInput, UpdateDraftInput, UpdateLabelInput, UpdateMailboxItemInput } from "./mail.schema.js";
 
 interface MailContext {
@@ -1676,25 +1677,51 @@ export class MailService {
    */
   async adminCreateMailbox(
     tenantId: string,
-    input: string | { membershipId: string; domainId?: string; localPart?: string },
+    input:
+      | string
+      | {
+          membershipId?: string;
+          /**
+           * Somebody who is not in the workspace yet. They are invited at
+           * their own (personal) address and the mailbox is created on the
+           * workspace domain at once, so it is waiting for them when they
+           * accept — the admin never chooses or learns their password.
+           */
+          newMember?: { email: string; firstName?: string; lastName?: string };
+          domainId?: string;
+          localPart?: string;
+        },
     context: MailContext
   ) {
-    const membershipId = typeof input === "string" ? input : input.membershipId;
+    const newMember = typeof input === "string" ? undefined : input.newMember;
+    let membershipId = typeof input === "string" ? input : input.membershipId ?? "";
     const domainId = typeof input === "string" ? undefined : input.domainId;
     const requestedLocalPart = typeof input === "string" ? undefined : input.localPart;
 
-    const membership = await prisma.tenantMembership.findFirst({
-      where: { id: membershipId, tenantId, status: "ACTIVE" },
-      include: { user: { select: { id: true, email: true } }, mailbox: true },
-    });
-    if (!membership) throw new AppError("Active membership not found", 404, ErrorCodes.NOT_FOUND);
-    if (membership.mailbox) throw new AppError("Mailbox already exists for this member", 409, ErrorCodes.CONFLICT);
+    // A new person's mailbox has to be on a workspace domain: without one the
+    // address would be their personal email, which the workspace does not own.
+    if (newMember && !domainId) {
+      throw new AppError("Choose a domain for the new person's mailbox", 400, ErrorCodes.VALIDATION_ERROR, { parameter: "domainId" });
+    }
+
+    let ownEmail: string;
+    if (newMember) {
+      ownEmail = newMember.email.toLowerCase();
+    } else {
+      const membership = await prisma.tenantMembership.findFirst({
+        where: { id: membershipId, tenantId, status: "ACTIVE" },
+        include: { user: { select: { id: true, email: true } }, mailbox: true },
+      });
+      if (!membership) throw new AppError("Active membership not found", 404, ErrorCodes.NOT_FOUND);
+      if (membership.mailbox) throw new AppError("Mailbox already exists for this member", 409, ErrorCodes.CONFLICT);
+      ownEmail = membership.user.email;
+    }
 
     // Enforce the tenant-level mailbox limit before provisioning a new mailbox.
     await billingService.assertMailboxWithinLimit(tenantId);
 
     // ── Domain readiness check ──────────────────────────────────────────
-    let address = membership.user.email.toLowerCase();
+    let address = ownEmail.toLowerCase();
     let resolvedDomainId: string | null = null;
 
     if (domainId) {
@@ -1716,9 +1743,23 @@ export class MailService {
 
       // Defaults to the local part they already use, which is what somebody
       // expects when they invite dana@old-company.com and pick acme.com.
-      const localPart = (requestedLocalPart ?? membership.user.email.split("@")[0] ?? "")
+      let localPart = (requestedLocalPart ?? ownEmail.split("@")[0] ?? "")
         .trim()
         .toLowerCase();
+      // People type the whole address. On this domain that is unambiguous;
+      // on any other it is a mistake worth naming rather than a bad character.
+      const at = localPart.indexOf("@");
+      if (at >= 0) {
+        if (localPart.slice(at + 1) !== domain.domainName.toLowerCase()) {
+          throw new AppError(
+            `Enter only the part before the @ — the domain is ${domain.domainName}`,
+            422,
+            ErrorCodes.VALIDATION_ERROR,
+            { parameter: "localPart" }
+          );
+        }
+        localPart = localPart.slice(0, at);
+      }
       if (!/^[a-z0-9._%+-]{1,64}$/.test(localPart)) {
         throw new AppError(
           "That mailbox name contains characters an address cannot carry",
@@ -1742,6 +1783,26 @@ export class MailService {
           ErrorCodes.CONFLICT,
           { reason: "ADDRESS_TAKEN" }
         );
+      }
+    }
+
+    // Invited only now, once the address is known to be free: refusing after
+    // the invitation went out would leave a stranger with an email for a
+    // mailbox that does not exist.
+    if (newMember) {
+      const invited = await membershipService.createInvitation(
+        { email: ownEmail, role: "MEMBER", firstName: newMember.firstName, lastName: newMember.lastName },
+        { tenantId, userId: context.userId, role: context.role, requestId: context.requestId, ipAddress: context.ipAddress, userAgent: context.userAgent }
+      ).catch((error: unknown) => {
+        if (error instanceof AppError && error.message === "User already belongs to this tenant") {
+          throw new AppError(`${ownEmail} is already a member of this workspace. Choose them from the member list instead.`, 409, ErrorCodes.CONFLICT, { reason: "ALREADY_A_MEMBER" });
+        }
+        throw error;
+      });
+      membershipId = invited.membership.id;
+      // A re-invitation reuses an earlier membership, which may already hold one.
+      if (await prisma.mailbox.findFirst({ where: { tenantId, membershipId }, select: { id: true } })) {
+        throw new AppError("Mailbox already exists for this member", 409, ErrorCodes.CONFLICT);
       }
     }
 
