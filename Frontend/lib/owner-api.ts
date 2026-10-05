@@ -72,6 +72,11 @@ export interface InvitationLookup {
    * set a password on an account that already exists.
    */
   needsPassword: boolean;
+  /**
+   * The link was already used to join. Opening it again is a sign-in, not a
+   * failure. Optional because older APIs do not send it.
+   */
+  alreadyAccepted?: boolean;
 }
 
 /** What this link is for, asked before anyone has a session. */

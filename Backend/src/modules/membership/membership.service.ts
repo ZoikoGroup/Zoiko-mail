@@ -385,17 +385,34 @@ export class MembershipService {
       include: { tenant: { select: { name: true, status: true } }, user: { select: { email: true, status: true } } },
     });
 
-    if (!invitation || invitation.status !== "INVITED") {
+    if (!invitation) {
+      throw new AppError("Invitation is invalid", 401, ErrorCodes.INVITATION_INVALID);
+    }
+    if (invitation.tenant.status !== "ACTIVE") {
+      throw new AppError("Tenant is not active", 403, ErrorCodes.FORBIDDEN);
+    }
+    // The link was already used to join. Accepting keeps the token so a
+    // second presentment is harmless, but the lookup refused anything not
+    // INVITED — so opening the same email link again, after joining, read
+    // "Invitation failed" to someone who had succeeded. It is a sign-in.
+    if (invitation.status === "ACTIVE") {
+      return {
+        email: invitation.user.email,
+        tenantName: invitation.tenant.name,
+        role: invitation.role,
+        needsPassword: false,
+        alreadyAccepted: true,
+      };
+    }
+    if (invitation.status !== "INVITED") {
       throw new AppError("Invitation is invalid", 401, ErrorCodes.INVITATION_INVALID);
     }
     if (!invitation.inviteExpiresAt || invitation.inviteExpiresAt <= new Date()) {
       throw new AppError("Invitation has expired", 410, ErrorCodes.INVITATION_EXPIRED);
     }
-    if (invitation.tenant.status !== "ACTIVE") {
-      throw new AppError("Tenant is not active", 403, ErrorCodes.FORBIDDEN);
-    }
 
     return {
+      alreadyAccepted: false,
       email: invitation.user.email,
       tenantName: invitation.tenant.name,
       role: invitation.role,
@@ -430,6 +447,18 @@ export class MembershipService {
         include: { tenant: true, user: true },
       });
 
+      // Claimed already: a double-click, a retry after a slow response, the
+      // link opened again. Never set the password a second time — that would
+      // make the email link a permanent password reset — but say what
+      // happened, so the screen can send them to sign in instead of failing.
+      if (invitation?.status === "ACTIVE") {
+        throw new AppError(
+          "This invitation has already been accepted. Sign in to continue.",
+          409,
+          ErrorCodes.CONFLICT,
+          { reason: "ALREADY_ACCEPTED" }
+        );
+      }
       if (!invitation || invitation.status !== "INVITED") {
         throw new AppError("Invitation is invalid", 401, ErrorCodes.INVITATION_INVALID);
       }
