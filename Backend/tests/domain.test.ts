@@ -192,6 +192,25 @@ describe("verification", () => {
     expect(result.records.every((entry: ApiRecord) => entry.state === "MISSING")).toBe(true);
   });
 
+  it("gives a timed-out domain a fresh window when an admin re-checks it", async () => {
+    const { owner, domain } = await ownerWithDomain("dom-restart-owner@zoiko.test");
+    await prisma.mailDomain.update({
+      where: { id: domain.id },
+      data: { status: "FAILED", verificationDeadlineAt: new Date(Date.now() - 3_600_000) },
+    });
+
+    // Still nothing published: back to the fast schedule, not FAILED again.
+    const pending = await diagnose(owner.accessToken, domain.id);
+    expect(pending.status).toBe("PENDING_VERIFICATION");
+    expect(new Date(pending.verificationDeadlineAt).getTime()).toBeGreaterThan(Date.now() + 70 * 3_600_000);
+    expect(new Date(pending.nextCheckAt).getTime() - Date.now()).toBeLessThanOrEqual(2 * 60_000);
+    expect(await auditTypes(owner.tenantId)).toContain("DOMAIN_VERIFICATION_RESTARTED");
+
+    // Published: verifies on the next re-check.
+    dns.publishAll(domain.records);
+    expect((await diagnose(owner.accessToken, domain.id)).status).toBe("ACTIVE");
+  });
+
   it("stops an admin re-checking faster than the cooldown", async () => {
     const { owner, domain } = await ownerWithDomain("dom-cooldown-owner@zoiko.test");
     const previous = env.DNS_MANUAL_CHECK_COOLDOWN_MS;
