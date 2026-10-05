@@ -982,13 +982,13 @@ export class ConnectorService {
   private async claimEvent() {
     const rows = await prisma.$queryRaw<Array<{ id: string }>>`
       UPDATE "provider_events"
-      SET "processing_status"='FAILED', "locked_at"=CURRENT_TIMESTAMP,
+      SET "processing_status"='FAILED', "locked_at"=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
           "attempts"="attempts"+1
       WHERE "id"=(
         SELECT "id" FROM "provider_events"
         WHERE (
-          ("processing_status" IN ('RECEIVED','RETRY') AND "run_at"<=CURRENT_TIMESTAMP)
-          OR ("processing_status"='FAILED' AND "locked_at"<=CURRENT_TIMESTAMP-INTERVAL '5 minutes')
+          ("processing_status" IN ('RECEIVED','RETRY') AND "run_at"<=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
+          OR ("processing_status"='FAILED' AND "locked_at"<=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')-INTERVAL '5 minutes')
         )
         ORDER BY "run_at", "received_at"
         FOR UPDATE SKIP LOCKED LIMIT 1

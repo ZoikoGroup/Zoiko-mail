@@ -201,4 +201,104 @@ describe("Track A connector foundation", () => {
       where: { id: accepted.body.data.event.id },
     })).toMatchObject({ processingStatus: "RETRY", attempts: 0, errorCode: null });
   });
+
+  it("leaves a provider event queued until its runAt actually arrives", async () => {
+    const owner = await registerUser(app, { email: "future-event-owner@zoiko.test" });
+    await request(app).post("/api/v1/connectors").set(authHeader(owner.accessToken))
+      .send({
+        provider: "GMAIL",
+        providerAccountId: "gmail-future-event",
+        email: "future-event@gmail.test",
+        scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+      }).expect(201);
+    const due = {
+      providerEventId: "due-before-future",
+      providerAccountId: "gmail-future-event",
+      eventType: "PROVIDER_RATE_LIMIT",
+      occurredAt: new Date().toISOString(),
+    };
+    const future = {
+      providerEventId: "future-run-at-event",
+      providerAccountId: "gmail-future-event",
+      eventType: "PROVIDER_RATE_LIMIT",
+      occurredAt: new Date().toISOString(),
+    };
+
+    // The retry backoff writes run_at in UTC, so a local CURRENT_TIMESTAMP
+    // comparison would let the next attempt through the moment it is scheduled
+    // and collapse the backoff to nothing.
+    const queued = await request(app).post("/api/v1/connectors/callbacks/GMAIL")
+      .set("x-provider-signature", signature(future)).send(future).expect(202);
+    await prisma.providerEvent.update({
+      where: { id: queued.body.data.event.id },
+      data: { runAt: new Date(Date.now() + 3_600_000) },
+    });
+
+    // Sweep whatever is genuinely due, including this event's own sibling, so
+    // that a `processed: false` below can only mean the future row was skipped.
+    await request(app).post("/api/v1/connectors/callbacks/GMAIL")
+      .set("x-provider-signature", signature(due)).send(due).expect(202);
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const processed = await connectorService.processNextEvent();
+      if (!processed.processed) break;
+      if (attempt === 49) throw new Error("provider event queue never drained");
+    }
+
+    expect(await connectorService.processNextEvent()).toMatchObject({ processed: false });
+    expect(await prisma.providerEvent.findUniqueOrThrow({
+      where: { id: queued.body.data.event.id },
+    })).toMatchObject({ processingStatus: "RECEIVED", attempts: 0, lockedAt: null });
+  });
+
+  it("stamps the provider-event lease in UTC so the five-minute reclaim still works", async () => {
+    const owner = await registerUser(app, { email: "lease-owner@zoiko.test" });
+    // Sweep the queue first, so the claim below can only reach this test's own
+    // event rather than something an earlier case left behind.
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const processed = await connectorService.processNextEvent();
+      if (!processed.processed) break;
+      if (attempt === 49) throw new Error("provider event queue never drained");
+    }
+    await request(app).post("/api/v1/connectors").set(authHeader(owner.accessToken))
+      .send({
+        provider: "GMAIL",
+        providerAccountId: "gmail-lease-owner",
+        email: "lease-owner@gmail.test",
+        scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+      }).expect(201);
+    const callback = {
+      providerEventId: "lease-owner-event",
+      providerAccountId: "gmail-lease-owner",
+      eventType: "PROVIDER_RATE_LIMIT",
+      occurredAt: new Date().toISOString(),
+    };
+    const accepted = await request(app).post("/api/v1/connectors/callbacks/GMAIL")
+      .set("x-provider-signature", signature(callback)).send(callback).expect(202);
+    const eventId = accepted.body.data.event.id as string;
+
+    // claimEvent is the statement that takes the lease, and both of its success
+    // and failure paths clear locked_at again, so it has to be exercised
+    // directly to see the value it wrote.
+    const claimEvent = (connectorService as unknown as {
+      claimEvent(): Promise<{ id: string } | null>;
+    }).claimEvent.bind(connectorService);
+
+    expect((await claimEvent())?.id).toBe(eventId);
+    const leased = await prisma.providerEvent.findUniqueOrThrow({ where: { id: eventId } });
+    expect(leased.lockedAt).not.toBeNull();
+    // A session-local stamp would read back 5h30m in the future here.
+    expect(Math.abs(leased.lockedAt!.getTime() - Date.now())).toBeLessThan(60_000);
+
+    // A fresh lease is not yet reclaimable.
+    expect(await claimEvent()).toBeNull();
+
+    // Once it is genuinely older than five minutes the reclaim has to fire. The
+    // lease write and this comparison share one convention, so moving only one
+    // of them would strand every crashed event forever.
+    await prisma.providerEvent.update({
+      where: { id: eventId },
+      data: { lockedAt: new Date(Date.now() - 6 * 60_000) },
+    });
+    expect((await claimEvent())?.id).toBe(eventId);
+  });
 });
