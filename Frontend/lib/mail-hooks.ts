@@ -35,6 +35,8 @@ import {
   type ListThreadsParams,
   getSignature,
   updateSignature,
+  getMyMailbox,
+  snoozeMessage,
 } from "./mail-api";
 
 const listKey = (params: ListMailParams) =>
@@ -122,7 +124,7 @@ export function useUpdateMailItem() {
       messageId: string;
       isRead?: boolean;
       isStarred?: boolean;
-      folder?: "INBOX" | "ARCHIVE" | "TRASH";
+      folder?: "INBOX" | "ARCHIVE" | "TRASH" | "SPAM";
     }) => updateMailItem(v.messageId, { isRead: v.isRead, isStarred: v.isStarred, folder: v.folder }),
     onMutate: async (v) => {
       await qc.cancelQueries({ queryKey: ["mail", "list"] });
@@ -148,6 +150,31 @@ export function useUpdateMailItem() {
       ctx?.snapshots.forEach(([key, data]) => qc.setQueryData(key, data));
     },
     onSettled: () => qc.invalidateQueries({ queryKey: ["mail", "list"] }),
+  });
+}
+
+/** The caller's own mailbox: address + storage used/limit, for the folder
+ * rail's storage meter and the account menu. */
+export function useMyMailbox() {
+  return useQuery({
+    queryKey: ["mail", "mailbox"],
+    queryFn: getMyMailbox,
+    staleTime: 30_000,
+  });
+}
+
+export function useSnoozeMessage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { messageId: string; until: string | null }) =>
+      snoozeMessage(v.messageId, v.until),
+    // Snoozing moves a message between the INBOX and SNOOZED views (and
+    // changes the rail's badge counts), so invalidate both rather than
+    // trying to patch two separate query-cache entries optimistically.
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["mail", "list"] });
+      qc.invalidateQueries({ queryKey: ["mail", "unread-counts"] });
+    },
   });
 }
 
@@ -192,6 +219,10 @@ export interface ComposerPayload {
   subject?: string; // new only (reply/forward subject is derived server-side)
   recipients?: Recipients; // new + forward
   textBody: string;
+  /** Rich-text body from the compose editor. textBody stays the plain-text
+   * fallback (mail clients that can't render HTML, search indexing, etc.) —
+   * the backend already accepts both on every one of these endpoints. */
+  htmlBody?: string;
   action: "send" | "draft" | "schedule";
   scheduledAt?: string; // ISO, required when action === "schedule"
   files?: File[]; // attachments to upload after draft creation
@@ -235,23 +266,27 @@ export function useComposerSubmit() {
         draft = await createDraft({
           subject: p.subject ?? "",
           textBody: p.textBody,
+          htmlBody: p.htmlBody,
           recipients: p.recipients ?? { to: [], cc: [], bcc: [] },
           sendAsMailboxId: p.sendAsMailboxId,
         });
       } else if (p.mode === "reply") {
         draft = await replyApi(p.sourceId as string, {
           textBody: p.textBody,
+          htmlBody: p.htmlBody,
           sendAsMailboxId: p.sendAsMailboxId,
         });
       } else if (p.mode === "replyAll") {
         draft = await replyAllApi(p.sourceId as string, {
           textBody: p.textBody,
+          htmlBody: p.htmlBody,
           sendAsMailboxId: p.sendAsMailboxId,
         });
       } else {
         draft = await forwardApi(p.sourceId as string, {
           recipients: p.recipients as Recipients,
           textBody: p.textBody,
+          htmlBody: p.htmlBody,
           sendAsMailboxId: p.sendAsMailboxId,
         });
       }

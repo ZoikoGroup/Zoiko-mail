@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AppShell } from "@/components/shell/AppShell";
 import {
@@ -20,6 +22,11 @@ function timeAgo(iso: string): string {
 
 
 export default function NotificationsPage() {
+  const router = useRouter();
+  // Track A's notifications center is no longer in member nav — webmail is
+  // the member home now, with its own toasts via AppShell's SSE wiring.
+  // Nothing below was deleted, it just isn't reachable from the UI.
+  useEffect(() => { router.replace("/mail"); }, [router]);
   const { data: notifications = [], isLoading, error, refetch, isFetching } =
     useNotifications(false);
   const markRead = useMarkNotificationRead();

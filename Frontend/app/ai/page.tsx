@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/shell/AppShell";
 import { useAiActions, useReviewAiAction } from "@/lib/ai-hooks";
 import type { AIAction, AIActionType, AIActionStatus } from "@/lib/ai-api";
@@ -29,6 +30,11 @@ const STATUS_META: Record<AIActionStatus, { label: string; tone: string }> = {
 type Tab = "review" | "all" | "PENDING" | "CONFIRMED" | "DISMISSED";
 
 export default function AiActionsPage() {
+  const router = useRouter();
+  // Track A's AI drafting & summaries is no longer in member nav — webmail
+  // is the member home now. Nothing below was deleted, it just isn't
+  // reachable from the UI.
+  useEffect(() => { router.replace("/mail"); }, [router]);
   const { data: actions = [], isLoading, error } = useAiActions();
   const review = useReviewAiAction();
   const [tab, setTab] = useState<Tab>("review");

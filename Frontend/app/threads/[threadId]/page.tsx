@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, MessagesSquare, Paperclip } from "lucide-react";
@@ -12,6 +12,10 @@ import type { EmailMessage, MailAttachment } from "@/lib/mail-api";
 export default function ThreadDetailPage() {
   const params = useParams();
   const router = useRouter();
+  // Track A's thread detail view is no longer in member nav — the reading
+  // pane in webmail shows a message's thread inline now. Nothing below was
+  // deleted, it just isn't reachable from the UI.
+  useEffect(() => { router.replace("/mail"); }, [router]);
   const threadId = typeof params?.threadId === "string" ? params.threadId : null;
 
   const { data: thread, isLoading, isError, error } = useThread(threadId);

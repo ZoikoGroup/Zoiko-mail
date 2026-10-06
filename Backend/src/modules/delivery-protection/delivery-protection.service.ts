@@ -222,9 +222,12 @@ export class DeliveryProtectionService {
         },
       });
       if (dangerous) {
+        // Plain spam goes to the member-visible SPAM folder; phishing and
+        // malware verdicts still go to QUARANTINE, which only an admin
+        // can see — those are a different severity, not the same shelf.
         await tx.mailboxMessage.updateMany({
           where: { tenantId: event.tenantId, messageId: message.id },
-          data: { folder: "QUARANTINE" },
+          data: { folder: type === "SPAM_DETECTED" ? "SPAM" : "QUARANTINE" },
         });
       }
       if (type === "MALWARE_DETECTED") {
