@@ -3,7 +3,16 @@ import { API_BASE } from "./config";
 import { getAccessToken } from "./auth-storage";
 
 // ---- Types (mirror the backend mail module) --------------------------------
-export type MailFolder = "INBOX" | "SENT" | "DRAFTS" | "ARCHIVE" | "TRASH" | "QUARANTINE";
+export type MailFolder = "INBOX" | "SENT" | "DRAFTS" | "ARCHIVE" | "TRASH" | "QUARANTINE" | "SPAM";
+/**
+ * What the folder rail and the list query can ask for. SNOOZED, SCHEDULED
+ * and STARRED are never a message's actual stored folder (see mail.service.ts
+ * on the backend) — they're view filters the backend resolves into a where
+ * clause. A message's own `folder` field (MailItemBase below) is always a
+ * real MailFolder; only the request/response around "which view is this"
+ * uses the wider type.
+ */
+export type MailListFolder = MailFolder | "SNOOZED" | "SCHEDULED" | "STARRED";
 export type RecipientType = "TO" | "CC" | "BCC";
 export type MessageStatus =
   | "DRAFT" | "QUEUED" | "SCHEDULED" | "SENT" | "FAILED" | "RECEIVED" | string;
@@ -107,7 +116,7 @@ export interface MailItem extends MailItemBase {
 }
 
 export interface MailPagination {
-  folder: MailFolder;
+  folder: MailListFolder;
   starredOnly: boolean;
   labelId?: string;
   page: number;
@@ -122,7 +131,7 @@ export interface ListMailResponse {
 }
 
 export interface ListMailParams {
-  folder?: MailFolder;
+  folder?: MailListFolder;
   starredOnly?: boolean;
   unreadOnly?: boolean;
   labelId?: string;
@@ -162,7 +171,8 @@ export interface SendableMailbox {
 }
 
 export type BulkAction =
-  | "MARK_READ" | "MARK_UNREAD" | "STAR" | "UNSTAR" | "ARCHIVE" | "TRASH" | "RESTORE";
+  | "MARK_READ" | "MARK_UNREAD" | "STAR" | "UNSTAR" | "ARCHIVE" | "TRASH" | "RESTORE"
+  | "SPAM" | "NOT_SPAM";
 
 // ---- Read ------------------------------------------------------------------
 export async function listMail(params: ListMailParams = {}): Promise<ListMailResponse> {
@@ -215,7 +225,7 @@ export async function removeLabel(messageId: string, labelId: string): Promise<v
 // ---- Triage ----------------------------------------------------------------
 export async function updateMailItem(
   messageId: string,
-  input: { isRead?: boolean; isStarred?: boolean; folder?: "INBOX" | "ARCHIVE" | "TRASH" }
+  input: { isRead?: boolean; isStarred?: boolean; folder?: "INBOX" | "ARCHIVE" | "TRASH" | "SPAM" }
 ): Promise<MailItem> {
   return apiRequest<MailItem>(`/mail/${messageId}`, { method: "PATCH", body: input });
 }
@@ -419,4 +429,25 @@ export async function updateSignature(signature: string | null): Promise<{ signa
     body: { signature },
   });
 }
- 
+
+export interface MyMailbox {
+  address: string;
+  storageUsed: number;
+  storageLimit: number;
+}
+
+/** The caller's own mailbox — account menu and the folder rail's storage meter. */
+export async function getMyMailbox(): Promise<MyMailbox> {
+  return apiRequest<MyMailbox>("/mail/mailbox");
+}
+
+/** Pass `until: null` to unsnooze. */
+export async function snoozeMessage(
+  messageId: string,
+  until: string | null
+): Promise<{ messageId: string; snoozedUntil: string | null }> {
+  return apiRequest(`/mail/${messageId}/snooze`, {
+    method: "PATCH",
+    body: { until },
+  });
+}

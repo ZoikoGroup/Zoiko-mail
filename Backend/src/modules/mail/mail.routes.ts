@@ -2,7 +2,7 @@ import { Router } from "express";
 import { requireCapabilityWhen, authenticate, idempotency, requireCapability, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./mail.controller.js";
 import { attachmentUpload } from "./attachment.middleware.js";
-import { adminDeliveryEventsQuerySchema, adminDeliverySummaryQuerySchema,updateSignatureSchema, adminUpdateMailboxSchema, adminCreateMailboxSchema, assignMailboxSchema, delegateMailboxSchema, createSharedMailboxSchema, mailboxAssigneeParamsSchema, createAliasSchema, createForwardingSchema, aliasParamsSchema, forwardingParamsSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, mailboxScopeSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
+import { adminDeliveryEventsQuerySchema, adminDeliverySummaryQuerySchema,updateSignatureSchema, adminUpdateMailboxSchema, adminCreateMailboxSchema, assignMailboxSchema, delegateMailboxSchema, createSharedMailboxSchema, mailboxAssigneeParamsSchema, createAliasSchema, createForwardingSchema, aliasParamsSchema, forwardingParamsSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, mailboxScopeSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, snoozeMailboxItemSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
 
 const mailRouter = Router();
 // `mail.own.rw` rather than the three role names it used to list. The matrix
@@ -33,6 +33,9 @@ mailRouter.get(
 // parsed as a message id.
 mailRouter.get("/send-as", controller.listSendableMailboxes);
 mailRouter.get("/unread-counts", controller.unreadCounts);
+// The caller's own mailbox: account menu + storage meter. Literal path, so
+// it must sit above "/:messageId" for the same reason "/send-as" does.
+mailRouter.get("/mailbox", controller.getMyMailbox);
 mailRouter.get("/", validate(listMailSchema, "query"), controller.list);
 mailRouter.post("/drafts", validate(createDraftSchema), controller.createDraft);
 mailRouter.patch("/bulk", validate(bulkMailboxActionSchema), controller.bulkAction);
@@ -48,6 +51,7 @@ mailRouter.delete("/drafts/:messageId/attachments/:attachmentId", validate(attac
 mailRouter.get("/signature", controller.getSignature);
 mailRouter.patch("/signature", validate(updateSignatureSchema), controller.updateSignature);
 
+mailRouter.patch("/:messageId/snooze", validate(messageIdParamsSchema, "params"), validate(snoozeMailboxItemSchema), controller.snooze);
 mailRouter.get("/:messageId/delivery-events", validate(messageIdParamsSchema, "params"), controller.listDeliveryEvents);
 mailRouter.post("/:messageId/reply", validate(messageIdParamsSchema, "params"), validate(replySchema), controller.reply);
 mailRouter.post("/:messageId/reply-all", validate(messageIdParamsSchema, "params"), validate(replySchema), controller.replyAll);

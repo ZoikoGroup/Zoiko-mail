@@ -162,7 +162,13 @@ export const forwardingParamsSchema = z.object({
 });
 
 export const listMailSchema = z.object({
-  folder: z.enum(["DRAFTS", "INBOX", "ARCHIVE", "SENT", "TRASH", "QUARANTINE"]).default("INBOX"),
+  // SNOOZED, SCHEDULED and STARRED are not MailFolder column values — they
+  // are view filters the service translates into a where clause. See
+  // mail.service.ts#list for exactly how each one resolves.
+  folder: z.enum([
+    "DRAFTS", "INBOX", "ARCHIVE", "SENT", "TRASH", "QUARANTINE", "SPAM",
+    "SNOOZED", "SCHEDULED", "STARRED",
+  ]).default("INBOX"),
   // Absent means the caller's own mailbox, which is what every existing
   // caller gets. Present means a shared mailbox they must hold read on.
   mailboxId: z.string().uuid().optional(),
@@ -198,13 +204,31 @@ export const adminDeliverySummaryQuerySchema = z.object({
 export const updateMailboxItemSchema = z.object({
   isRead: z.boolean().optional(),
   isStarred: z.boolean().optional(),
-  folder: z.enum(["INBOX", "ARCHIVE", "TRASH"]).optional(),
+  folder: z.enum(["INBOX", "ARCHIVE", "TRASH", "SPAM"]).optional(),
 }).refine((value) => Object.keys(value).length > 0, "At least one change is required");
+
+/**
+ * Snooze (or unsnooze, with `until: null`) a single INBOX message.
+ *
+ * Deliberately its own endpoint rather than folded into updateMailboxItemSchema:
+ * snoozing doesn't change `folder` (see the schema comment on
+ * MailboxMessage.snoozedUntil), so it isn't a "folder move" the way archive
+ * or trash are, and giving it its own route keeps that true at the API
+ * surface too.
+ */
+export const snoozeMailboxItemSchema = z.object({
+  until: z.coerce.date()
+    .refine((value) => value.getTime() > Date.now(), "Snooze time must be in the future")
+    .nullable(),
+});
 
 export const bulkMailboxActionSchema = z.object({
   messageIds: z.array(z.string().uuid()).min(1).max(100)
     .transform((ids) => [...new Set(ids)]),
-  action: z.enum(["MARK_READ", "MARK_UNREAD", "STAR", "UNSTAR", "ARCHIVE", "TRASH", "RESTORE"]),
+  action: z.enum([
+    "MARK_READ", "MARK_UNREAD", "STAR", "UNSTAR", "ARCHIVE", "TRASH", "RESTORE",
+    "SPAM", "NOT_SPAM",
+  ]),
 });
 
 export const labelIdParamsSchema = z.object({ labelId: z.string().uuid() });
@@ -241,6 +265,7 @@ export type CreateDraftInput = z.infer<typeof createDraftSchema>;
 export type UpdateDraftInput = z.infer<typeof updateDraftSchema>;
 export type ListMailInput = z.infer<typeof listMailSchema>;
 export type UpdateMailboxItemInput = z.infer<typeof updateMailboxItemSchema>;
+export type SnoozeMailboxItemInput = z.infer<typeof snoozeMailboxItemSchema>;
 export type BulkMailboxActionInput = z.infer<typeof bulkMailboxActionSchema>;
 export type CreateLabelInput = z.infer<typeof createLabelSchema>;
 export type UpdateLabelInput = z.infer<typeof updateLabelSchema>;

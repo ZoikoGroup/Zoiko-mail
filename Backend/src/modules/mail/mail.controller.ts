@@ -43,6 +43,13 @@ export const list = asyncHandler(async (req: Request, res: Response) => {
 export const unreadCounts = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await mailService.unreadCounts(context(req)), req.requestId);
 });
+export const getMyMailbox = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailService.getMyMailbox(context(req)), req.requestId);
+});
+export const snooze = asyncHandler(async (req: Request, res: Response) => {
+  const until = req.body.until ? new Date(req.body.until) : null;
+  sendSuccess(res, 200, await mailService.snooze(String(req.params.messageId), until, context(req)), req.requestId);
+});
 export const get = asyncHandler(async (req: Request, res: Response) => {
   const mailboxId = req.query.mailboxId ? String(req.query.mailboxId) : undefined;
   sendSuccess(

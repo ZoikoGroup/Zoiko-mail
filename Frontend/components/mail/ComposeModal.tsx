@@ -1,17 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X, Send, Save, Clock, Loader2, AlertCircle, CheckCircle2, Paperclip } from "lucide-react";
+import { X, Save, Clock, AlertCircle, CheckCircle2, Paperclip } from "lucide-react";
 import { useComposerSubmit, type ComposerMode, useSignature, useSendableMailboxes } from "@/lib/mail-hooks";
+import { updateDraft } from "@/lib/mail-api";
 import type { MailItem, Recipients } from "@/lib/mail-api";
 import { RecipientInput } from "@/components/mail/RecipientInput";
-
-function parseEmails(raw: string): string[] {
-  return raw
-    .split(/[\s,;]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
+import { RichTextEditor } from "@/components/mail/RichTextEditor";
+import { SendMenu } from "@/components/mail/SendMenu";
 
 function bytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -42,6 +38,11 @@ const MODE_TITLE: Record<ComposerMode, string> = {
   forward: "Forward",
 };
 
+/** How long to wait after the last keystroke before autosaving. Long enough
+ * that we aren't firing a request per character, short enough that closing
+ * the tab mid-sentence rarely loses more than this much typing. */
+const AUTOSAVE_DEBOUNCE_MS = 2000;
+
 export function ComposeModal({
   open,
   mode,
@@ -63,32 +64,43 @@ export function ComposeModal({
   const ownAddress = options.find((mailbox) => !mailbox.shared)?.address;
 
   const [sendAsMailboxId, setSendAsMailboxId] = useState("");
-  // const [to, setTo] = useState("");
-  // const [cc, setCc] = useState("");
   const [to, setTo] = useState<string[]>([]);
   const [cc, setCc] = useState<string[]>([]);
+  const [bcc, setBcc] = useState<string[]>([]);
+  const [showBcc, setShowBcc] = useState(false);
   const [subject, setSubject] = useState("");
-  const [body, setBody] = useState("");
+  const [bodyHtml, setBodyHtml] = useState("");
+  const [bodyText, setBodyText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
-  const [showSchedule, setShowSchedule] = useState(false);
-  const [scheduledAt, setScheduledAt] = useState("");
   const [notice, setNotice] = useState<{ kind: "gate" | "ok" | "err"; text: string } | null>(null);
   const { data: sigData } = useSignature();
+
+  // Autosave. draftId is null until the first save actually creates a
+  // draft row — before that there's nothing to PATCH, so the first save
+  // goes through the same mode-specific creation (createDraft / replyApi /
+  // replyAllApi / forwardApi) that an explicit "Save draft" click already
+  // uses; every save after that is a plain updateDraft against that id.
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const [saving, setSaving] = useState(false);
+  const draftIdRef = useRef<string | null>(null);
+  draftIdRef.current = draftId;
 
   // Reset the form whenever the composer opens for a new context.
   useEffect(() => {
     if (!open) return;
-    // setTo("");
-    // setCc("");
     setTo([]);
     setCc([]);
-    // setBody("");
+    setBcc([]);
+    setShowBcc(false);
     const sig = sigData?.signature;
-    setBody(sig ? `\n\n--\n${sig}` : "");
+    const initial = sig ? `<p></p><p>--</p><p>${sig.replace(/\n/g, "<br/>")}</p>` : "";
+    setBodyHtml(initial);
+    setBodyText(sig ? `\n\n--\n${sig}` : "");
     setFiles([]);
-    setShowSchedule(false);
-    setScheduledAt("");
     setNotice(null);
+    setDraftId(null);
+    setSavedAt(null);
     // Defaults to one's own address every time the composer opens, rather than
     // remembering the last shared mailbox used: sending as the team by
     // accident is the mistake worth designing against.
@@ -97,10 +109,55 @@ export function ComposeModal({
     // reply/forward subjects are derived server-side, so we don't edit them here
   }, [open, mode, source?.messageId]);
 
-  if (!open) return null;
-
   const needsRecipients = mode === "new" || mode === "forward";
   const srcMsg = source?.message;
+
+  // Debounced autosave. Skipped until there's something worth saving, and
+  // skipped entirely once a send/schedule is in flight (submit.isPending)
+  // so autosave can't race the real send.
+  useEffect(() => {
+    if (!open || submit.isPending) return;
+    const hasContent = bodyText.trim().length > 0 || subject.trim().length > 0 || to.length > 0;
+    if (!hasContent) return;
+
+    const t = setTimeout(async () => {
+      setSaving(true);
+      try {
+        if (!draftIdRef.current) {
+          const result = await submit.mutateAsync({
+            mode,
+            sourceId: source?.messageId,
+            subject: mode === "new" ? subject : undefined,
+            recipients: needsRecipients ? { to, cc, bcc } : undefined,
+            textBody: bodyText,
+            htmlBody: bodyHtml,
+            action: "draft",
+            sendAsMailboxId: sendAsMailboxId || undefined,
+          });
+          setDraftId(result.draftId);
+        } else {
+          await updateDraft(draftIdRef.current, {
+            subject: mode === "new" ? subject : undefined,
+            recipients: needsRecipients ? { to, cc, bcc } : undefined,
+            textBody: bodyText,
+            htmlBody: bodyHtml,
+          });
+        }
+        setSavedAt(new Date());
+      } catch {
+        // Autosave failures stay silent — they shouldn't interrupt typing.
+        // The explicit Send / Save draft buttons still surface errors via
+        // the `notice` banner below.
+      } finally {
+        setSaving(false);
+      }
+    }, AUTOSAVE_DEBOUNCE_MS);
+
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bodyText, bodyHtml, subject, to, cc, bcc, open]);
+
+  if (!open) return null;
 
   const addFiles = (incoming: FileList | null) => {
     if (!incoming) return;
@@ -117,29 +174,52 @@ export function ComposeModal({
 
   const totalSize = files.reduce((sum, f) => sum + f.size, 0);
 
-  const run = (action: "send" | "draft" | "schedule") => {
+  const run = (action: "send" | "draft" | "schedule", scheduledAt?: Date) => {
     setNotice(null);
 
-    // let recipients: Recipients | undefined;
-    // if (needsRecipients) {
-    //   const toList = parseEmails(to);
-    //   if (toList.length === 0) {
-    //     setNotice({ kind: "err", text: "Add at least one recipient." });
-    //     return;
-    //   }
-    //   recipients = { to: toList, cc: parseEmails(cc), bcc: [] };
-    // }
     let recipients: Recipients | undefined;
     if (needsRecipients) {
       if (to.length === 0) {
         setNotice({ kind: "err", text: "Add at least one recipient." });
         return;
       }
-      recipients = { to, cc, bcc: [] };
+      recipients = { to, cc, bcc };
     }
 
     if (action === "schedule" && !scheduledAt) {
       setNotice({ kind: "err", text: "Pick a date and time to schedule." });
+      return;
+    }
+
+    // Once we have a draftId from autosave, the draft already exists with
+    // (close to) this content server-side — but submit.mutate always goes
+    // through the mode-specific creation path, which would create a
+    // *second* draft for reply/replyAll/forward. So once autosave has run,
+    // finishing the job is PATCH-then-act on the existing draft instead of
+    // creating another one.
+    if (draftId) {
+      void (async () => {
+        try {
+          await updateDraft(draftId, {
+            subject: mode === "new" ? subject : undefined,
+            recipients,
+            textBody: bodyText,
+            htmlBody: bodyHtml,
+          });
+          const { sendDraft, scheduleDraft } = await import("@/lib/mail-api");
+          if (action === "send") {
+            await sendDraft(draftId);
+          } else if (action === "schedule" && scheduledAt) {
+            await scheduleDraft(draftId, scheduledAt.toISOString());
+          }
+          onClose();
+        } catch (err) {
+          setNotice({
+            kind: "err",
+            text: err instanceof Error ? err.message : "Something went wrong. Try again.",
+          });
+        }
+      })();
       return;
     }
 
@@ -149,10 +229,11 @@ export function ComposeModal({
         sourceId: source?.messageId,
         subject: mode === "new" ? subject : undefined,
         recipients,
-        textBody: body,
+        textBody: bodyText,
+        htmlBody: bodyHtml,
         action,
         sendAsMailboxId: sendAsMailboxId || undefined,
-        scheduledAt: action === "schedule" ? new Date(scheduledAt).toISOString() : undefined,
+        scheduledAt: action === "schedule" && scheduledAt ? scheduledAt.toISOString() : undefined,
         files: files.length > 0 ? files : undefined,
       },
       {
@@ -180,9 +261,14 @@ export function ComposeModal({
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-3">
           <h2 className="font-editorial text-lg text-[var(--ink)]">{MODE_TITLE[mode]}</h2>
-          <button onClick={onClose} className="rounded-md p-1.5 text-[var(--ink3)] hover:bg-[var(--s2)]">
-            <X className="h-5 w-5" />
-          </button>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-[var(--ink3)]">
+              {saving ? "Saving…" : savedAt ? `Draft saved ${savedAt.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}` : ""}
+            </span>
+            <button onClick={onClose} className="rounded-md p-1.5 text-[var(--ink3)] hover:bg-[var(--s2)]">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
         </div>
 
         {/* Body */}
@@ -230,10 +316,19 @@ export function ComposeModal({
 
           {needsRecipients && (
             <>
-              {/* <input className={field} placeholder="To (comma-separated)" value={to} onChange={(e) => setTo(e.target.value)} />
-              <input className={field} placeholder="Cc (optional)" value={cc} onChange={(e) => setCc(e.target.value)} /> */}
               <RecipientInput value={to} onChange={setTo} placeholder="To" autoFocus />
-              <RecipientInput value={cc} onChange={setCc} placeholder="Cc (optional)" />
+              <div className="flex items-start gap-2">
+                <RecipientInput value={cc} onChange={setCc} placeholder="Cc (optional)" />
+                {!showBcc && (
+                  <button
+                    onClick={() => setShowBcc(true)}
+                    className="shrink-0 pt-2 text-xs font-medium text-[var(--ink3)] hover:text-[var(--ink2)]"
+                  >
+                    Bcc
+                  </button>
+                )}
+              </div>
+              {showBcc && <RecipientInput value={bcc} onChange={setBcc} placeholder="Bcc (optional)" />}
             </>
           )}
 
@@ -241,11 +336,12 @@ export function ComposeModal({
             <input className={field} placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
           )}
 
-          <textarea
-            className={`${field} min-h-[220px] resize-y`}
-            placeholder="Write your message…"
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
+          <RichTextEditor
+            initialHtml={bodyHtml}
+            onChange={(html, text) => {
+              setBodyHtml(html);
+              setBodyText(text);
+            }}
           />
 
           {/* Attached files list */}
@@ -274,18 +370,6 @@ export function ComposeModal({
             </div>
           )}
 
-          {showSchedule && (
-            <div className="flex items-center gap-2">
-              <Clock className="h-4 w-4 text-[var(--ink3)]" />
-              <input
-                type="datetime-local"
-                className={field}
-                value={scheduledAt}
-                onChange={(e) => setScheduledAt(e.target.value)}
-              />
-            </div>
-          )}
-
           {notice && (
             <div
               className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${notice.kind === "err"
@@ -309,16 +393,11 @@ export function ComposeModal({
 
         {/* Footer actions */}
         <div className="flex flex-wrap items-center gap-2 border-t border-[var(--border)] px-5 py-3">
-          <button onClick={() => run(showSchedule ? "schedule" : "send")} disabled={submit.isPending} className="zoiko-btn pri disabled:opacity-50">
-            {submit.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : showSchedule ? (
-              <Clock className="h-4 w-4" />
-            ) : (
-              <Send className="h-4 w-4" />
-            )}
-            {showSchedule ? "Schedule" : "Send"}
-          </button>
+          <SendMenu
+            pending={submit.isPending}
+            onSendNow={() => run("send")}
+            onSchedule={(date) => run("schedule", date)}
+          />
 
           <button onClick={() => run("draft")} disabled={submit.isPending} className="zoiko-btn disabled:opacity-50">
             <Save className="h-4 w-4" /> Save draft
@@ -344,15 +423,6 @@ export function ComposeModal({
           >
             <Paperclip className="h-4 w-4" />
             <span className="hidden sm:inline">Attach</span>
-          </button>
-
-          <button
-            onClick={() => setShowSchedule((s) => !s)}
-            className="zoiko-btn sm ml-auto"
-            title="Schedule send"
-          >
-            <Clock className="h-4 w-4" />
-            <span className="hidden sm:inline">{showSchedule ? "Cancel schedule" : "Schedule"}</span>
           </button>
         </div>
       </div>

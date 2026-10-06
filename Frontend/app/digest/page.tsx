@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AppShell } from "@/components/shell/AppShell";
 import DigestSection from "@/components/digest/DigestSection";
@@ -19,6 +20,10 @@ function formatDueDate(iso: string | null): string {
 }
 
 export default function DigestPage() {
+  const router = useRouter();
+  // Track A's Daily digest is no longer in member nav — webmail is the
+  // member home now. Nothing below was deleted, it just isn't reachable.
+  useEffect(() => { router.replace("/mail"); }, [router]);
   const qc = useQueryClient();
 
   // Compute the time boundaries once per render. Using browser local time
