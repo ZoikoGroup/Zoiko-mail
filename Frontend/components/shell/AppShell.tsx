@@ -1,122 +1,39 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { Menu, X, LogOut } from "lucide-react";
-// import { isLoggedIn } from "@/lib/auth-storage";
-import {
-  clearTokens,
-  getPlatformToken,
-  isLoggedIn,
-  setSignOutNotice,
-} from "@/lib/auth-storage";
-import { useMe, useLogout } from "@/lib/auth-hooks";
-import type { MeResponse } from "@/lib/auth-api";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { DASHBOARD_ITEM, MEMBER_NAV, sectionsFor } from "@/lib/nav";
-import { resolveWorkspaceHref, workspaceDenialNotice } from "@/lib/workspace";
+import { useMemberShell, initials } from "@/lib/useMemberShell";
+import { ToastContainer } from "@/components/ui/Toast";
 import { NetworkBanner } from "@/components/ui/NetworkBanner";
-
-/** This shell is the member workspace; only sessions opened for it belong. */
-const MEMBER_WORKSPACE = "MEMBER" as const;
 import { AccessDenied } from "@/components/ui/AccessDenied";
 
-// Roles that belong on the member dashboard. SUPPORT has its own dashboard
-// at /support and should never land here.
-const MEMBER_DASHBOARD_ROLES = ["OWNER", "ADMIN", "MEMBER"];
-
-function initials(name?: string, email?: string) {
-  const base = (name?.trim() || email || "?").trim();
-  const parts = base.split(/\s+/);
-  return (parts.length >= 2 ? parts[0][0] + parts[1][0] : base.slice(0, 2)).toUpperCase();
-}
-
 export function AppShell({ children }: { children: ReactNode }) {
-  const router = useRouter();
   const pathname = usePathname();
-  const { data, isLoading: meLoading, isError } = useMe();
-  const me = data as MeResponse | undefined;
-  const logout = useLogout();
   const [mobileOpen, setMobileOpen] = useState(false);
-
-  // Auth guard for every page that uses the shell.
-  useEffect(() => {
-    if (!isLoggedIn()) router.replace("/login");
-  }, [router]);
-
-  // Session guard: the shell only renders for a session /auth/me validated.
-  // If that call fails — token refused, or the backend unreachable — there is
-  // nothing to show, and the loading gate below would sit on a spinner with no
-  // way onward. Treat it as signed out and return to the login form.
-  useEffect(() => {
-    if (isError) {
-      clearTokens();
-      router.replace("/login");
-    }
-  }, [isError, router]);
-
-  // Staff-token guard: a user with a platform token (staff) has no tenant
-  // membership, so useMe() will never resolve on this page and the loading
-  // gate below would hang forever. Send them to /support where their token
-  // is actually valid. Runs on mount only; token doesn't change mid-session.
-  useEffect(() => {
-    if (getPlatformToken()) {
-      router.replace("/support");
-    }
-  }, [router]);
-
-  // Workspace guard: this is the member workspace, so only a session opened
-  // for it belongs here. An admin or owner session reaching these pages is a
-  // workspace switch, and switching requires signing in again — so the
-  // session that belongs elsewhere is ended rather than left usable.
-  //
-  // A tenant support member is covered by this too: their session is
-  // SUPPORT-scoped, so it is turned away here and they land on the support
-  // console at /support after re-authenticating for that workspace.
-  //
-  // Skipped for staff, whose platform token has no tenant membership and no
-  // workspace scope; the effect above has already sent them to /support.
-  useEffect(() => {
-    if (getPlatformToken() || meLoading || !me) return;
-    const scope = me.workspace;
-    if (scope === MEMBER_WORKSPACE) return;
-
-    setSignOutNotice(workspaceDenialNotice(MEMBER_WORKSPACE, scope));
-    clearTokens();
-    router.replace("/login");
-  }, [me, meLoading, router]);
-
-  // Role guard: a SUPPORT member (or any future role that isn't OWNER/ADMIN/
-  // MEMBER) should never see this dashboard's nav or pages — send them to
-  // the one their role actually resolves to.
-  // useEffect(() => {
-  //   if (me && !MEMBER_DASHBOARD_ROLES.includes(me.membership.role)) {
-  //     router.replace(resolveWorkspaceHref(me.membership.role));
-  //   }
-  // }, [me, router]);
+  const { me, status, logout, toasts, dismissToast } = useMemberShell();
 
   // Loading gate: don't render the shell until we know the user's role.
   // Without this, a SUPPORT user would briefly see the member dashboard nav
-  // and header before the role guard useEffect kicks in and redirects them.
-  if (meLoading || !me || me.workspace !== MEMBER_WORKSPACE) {
+  // and header before the hook's guard effects kick in and redirect them.
+  if (status === "loading") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--ground)]">
         <div className="h-7 w-7 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
       </div>
     );
   }
-  // if (!MEMBER_DASHBOARD_ROLES.includes(me.membership.role)) {
-  //   return null;
-  // }
-  // A SUPPORT user is already being redirected by the effect above; the
-  // in-render guard below catches any other non-member role.
-  if (me.membership.role === "SUPPORT") {
+  // SUPPORT holding a MEMBER-scoped session: blank page, same as before
+  // extracting the guard logic into useMemberShell.
+  if (status === "denied-silent") {
     return null;
   }
-  if (!MEMBER_DASHBOARD_ROLES.includes(me.membership.role)) {
-    return <AccessDenied role={me.membership.role} dashboard="member" />;
+  if (status === "denied-role") {
+    return <AccessDenied role={me!.membership.role} dashboard="member" />;
   }
 
   return (
@@ -133,7 +50,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             className="absolute inset-0 bg-black/50"
             onClick={() => setMobileOpen(false)}
           />
-          <aside className="zoi-drawer absolute left-0 top-0 flex h-full w-64 flex-col border-r border-[var(--border)] bg-[var(--surface)]">
+          <aside className="absolute left-0 top-0 flex h-full w-64 flex-col border-r border-[var(--border)] bg-[var(--surface)]">
             <div className="flex justify-end p-2">
               <button
                 onClick={() => setMobileOpen(false)}
@@ -188,6 +105,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             while the sidebar/header stay mounted (see .page-enter CSS). */}
         <main key={pathname} className="page-enter flex-1 overflow-y-auto">{children}</main>
       </div>
+
+      {/* Toast notifications — rendered outside main so they float above everything */}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

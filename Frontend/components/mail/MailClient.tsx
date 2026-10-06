@@ -9,7 +9,7 @@
  * One implementation, two shells — never a per-role copy.
  */
 
-import { useEffect, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import {
   useMailList,
   useMessage,
@@ -24,6 +24,8 @@ import {
   usePermanentlyDelete,
   useEmptyTrash,
   useDeleteDraft,
+  useThread,
+  useSnoozeMessage,
 } from "@/lib/mail-hooks";
 import { ComposeModal } from "@/components/mail/ComposeModal";
 import { Modal } from "@/components/ui/Modal";
@@ -31,6 +33,7 @@ import type { ComposerMode } from "@/lib/mail-hooks";
 import {
   downloadAttachment,
   type MailFolder,
+  type MailListFolder,
   type MailItem,
   type MailListItem,
 } from "@/lib/mail-api";
@@ -40,13 +43,17 @@ import {
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   Inbox, Send, FileText, Archive, Trash2, Star, Loader2, AlertCircle,
-  ChevronLeft, ChevronRight, Paperclip, Download, ArrowLeft, MailOpen,
+  ChevronLeft, ChevronRight, Paperclip, ArrowLeft, MailOpen,
   Pencil, Reply, ReplyAll, Forward, Search, ShieldAlert, Tag, Settings2, X,
-  SlidersHorizontal, MailCheck,
+  SlidersHorizontal, MailCheck, Clock, ChevronDown,
 } from "lucide-react";
 import { AttachmentList } from "@/components/mail/AttachmentPreview";
 import { Sparkles, BrainCircuit } from "lucide-react";
 import { useCreateAiAction } from "@/lib/ai-hooks";
+import { parseMailQuery } from "@/lib/mail-search";
+import { MailRow, groupByDay } from "@/components/mail/MailRow";
+import { SnoozeMenu } from "@/components/mail/SnoozeMenu";
+import { QuickReply } from "@/components/mail/QuickReply";
 
 const FOLDERS: { key: MailFolder; label: string; icon: any }[] = [
   { key: "INBOX", label: "Inbox", icon: Inbox },
@@ -79,14 +86,56 @@ function bytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/** Works for a list row or a detail read — both carry the sender fields. */
-function sender(item: MailListItem | MailItem): string {
-  const m = item.message;
-  return m.fromName || m.fromAddress || m.author?.displayName || m.author?.email || "Unknown";
+interface MailClientProps {
+  /**
+   * Controlled folder, set by a parent that renders its own rail — the new
+   * WebmailShell's FolderRail does, since the design puts the rail in the
+   * shell, not inside this component. Admin/Owner's inbox pages pass
+   * nothing and keep today's self-contained behaviour (internal state,
+   * internal rail) unchanged.
+   */
+  folder?: MailListFolder;
+  onFolderChange?: (folder: MailListFolder) => void;
+  /** Hide this component's own folder rail + mobile folder pills — the
+   * parent is rendering them instead (WebmailShell's FolderRail). */
+  hideRail?: boolean;
+  /**
+   * Controlled search text, set by a parent that renders its own search box
+   * — WebmailShell's TopBar does. Admin/Owner's inbox pages pass nothing
+   * and keep this component's own internal search input (hideSearchBox
+   * stays false for them too, see below).
+   */
+  searchQuery?: string;
+  onSearchQueryChange?: (value: string) => void;
+  /** Hide this component's own search input — the parent is rendering one
+   * instead (WebmailShell's TopBar). Operator parsing still runs on
+   * whatever searchQuery the parent feeds in. */
+  hideSearchBox?: boolean;
 }
 
-export function MailClient() {
-  const [folder, setFolder] = useState<MailFolder>("INBOX");
+/**
+ * Exposed via ref so a parent shell's own Compose button (WebmailShell's
+ * FolderRail has one, since the rail is now owned by the shell, not by
+ * this component) can open this component's compose modal without MailClient
+ * needing to also lift its entire compose-modal state up to the parent.
+ */
+export interface MailClientHandle {
+  openCompose: (mode: ComposerMode, source: MailItem | null) => void;
+}
+
+export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function MailClient(
+  {
+    folder: controlledFolder,
+    onFolderChange,
+    hideRail = false,
+    searchQuery: controlledSearchQuery,
+    onSearchQueryChange,
+    hideSearchBox = false,
+  },
+  ref
+) {
+  const [internalFolder, setInternalFolder] = useState<MailListFolder>("INBOX");
+  const folder = controlledFolder ?? internalFolder;
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [compose, setCompose] = useState<{ open: boolean; mode: ComposerMode; source: MailItem | null }>({
@@ -96,9 +145,12 @@ export function MailClient() {
   });
   const openCompose = (mode: ComposerMode, source: MailItem | null) =>
     setCompose({ open: true, mode, source });
+  useImperativeHandle(ref, () => ({ openCompose }));
 
   // Filters
-  const [searchInput, setSearchInput] = useState("");
+  const [internalSearchInput, setInternalSearchInput] = useState("");
+  const searchInput = controlledSearchQuery ?? internalSearchInput;
+  const setSearchInput = onSearchQueryChange ?? setInternalSearchInput;
   const [q, setQ] = useState("");
   const [starredOnly, setStarredOnly] = useState(false);
   const [unreadOnly, setUnreadOnly] = useState(false);
@@ -122,10 +174,22 @@ export function MailClient() {
     setShowAdvanced(false);
   };
 
-  // Debounce search input → query param; any filter change resets paging.
+  // Debounce search input → query params. Operators (from:, to:, has:,
+  // is:, after:, before:) populate the same advanced-filter state the
+  // panel below edits by hand — typing "from:hr has:attachment" here does
+  // exactly what filling in those two fields manually would do. Whatever
+  // text is left over becomes the free-text `q` search.
   useEffect(() => {
     const t = setTimeout(() => {
-      setQ(searchInput.trim());
+      const parsed = parseMailQuery(searchInput);
+      setQ(parsed.q);
+      if (parsed.from) setFromFilter(parsed.from);
+      if (parsed.to) setToFilter(parsed.to);
+      if (parsed.hasAttachment) setHasAttachment(true);
+      if (parsed.dateAfter) setDateAfter(parsed.dateAfter);
+      if (parsed.dateBefore) setDateBefore(parsed.dateBefore);
+      if (parsed.unreadOnly) setUnreadOnly(true);
+      if (parsed.starredOnly) setStarredOnly(true);
       setPage(1);
     }, 300);
     return () => clearTimeout(t);
@@ -185,8 +249,9 @@ export function MailClient() {
   const toggleAllChecked = () =>
     setCheckedIds(allChecked ? new Set() : new Set(items.map((it) => it.messageId)));
 
-  const switchFolder = (f: MailFolder) => {
-    setFolder(f);
+  const switchFolder = (f: MailListFolder) => {
+    if (onFolderChange) onFolderChange(f);
+    else setInternalFolder(f);
     setPage(1);
     setSelectedId(null);
     setSearchInput("");
@@ -206,36 +271,40 @@ export function MailClient() {
   return (
     <>
       <div className="flex h-full min-h-0">
-        {/* Folder rail */}
-        <aside className="hidden w-48 shrink-0 border-r border-[var(--border)] bg-[var(--surface)] p-3 lg:block">
-          <button onClick={() => openCompose("new", null)} className="zoiko-btn pri mb-3 w-full">
-            <Pencil className="h-4 w-4" /> Compose
-          </button>
-          <nav className="space-y-0.5">
-            {FOLDERS.map((f) => {
-              const Icon = f.icon;
-              const active = folder === f.key;
-              const unread = unreadCounts?.[f.key] ?? 0;
-              return (
-                <button
-                  key={f.key}
-                  onClick={() => switchFolder(f.key)}
-                  className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition ${active
-                    ? "bg-[var(--accent-soft)] font-medium text-[var(--accent-ink)]"
-                    : "text-[var(--ink2)] hover:bg-[var(--s2)]"
-                    }`}
-                >
-                  <Icon className="h-4 w-4 shrink-0" /> {f.label}
-                  {unread > 0 && (
-                    <span className="ml-auto rounded-full bg-[var(--accent)] px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                      {unread > 99 ? "99+" : unread}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </nav>
-        </aside>
+        {/* Folder rail — WebmailShell's FolderRail replaces this on /mail
+            (hideRail=true there); Admin/Owner's inbox pages pass nothing
+            and get this self-contained rail exactly as before. */}
+        {!hideRail && (
+          <aside className="hidden w-48 shrink-0 border-r border-[var(--border)] bg-[var(--surface)] p-3 lg:block">
+            <button onClick={() => openCompose("new", null)} className="zoiko-btn pri mb-3 w-full">
+              <Pencil className="h-4 w-4" /> Compose
+            </button>
+            <nav className="space-y-0.5">
+              {FOLDERS.map((f) => {
+                const Icon = f.icon;
+                const active = folder === f.key;
+                const unread = unreadCounts?.[f.key] ?? 0;
+                return (
+                  <button
+                    key={f.key}
+                    onClick={() => switchFolder(f.key)}
+                    className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition ${active
+                      ? "bg-[var(--accent-soft)] font-medium text-[var(--accent-ink)]"
+                      : "text-[var(--ink2)] hover:bg-[var(--s2)]"
+                      }`}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" /> {f.label}
+                    {unread > 0 && (
+                      <span className="ml-auto rounded-full bg-[var(--accent)] px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                        {unread > 99 ? "99+" : unread}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </nav>
+          </aside>
+        )}
 
         {/* List column */}
         <section
@@ -250,7 +319,11 @@ export function MailClient() {
             >
               <Pencil className="h-3.5 w-3.5" /> Compose
             </button>
-            {FOLDERS.map((f) => (
+            {/* Known gap: when hideRail is set (today, only /mail), mobile
+                loses folder switching here until Step 5 builds the real
+                bottom nav + folder drawer. Admin/Owner (hideRail unset)
+                are unaffected. */}
+            {!hideRail && FOLDERS.map((f) => (
               <button
                 key={f.key}
                 onClick={() => switchFolder(f.key)}
@@ -260,6 +333,39 @@ export function MailClient() {
                   }`}
               >
                 {f.label}
+              </button>
+            ))}
+          </div>
+
+          {/* List tabs */}
+          <div className="flex items-center gap-1 border-b border-[var(--border)] px-2 pt-2">
+            {([
+              { key: "all", label: "All", active: !unreadOnly && !starredOnly },
+              { key: "unread", label: "Unread", active: unreadOnly },
+              { key: "starred", label: "Starred", active: starredOnly },
+            ] as const).map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => {
+                  setPage(1);
+                  if (tab.key === "all") {
+                    setUnreadOnly(false);
+                    setStarredOnly(false);
+                  } else if (tab.key === "unread") {
+                    setUnreadOnly(true);
+                    setStarredOnly(false);
+                  } else {
+                    setStarredOnly(true);
+                    setUnreadOnly(false);
+                  }
+                }}
+                className={`rounded-t-md px-3 py-1.5 text-sm transition ${
+                  tab.active
+                    ? "border-b-2 border-[var(--accent)] font-medium text-[var(--ink)]"
+                    : "text-[var(--ink3)] hover:text-[var(--ink2)]"
+                }`}
+              >
+                {tab.label}
               </button>
             ))}
           </div>
@@ -274,23 +380,26 @@ export function MailClient() {
                 className="h-3.5 w-3.5 accent-[var(--accent)]"
               />
             </label>
-            <div className="relative min-w-0 flex-1">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ink3)]" />
-              <input
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                placeholder="Search this folder…"
-                className="h-8 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] pl-8 pr-7 text-sm text-[var(--ink)] placeholder:text-[var(--ink3)] focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
-              />
-              {searchInput && (
-                <button
-                  onClick={() => setSearchInput("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--ink3)] hover:text-[var(--ink2)]"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
+            {!hideSearchBox && (
+              <div className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ink3)]" />
+                <input
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  placeholder="Search this folder…"
+                  className="h-8 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] pl-8 pr-7 text-sm text-[var(--ink)] placeholder:text-[var(--ink3)] focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+                />
+                {searchInput && (
+                  <button
+                    onClick={() => setSearchInput("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--ink3)] hover:text-[var(--ink2)]"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            )}
+            {hideSearchBox && <div className="min-w-0 flex-1" />}
             <button
               onClick={() => setStarredOnly((s) => !s)}
               className={`zoiko-btn sm shrink-0 ${starredOnly ? "pri" : ""}`}
@@ -422,6 +531,14 @@ export function MailClient() {
                 {folder === "INBOX" && (
                   <button onClick={() => runBulk("ARCHIVE")} disabled={bulk.isPending} className="zoiko-btn sm"><Archive className="h-3 w-3" /> Archive</button>
                 )}
+                {(folder === "INBOX" || folder === "ARCHIVE") && (
+                  <button onClick={() => runBulk("SPAM")} disabled={bulk.isPending} className="zoiko-btn sm" title="Report spam">
+                    <ShieldAlert className="h-3 w-3" /> Spam
+                  </button>
+                )}
+                {folder === "SPAM" && (
+                  <button onClick={() => runBulk("NOT_SPAM")} disabled={bulk.isPending} className="zoiko-btn sm">Not spam</button>
+                )}
                 {(folder === "TRASH" || folder === "ARCHIVE") && (
                   <button onClick={() => runBulk("RESTORE")} disabled={bulk.isPending} className="zoiko-btn sm">Restore</button>
                 )}
@@ -451,71 +568,27 @@ export function MailClient() {
               </div>
             )}
 
-            <ul className="divide-y divide-[var(--border)]">
-              {items.map((it) => (
-                <li key={it.id} className="flex items-start">
-                  <label
-                    className="flex shrink-0 cursor-pointer items-center self-stretch px-3 py-3"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <input
-                      type="checkbox"
+            {groupByDay(items).map((group) => (
+              <div key={group.label}>
+                <div className="font-mono-num sticky top-0 bg-[var(--ground)] px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
+                  {group.label}
+                </div>
+                <ul className="divide-y divide-[var(--border)]">
+                  {group.items.map((it) => (
+                    <MailRow
+                      key={it.id}
+                      item={it}
+                      selected={selectedId === it.messageId}
                       checked={checkedIds.has(it.messageId)}
-                      onChange={() => toggleChecked(it.messageId)}
-                      className="h-3.5 w-3.5 accent-[var(--accent)]"
+                      onToggleChecked={() => toggleChecked(it.messageId)}
+                      onSelect={() => setSelectedId(it.messageId)}
+                      showDeleteDraft={folder === "DRAFTS"}
+                      onDeleteDraft={() => setDraftToDelete(it.messageId)}
                     />
-                  </label>
-                  <button
-                    onClick={() => setSelectedId(it.messageId)}
-                    className={`min-w-0 flex-1 flex-col gap-1 px-2 py-3 pr-4 text-left transition hover:bg-[var(--s2)] ${selectedId === it.messageId ? "bg-[var(--s2)]" : ""
-                      }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      {!it.isRead && <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--accent)]" />}
-                      <span className={`truncate text-sm ${it.isRead ? "text-[var(--ink2)]" : "font-semibold text-[var(--ink)]"}`}>
-                        {sender(it)}
-                      </span>
-                      {it.isStarred && <Star className="h-3.5 w-3.5 shrink-0 fill-[var(--warn)] text-[var(--warn)]" />}
-                      <span className="ml-auto shrink-0 text-[11px] text-[var(--ink3)]">
-                        {fmt(it.message.sentAt || it.createdAt)}
-                      </span>
-                    </div>
-                    <span className={`truncate text-sm ${it.isRead ? "text-[var(--ink3)]" : "text-[var(--ink)]"}`}>
-                      {it.message.subject || "(no subject)"}
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      {/* A flag, not the attachment list — the list endpoint
-                          returns `has_attachments` per API §9 and names the
-                          files only on the detail read. */}
-                      {it.message.hasAttachments && (
-                        <Paperclip className="h-3 w-3 text-[var(--ink3)]" />
-                      )}
-                      {it.labels.slice(0, 2).map((l) => (
-                        <span
-                          key={l.id}
-                          className="rounded px-1.5 py-0.5 text-[10px] font-medium"
-                          style={{ backgroundColor: `${l.color}22`, color: l.color }}
-                        >
-                          {l.name}
-                        </span>
-                      ))}
-                    </div>
-                  </button>
-                  {folder === "DRAFTS" && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDraftToDelete(it.messageId);
-                      }}
-                      title="Delete draft"
-                      className="mr-3 self-center rounded-md p-1.5 text-[var(--ink3)] hover:bg-[var(--crit-soft)] hover:text-[var(--crit)]"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ul>
+                  ))}
+                </ul>
+              </div>
+            ))}
           </div>
 
           {/* Pagination */}
@@ -597,7 +670,7 @@ export function MailClient() {
       />
     </>
   );
-}
+});
 
 function ReadingPane({
   messageId,
@@ -606,7 +679,7 @@ function ReadingPane({
   onCompose,
 }: {
   messageId: string;
-  folder: MailFolder;
+  folder: MailListFolder;
   onClose: () => void;
   onCompose: (mode: ComposerMode, source: MailItem | null) => void;
 }) {
@@ -619,6 +692,15 @@ function ReadingPane({
   const removeLabel = useRemoveLabel();
   const createAiAction = useCreateAiAction();
   const [aiTriggered, setAiTriggered] = useState<string | null>(null);
+  const snooze = useSnoozeMessage();
+  const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
+  // Called unconditionally, before the early returns below — item is
+  // undefined on the loading render, so this passes null until it loads
+  // (useThread already gates its query on `enabled: Boolean(threadId)`).
+  // Calling it after an early return was a rules-of-hooks violation: the
+  // hook simply wouldn't run on the loading render, then would on the next
+  // one, changing the hook count between renders.
+  const { data: thread } = useThread(item?.message.threadId ?? null);
 
   // Mark read on open (once we have the item and it's unread).
   const isUnread = item && !item.isRead;
@@ -646,11 +728,20 @@ function ReadingPane({
   const to = m.recipients.filter((r) => r.type === "TO").map((r) => r.email);
   const cc = m.recipients.filter((r) => r.type === "CC").map((r) => r.email);
   const canTriage = folder === "INBOX" || folder === "ARCHIVE" || folder === "TRASH";
+  const isSnoozed = folder === "SNOOZED";
+
+  // Screen 2 (full conversation view) was explicitly deferred — this is the
+  // one piece of it that still ships now: the reading pane shows the whole
+  // thread rather than just the clicked message, so a reply chain doesn't
+  // look broken. Older messages render collapsed to one line; the latest
+  // (or whichever one is clicked) renders in full, matching the body
+  // already built below for the single-message case.
+  const threadMessages = thread && thread.messages.length > 1 ? thread.messages : null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Toolbar */}
-      <div className="flex items-center gap-1.5 border-b border-[var(--border)] p-3">
+      <div className="flex items-center gap-1.5 border-b border-[var(--border)] p-3 overflow-x-auto min-w-0">
         <button onClick={onClose} className="zoiko-btn sm md:hidden">
           <ArrowLeft className="h-4 w-4" />
         </button>
@@ -661,14 +752,34 @@ function ReadingPane({
         >
           <Star className={`h-4 w-4 ${item.isStarred ? "fill-[var(--warn)] text-[var(--warn)]" : ""}`} />
         </button>
+        {isSnoozed ? (
+          <button
+            onClick={() => { snooze.mutate({ messageId, until: null }); onClose(); }}
+            disabled={snooze.isPending}
+            className="zoiko-btn sm"
+            title="Remove from Snoozed — back to Inbox now"
+          >
+            <Clock className="h-4 w-4" /> <span className="hidden lg:inline">Unsnooze</span>
+          </button>
+        ) : (
+          folder === "INBOX" && (
+            <SnoozeMenu
+              disabled={snooze.isPending}
+              onSnooze={(until) => {
+                snooze.mutate({ messageId, until: until.toISOString() });
+                onClose();
+              }}
+            />
+          )
+        )}
         {canTriage && folder !== "ARCHIVE" && (
           <button onClick={() => { update.mutate({ messageId, folder: "ARCHIVE" }); onClose(); }} className="zoiko-btn sm">
-            <Archive className="h-4 w-4" /> <span className="hidden sm:inline">Archive</span>
+            <Archive className="h-4 w-4" /> <span className="hidden lg:inline">Archive</span>
           </button>
         )}
         {canTriage && folder !== "TRASH" && (
           <button onClick={() => { update.mutate({ messageId, folder: "TRASH" }); onClose(); }} className="zoiko-btn crit sm">
-            <Trash2 className="h-4 w-4" /> <span className="hidden sm:inline">Trash</span>
+            <Trash2 className="h-4 w-4" /> <span className="hidden lg:inline">Trash</span>
           </button>
         )}
         {folder === "TRASH" && (
@@ -678,14 +789,15 @@ function ReadingPane({
         )}
         {folder === "TRASH" && (
           <button onClick={() => setConfirmDelete(true)} disabled={permanentlyDelete.isPending} className="zoiko-btn crit sm" title="Delete forever">
-            <X className="h-4 w-4" /> <span className="hidden sm:inline">Delete forever</span>
+            <X className="h-4 w-4" /> <span className="hidden lg:inline">Delete forever</span>
           </button>
         )}
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 shrink-0">
           <DropdownMenu
             trigger={
               <span className="zoiko-btn sm">
-                <Tag className="h-3 w-3" /> <span className="hidden sm:inline">Labels</span>
+                <Tag className="h-3 w-3" /> 
+                {/* <span className="hidden lg:inline">Labels</span> */}
               </span>
             }
           >
@@ -734,14 +846,14 @@ function ReadingPane({
                 title="Send this draft now"
               >
                 <Send className="h-4 w-4" />
-                <span className="hidden sm:inline">Send</span>
+                <span className="hidden lg:inline">Send</span>
               </button>
               <div className="mx-1 h-5 w-px bg-[var(--border)]" />
             </>
           )}
 
           <button onClick={() => onCompose("reply", item)} className="zoiko-btn sm" title="Reply">
-            <Reply className="h-4 w-4" /> <span className="hidden sm:inline">Reply</span>
+            <Reply className="h-4 w-4" />
           </button>
           <button onClick={() => onCompose("replyAll", item)} className="zoiko-btn sm" title="Reply all">
             <ReplyAll className="h-4 w-4" />
@@ -765,7 +877,7 @@ function ReadingPane({
             title="Extract actions (commitments, deadlines, approvals)"
           >
             <Sparkles className="h-4 w-4" />
-            <span className="hidden sm:inline">
+            <span className="hidden lg:inline">
               {aiTriggered === "extract" ? "Sent to AI ✓" : "Extract"}
             </span>
           </button>
@@ -783,7 +895,7 @@ function ReadingPane({
             title="AI draft reply"
           >
             <BrainCircuit className="h-4 w-4" />
-            <span className="hidden sm:inline">
+            <span className="hidden lg:inline">
               {aiTriggered === "draft" ? "Drafting ✓" : "AI Draft"}
             </span>
           </button>
@@ -791,66 +903,124 @@ function ReadingPane({
         </div>
       </div>
 
-      {/* Header */}
-      <div className="border-b border-[var(--border)] p-5">
-        <h1 className="font-editorial text-xl font-normal text-[var(--ink)]">
-          {m.subject || "(no subject)"}
-        </h1>
-        <div className="mt-2 text-sm text-[var(--ink2)]">
-          <span className="font-medium">{m.fromName || m.author?.displayName || m.fromAddress || m.author?.email}</span>
-          {(m.fromAddress || m.author?.email) && (
-            <span className="text-[var(--ink3)]"> &lt;{m.fromAddress || m.author?.email}&gt;</span>
-          )}
-        </div>
-        <div className="mt-1 text-xs text-[var(--ink3)]">
-          To: {to.join(", ") || "—"}
-          {cc.length > 0 && <> · Cc: {cc.join(", ")}</>}
-        </div>
-        <div className="mt-1 text-xs text-[var(--ink3)]">{fmt(m.sentAt || m.createdAt)}</div>
-      </div>
-
-      {/* Body */}
-      <div className="min-h-0 flex-1 overflow-y-auto p-5">
-        {m.htmlBody ? (
-          <iframe
-            title="message body"
-            sandbox=""
-            srcDoc={m.htmlBody}
-            className="h-[60vh] w-full rounded-lg border border-[var(--border)] bg-white"
-          />
-        ) : (
-          <pre className="whitespace-pre-wrap break-words font-[var(--ui)] text-sm text-[var(--ink)]">
-            {m.textBody || "(no content)"}
-          </pre>
-        )}
-
-        {/* Attachments */}
-        {m.attachments.length > 0 && (
-          <div className="mt-6">
-            <div className="font-mono-num mb-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
-              {m.attachments.length} attachment{m.attachments.length > 1 ? "s" : ""}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {/* {m.attachments.map((att) => (
-                <button
-                  key={att.id}
-                  onClick={() => downloadAttachment(messageId, att)}
-                  className="zoiko-card flex items-center gap-2 p-3 text-left transition hover:shadow-[var(--sh2)]"
-                >
-                  <Paperclip className="h-4 w-4 text-[var(--ink3)]" />
-                  <div className="min-w-0">
-                    <div className="truncate text-sm text-[var(--ink)]">{att.fileName}</div>
-                    <div className="text-[11px] text-[var(--ink3)]">{bytes(att.sizeBytes)}</div>
-                  </div>
-                  <Download className="ml-2 h-4 w-4 text-[var(--ink3)]" />
-                </button>
-              ))} */}
-              {/* Attachments */}
-              <AttachmentList messageId={messageId} attachments={m.attachments} />
-            </div>
+      {threadMessages ? (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="border-b border-[var(--border)] p-5 pb-3">
+            <h1 className="font-editorial text-xl font-normal text-[var(--ink)]">
+              {m.subject || "(no subject)"}
+            </h1>
+            <span className="text-xs text-[var(--ink3)]">{threadMessages.length} messages</span>
           </div>
-        )}
-      </div>
+          {threadMessages.map((tm, idx) => {
+            const isLast = idx === threadMessages.length - 1;
+            const isOpen = expandedMessageId ? expandedMessageId === tm.id : isLast;
+            const tmTo = tm.recipients.filter((r) => r.type === "TO").map((r) => r.email);
+            return (
+              <div key={tm.id} className="border-b border-[var(--border)]">
+                <button
+                  onClick={() => setExpandedMessageId(isOpen ? null : tm.id)}
+                  className="flex w-full items-center gap-2 px-5 py-3 text-left hover:bg-[var(--s2)]"
+                >
+                  <span className="shrink-0 truncate text-sm font-medium text-[var(--ink)]">
+                    {tm.fromName || tm.author?.displayName || tm.fromAddress || tm.author?.email}
+                  </span>
+                  {!isOpen && (
+                    <span className="min-w-0 flex-1 truncate text-xs text-[var(--ink3)]">
+                      {tm.textBody?.slice(0, 100) || ""}
+                    </span>
+                  )}
+                  <span className="ml-auto shrink-0 text-xs text-[var(--ink3)]">
+                    {fmt(tm.sentAt || tm.createdAt)}
+                  </span>
+                  <ChevronDown
+                    className={`h-3.5 w-3.5 shrink-0 text-[var(--ink3)] transition-transform ${isOpen ? "rotate-180" : ""}`}
+                  />
+                </button>
+                {isOpen && (
+                  <div className="px-5 pb-5">
+                    <div className="mb-3 text-xs text-[var(--ink3)]">
+                      To: {tmTo.join(", ") || "—"}
+                    </div>
+                    {tm.htmlBody ? (
+                      <iframe
+                        title="message body"
+                        sandbox=""
+                        srcDoc={tm.htmlBody}
+                        className="h-[40vh] w-full rounded-lg border border-[var(--border)] bg-white"
+                      />
+                    ) : (
+                      <pre className="whitespace-pre-wrap break-words font-[var(--ui)] text-sm text-[var(--ink)]">
+                        {tm.textBody || "(no content)"}
+                      </pre>
+                    )}
+                    {tm.attachments.length > 0 && (
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <AttachmentList messageId={tm.id} attachments={tm.attachments} />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <>
+          {/* Header */}
+          <div className="border-b border-[var(--border)] p-5">
+            <h1 className="font-editorial text-xl font-normal text-[var(--ink)]">
+              {m.subject || "(no subject)"}
+            </h1>
+            <div className="mt-2 text-sm text-[var(--ink2)]">
+              <span className="font-medium">{m.fromName || m.author?.displayName || m.fromAddress || m.author?.email}</span>
+              {(m.fromAddress || m.author?.email) && (
+                <span className="text-[var(--ink3)]"> &lt;{m.fromAddress || m.author?.email}&gt;</span>
+              )}
+            </div>
+            <div className="mt-1 text-xs text-[var(--ink3)]">
+              To: {to.join(", ") || "—"}
+              {cc.length > 0 && <> · Cc: {cc.join(", ")}</>}
+            </div>
+            <div className="mt-1 text-xs text-[var(--ink3)]">{fmt(m.sentAt || m.createdAt)}</div>
+          </div>
+
+          {/* Body */}
+          <div className="min-h-0 flex-1 overflow-y-auto p-5">
+            {m.htmlBody ? (
+              <iframe
+                title="message body"
+                sandbox=""
+                srcDoc={m.htmlBody}
+                className="h-[60vh] w-full rounded-lg border border-[var(--border)] bg-white"
+              />
+            ) : (
+              <pre className="whitespace-pre-wrap break-words font-[var(--ui)] text-sm text-[var(--ink)]">
+                {m.textBody || "(no content)"}
+              </pre>
+            )}
+
+            {/* Attachments */}
+            {m.attachments.length > 0 && (
+              <div className="mt-6">
+                <div className="font-mono-num mb-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
+                  {m.attachments.length} attachment{m.attachments.length > 1 ? "s" : ""}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <AttachmentList messageId={messageId} attachments={m.attachments} />
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Quick reply — sends via the same reply orchestration ComposeModal
+          uses (useComposerSubmit), so a gated send still saves as a draft
+          rather than failing silently. */}
+      <QuickReply
+        messageId={messageId}
+        senderName={m.fromName || m.author?.displayName || m.fromAddress || m.author?.email || "sender"}
+      />
 
       <ConfirmDialog
         open={confirmDelete}

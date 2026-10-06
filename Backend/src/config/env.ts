@@ -51,6 +51,9 @@ export const envSchema = z.object({
   MAIL_MAX_RECIPIENTS_PER_WINDOW: z.coerce.number().int().positive().default(100),
   MAIL_SCHEDULER_INTERVAL_MS: z.coerce.number().int().min(1_000).default(15_000),
   MAIL_SCHEDULE_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
+  /** How often the snooze wake-up sweep runs. A snoozed message can sit up
+   * to this long past its wake time before reappearing in Inbox. */
+  SNOOZE_WAKE_INTERVAL_MS: z.coerce.number().int().min(1_000).default(60_000),
   JOB_WORKER_INTERVAL_MS: z.coerce.number().int().min(1_000).default(10_000),
   // Compliance housekeeping: flags deletions past their 30-day SLA and
   // drops expired idempotency records. Minutes rather than seconds, since

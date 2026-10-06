@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { MessagesSquare, Search } from "lucide-react";
 import {AppShell} from "@/components/shell/AppShell";
@@ -10,6 +11,11 @@ import type { ThreadSummary } from "@/lib/mail-api";
 const PAGE_SIZE = 25;
 
 export default function ThreadsPage() {
+  const router = useRouter();
+  // Track A's Threads & messages is no longer in member nav — the reading
+  // pane in webmail shows a message's thread inline now. Nothing below was
+  // deleted, it just isn't reachable from the UI.
+  useEffect(() => { router.replace("/mail"); }, [router]);
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
   const [activeQuery, setActiveQuery] = useState("");

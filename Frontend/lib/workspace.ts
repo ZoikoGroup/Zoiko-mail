@@ -20,7 +20,12 @@ export type WorkspaceScope = "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT";
 export const WORKSPACE_HREF: Record<WorkspaceScope, string> = {
   OWNER: "/owner",
   ADMIN: "/admin",
-  MEMBER: "/inbox",
+  // Webmail is the member home — was "/inbox" (Track A's Action Inbox)
+  // before the webmail redesign. Every place that opens or returns to a
+  // MEMBER-scoped session (login, select-workspace, access-denied) reads
+  // this constant, so changing it here is the one change that moves the
+  // landing page everywhere at once.
+  MEMBER: "/mail",
   SUPPORT: "/support",
 };
 

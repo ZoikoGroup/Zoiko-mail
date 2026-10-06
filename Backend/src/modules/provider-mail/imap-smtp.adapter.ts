@@ -28,6 +28,8 @@ export interface ImapFetchMessage {
   flags?: Set<string>;
   internalDate?: Date;
   size?: number;
+  textBody?: string | null;   
+  htmlBody?: string | null;
 }
 
 export interface ImapClient {
@@ -131,6 +133,42 @@ export class ImapSmtpAdapter {
     }
   }
 
+  // async fetchMetadata(limit = 50) {
+  //   const config = this.requireConfig();
+  //   const client = this.imapFactory(config);
+  //   await client.connect();
+  //   try {
+  //     const lock = await client.getMailboxLock("INBOX");
+  //     try {
+  //       const exists = client.mailbox ? client.mailbox.exists : 0;
+  //       if (exists === 0) return [];
+  //       const start = Math.max(1, exists - Math.min(Math.max(limit, 1), 100) + 1);
+  //       const result = [];
+  //       for await (const message of client.fetch(`${start}:*`, {
+  //         uid: true, envelope: true, flags: true, internalDate: true, size: true,
+  //       })) {
+  //         result.push({
+  //           uid: message.uid,
+  //           providerMessageId: message.envelope?.messageId ?? null,
+  //           subject: message.envelope?.subject ?? "",
+  //           from: addresses(message.envelope?.from),
+  //           to: addresses(message.envelope?.to),
+  //           cc: addresses(message.envelope?.cc),
+  //           date: message.envelope?.date ?? message.internalDate ?? null,
+  //           flags: [...(message.flags ?? [])].filter((flag) =>
+  //             ["\\Seen", "\\Flagged", "\\Answered", "\\Draft"].includes(flag)
+  //           ),
+  //           size: message.size ?? null,
+  //         });
+  //       }
+  //       return result;
+  //     } finally {
+  //       lock.release();
+  //     }
+  //   } finally {
+  //     await client.logout().catch(() => undefined);
+  //   }
+  // }
   async fetchMetadata(limit = 50) {
     const config = this.requireConfig();
     const client = this.imapFactory(config);
@@ -142,9 +180,41 @@ export class ImapSmtpAdapter {
         if (exists === 0) return [];
         const start = Math.max(1, exists - Math.min(Math.max(limit, 1), 100) + 1);
         const result = [];
-        for await (const message of client.fetch(`${start}:*`, {
-          uid: true, envelope: true, flags: true, internalDate: true, size: true,
+        for await (const message of (client as any).fetch(`${start}:*`, {
+          uid: true,
+          envelope: true,
+          flags: true,
+          internalDate: true,
+          size: true,
+          source: true,   // ← fetch full RFC822 source
         })) {
+          // Parse full source to extract text + html body
+          let textBody: string | null = null;
+          let htmlBody: string | null = null;
+
+          if (message.source) {
+            try {
+              const { simpleParser } = await import("mailparser");
+              const { convert } = await import("html-to-text");
+              const parsed = await simpleParser(message.source);
+              htmlBody = parsed.html || null;
+              if (parsed.text) {
+                textBody = parsed.text.trim();
+              } else if (htmlBody) {
+                // Convert HTML to plain text as fallback
+                textBody = convert(htmlBody, {
+                  wordwrap: false,
+                  selectors: [
+                    { selector: "a", options: { ignoreHref: true } },
+                    { selector: "img", format: "skip" },
+                  ],
+                }).trim();
+              }
+            } catch {
+              // Body parse failure is non-fatal — metadata still gets imported
+            }
+          }
+
           result.push({
             uid: message.uid,
             providerMessageId: message.envelope?.messageId ?? null,
@@ -157,6 +227,8 @@ export class ImapSmtpAdapter {
               ["\\Seen", "\\Flagged", "\\Answered", "\\Draft"].includes(flag)
             ),
             size: message.size ?? null,
+            textBody,
+            htmlBody,
           });
         }
         return result;

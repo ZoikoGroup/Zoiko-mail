@@ -8,6 +8,7 @@ import { policyService } from "../policy/policy.service.js";
 import { aiProvider, type ActionPriority } from "./ai.provider.js";
 import { env } from "../../config/env.js";
 import { logger } from "../../config/logger.js";
+import { sseManager } from "../../common/sse/sse.manager.js";
 
 type AIActionType = Prisma.AIActionCreateInput["actionType"];
 
@@ -47,24 +48,23 @@ export class AIService {
     );
     if (decision.effect === "DENY") throw new AppError(`AI processing denied by tenant policy (${decision.reason})`, 403, ErrorCodes.FORBIDDEN);
     const action = await prisma.aIAction.create({ data: { tenantId: context.tenantId, createdByUserId: context.userId, actionType: input.actionType, messageId: input.messageId, threadId: input.threadId, inputHash: inputHash(context.tenantId, input.actionType, input.messageId, input.threadId) } });
-    await auditService.record({
-      tenantId: context.tenantId, actorUserId: context.userId, eventType: "AI_ACTION_REQUESTED",
-      actorType: "AI_WORKER", targetType: "AIAction", targetId: action.id
-    });
-    // return action;
-
-    // Enqueue the extraction job so the background worker processes it
+    await auditService.record({ tenantId: context.tenantId, actorUserId: context.userId, eventType: "AI_ACTION_REQUESTED", targetType: "AIAction", targetId: action.id });
     const { jobService } = await import("../job/job.service.js");
     await jobService.enqueue({
       tenantId: context.tenantId,
       userId: context.userId,
       type: "AI_EXTRACTION",
-      // payload: { messageId: input.messageId, threadId: input.threadId },
-      payload: { messageId: input.messageId, threadId: input.threadId, sourceActionId: action.id },
+      payload: {
+        messageId: input.messageId,
+        threadId: input.threadId,
+        originatingActionId: action.id,
+      },
       idempotencyKey: `ai-extract-${action.id}`,
     });
 
     return action;
+    // return action;
+
   }
 
   list(tenantId: string, userId: string, status?: string) {
@@ -78,10 +78,7 @@ export class AIService {
     const action = await prisma.aIAction.findFirst({ where: { id, tenantId, status: "PENDING" } });
     if (!action) throw new AppError("Pending AI action not found", 404, ErrorCodes.NOT_FOUND);
     const updated = await prisma.aIAction.update({ where: { id: action.id, tenantId }, data: { ...input, status: "COMPLETED" } });
-    await auditService.record({
-      tenantId, actorUserId: userId, eventType: "AI_ACTION_COMPLETED",
-      actorType: "AI_WORKER", targetType: "AIAction", targetId: id
-    });
+    await auditService.record({ tenantId, actorUserId: userId, eventType: "AI_ACTION_COMPLETED", targetType: "AIAction", targetId: id });
     return updated;
   }
 
@@ -174,7 +171,6 @@ export class AIService {
         tenantId,
         actorUserId,
         eventType: "AI_EXTRACTION_SKIPPED",
-        actorType: "AI_WORKER",
         targetType: "Mailbox",
         targetId: mailbox.id,
         metadata: { messageId: message.id, reason: "MAILBOX_AI_DISABLED" },
@@ -220,6 +216,17 @@ export class AIService {
       const existing = await prisma.aIAction.findFirst({ where: { tenantId, inputHash: hash } });
       if (existing) {
         alreadyPresent += 1;
+        if (existing.status === "PENDING") {
+          await prisma.aIAction.update({
+            where: { id: existing.id, tenantId },
+            data: {
+              status: "COMPLETED",
+              output: { text: action.text, dueAt: action.dueAt ?? null, priority: action.priority },
+              confidenceScore: action.confidence,
+              sourceExcerpt: action.excerpt,
+            },
+          });
+        }
         continue;
       }
       await prisma.aIAction.create({
@@ -239,11 +246,17 @@ export class AIService {
       created += 1;
     }
 
+    // Close out any placeholder rows for this message that the loop above
+    // never touched — e.g. the provider found nothing at all this run.
+    await prisma.aIAction.updateMany({
+      where: { tenantId, messageId: message.id, status: "PENDING" },
+      data: { status: "COMPLETED", output: { text: null, note: "No items found" } },
+    });
+
     await auditService.record({
       tenantId,
       actorUserId,
       eventType: "AI_EXTRACTION_COMPLETED",
-      actorType: "AI_WORKER",
       targetType: "BackgroundJob",
       targetId: jobId,
       metadata: { messageId, provider: aiProvider.name, extracted: created, alreadyPresent },
@@ -251,6 +264,13 @@ export class AIService {
     await prisma.backgroundJob.update({
       where: { id: jobId, tenantId },
       data: { status: "COMPLETED", completedAt: new Date(), lockedAt: null, result: { extracted: created, alreadyPresent } },
+    });
+    // Push real-time event so /ai page updates instantly
+    sseManager.sendToUser(actorUserId, {
+      type: "AI_EXTRACTION_DONE",
+      tenantId,
+      userId: actorUserId,
+      payload: { messageId: messageId ?? undefined, actionCount: created, provider: aiProvider.name },
     });
 
     // Update the original PENDING action that triggered this extraction
@@ -423,7 +443,6 @@ export class AIService {
         tenantId,
         actorUserId,
         eventType: "AI_DRAFT_GENERATED",
-        actorType: "AI_WORKER",
         targetType: "BackgroundJob",
         targetId: jobId,
         metadata: { aiActionId, messageId: email.id, provider: aiProvider.name },
@@ -431,6 +450,13 @@ export class AIService {
       return email;
     });
 
+    // Push real-time event so user gets instant notification
+    sseManager.sendToUser(actorUserId, {
+      type: "AI_DRAFT_READY",
+      tenantId,
+      userId: actorUserId,
+      payload: { draftId: createdDraft.id, aiActionId: aiActionId ?? undefined },
+    });
     logger.info({ jobId, aiActionId, draftMessageId: createdDraft.id }, "AI draft generated");
     return { messageId: createdDraft.id, provider: aiProvider.name };
   }
