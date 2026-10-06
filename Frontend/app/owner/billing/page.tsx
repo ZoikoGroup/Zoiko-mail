@@ -11,15 +11,14 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
-  usePlans,
   useSubscription,
   useInvoices,
-  useCheckout,
   useBillingPortal,
   useCancelSubscription,
   useReactivateSubscription,
 } from "@/lib/billing-hooks";
 import { useMembers, useAdminMailboxes } from "@/lib/owner-hooks";
+import { DomainBillingSummary } from "@/components/owner/billing/DomainBillingSummary";
 import {
   CreditCard,
   ExternalLink,
@@ -27,9 +26,7 @@ import {
   Users,
   Mail,
   HardDrive,
-  Loader2,
   Building2,
-  Check,
 } from "lucide-react";
 
 function formatMoney(cents: number, currency = "usd") {
@@ -94,7 +91,6 @@ function BillingPageInner() {
   const searchParams = useSearchParams();
   const checkoutNotice = searchParams.get("checkout");
 
-  const { data: plans = [], isLoading: plansLoading } = usePlans();
   const {
     data: sub,
     isLoading: subLoading,
@@ -105,14 +101,13 @@ function BillingPageInner() {
   const { data: members = [] } = useMembers();
   const { data: mailboxes = [] } = useAdminMailboxes();
 
-  const checkout = useCheckout();
   const portal = useBillingPortal();
   const cancel = useCancelSubscription();
   const reactivate = useReactivateSubscription();
 
   const [cancelOpen, setCancelOpen] = useState(false);
 
-  const isLoading = plansLoading || subLoading;
+  const isLoading = subLoading;
   const activeUsers = members.filter((m) => m.status === "ACTIVE").length;
   const storageUsedMb = mailboxes.reduce((sum, m) => sum + m.storageUsedMb, 0);
   const storageUsedGb = +(storageUsedMb / 1024).toFixed(1);
@@ -135,15 +130,6 @@ function BillingPageInner() {
   const currentPeriodLabel = sub?.status === "trialing"
     ? `Active until ${formatDate(sub.trialEnd ?? null)}`
     : `Active until ${formatDate(sub?.currentPeriodEnd ?? null)}`;
-
-  const handleSelectPlan = (planCode: string) => {
-    if (planCode === currentPlan?.code) return;
-    checkout.mutate(planCode, {
-      onSuccess: (data) => {
-        if (data.url) window.location.href = data.url;
-      },
-    });
-  };
 
   const handlePortal = () => {
     portal.mutate(undefined, {
@@ -200,128 +186,101 @@ function BillingPageInner() {
           </div>
         ) : (
           <>
-            {/* Current Plan */}
-            <div className="zoiko-card p-6">
-              {isLoading ? (
-                <div className="space-y-3">
-                  <Skeleton className="h-6 w-48" />
-                  <Skeleton className="h-4 w-64" />
-                </div>
-              ) : !hasSubscription ? (
-                /* No active subscription */
-                <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--s2)] text-[var(--ink3)]">
-                      <CreditCard className="h-5 w-5" />
-                    </span>
-                    <div>
-                      <h3 className="text-base font-semibold text-[var(--ink)]">
-                        No active subscription
-                      </h3>
-                      <p className="mt-0.5 text-[11px] text-[var(--ink3)]">
-                        {workspaceName
-                          ? `${workspaceName} has no active subscription.`
-                          : "Choose a plan to start using Zoiko Mail."}
-                      </p>
-                    </div>
+            {/* Current Plan — nothing to show while the workspace has no subscription */}
+            {(isLoading || hasSubscription) && (
+              <div className="zoiko-card p-6">
+                {isLoading ? (
+                  <div className="space-y-3">
+                    <Skeleton className="h-6 w-48" />
+                    <Skeleton className="h-4 w-64" />
                   </div>
-                  <button
-                    onClick={() =>
-                      document
-                        .getElementById("plan-picker")
-                        ?.scrollIntoView({ behavior: "smooth" })
-                    }
-                    className="zoiko-btn pri"
-                  >
-                    Choose Plan
-                  </button>
-                </div>
-              ) : (
-                /* Active subscription */
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent-ink)]">
-                      <CreditCard className="h-5 w-5" />
-                    </span>
-                    <div>
-                      {workspaceName && (
-                        <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--ink3)]">
-                          {workspaceName}
-                        </div>
-                      )}
-                      <h3 className="text-base font-semibold text-[var(--ink)]">
-                        {currentPlan?.name ?? "Subscription"}
-                      </h3>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-2">
-                        <StatusBadge
-                          variant={statusVariant(sub?.status ?? "none")}
-                          dot
-                        >
-                          {sub?.status ?? "unsubscribed"}
-                        </StatusBadge>
-                        {currentPlan && (
-                          <span className="text-[11px] text-[var(--ink3)]">
-                            {currentPlan.priceMonthly === 0
-                              ? "No charge"
-                              : `${formatMoney(currentPlan.priceMonthly)} / user / month`}
-                          </span>
+                ) : (
+                  /* Active subscription */
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent-ink)]">
+                        <CreditCard className="h-5 w-5" />
+                      </span>
+                      <div>
+                        {workspaceName && (
+                          <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--ink3)]">
+                            {workspaceName}
+                          </div>
                         )}
-                      </div>
-                      {showCancelAtPeriodEnd ? (
-                        <p className="mt-1 text-xs font-medium text-[var(--warn)]">
-                          {currentPeriodLabel}
-                          {" · Your subscription will not renew."}
-                        </p>
-                      ) : isActiveish && (sub?.trialEnd || sub?.currentPeriodEnd) ? (
-                        <p className="mt-1 text-[11px] text-[var(--ink3)]">
-                          {sub?.status === "trialing"
-                            ? `Trial ends ${formatDate(sub.trialEnd)}`
-                            : `Next billing date: ${formatDate(sub.currentPeriodEnd)}`}
-                        </p>
-                      ) : (
-                        (sub?.trialEnd || sub?.currentPeriodEnd) && (
+                        <h3 className="text-base font-semibold text-[var(--ink)]">
+                          {currentPlan?.name ?? "Subscription"}
+                        </h3>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                          <StatusBadge
+                            variant={statusVariant(sub?.status ?? "none")}
+                            dot
+                          >
+                            {sub?.status ?? "unsubscribed"}
+                          </StatusBadge>
+                          {currentPlan && (
+                            <span className="text-[11px] text-[var(--ink3)]">
+                              {currentPlan.priceMonthly === 0
+                                ? "No charge"
+                                : `${formatMoney(currentPlan.priceMonthly)} / user / month`}
+                            </span>
+                          )}
+                        </div>
+                        {showCancelAtPeriodEnd ? (
+                          <p className="mt-1 text-xs font-medium text-[var(--warn)]">
+                            {currentPeriodLabel}
+                            {" · Your subscription will not renew."}
+                          </p>
+                        ) : isActiveish && (sub?.trialEnd || sub?.currentPeriodEnd) ? (
                           <p className="mt-1 text-[11px] text-[var(--ink3)]">
                             {sub?.status === "trialing"
                               ? `Trial ends ${formatDate(sub.trialEnd)}`
                               : `Next billing date: ${formatDate(sub.currentPeriodEnd)}`}
                           </p>
-                        )
+                        ) : (
+                          (sub?.trialEnd || sub?.currentPeriodEnd) && (
+                            <p className="mt-1 text-[11px] text-[var(--ink3)]">
+                              {sub?.status === "trialing"
+                                ? `Trial ends ${formatDate(sub.trialEnd)}`
+                                : `Next billing date: ${formatDate(sub.currentPeriodEnd)}`}
+                            </p>
+                          )
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {showCancelAtPeriodEnd ? (
+                        <>
+                          <button onClick={handleReactivate} className="zoiko-btn pri">
+                            {reactivate.isPending ? "Reactivating…" : "Reactivate"}
+                          </button>
+                          {hasStripeCustomer && (
+                            <button onClick={handlePortal} className="zoiko-btn">
+                              <ExternalLink className="h-3.5 w-3.5" /> Manage Billing
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          {hasStripeCustomer && (
+                            <button onClick={handlePortal} className="zoiko-btn">
+                              <ExternalLink className="h-3.5 w-3.5" /> Manage Billing
+                            </button>
+                          )}
+                          {isActiveish && hasStripeCustomer && (
+                            <button
+                              onClick={() => setCancelOpen(true)}
+                              className="zoiko-btn sm crit"
+                            >
+                              Cancel Subscription
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {showCancelAtPeriodEnd ? (
-                      <>
-                        <button onClick={handleReactivate} className="zoiko-btn pri">
-                          {reactivate.isPending ? "Reactivating…" : "Reactivate"}
-                        </button>
-                        {hasStripeCustomer && (
-                          <button onClick={handlePortal} className="zoiko-btn">
-                            <ExternalLink className="h-3.5 w-3.5" /> Manage Billing
-                          </button>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        {hasStripeCustomer && (
-                          <button onClick={handlePortal} className="zoiko-btn">
-                            <ExternalLink className="h-3.5 w-3.5" /> Manage Billing
-                          </button>
-                        )}
-                        {isActiveish && hasStripeCustomer && (
-                          <button
-                            onClick={() => setCancelOpen(true)}
-                            className="zoiko-btn sm crit"
-                          >
-                            Cancel Subscription
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
 
             {/* Usage */}
             {currentPlan && (
@@ -377,113 +336,9 @@ function BillingPageInner() {
               </div>
             )}
 
-            {/* Plans */}
-            <div id="plan-picker" className="zoiko-card p-6">
-              <div className="mb-4 flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-[var(--ink)]">
-                  Plans
-                </h3>
-                <span className="text-[11px] text-[var(--ink3)]">
-                  Select a plan to start, upgrade, or switch.
-                </span>
-              </div>
-              {plansLoading ? (
-                <div className="space-y-3">
-                  <Skeleton className="h-16 w-full" />
-                  <Skeleton className="h-16 w-full" />
-                </div>
-              ) : (
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  {plans.map((plan) => {
-                    const isCurrent = plan.code === currentPlan?.code;
-                    const isFree = plan.priceMonthly === 0;
-                    const ctaLabel = isFree ? "Start free" : "Start trial";
-                    return (
-                      <div
-                        key={plan.id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => {
-                          if (!isCurrent && !checkout.isPending && !portal.isPending) {
-                            handleSelectPlan(plan.code);
-                          }
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            if (!isCurrent && !checkout.isPending && !portal.isPending) {
-                              handleSelectPlan(plan.code);
-                            }
-                          }
-                        }}
-                        aria-disabled={isCurrent || checkout.isPending || portal.isPending}
-                        className={`flex cursor-pointer flex-col rounded-xl border p-5 text-left transition ${
-                          isCurrent
-                            ? "border-[var(--accent)] bg-[var(--accent-soft)]"
-                            : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)]"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-semibold text-[var(--ink)]">
-                            {plan.name}
-                          </span>
-                          {isCurrent && (
-                            <StatusBadge variant="accent">Current</StatusBadge>
-                          )}
-                        </div>
-                        <p className="mt-1 min-h-[2.5em] text-[11px] leading-relaxed text-[var(--ink3)]">
-                          {plan.tagline}
-                        </p>
-                        <div className="mt-2 font-mono-num text-xl font-semibold text-[var(--ink)]">
-                          {isFree ? "No charge" : formatMoney(plan.priceMonthly)}
-                          <span className="block text-[10px] font-normal tracking-wide text-[var(--ink3)]">
-                            per user / month
-                          </span>
-                        </div>
-
-                        <ul className="mt-3 flex-1 space-y-1.5 border-t border-[var(--border)] pt-3">
-                          {plan.features?.map((feature) => (
-                            <li
-                              key={feature}
-                              className="flex items-start gap-1.5 text-xs leading-snug text-[var(--ink2)]"
-                            >
-                              <Check className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-[var(--ok)]" />
-                              <span>{feature}</span>
-                            </li>
-                          ))}
-                        </ul>
-
-                        <div
-                          className={`mt-4 rounded-lg px-3 py-2 text-center text-xs font-semibold ${
-                            isCurrent
-                              ? "bg-[var(--s2)] text-[var(--ink3)]"
-                              : "bg-[var(--accent)] text-white"
-                          }`}
-                        >
-                          {checkout.isPending &&
-                          checkout.variables === plan.code ? (
-                            <span className="inline-flex items-center justify-center gap-1.5">
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              Starting…
-                            </span>
-                          ) : isCurrent ? (
-                            "Current plan"
-                          ) : (
-                            ctaLabel
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              {checkout.isError && (
-                <p className="mt-3 text-sm text-[var(--crit)]">
-                  {checkout.error?.message ??
-                    "Couldn't start checkout. Please try again."}
-                </p>
-              )}
-            </div>
+            {/* Domain-level subscription summary — read-only, composed from the
+                existing subscription, domain and mailbox endpoints. */}
+            <DomainBillingSummary />
 
             {/* Billing History */}
             <div className="zoiko-card">

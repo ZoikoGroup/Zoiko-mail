@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Building2, ChevronRight, LogOut, MonitorSmartphone } from "lucide-react";
+import { Building2, ChevronRight, LogOut, MonitorSmartphone, UserCircle } from "lucide-react";
 
 import { useLogout, useLogoutAll, useMe } from "@/lib/auth-hooks";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -31,7 +32,19 @@ function titleCase(role: string): string {
   return role.charAt(0) + role.slice(1).toLowerCase();
 }
 
-export function ProfileMenu() {
+export function ProfileMenu({
+  profileHref,
+  showEmail = false,
+}: {
+  /**
+   * When set, a Profile row joins the menu. The owner console has a personal
+   * profile page and no other way to reach it once sign-out moved in here;
+   * the admin console has none, so it passes nothing and renders as before.
+   */
+  profileHref?: string;
+  /** Second line on the trigger: the signed-in address, visible without opening the menu. */
+  showEmail?: boolean;
+}) {
   const { data: me } = useMe();
   const router = useRouter();
   const logout = useLogout();
@@ -112,9 +125,18 @@ export function ProfileMenu() {
         </span>
         {/* The name hides on a phone; the avatar never does, because it is the
             only way to reach sign-out at that width. */}
-        <span className="hidden max-w-[12rem] truncate text-[13px] font-medium text-[var(--ink2)] sm:inline">
-          {me.displayName}
-        </span>
+        {showEmail ? (
+          <span className="hidden min-w-0 max-w-[15rem] flex-col items-start leading-tight sm:flex">
+            <span className="truncate text-[13px] font-medium text-[var(--ink)]">
+              {me.displayName}
+            </span>
+            <span className="truncate text-[10.5px] text-[var(--ink3)]">{me.email}</span>
+          </span>
+        ) : (
+          <span className="hidden max-w-[12rem] truncate text-[13px] font-medium text-[var(--ink2)] sm:inline">
+            {me.displayName}
+          </span>
+        )}
       </button>
 
       {open && (
@@ -172,6 +194,21 @@ export function ProfileMenu() {
                 <span className="flex-1">Switch workspace</span>
                 <ChevronRight className="h-4 w-4 shrink-0 text-[var(--ink3)]" />
               </button>
+            </div>
+          )}
+
+          {profileHref && (
+            <div className="border-b border-[var(--border)] py-1">
+              <Link
+                href={profileHref}
+                role="menuitem"
+                className={row}
+                onClick={() => setOpen(false)}
+              >
+                <UserCircle className="h-4 w-4 shrink-0 text-[var(--ink3)]" />
+                <span className="flex-1">Profile</span>
+                <ChevronRight className="h-4 w-4 shrink-0 text-[var(--ink3)]" />
+              </Link>
             </div>
           )}
 
