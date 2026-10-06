@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -9,6 +9,7 @@ import {
   useDelegateMailbox,
   useDomains,
   useDeleteMailbox,
+  useMailboxCandidates,
   useMailboxDelegates,
   useRevokeMailboxDelegate,
   useSetMailboxSending,
@@ -16,6 +17,8 @@ import {
 } from "@/lib/admin-hooks";
 import { StepUpDialog, useStepUp } from "@/components/admin/StepUpDialog";
 import type { MailboxDto } from "@/lib/admin-api";
+import type { MailboxIneligibility } from "@/lib/admin-queries";
+import { ApiError } from "@/lib/api-client";
 
 /**
  * Provision a mailbox for a member who has none.
@@ -26,13 +29,13 @@ import type { MailboxDto } from "@/lib/admin-api";
  * rather than a form.
  */
 export function CreateMailboxDialog({
-  existing,
   onClose,
 }: {
-  existing: MailboxDto[];
+  /** No longer read: eligibility comes from the server's candidate list. */
+  existing?: MailboxDto[];
   onClose: () => void;
 }) {
-  const { data: people, isLoading, error } = useWorkspacePeople();
+  const { data: members, isLoading, error } = useMailboxCandidates();
   const { data: domains } = useDomains();
   const create = useCreateMailbox();
   const [membershipId, setMembershipId] = useState("");
@@ -56,18 +59,33 @@ export function CreateMailboxDialog({
   const usable = (domains ?? []).filter((d) => d.verificationStatus === "VERIFIED");
   const pending = (domains ?? []).filter((d) => d.verificationStatus !== "VERIFIED");
 
-  // A member already holding a mailbox is not a candidate — the server
-  // refuses a second one with a 409, so offering them would be inviting it.
-  const taken = new Set(existing.map((mailbox) => mailbox.membershipId).filter(Boolean));
-  const candidates = (people ?? []).filter((person) => !taken.has(person.id));
+  // The server decides who is eligible, from the database, every time this
+  // list is read: removed, suspended, disabled and already-provisioned
+  // members are never offered, and pending invitees are.
+  const candidates = (members ?? []).filter((member) => member.eligible);
 
-  const chosen = candidates.find((person) => person.id === membershipId);
+  const chosen = candidates.find((member) => member.membershipId === membershipId);
+  // Selected, then removed or provisioned elsewhere while this was open: the
+  // refreshed list no longer has them, so neither does the selection.
+  const lostSelection = Boolean(membershipId) && !adding && Boolean(members) && !chosen;
+  useEffect(() => {
+    if (lostSelection) setMembershipId("");
+  }, [lostSelection]);
+  const [lostNotice, setLostNotice] = useState(false);
+  useEffect(() => {
+    if (lostSelection) setLostNotice(true);
+  }, [lostSelection]);
+
+  // Somebody typed as a "new person" who is in fact already here.
+  const typedEmail = personalEmail.trim().toLowerCase();
+  const existingMatch = adding && typedEmail ? (members ?? []).find((member) => member.email.toLowerCase() === typedEmail) : undefined;
+
   // What they already use, which is what somebody expects when they invite
   // dana@old-company.com and then pick acme.com. A new person's first name
   // is the more likely choice than whatever their personal address says.
   const suggested = adding
     ? (firstName.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "") || personalEmail.split("@")[0] || "").toLowerCase()
-    : chosen?.user.email.split("@")[0] ?? "";
+    : chosen?.email.split("@")[0] ?? "";
   const chosenDomain = usable.find((d) => d.id === domainId);
   // People type the whole address. On the chosen domain that is clear enough
   // to accept; the screen used to append the domain again and show
@@ -80,8 +98,8 @@ export function CreateMailboxDialog({
   const personalValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(personalEmail.trim());
 
   const ready = adding
-    ? Boolean(chosenDomain) && personalValid && Boolean(firstName.trim()) && Boolean(effectiveLocal) && !wrongDomain
-    : Boolean(membershipId) && (usable.length === 0 || Boolean(domainId)) && !wrongDomain;
+    ? Boolean(chosenDomain) && personalValid && Boolean(firstName.trim()) && Boolean(effectiveLocal) && !wrongDomain && !existingMatch
+    : Boolean(chosen) && (usable.length === 0 || Boolean(domainId)) && !wrongDomain;
 
   return (
     <Modal
@@ -144,19 +162,28 @@ export function CreateMailboxDialog({
             id="mailbox-member"
             value={membershipId}
             disabled={create.isPending}
-            onChange={(event) => setMembershipId(event.target.value)}
+            onChange={(event) => {
+              setMembershipId(event.target.value);
+              setLostNotice(false);
+            }}
             className="w-full rounded-lg border border-[var(--border)] bg-[var(--s2)] px-3 py-2 text-[12.6px] text-[var(--ink)]"
           >
             <option value="">
               {candidates.length ? "Choose a member…" : "Every member already has a mailbox"}
             </option>
             <option value={NEW_PERSON}>+ Add a new person…</option>
-            {candidates.map((person) => (
-              <option key={person.id} value={person.id}>
-                {person.user.displayName} — {person.user.email}
+            {candidates.map((member) => (
+              <option key={member.membershipId} value={member.membershipId}>
+                {member.displayName || member.email} — {member.email}
+                {member.membershipStatus === "INVITED" ? " (invitation pending)" : ""}
               </option>
             ))}
           </select>
+          {lostNotice && (
+            <p className="mt-1.5 text-[11.5px] text-[var(--warn)]">
+              The member you picked was just removed or given a mailbox elsewhere. Choose again.
+            </p>
+          )}
 
           {adding && (
             <div className="mt-3 space-y-3 rounded-lg border border-[var(--border)] bg-[var(--s2)] p-3">
@@ -179,6 +206,33 @@ export function CreateMailboxDialog({
               </p>
               {personalEmail.trim() && !personalValid && (
                 <p className="text-[11.5px] text-[var(--crit)]">Enter a full email address.</p>
+              )}
+              {existingMatch && (
+                <div className="rounded-md border border-[var(--warn)] bg-[var(--warn-soft)] px-3 py-2 text-[11.5px] text-[var(--ink2)]">
+                  {existingMatch.eligible ? (
+                    <>
+                      <b>{existingMatch.displayName || existingMatch.email}</b> is already in this workspace
+                      {existingMatch.membershipStatus === "INVITED" ? " (invitation pending)" : ""}.{" "}
+                      <button
+                        type="button"
+                        className="font-semibold text-[var(--accent)] underline"
+                        onClick={() => {
+                          setMembershipId(existingMatch.membershipId);
+                          setPersonalEmail("");
+                          setFirstName("");
+                          setLastName("");
+                        }}
+                      >
+                        Select them instead
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <b>{existingMatch.displayName || existingMatch.email}</b> is already in this workspace and{" "}
+                      {INELIGIBLE_TEXT[existingMatch.reason ?? "NOT_A_MEMBER"](existingMatch.mailbox?.address)}.
+                    </>
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -273,6 +327,15 @@ export function CreateMailboxDialog({
 
 /** The member picker's value for "somebody not in the workspace yet". */
 const NEW_PERSON = "__new_person__";
+
+/** Why an existing member cannot be picked, finishing "…is already in this workspace and". */
+const INELIGIBLE_TEXT: Record<MailboxIneligibility, (address?: string) => string> = {
+  HAS_MAILBOX: (address) => `already has a mailbox${address ? ` (${address})` : ""}`,
+  MEMBERSHIP_SUSPENDED: () => "is suspended — reinstate them on the Users screen first",
+  ACCOUNT_DISABLED: () => "their account is disabled",
+  SUPPORT_SEAT: () => "holds a support seat, which does not get a mailbox",
+  NOT_A_MEMBER: () => "cannot be given a mailbox",
+};
 
 function TextField({ id, label, value, onChange, disabled, type = "text", placeholder }: {
   id: string;
@@ -416,7 +479,23 @@ export function DeleteMailboxDialog({
 }) {
   const remove = useDeleteMailbox();
   const stepUp = useStepUp();
+  const [error, setError] = useState<string | null>(null);
   const stillSending = mailbox.status !== "SUSPENDED";
+
+  // Closes only once the server has said yes. It used to close first, which
+  // unmounted the step-up prompt this very component renders — deleting is
+  // step-up, so the server asked for a password and nothing was left on
+  // screen to ask with. Any other refusal went into a discarded promise.
+  const run = (stepUpToken?: string) =>
+    remove
+      .mutateAsync({ mailboxId: mailbox.id, stepUpToken })
+      .then(onClose)
+      .catch((cause: unknown) => {
+        // The step-up refusal has to reach useStepUp so it can prompt; any
+        // other failure is shown here, on the dialog that stays open.
+        if (cause instanceof ApiError && cause.needsStepUp) throw cause;
+        setError(cause instanceof Error ? cause.message : "The mailbox could not be deleted.");
+      });
 
   return (
     <>
@@ -424,22 +503,26 @@ export function DeleteMailboxDialog({
 
       <ConfirmDialog
         open={!stepUp.dialog.open}
-        onClose={onClose}
+        onClose={() => {
+          if (!remove.isPending) onClose();
+        }}
         onConfirm={() => {
-          onClose();
-          void stepUp.attempt(`Deleting ${mailbox.address}`, (stepUpToken) =>
-            remove.mutateAsync({ mailboxId: mailbox.id, stepUpToken })
-          );
+          setError(null);
+          stepUp
+            .attempt(`Deleting ${mailbox.address}`, run)
+            .catch((cause: Error) => setError(cause.message || "The mailbox could not be deleted."));
         }}
         title={`Delete ${mailbox.address}?`}
         message={
           stillSending
-            ? "This mailbox is still able to send. Stop sending first, and offer the owner an export — deleting removes the mail as well as the address."
-            : "The mailbox and its mail are removed. Offer the owner an export first if they may need the contents; this cannot be undone."
+            ? "This mailbox can still send. Deleting removes the address and the mail in it; anything a colleague also received stays in their mailbox. Offer the owner an export first if they may need the contents. This cannot be undone."
+            : "The mailbox and its mail are removed; anything a colleague also received stays in their mailbox. Offer the owner an export first if they may need the contents. This cannot be undone."
         }
-        confirmLabel="Delete mailbox"
+        confirmLabel={remove.isPending ? "Deleting…" : "Delete mailbox"}
         loading={remove.isPending}
-      />
+      >
+        {error && <p className="mt-2 text-[12px] text-[var(--crit)]">{error}</p>}
+      </ConfirmDialog>
     </>
   );
 }

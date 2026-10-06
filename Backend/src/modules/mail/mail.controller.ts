@@ -314,6 +314,13 @@ export const listAllMailboxes = asyncHandler(async (req: Request, res: Response)
   sendSuccess(res, 200, await mailService.listAllMailboxes(tenant.tenantId), req.requestId);
 });
 
+export const adminMailboxCandidates = asyncHandler(async (req: Request, res: Response) => {
+  // Never cached: this list has to match the database at the moment the
+  // dialog asks, or it offers people who were removed seconds ago.
+  res.setHeader("Cache-Control", "no-store");
+  sendSuccess(res, 200, { members: await mailService.adminMailboxCandidates(req.tenantContext!.tenantId) }, req.requestId);
+});
+
 export const adminCreateMailbox = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 201, await mailService.adminCreateMailbox(
     req.tenantContext!.tenantId,

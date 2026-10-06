@@ -654,6 +654,60 @@ describe("Mail module", () => {
       expect(list.body.data.find((m: any) => m.id === createRes.body.data.id)).toBeUndefined();
     });
 
+    it("deletes a mailbox that holds mail, keeping mail a colleague also has", async () => {
+      const owner = await registerUser(app, { email: `admin-delfull-${Date.now()}@zoiko.test` });
+      const member = await registerUser(app, { email: `admin-delfullm-${Date.now()}@zoiko.test` });
+      const added = await request(app)
+        .post("/api/v1/membership/members")
+        .set(authHeader(owner.accessToken))
+        .send({ email: member.email, role: "MEMBER" })
+        .expect(201);
+      const created = await request(app)
+        .post("/api/v1/mail/admin/mailboxes")
+        .set(authHeader(owner.accessToken))
+        .send({ membershipId: added.body.data.id })
+        .expect(201);
+      const mailboxId = created.body.data.id as string;
+      const ownerCreated = await request(app)
+        .post("/api/v1/mail/admin/mailboxes")
+        .set(authHeader(owner.accessToken))
+        .send({ membershipId: owner.membershipId })
+        .expect(201);
+      const ownerMailbox = { id: ownerCreated.body.data.id as string };
+
+      // One message only this mailbox holds, one the owner holds too.
+      const mine = await prisma.emailMessage.create({
+        data: { tenantId: owner.tenantId, authorUserId: owner.userId, subject: "Only theirs", status: "SENT" },
+      });
+      const shared = await prisma.emailMessage.create({
+        data: { tenantId: owner.tenantId, authorUserId: owner.userId, subject: "Both have it", status: "SENT" },
+      });
+      await prisma.mailboxMessage.createMany({
+        data: [
+          { tenantId: owner.tenantId, mailboxId, messageId: mine.id, folder: "INBOX" },
+          { tenantId: owner.tenantId, mailboxId, messageId: shared.id, folder: "INBOX" },
+          { tenantId: owner.tenantId, mailboxId: ownerMailbox.id, messageId: shared.id, folder: "SENT" },
+        ],
+      });
+
+      // It used to answer 409 "Cannot delete mailbox with messages" here.
+      const res = await request(app)
+        .delete(`/api/v1/mail/admin/mailboxes/${mailboxId}`)
+        .set(authHeader(owner.accessToken))
+        .set(await stepUpHeader(app, owner.accessToken))
+        .expect(200);
+      expect(res.body.data).toMatchObject({ deleted: true, copiesRemoved: 2, messagesDeleted: 1 });
+
+      expect(await prisma.mailbox.findUnique({ where: { id: mailboxId } })).toBeNull();
+      expect(await prisma.emailMessage.findUnique({ where: { id: mine.id } })).toBeNull();
+      // Still in the owner's Sent folder.
+      expect(await prisma.emailMessage.findUnique({ where: { id: shared.id } })).not.toBeNull();
+      expect(await prisma.mailboxMessage.count({ where: { mailboxId: ownerMailbox.id, messageId: shared.id } })).toBe(1);
+
+      const audit = await prisma.auditEvent.findFirstOrThrow({ where: { tenantId: owner.tenantId, eventType: "MAILBOX_DELETED" } });
+      expect(audit.metadata).toMatchObject({ copiesRemoved: 2, messagesDeleted: 1 });
+    });
+
     it("returns 404 for non-existent mailbox deletion", async () => {
       const owner = await registerUser(app, { email: `admin-del404-${Date.now()}@zoiko.test` });
       const fakeId = "00000000-0000-0000-0000-000000000000";

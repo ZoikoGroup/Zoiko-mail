@@ -248,6 +248,36 @@ export async function createMailbox(input: CreateMailboxInput): Promise<void> {
   await apiRequest("/mail/admin/mailboxes", { method: "POST", body: input });
 }
 
+/** Why a member cannot be given a mailbox; mirrors the server's rule. */
+export type MailboxIneligibility =
+  | "NOT_A_MEMBER"
+  | "MEMBERSHIP_SUSPENDED"
+  | "SUPPORT_SEAT"
+  | "ACCOUNT_DISABLED"
+  | "HAS_MAILBOX";
+
+export interface MailboxCandidateDto {
+  membershipId: string;
+  email: string;
+  displayName: string | null;
+  role: "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT";
+  membershipStatus: "ACTIVE" | "INVITED" | "SUSPENDED";
+  accountStatus: string;
+  mailbox: { id: string; address: string } | null;
+  eligible: boolean;
+  reason: MailboxIneligibility | null;
+}
+
+/**
+ * Every current member, each marked eligible for a mailbox or not — decided
+ * by the server from the database at the moment of asking, so the picker
+ * never shows somebody removed, suspended or already provisioned.
+ */
+export async function fetchMailboxCandidates(): Promise<MailboxCandidateDto[]> {
+  const res = await apiRequest<{ members: MailboxCandidateDto[] }>("/mail/admin/mailbox-candidates");
+  return res.members;
+}
+
 export type CreateMailboxInput = {
   domainId?: string;
   localPart?: string;

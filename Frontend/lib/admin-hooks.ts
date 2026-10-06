@@ -37,6 +37,7 @@ import {
   fetchGroupAssignees,
   fetchGroups,
   fetchInvitations,
+  fetchMailboxCandidates,
   fetchMailboxRouting,
   fetchMailboxes,
   fetchMembers,
@@ -525,6 +526,8 @@ function invalidatePeople(qc: ReturnType<typeof useQueryClient>) {
   return Promise.all([
     qc.invalidateQueries({ queryKey: ["members"] }),
     qc.invalidateQueries({ queryKey: ["invitations"] }),
+    // A removed or suspended member must leave the mailbox picker too.
+    qc.invalidateQueries({ queryKey: ["mailbox-candidates"] }),
   ]);
 }
 
@@ -806,17 +809,44 @@ export function useDomainChecks(domainId: string | null): QueryLike<DomainCheckD
 
 /* ── mailbox lifecycle ─────────────────────────────────────────────────── */
 
-/** Every mailbox write moves the list and the dashboard tile counted off it. */
+/**
+ * Every mailbox write moves the list, the dashboard tile counted off it, and
+ * who can still be given one. On settle rather than success: a refusal
+ * ("already has a mailbox", "no longer a member") usually means this screen
+ * was behind, and re-reading is how it catches up.
+ */
 function useMailboxMutation<TInput>(fn: (input: TInput) => Promise<void>) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: fn,
-    onSuccess: async () => {
+    onSettled: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["mailboxes"] }),
         qc.invalidateQueries({ queryKey: ["admin-dashboard"] }),
+        qc.invalidateQueries({ queryKey: ["mailbox-candidates"] }),
+        // Adding a new person here creates an invitation and a member.
+        qc.invalidateQueries({ queryKey: ["members"] }),
+        qc.invalidateQueries({ queryKey: ["invitations"] }),
       ]);
     },
+  });
+}
+
+/**
+ * Who can be given a mailbox, kept current while the dialog is open.
+ *
+ * Re-read every time the dialog mounts and every 15 seconds while it stays
+ * open, and on window focus: someone removed in another tab, or given a
+ * mailbox by another admin, drops out of the picker without a reload.
+ */
+export function useMailboxCandidates() {
+  return useQuery({
+    queryKey: ["mailbox-candidates"],
+    queryFn: fetchMailboxCandidates,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    refetchInterval: 15_000,
   });
 }
 

@@ -207,6 +207,94 @@ describe("creating a mailbox on a workspace domain", () => {
     expect(dup.body.error.details.reason).toBe("ALREADY_A_MEMBER");
   });
 
+  describe("who can be given a mailbox", () => {
+    const candidates = async (token: string) =>
+      (await request(app).get("/api/v1/mail/admin/mailbox-candidates").set(authHeader(token)).expect(200)).body.data.members as Array<{
+        membershipId: string; email: string; eligible: boolean; reason: string | null; membershipStatus: string; mailbox: { address: string } | null;
+      }>;
+    const byEmail = (list: Awaited<ReturnType<typeof candidates>>, email: string) => list.find((member) => member.email === email);
+
+    it("reflects the workspace's real members and their state", async () => {
+      const w = await workspace("cand");
+      const domainId = await domain(w.owner.accessToken, w.owner.tenantId, "cand-acme.test", true);
+      const invited = await request(app)
+        .post("/api/v1/membership/invitations")
+        .set(authHeader(w.owner.accessToken))
+        .send({ email: "pending@elsewhere.test", role: "MEMBER" })
+        .expect(201);
+
+      let list = await candidates(w.owner.accessToken);
+      expect(byEmail(list, w.email)).toMatchObject({ eligible: true, reason: null, membershipStatus: "ACTIVE" });
+      // A pending invitee can have a mailbox waiting for them.
+      expect(byEmail(list, "pending@elsewhere.test")).toMatchObject({ eligible: true, membershipStatus: "INVITED" });
+      // One row per person, however the list was assembled.
+      expect(new Set(list.map((member) => member.membershipId)).size).toBe(list.length);
+
+      // Given a mailbox: still a member, no longer eligible, and says where.
+      await createMailbox(w.owner.accessToken, { membershipId: w.membershipId, domainId, localPart: "taken" }).expect(201);
+      list = await candidates(w.owner.accessToken);
+      expect(byEmail(list, w.email)).toMatchObject({ eligible: false, reason: "HAS_MAILBOX", mailbox: { address: "taken@cand-acme.test" } });
+
+      // Invitation cancelled: gone from the list entirely.
+      await request(app).delete(`/api/v1/membership/invitations/${invited.body.data.membership.id}`).set(authHeader(w.owner.accessToken));
+      await prisma.tenantMembership.update({ where: { id: invited.body.data.membership.id }, data: { status: "REMOVED" } });
+      list = await candidates(w.owner.accessToken);
+      expect(byEmail(list, "pending@elsewhere.test")).toBeUndefined();
+    });
+
+    it("drops removed members, and marks suspended members and disabled accounts", async () => {
+      const w = await workspace("candstate");
+      const other = await registerUser(app, { email: "md-disabled-candstate@external-signup.test" });
+      const added = await request(app).post("/api/v1/membership/members").set(authHeader(w.owner.accessToken)).send({ email: other.email, role: "MEMBER" }).expect(201);
+
+      await prisma.appUser.update({ where: { email: other.email }, data: { status: "DISABLED" } });
+      await prisma.tenantMembership.update({ where: { id: w.membershipId }, data: { status: "SUSPENDED" } });
+      let list = await candidates(w.owner.accessToken);
+      expect(byEmail(list, other.email)).toMatchObject({ eligible: false, reason: "ACCOUNT_DISABLED" });
+      expect(byEmail(list, w.email)).toMatchObject({ eligible: false, reason: "MEMBERSHIP_SUSPENDED" });
+
+      await prisma.tenantMembership.update({ where: { id: added.body.data.id }, data: { status: "REMOVED" } });
+      list = await candidates(w.owner.accessToken);
+      expect(byEmail(list, other.email)).toBeUndefined();
+    });
+
+    it("refuses on the server exactly whom the list refuses", async () => {
+      const w = await workspace("candrule");
+      const domainId = await domain(w.owner.accessToken, w.owner.tenantId, "candrule-acme.test", true);
+
+      // Removed after the screen loaded: a stale picker cannot provision them.
+      await prisma.tenantMembership.update({ where: { id: w.membershipId }, data: { status: "REMOVED" } });
+      const removed = await createMailbox(w.owner.accessToken, { membershipId: w.membershipId, domainId, localPart: "gone" }).expect(404);
+      expect(removed.body.error.details.reason).toBe("NOT_A_MEMBER");
+
+      // Re-joining makes them eligible again.
+      await prisma.tenantMembership.update({ where: { id: w.membershipId }, data: { status: "ACTIVE" } });
+      await createMailbox(w.owner.accessToken, { membershipId: w.membershipId, domainId, localPart: "back" }).expect(201);
+
+      const again = await createMailbox(w.owner.accessToken, { membershipId: w.membershipId, domainId, localPart: "second" }).expect(409);
+      expect(again.body.error.details.reason).toBe("HAS_MAILBOX");
+    });
+
+    it("lets one of two simultaneous creates win, and tells the other why", async () => {
+      const w = await workspace("candrace");
+      const domainId = await domain(w.owner.accessToken, w.owner.tenantId, "candrace-acme.test", true);
+      const [first, second] = await Promise.all([
+        createMailbox(w.owner.accessToken, { membershipId: w.membershipId, domainId, localPart: "one" }),
+        createMailbox(w.owner.accessToken, { membershipId: w.membershipId, domainId, localPart: "two" }),
+      ]);
+      expect([first.status, second.status].sort()).toEqual([201, 409]);
+      expect((first.status === 409 ? first : second).body.error.details.reason).toBe("HAS_MAILBOX");
+      expect(await prisma.mailbox.count({ where: { membershipId: w.membershipId } })).toBe(1);
+    });
+
+    it("is only for those who manage mailboxes", async () => {
+      const w = await workspace("candrbac");
+      const login = await request(app).post("/api/v1/auth/login").send({ email: w.email, password: "Password123!", tenantId: w.owner.tenantId }).expect(200);
+      const token = (login.body.data.session ?? login.body.data).accessToken;
+      await request(app).get("/api/v1/mail/admin/mailbox-candidates").set(authHeader(token)).expect(403);
+    });
+  });
+
   it("rejects a local part an address cannot carry", async () => {
     const w = await workspace("badlocal");
     const domainId = await domain(w.owner.accessToken, w.owner.tenantId, "bad-acme.test", true);

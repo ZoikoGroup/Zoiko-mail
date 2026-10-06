@@ -156,6 +156,7 @@ mailRouter.delete(
   controller.deleteForwarding
 );
 mailRouter.get("/admin/mailboxes", requireCapability("workspace.mailboxes.manage"), controller.listAllMailboxes);
+mailRouter.get("/admin/mailbox-candidates", requireCapability("workspace.mailboxes.manage"), controller.adminMailboxCandidates);
 // Adding a new person here also invites them, so it needs the invite
 // capability too — a mailbox screen must not be a way around the Users one.
 const inviteCapability = requireCapability("people.invite.member");
