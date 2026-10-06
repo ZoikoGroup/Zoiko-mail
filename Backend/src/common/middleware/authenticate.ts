@@ -50,12 +50,18 @@ function isPlatformTokenPayload(value: unknown): value is PlatformTokenPayload {
 }
 
 function extractBearerToken(req: Request): string | null {
+  // Standard Authorization header
   const header = req.header("authorization");
-  if (!header?.startsWith("Bearer ")) {
-    return null;
+  if (header?.startsWith("Bearer ")) {
+    const token = header.slice("Bearer ".length).trim();
+    if (token.length > 0) return token;
   }
-  const token = header.slice("Bearer ".length).trim();
-  return token.length > 0 ? token : null;
+  // Query param fallback for SSE (EventSource can't set headers)
+  const queryToken = req.query?.token;
+  if (typeof queryToken === "string" && queryToken.length > 0) {
+    return queryToken;
+  }
+  return null;
 }
 
 /**
@@ -91,9 +97,7 @@ export function authenticate(
       platformRole: decoded.platformRole ?? "NONE",
       // Guaranteed present by isAccessTokenPayload above.
       workspace: decoded.workspace as WorkspaceScope,
-      // Null rather than refused for a token minted before session ids were
-      // carried: refusing would sign every active user out to add a field.
-      sessionId: decoded.sid ?? null,
+      sessionId: (decoded as any).sessionId ?? null,
       type: decoded.type,
     };
 

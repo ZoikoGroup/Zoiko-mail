@@ -327,7 +327,7 @@ model Mailbox {
   domainId             String?          @map("domain_id") @db.Uuid
   address              String
   storageUsed          BigInt           @default(0) @map("storage_used")
-  storageLimit         BigInt           @default(1073741824) @map("storage_limit")
+  storageLimit         BigInt           @default(10737418240) @map("storage_limit")
   sendWindowStartedAt  DateTime         @default(now()) @map("send_window_started_at")
   sendRecipientCount   Int              @default(0) @map("send_recipient_count")
   sendSuspendedAt      DateTime?        @map("send_suspended_at")
@@ -625,6 +625,10 @@ model MailboxMessage {
   folder    MailFolder
   isRead    Boolean               @default(false) @map("is_read")
   isStarred Boolean               @default(false) @map("is_starred")
+  /// Set when the member snoozes a message. The row's `folder` stays INBOX
+  /// the whole time — snoozing is a view filter, not a move — so the
+  /// snooze-wake worker only has to clear this column to bring it back.
+  snoozedUntil DateTime?          @map("snoozed_until")
   createdAt DateTime              @default(now()) @map("created_at")
   updatedAt DateTime              @updatedAt @map("updated_at")
   mailbox   Mailbox               @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
@@ -633,6 +637,7 @@ model MailboxMessage {
 
   @@unique([mailboxId, messageId])
   @@index([tenantId, mailboxId, folder, createdAt])
+  @@index([snoozedUntil])
   @@map("mailbox_messages")
 }
 
@@ -1462,6 +1467,7 @@ enum MailFolder {
   SENT
   TRASH
   QUARANTINE
+  SPAM
 }
 
 enum DeliveryEventType {

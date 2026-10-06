@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Menu, X, LogOut } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { useWorkspaceAccess } from "@/lib/workspace-access";
-import { useMe, useLogout } from "@/lib/auth-hooks";
+import { useMe } from "@/lib/auth-hooks";
 import type { MeResponse } from "@/lib/auth-api";
 import { OwnerSidebar } from "./OwnerSidebar";
 import { GlobalSearch } from "./GlobalSearch";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
+import { ProfileMenu } from "@/components/shell/ProfileMenu";
 import { AccessDenied } from "@/components/ui/AccessDenied";
 
 /**
@@ -21,18 +22,11 @@ import { AccessDenied } from "@/components/ui/AccessDenied";
  */
 const OWNER_WORKSPACE = "OWNER" as const;
 
-function initials(name?: string, email?: string) {
-  const base = (name?.trim() || email || "?").trim();
-  const parts = base.split(/\s+/);
-  return (parts.length >= 2 ? parts[0][0] + parts[1][0] : base.slice(0, 2)).toUpperCase();
-}
-
 export function OwnerShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const { data, isLoading, error } = useMe();
   const me = data as MeResponse | undefined;
-  const logout = useLogout();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   // Fail closed: nothing renders until the role is known and permitted.
@@ -97,29 +91,15 @@ export function OwnerShell({ children }: { children: ReactNode }) {
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <ThemeToggle />
-
-            {me && (
-              <div className="hidden items-center gap-2 sm:flex">
-                <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--accent)] text-xs font-semibold text-white">
-                  {initials(me.displayName, me.email)}
-                </span>
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-[var(--ink)]">{me.displayName}</div>
-                  <div className="truncate text-[10px] text-[var(--ink3)]">{me.membership.role}</div>
-                </div>
-              </div>
-            )}
-
-            <button
-              onClick={() => logout.mutate()}
-              disabled={logout.isPending}
-              className="zoiko-btn sm"
-            >
-              <LogOut className="h-4 w-4" />
-              <span className="hidden sm:inline">{logout.isPending ? "…" : "Log out"}</span>
-            </button>
+            {/*
+              Avatar, identity and sign-out in one menu, the same one the
+              admin console uses: the address sits on the trigger so the
+              signed-in account is visible without opening anything, and
+              Profile plus Log out live inside it.
+            */}
+            <ProfileMenu profileHref="/owner/profile" showEmail />
           </div>
         </header>
 

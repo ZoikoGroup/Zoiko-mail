@@ -637,21 +637,21 @@ export class MailService {
     const reservation = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
       UPDATE "mailboxes"
       SET "send_recipient_count" = CASE
-            WHEN "send_window_started_at" <= CURRENT_TIMESTAMP - (${env.MAIL_SEND_WINDOW_MS} * INTERVAL '1 millisecond')
+            WHEN "send_window_started_at" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - (${env.MAIL_SEND_WINDOW_MS} * INTERVAL '1 millisecond')
             THEN ${draft.recipients.length}
             ELSE "send_recipient_count" + ${draft.recipients.length}
           END,
           "send_window_started_at" = CASE
-            WHEN "send_window_started_at" <= CURRENT_TIMESTAMP - (${env.MAIL_SEND_WINDOW_MS} * INTERVAL '1 millisecond')
-            THEN CURRENT_TIMESTAMP
+            WHEN "send_window_started_at" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - (${env.MAIL_SEND_WINDOW_MS} * INTERVAL '1 millisecond')
+            THEN (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
             ELSE "send_window_started_at"
           END,
-          "updated_at" = CURRENT_TIMESTAMP
+          "updated_at" = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
       WHERE "id" = ${senderMailbox.id}::uuid
         AND "tenant_id" = ${context.tenantId}::uuid
         AND "send_suspended_at" IS NULL
         AND (
-          "send_window_started_at" <= CURRENT_TIMESTAMP - (${env.MAIL_SEND_WINDOW_MS} * INTERVAL '1 millisecond')
+          "send_window_started_at" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - (${env.MAIL_SEND_WINDOW_MS} * INTERVAL '1 millisecond')
           OR "send_recipient_count" + ${draft.recipients.length} <= ${env.MAIL_MAX_RECIPIENTS_PER_WINDOW}
         )
       RETURNING "id"
@@ -1076,17 +1076,62 @@ export class MailService {
     const mailbox = filters.mailboxId
       ? await sharedMailboxService.resolveAccessibleMailbox(context, filters.mailboxId, "canRead")
       : await this.mailbox(context);
+
+    const now = new Date();
+
+    // `folder` on the filter is either a real MailFolder column value, or
+    // one of three view filters the folder rail needs that don't map onto
+    // the column 1:1:
+    //  - SNOOZED never moves a row out of INBOX (see the schema comment on
+    //    snoozedUntil) — it's the same rows as INBOX, just filtered the
+    //    opposite way on snoozedUntil.
+    //  - SCHEDULED is still a DRAFTS row until the scheduler actually sends
+    //    it; only message.status tells the two apart.
+    //  - STARRED spans every folder except TRASH and SPAM.
+    // Plain INBOX must, as the mirror image of SNOOZED, exclude anything
+    // currently snoozed — that's the whole mechanism by which snoozing
+    // hides a message.
+    let folderWhere: Record<string, unknown>;
+    let messageStatusFilter: "DRAFT" | "SCHEDULED" | undefined;
+    switch (filters.folder) {
+      case "SNOOZED":
+        folderWhere = { folder: "INBOX", snoozedUntil: { gt: now } };
+        break;
+      case "SCHEDULED":
+        folderWhere = { folder: "DRAFTS" };
+        messageStatusFilter = "SCHEDULED";
+        break;
+      case "STARRED":
+        folderWhere = { isStarred: true, folder: { notIn: ["TRASH", "SPAM"] as const } };
+        break;
+      case "INBOX":
+        folderWhere = { folder: "INBOX", OR: [{ snoozedUntil: null }, { snoozedUntil: { lte: now } }] };
+        break;
+      case "DRAFTS":
+        folderWhere = { folder: "DRAFTS" };
+        messageStatusFilter = "DRAFT";
+        break;
+      default:
+        folderWhere = { folder: filters.folder };
+    }
+
+    const hasMessageFilter = Boolean(
+      filters.q || filters.from || filters.to || filters.hasAttachment ||
+      filters.dateAfter || filters.dateBefore || messageStatusFilter
+    );
+
     const where = {
       tenantId: context.tenantId,
       mailboxId: mailbox.id,
-      folder: filters.folder,
+      ...folderWhere,
       ...(filters.starredOnly ? { isStarred: true } : {}),
       ...(filters.unreadOnly ? { isRead: false } : {}),
       ...(filters.labelId ? {
         labels: { some: { tenantId: context.tenantId, labelId: filters.labelId } },
       } : {}),
-      ...(filters.q || filters.from || filters.to || filters.hasAttachment || filters.dateAfter || filters.dateBefore ? {
+      ...(hasMessageFilter ? {
         message: {
+          ...(messageStatusFilter ? { status: messageStatusFilter } : {}),
           ...(filters.q ? {
             OR: [
               { subject: { contains: filters.q, mode: "insensitive" as const } },
@@ -1150,6 +1195,7 @@ export class MailService {
    */
   async unreadCounts(context: MailContext) {
     const mailbox = await this.mailbox(context);
+    const now = new Date();
     const grouped = await prisma.mailboxMessage.groupBy({
       by: ["folder"],
       where: {
@@ -1162,7 +1208,79 @@ export class MailService {
     });
     const counts: Record<string, number> = {};
     for (const row of grouped) counts[row.folder] = row._count._all;
+
+    // The rail shows these three as plain totals, not unread counts — a
+    // "Scheduled 1" badge means one send pending, not one unread send.
+    const [snoozed, scheduled, drafts] = await Promise.all([
+      prisma.mailboxMessage.count({
+        where: { tenantId: context.tenantId, mailboxId: mailbox.id, folder: "INBOX", snoozedUntil: { gt: now } },
+      }),
+      prisma.mailboxMessage.count({
+        where: { tenantId: context.tenantId, mailboxId: mailbox.id, folder: "DRAFTS", message: { status: "SCHEDULED" } },
+      }),
+      prisma.mailboxMessage.count({
+        where: { tenantId: context.tenantId, mailboxId: mailbox.id, folder: "DRAFTS", message: { status: "DRAFT" } },
+      }),
+    ]);
+    counts.SNOOZED = snoozed;
+    counts.SCHEDULED = scheduled;
+    counts.DRAFTS = drafts;
+
     return { counts };
+  }
+
+  /**
+   * The caller's own mailbox, for the account menu and the storage meter.
+   * Unlike admin reads elsewhere in this file, this never takes a mailboxId
+   * — it is always "mine".
+   */
+  async getMyMailbox(context: MailContext) {
+    const mailbox = await this.mailbox(context);
+    return {
+      address: mailbox.address,
+      storageUsed: Number(mailbox.storageUsed),
+      storageLimit: Number(mailbox.storageLimit),
+    };
+  }
+
+  /**
+   * Snooze or unsnooze one message. Only valid from INBOX — snoozing a
+   * message already in Sent, Trash or elsewhere isn't a concept the rail
+   * exposes, so trying to is a 404 rather than a silent no-op.
+   */
+  async snooze(messageId: string, until: Date | null, context: MailContext) {
+    const mailbox = await this.mailbox(context);
+    const item = await prisma.mailboxMessage.findFirst({
+      where: { tenantId: context.tenantId, mailboxId: mailbox.id, messageId, folder: "INBOX" },
+      select: { id: true },
+    });
+    if (!item) throw new AppError("Message not found in Inbox", 404, ErrorCodes.NOT_FOUND);
+
+    const updated = await prisma.mailboxMessage.update({
+      where: { id: item.id },
+      data: { snoozedUntil: until },
+    });
+    return { messageId, snoozedUntil: updated.snoozedUntil };
+  }
+
+  /**
+   * Wakes every message whose snooze has expired: clears snoozedUntil and
+   * marks it unread, so it reappears in INBOX exactly the way a fresh
+   * message would. Called on an interval from server.ts, mirroring
+   * processDueScheduled() below. Bulk updateMany rather than a per-row
+   * loop — there's nothing row-specific to do, so one query is enough.
+   */
+  async processDueSnoozes() {
+    // Sweeps every workspace, same as processDueScheduled above — it must
+    // run outside a single tenant's RLS scope or the update silently
+    // matches zero rows.
+    return withCrossTenant(async () => {
+      const result = await prisma.mailboxMessage.updateMany({
+        where: { folder: "INBOX", snoozedUntil: { lte: new Date() } },
+        data: { snoozedUntil: null, isRead: false },
+      });
+      return { woken: result.count };
+    });
   }
 
   async get(messageId: string, context: MailContext, mailboxId?: string) {
@@ -1197,12 +1315,17 @@ export class MailService {
       where: { tenantId: context.tenantId, mailboxId: mailbox.id, messageId },
     });
     if (!item) throw new AppError("Message not found", 404, ErrorCodes.NOT_FOUND);
-    if (input.folder === "INBOX" && !["INBOX", "ARCHIVE", "TRASH"].includes(item.folder)) {
-      throw new AppError("Only archived or trashed inbox messages can be restored", 400, ErrorCodes.VALIDATION_ERROR);
+    if (input.folder === "INBOX" && !["INBOX", "ARCHIVE", "TRASH", "SPAM"].includes(item.folder)) {
+      throw new AppError("Only archived, trashed or spam-folder inbox messages can be restored", 400, ErrorCodes.VALIDATION_ERROR);
     }
     if (input.folder === "ARCHIVE" && !["INBOX", "ARCHIVE"].includes(item.folder)) {
       throw new AppError("Only inbox messages can be archived", 400, ErrorCodes.VALIDATION_ERROR);
     }
+    if (input.folder === "SPAM" && !["INBOX", "ARCHIVE"].includes(item.folder)) {
+      throw new AppError("Only inbox or archived messages can be reported as spam", 400, ErrorCodes.VALIDATION_ERROR);
+    }
+    // Moving OUT of spam always goes through "folder: INBOX" above, which
+    // already allows it — SPAM is in the restore-eligible set here too.
     return prisma.$transaction(async (tx) => {
       const updated = await tx.mailboxMessage.update({
         where: { id: item.id, tenantId: context.tenantId },
@@ -1238,6 +1361,8 @@ export class MailService {
     const invalid = items.some((item) => {
       if (input.action === "ARCHIVE") return item.folder !== "INBOX" && item.folder !== "ARCHIVE";
       if (input.action === "RESTORE") return item.folder !== "TRASH" && item.folder !== "ARCHIVE";
+      if (input.action === "SPAM") return item.folder !== "INBOX" && item.folder !== "ARCHIVE";
+      if (input.action === "NOT_SPAM") return item.folder !== "SPAM";
       return false;
     });
     if (invalid) {
@@ -1251,7 +1376,9 @@ export class MailService {
             : input.action === "UNSTAR" ? { isStarred: false }
               : input.action === "ARCHIVE" ? { folder: "ARCHIVE" }
                 : input.action === "TRASH" ? { folder: "TRASH" }
-                  : { folder: "INBOX" };
+                  : input.action === "SPAM" ? { folder: "SPAM" }
+                    : input.action === "NOT_SPAM" ? { folder: "INBOX" }
+                      : { folder: "INBOX" };
 
     return prisma.$transaction(async (tx) => {
       const result = await tx.mailboxMessage.updateMany({
@@ -1503,7 +1630,7 @@ export class MailService {
         const reserved = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
           UPDATE "mailboxes"
           SET "storage_used" = "storage_used" + ${file.size},
-              "updated_at" = CURRENT_TIMESTAMP
+              "updated_at" = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
           WHERE "id" = ${mailbox.id}::uuid
             AND "tenant_id" = ${context.tenantId}::uuid
             AND "storage_used" + ${file.size} <= "storage_limit"

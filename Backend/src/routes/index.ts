@@ -4,7 +4,6 @@ import { membershipRouter } from "../modules/membership/membership.routes.js";
 import { tenantRouter } from "../modules/tenant/tenant.routes.js";
 import { userRouter } from "../modules/user/user.routes.js";
 import { auditRouter } from "../modules/audit/audit.routes.js";
-import { securityAlertRouter } from "../modules/security-alert/security-alert.routes.js";
 import { policyRouter } from "../modules/policy/policy.routes.js";
 import { mailRouter } from "../modules/mail/mail.routes.js";
 import { messageRouter, threadRouter } from "../modules/message/message.routes.js";
@@ -16,7 +15,6 @@ import { integrationRouter } from "../modules/integration/integration.routes.js"
 import { jobRouter } from "../modules/job/job.routes.js";
 import { lifecycleRouter } from "../modules/lifecycle/lifecycle.routes.js";
 import { supportPlatformRouter, supportRouter } from "../modules/support/support.routes.js";
-import { ticketPlatformRouter, ticketRouter } from "../modules/ticket/ticket.routes.js";
 import { connectorRouter } from "../modules/connector/connector.routes.js";
 import { deliveryProtectionRouter } from "../modules/delivery-protection/delivery-protection.routes.js";
 import { billingRouter } from "../modules/billing/billing.routes.js";
@@ -25,6 +23,7 @@ import { authenticate } from "../common/middleware/authenticate.js";
 import { tenantContext } from "../common/middleware/tenantContext.js";
 import { dashboardRouter } from "../modules/dashboard/dashboard.routes.js";
 import { participantRouter } from "../modules/participant/participant.routes.js";
+import { eventsRouter } from "../modules/events/events.routes.js";
 
 const apiRouter = Router();
 
@@ -37,7 +36,6 @@ apiRouter.use("/membership", membershipRouter);
 apiRouter.use("/users", userRouter);
 apiRouter.use("/tenants", tenantRouter);
 apiRouter.use("/audit", auditRouter);
-apiRouter.use("/security-alerts", securityAlertRouter);
 apiRouter.use("/policies", policyRouter);
 apiRouter.use("/mail", mailRouter);
 apiRouter.use("/participants", participantRouter);
@@ -50,10 +48,6 @@ apiRouter.use("/notifications", notificationRouter);
 apiRouter.use("/integrations", integrationRouter);
 apiRouter.use("/jobs", jobRouter);
 apiRouter.use("/lifecycle", lifecycleRouter);
-// Mount ticket routers before the generic support routers: /support/tickets
-// and /support/platform/tickets are more specific and must win the match.
-apiRouter.use("/support/platform/tickets", ticketPlatformRouter);
-apiRouter.use("/support/tickets", ticketRouter);
 // Mount the platform support console before the tenant-scoped /support router:
 // supportRouter runs tenantContext (ACTIVE membership required), which would
 // otherwise reject staff sessions that lack a tenant context.
@@ -63,5 +57,6 @@ apiRouter.use("/connectors", connectorRouter);
 apiRouter.use("/contacts", authenticate, tenantContext, contactRouter);
 apiRouter.use("/delivery-protection", deliveryProtectionRouter);
 apiRouter.use("/billing", billingRouter);
+apiRouter.use("/events", eventsRouter);
 
 export { apiRouter };

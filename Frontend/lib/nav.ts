@@ -1,5 +1,5 @@
 import {
-  LayoutDashboard, Inbox, Link2, MessagesSquare, Bell, Sparkles,
+  LayoutDashboard, Link2,
   Mail, KeyRound, Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -32,41 +32,19 @@ export const DASHBOARD_ITEM: NavItem = {
 // Domains & DNS) live in ADMIN_NAV below and are NOT included here.
 // Backend routes for those items are already role-guarded server-side; this
 // split just makes the sidebar honest about who each item is for.
+//
+// Track A (Action Inbox, Connected accounts, Threads, Notifications,
+// Digest, AI drafting) used to live here. Webmail is the member home now —
+// WORKSPACE_HREF.MEMBER in lib/workspace.ts points at /mail, which has its
+// own full-screen shell (WebmailShell) and isn't reached through this
+// sidebar at all. The Track A pages still exist and redirect to /mail if
+// visited directly; see each page's own comment for why.
 // ---------------------------------------------------------------------------
 export const MEMBER_NAV: NavItem[] = [
-  // Track A — the first-ship intelligence layer
   {
-    section: "Track A · Intelligence", label: "Action Inbox", href: "/inbox", icon: Inbox, status: "live",
-    desc: "Review and triage commitments, replies owed, and deadlines."
-  },
-  {
-    section: "Track A · Intelligence", label: "Connected accounts", href: "/connected-accounts", icon: Link2, status: "live",
-    desc: "Connect Gmail or Microsoft 365 (read-only) to detect actions."
-  },
-  {
-    section: "Track A · Intelligence", label: "Threads & messages", href: "/threads", icon: MessagesSquare, status: "live",
-    desc: "Browse conversations behind each detected action."
-  },
-  {
-    section: "Track A · Intelligence", label: "Notifications", href: "/notifications", icon: Bell, status: "live",
-    desc: "Alerts, digests, and other activity from your workspace."
-  },
-  {
-    section: "Track A · Intelligence", label: "Daily digest", href: "/digest", icon: LayoutDashboard, status: "live",
-    desc: "A once-a-day summary of what needs your attention."
-  },
-  {
-    section: "Track A · Intelligence", label: "AI drafting & summaries", href: "/ai", icon: Sparkles, status: "live",
-    desc: "Draft replies and summarize threads — you always send."
-  },
-
-  // Track B — hosted mail
-  {
-    section: "Track B · Hosted mail", label: "Webmail", href: "/mail", icon: Mail, status: "live",
+    section: "Hosted mail", label: "Webmail", href: "/mail", icon: Mail, status: "live",
     desc: "Send and receive from your Zoiko mailbox."
   },
-
-  // Account
   {
     section: "Account", label: "Profile", href: "/account", icon: KeyRound, status: "live",
     desc: "Your account details and sign-in security."

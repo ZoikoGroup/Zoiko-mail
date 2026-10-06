@@ -30,22 +30,22 @@ export class DeliveryProtectionService {
     const rows = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
       UPDATE "mailboxes"
       SET "warmup_daily_count" = CASE
-            WHEN "warmup_daily_started_at" < date_trunc('day', CURRENT_TIMESTAMP)
+            WHEN "warmup_daily_started_at" < date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
             THEN ${externalRecipients}
             ELSE "warmup_daily_count" + ${externalRecipients}
           END,
           "warmup_daily_started_at" = CASE
-            WHEN "warmup_daily_started_at" < date_trunc('day', CURRENT_TIMESTAMP)
-            THEN CURRENT_TIMESTAMP
+            WHEN "warmup_daily_started_at" < date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
+            THEN (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
             ELSE "warmup_daily_started_at"
           END,
           "external_sent_count" = "external_sent_count" + ${externalRecipients},
-          "updated_at" = CURRENT_TIMESTAMP
+          "updated_at" = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
       WHERE "id"=${mailboxId}::uuid AND "tenant_id"=${tenantId}::uuid
         AND "send_suspended_at" IS NULL
         AND (
           CASE
-            WHEN "warmup_daily_started_at" < date_trunc('day', CURRENT_TIMESTAMP)
+            WHEN "warmup_daily_started_at" < date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
             THEN ${externalRecipients}
             ELSE "warmup_daily_count" + ${externalRecipients}
           END
@@ -222,9 +222,12 @@ export class DeliveryProtectionService {
         },
       });
       if (dangerous) {
+        // Plain spam goes to the member-visible SPAM folder; phishing and
+        // malware verdicts still go to QUARANTINE, which only an admin
+        // can see — those are a different severity, not the same shelf.
         await tx.mailboxMessage.updateMany({
           where: { tenantId: event.tenantId, messageId: message.id },
-          data: { folder: "QUARANTINE" },
+          data: { folder: type === "SPAM_DETECTED" ? "SPAM" : "QUARANTINE" },
         });
       }
       if (type === "MALWARE_DETECTED") {

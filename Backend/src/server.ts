@@ -22,6 +22,12 @@ const server = app.listen(PORT, () => {
 });
 
 let schedulerRunning = false;
+import { sseManager } from "./common/sse/sse.manager.js";
+
+// Heartbeat ping every 30s to keep SSE connections alive
+const sseHeartbeat = setInterval(() => sseManager.ping(), 30_000);
+sseHeartbeat.unref();
+
 const scheduler = setInterval(() => {
   if (schedulerRunning) return;
   schedulerRunning = true;
@@ -39,6 +45,23 @@ const scheduler = setInterval(() => {
     });
 }, env.MAIL_SCHEDULER_INTERVAL_MS);
 scheduler.unref();
+
+let snoozeWorkerRunning = false;
+const snoozeWorker = setInterval(() => {
+  if (snoozeWorkerRunning) return;
+  snoozeWorkerRunning = true;
+  void mailService.processDueSnoozes()
+    .then((result) => {
+      if (result.woken > 0) logger.info(result, "Snoozed mail wake-up completed");
+    })
+    .catch((error: unknown) => {
+      logger.error({ error }, "Snoozed mail wake-up failed");
+    })
+    .finally(() => {
+      snoozeWorkerRunning = false;
+    });
+}, env.SNOOZE_WAKE_INTERVAL_MS);
+snoozeWorker.unref();
 
 let jobWorkerRunning = false;
 const jobWorker = setInterval(() => {
@@ -277,6 +300,7 @@ server.keepAliveTimeout = env.HTTP_KEEP_ALIVE_TIMEOUT_MS;
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, "Graceful shutdown started");
   clearInterval(scheduler);
+  clearInterval(snoozeWorker);
   clearInterval(jobWorker);
   clearInterval(providerEventWorker);
   clearInterval(complianceSweep);
@@ -304,4 +328,4 @@ process.on("SIGTERM", () => {
 
 process.on("SIGINT", () => {
   void shutdown("SIGINT");
-});
+});    

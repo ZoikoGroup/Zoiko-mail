@@ -28,10 +28,10 @@ export async function claimDueDomains(limit: number): Promise<Array<{ id: string
   // default; the scope is declared rather than assumed (AC-004).
   return withCrossTenant(() => prisma.$queryRaw<Array<{ id: string; tenantId: string }>>`
     UPDATE "mail_domains"
-    SET "next_check_at" = CURRENT_TIMESTAMP + (${LEASE_MINUTES} * INTERVAL '1 minute')
+    SET "next_check_at" = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + (${LEASE_MINUTES} * INTERVAL '1 minute')
     WHERE "id" IN (
       SELECT "id" FROM "mail_domains"
-      WHERE "type" = 'CUSTOM' AND "next_check_at" IS NOT NULL AND "next_check_at" <= CURRENT_TIMESTAMP
+      WHERE "type" = 'CUSTOM' AND "next_check_at" IS NOT NULL AND "next_check_at" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
       ORDER BY "next_check_at"
       LIMIT ${limit}
       FOR UPDATE SKIP LOCKED

@@ -10,14 +10,9 @@ import {
   FileText,
   ShieldAlert,
   ShieldCheck,
-  Download,
-  Trash2,
-  Sliders,
-  UserCircle,
   BarChart3,
   Activity,
   Webhook,
-  Ban,
   KeyRound,
   type LucideIcon,
 } from "lucide-react";
@@ -57,14 +52,7 @@ export const OWNER_NAV: OwnerNavItem[] = [
   // alerts through their own console.
   { section: "Security & Governance", label: "Security Alerts", href: "/owner/security-alerts", icon: ShieldAlert, ownerOnly: true },
   { section: "Security & Governance", label: "Policies", href: "/owner/policies", icon: ShieldCheck, ownerOnly: true },
-  { section: "Security & Governance", label: "Suppressions", href: "/owner/suppressions", icon: Ban, ownerOnly: true },
   { section: "Security & Governance", label: "Support Access", href: "/owner/support-access", icon: ShieldCheck, ownerOnly: true },
-
-  { section: "Data Management", label: "Export Data", href: "/owner/export-data", icon: Download, ownerOnly: true },
-  { section: "Data Management", label: "Deletion Requests", href: "/owner/deletion-requests", icon: Trash2, ownerOnly: true },
-
-  { section: "Settings", label: "General Settings", href: "/owner/general-settings", icon: Sliders },
-  { section: "Settings", label: "Profile", href: "/owner/profile", icon: UserCircle },
 ];
 
 export const OWNER_SECTIONS: string[] = OWNER_NAV.reduce<string[]>((acc, item) => {

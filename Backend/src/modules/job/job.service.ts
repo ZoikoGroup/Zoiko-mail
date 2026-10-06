@@ -27,23 +27,23 @@ export class JobService {
   }
   async claim() {
     const rows = await prisma.$queryRaw<Array<{ id: string }>>`
-      UPDATE "background_jobs" SET "status"='RUNNING',"locked_at"=CURRENT_TIMESTAMP,
-      "attempts"="attempts"+1,"updated_at"=CURRENT_TIMESTAMP
+      UPDATE "background_jobs" SET "status"='RUNNING',"locked_at"=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
+      "attempts"="attempts"+1,"updated_at"=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
       WHERE "id"=(SELECT "id" FROM "background_jobs" WHERE "status" IN ('PENDING','RETRY')
-      AND "run_at"<=CURRENT_TIMESTAMP ORDER BY "run_at" FOR UPDATE SKIP LOCKED LIMIT 1)
+      AND "run_at"<=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC') ORDER BY "run_at" FOR UPDATE SKIP LOCKED LIMIT 1)
       RETURNING "id"`;
     return rows[0] ? prisma.backgroundJob.findUnique({ where: { id: rows[0].id } }) : null;
   }
   async claimSupported() {
     const rows = await prisma.$queryRaw<Array<{ id: string }>>`
-      UPDATE "background_jobs" SET "status"='RUNNING',"locked_at"=CURRENT_TIMESTAMP,
-      "attempts"="attempts"+1,"updated_at"=CURRENT_TIMESTAMP
+      UPDATE "background_jobs" SET "status"='RUNNING',"locked_at"=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
+      "attempts"="attempts"+1,"updated_at"=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
       WHERE "id"=(SELECT "id" FROM "background_jobs" WHERE "status" IN ('PENDING','RETRY')
       AND (
         "type" IN ('DATA_EXPORT','NOTIFICATION_DIGEST','IMAP_SYNC','SMTP_SEND','AI_EXTRACTION','AI_DRAFT_GENERATION')
         OR ("type"='DATA_DELETION' AND "payload"->>'confirmed'='true')
       )
-      AND "run_at"<=CURRENT_TIMESTAMP ORDER BY "run_at" FOR UPDATE SKIP LOCKED LIMIT 1)
+      AND "run_at"<=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC') ORDER BY "run_at" FOR UPDATE SKIP LOCKED LIMIT 1)
       RETURNING "id"`;
     return rows[0] ? prisma.backgroundJob.findUnique({ where: { id: rows[0].id } }) : null;
   }

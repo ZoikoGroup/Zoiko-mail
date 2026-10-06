@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ProtectedRoute } from "@/components/owner/ProtectedRoute";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { DomainsWorkspace } from "@/components/domains/DomainsWorkspace";
+import { DomainMailboxOverview } from "@/components/owner/domains/DomainMailboxOverview";
 
 export default function DomainsPage() {
   const [adding, setAdding] = useState(false);
@@ -23,6 +24,9 @@ export default function DomainsPage() {
           {/* Owners hold every domain capability; the server still decides. */}
           <DomainsWorkspace canManage addOpen={adding} onAddOpenChange={setAdding} />
         </div>
+        {/* Read-only: which mailboxes sit on which domain. The cards above keep
+            owning creation, DNS, verification and every mutation. */}
+        <DomainMailboxOverview />
       </div>
     </ProtectedRoute>
   );
