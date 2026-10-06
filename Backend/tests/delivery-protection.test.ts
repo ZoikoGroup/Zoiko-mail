@@ -3,6 +3,7 @@ import request from "supertest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
 import { connectorService } from "../src/modules/connector/connector.service.js";
+import { deliveryProtectionService } from "../src/modules/delivery-protection/delivery-protection.service.js";
 import { authHeader, registerUser } from "./helpers.js";
 
 const app = createApp();
@@ -52,6 +53,41 @@ describe("Delivery protection", () => {
       .post(`/api/v1/delivery-protection/mailboxes/${mailbox.id}/warmup/evaluate`)
       .set(authHeader(owner.accessToken)).expect(200);
     expect(promoted.body.data.warmupStage).toBe(1);
+  });
+
+  it("rolls the warm-up day over on the UTC calendar and stamps it in UTC", async () => {
+    const owner = await registerUser(app, { email: "warmup-utc@zoiko.test" });
+    const mailbox = await prisma.mailbox.create({
+      data: {
+        tenantId: owner.tenantId,
+        membershipId: owner.membershipId,
+        address: `warmup-utc-${Date.now()}@zoiko.test`,
+      },
+    });
+    await prisma.mailbox.update({
+      where: { id: mailbox.id },
+      // Two days back guarantees the rollover branch runs, so the value read
+      // below was written by this statement rather than left untouched.
+      data: { warmupDailyStartedAt: new Date(Date.now() - 2 * 86_400_000) },
+    });
+
+    // Stage zero allows ten a day, so five fits.
+    expect(await deliveryProtectionService.reserveWarmup(mailbox.id, owner.tenantId, 5)).toBe(true);
+
+    const after = await prisma.mailbox.findUniqueOrThrow({ where: { id: mailbox.id } });
+    expect(after.warmupDailyCount).toBe(5);
+    expect(after.externalSentCount).toBe(5);
+    // Prisma fills this column with UTC and the day boundary is
+    // date_trunc('day', ... AT TIME ZONE 'UTC'); a session-local write would
+    // land 5h30m in the future and roll the allowance over hours early.
+    expect(Math.abs(after.warmupDailyStartedAt.getTime() - Date.now())).toBeLessThan(60_000);
+
+    // Within the same UTC day the counter accumulates instead of resetting.
+    expect(await deliveryProtectionService.reserveWarmup(mailbox.id, owner.tenantId, 5)).toBe(true);
+    const accumulated = await prisma.mailbox.findUniqueOrThrow({ where: { id: mailbox.id } });
+    expect(accumulated.warmupDailyCount).toBe(10);
+    // The same statement bumps updated_at, which Prisma would otherwise own.
+    expect(Math.abs(accumulated.updatedAt.getTime() - Date.now())).toBeLessThan(60_000);
   });
 
   it("blocks hashed suppression-list recipients without storing their address", async () => {

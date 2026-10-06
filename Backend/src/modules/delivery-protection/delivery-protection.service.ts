@@ -30,22 +30,22 @@ export class DeliveryProtectionService {
     const rows = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
       UPDATE "mailboxes"
       SET "warmup_daily_count" = CASE
-            WHEN "warmup_daily_started_at" < date_trunc('day', CURRENT_TIMESTAMP)
+            WHEN "warmup_daily_started_at" < date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
             THEN ${externalRecipients}
             ELSE "warmup_daily_count" + ${externalRecipients}
           END,
           "warmup_daily_started_at" = CASE
-            WHEN "warmup_daily_started_at" < date_trunc('day', CURRENT_TIMESTAMP)
-            THEN CURRENT_TIMESTAMP
+            WHEN "warmup_daily_started_at" < date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
+            THEN (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
             ELSE "warmup_daily_started_at"
           END,
           "external_sent_count" = "external_sent_count" + ${externalRecipients},
-          "updated_at" = CURRENT_TIMESTAMP
+          "updated_at" = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
       WHERE "id"=${mailboxId}::uuid AND "tenant_id"=${tenantId}::uuid
         AND "send_suspended_at" IS NULL
         AND (
           CASE
-            WHEN "warmup_daily_started_at" < date_trunc('day', CURRENT_TIMESTAMP)
+            WHEN "warmup_daily_started_at" < date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
             THEN ${externalRecipients}
             ELSE "warmup_daily_count" + ${externalRecipients}
           END

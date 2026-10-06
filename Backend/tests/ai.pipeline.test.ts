@@ -266,6 +266,13 @@ describe("AI extraction pipeline (ZM-BE-007/008/009)", () => {
     expect(retried.status).toBe("RETRY");
     expect(await prisma.aIAction.count({ where: { tenantId: owner.tenantId, messageId: message.id } })).toBe(0);
 
+    // The retry was given a 30 second backoff, so bring run_at forward rather
+    // than waiting it out. This used to pass without the adjustment only because
+    // run_at was compared against a session-local clock and read as already due.
+    await prisma.backgroundJob.update({
+      where: { id: retried.id },
+      data: { runAt: new Date(Date.now() - 60_000) },
+    });
     spy.mockRestore();
     const second = await jobService.processNext();
     expect(second.processed).toBe(true);
