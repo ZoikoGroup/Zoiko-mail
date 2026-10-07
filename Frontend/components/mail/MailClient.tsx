@@ -54,6 +54,25 @@ import { parseMailQuery } from "@/lib/mail-search";
 import { MailRow, groupByDay } from "@/components/mail/MailRow";
 import { SnoozeMenu } from "@/components/mail/SnoozeMenu";
 import { QuickReply } from "@/components/mail/QuickReply";
+import { ApiError } from "@/lib/api-client";
+
+/**
+ * Why a folder failed, in words that point at the fix.
+ *
+ * A 400 on a folder this client offers means the API does not recognise it —
+ * in practice an API older than the frontend, after a pull that added the
+ * folder. Saying so turns a dead end into "restart the API".
+ */
+function folderErrorReason(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 0) return error.message;
+    if (error.status === 400) {
+      return "The server did not accept this folder. It is usually running an older build than this screen — restart or rebuild the API, which also applies any new database migrations.";
+    }
+    return error.readableMessage || error.message;
+  }
+  return error instanceof Error ? error.message : "Unknown error";
+}
 
 const FOLDERS: { key: MailFolder; label: string; icon: any }[] = [
   { key: "INBOX", label: "Inbox", icon: Inbox },
@@ -228,7 +247,7 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
   const [confirmEmpty, setConfirmEmpty] = useState(false);
   const emptyTrashMut = useEmptyTrash();
 
-  const { data, isLoading, error } = useMailList({
+  const { data, isLoading, error, refetch, isFetching } = useMailList({
     folder,
     page,
     limit: 25,
@@ -557,7 +576,22 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
             )}
             {error && (
               <div className="m-3 flex items-start gap-2 rounded-lg border border-[var(--crit)]/30 bg-[var(--crit-soft)] p-4 text-sm text-[var(--crit)]">
-                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> Couldn&rsquo;t load this folder.
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p>Couldn&rsquo;t load this folder.</p>
+                  {/* The server's own reason. A bare "couldn't load" sent people
+                      looking in the wrong place when the cause was an API
+                      older than this screen (a folder it did not know yet). */}
+                  <p className="mt-1 text-xs text-[var(--ink2)]">{folderErrorReason(error)}</p>
+                  <button
+                    type="button"
+                    className="zoiko-btn sm mt-2"
+                    disabled={isFetching}
+                    onClick={() => void refetch()}
+                  >
+                    {isFetching ? "Retrying…" : "Try again"}
+                  </button>
+                </div>
               </div>
             )}
             {!isLoading && !error && items.length === 0 && (

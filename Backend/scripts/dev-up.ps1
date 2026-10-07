@@ -95,6 +95,13 @@ function Test-ApiScoped {
         -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 15
       $scope = $res.data.session.workspace
       if ($scope) { return @{ Scoped = $true; Detail = $scope } }
+      # The seed account is privileged, so a current API stops it at the
+      # second-factor step instead of issuing a session. That gate is newer
+      # than workspace scoping, so reaching it proves the API is current —
+      # reading it as "no workspace" reported a fresh API as stale.
+      if ($res.data.state -in @('MFA_REQUIRED', 'MFA_ENROLLMENT_REQUIRED')) {
+        return @{ Scoped = $true; Detail = "current (sign-in reached the $($res.data.state) step)" }
+      }
       # A well-formed answer with no scope is the stale-image symptom, and it
       # will not improve by waiting.
       return @{ Scoped = $false; Detail = 'no workspace on the session' }
@@ -191,6 +198,54 @@ function Start-DockerEngine {
   }
   Write-Bad 'Docker did not start within 4 minutes.'
   return $false
+}
+
+<#
+  Installs dependencies when the lockfile has moved since the last install.
+
+  A pull that adds a library otherwise fails at compile or import time, far
+  from the cause. npm writes node_modules\.package-lock.json on every install,
+  so a lockfile newer than that marker means "pulled, not installed".
+#>
+function Sync-Dependencies([string]$Dir, [string]$Name) {
+  $lock = Join-Path $Dir 'package-lock.json'
+  $marker = Join-Path $Dir 'node_modules\.package-lock.json'
+  if (-not (Test-Path $lock)) { return }
+  if ((Test-Path $marker) -and ((Get-Item $lock).LastWriteTime -le (Get-Item $marker).LastWriteTime)) {
+    Write-Ok "$Name dependencies up to date"
+    return
+  }
+  Write-Step "  $Name dependencies changed since the last install; running npm install..."
+  Push-Location $Dir
+  try { & npm install --no-audit --no-fund 2>&1 | Select-Object -Last 2 | ForEach-Object { Write-Step "    $_" } }
+  finally { Pop-Location }
+}
+
+<#
+  Brings the local database and Prisma client up to the checked-out schema.
+
+  The from-source API never ran migrations, so a pull that added one left the
+  API querying tables and enum values the database did not have yet — the
+  "Couldn't load this folder" on the Scheduled folder was exactly that.
+  `migrate deploy` applies only committed migrations and is a no-op when
+  there is nothing new, so running it every time costs a second.
+#>
+function Sync-Database {
+  Push-Location $BackendDir
+  try {
+    $env:DATABASE_URL = Get-DatabaseUrl
+    & npx prisma generate 2>&1 | Out-Null
+    $out = & npx prisma migrate deploy 2>&1
+    if ($LASTEXITCODE -ne 0) {
+      Write-Bad 'Database migrations failed:'
+      $out | Select-Object -Last 5 | ForEach-Object { Write-Bad "    $_" }
+      return $false
+    }
+    $applied = $out | Select-String -Pattern 'Applying migration' | ForEach-Object { ($_ -split '`')[1] }
+    if ($applied) { $applied | ForEach-Object { Write-Ok "  applied migration $_" } }
+    else { Write-Ok 'database schema up to date' }
+    return $true
+  } finally { Pop-Location }
 }
 
 Write-Host ''
@@ -294,6 +349,13 @@ if ($Docker) {
 else {
 
 Write-Step '3/4  api (from source)'
+Sync-Dependencies $BackendDir 'backend'
+if (-not (Sync-Database)) { return }
+# An API already running keeps the Prisma client it started with. Restarting it
+# is what picks up a schema change; said, rather than done silently mid-work.
+if ((Test-Port 5000) -and -not (docker ps -q --filter 'name=backend-api-1')) {
+  Write-Warn 'An API is already running from source. If this pull changed the schema, restart it (Ctrl+C in its window, then re-run this script).'
+}
 # The container image goes stale and answers with unscoped sessions, so it must
 # not own port 5000. Stopping it is cheap and prevents a confusing failure.
 #
@@ -301,6 +363,12 @@ Write-Step '3/4  api (from source)'
 # the check below saw the stopping container still listening, reported
 # "already up on 5000", started nothing, and left no API at all — the status
 # table two lines later said down.
+# Its compose restart policy is unless-stopped, so whenever Docker Desktop
+# restarts — a reboot, a crash, low memory — the stale container came back
+# up, took port 5000 from the source API and served old code again ("the
+# server did not accept this folder"). Turning the policy off keeps it down
+# until -Docker rebuilds and recreates it with the policy restored.
+& docker update --restart=no backend-api-1 2>&1 | Out-Null
 & docker stop backend-api-1 2>&1 | Out-Null
 $clearBy = (Get-Date).AddSeconds(20)
 while ((Test-Port 5000) -and (Get-Date) -lt $clearBy) {
@@ -330,6 +398,7 @@ npm run dev
 # frontend service in compose — so it runs with npm in both modes. Said here
 # rather than left implicit, because "-Docker" reasonably implies otherwise.
 Write-Step '4/4  frontend (npm — not containerised)'
+Sync-Dependencies $FrontendDir 'frontend'
 if (Test-Port 3000) {
   Write-Ok 'already up on 3000'
 } else {
