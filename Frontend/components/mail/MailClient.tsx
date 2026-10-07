@@ -86,6 +86,74 @@ function bytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/**
+ * readableEmailHtml() reads the app's current CSS variables, but it only
+ * runs when the component housing the iframe re-renders — toggling
+ * Light/Dark doesn't itself touch this component's state, so without this
+ * the colors were stale until something unrelated (switching messages,
+ * a reload) forced a re-render. Watching <html> for the attribute the
+ * theme toggle flips and bumping a counter on change makes the switch
+ * take effect immediately; the counter is used as part of the iframe's
+ * `key`, which also remounts it so the new colors apply cleanly.
+ */
+function useThemeRevision(): number {
+  const [rev, setRev] = useState(0);
+  useEffect(() => {
+    const target = document.documentElement;
+    const observer = new MutationObserver(() => setRev((r) => r + 1));
+    observer.observe(target, { attributes: true, attributeFilter: ["class", "data-theme", "style"] });
+    return () => observer.disconnect();
+  }, []);
+  return rev;
+}
+
+/**
+ * Message HTML is written by whoever sent it and usually assumes it will
+ * sit on a plain white page: it rarely sets its own text color, it just
+ * relies on the browser default (black). Dropping that straight into an
+ * iframe with a transparent/dark background makes the (invisible) black
+ * text disappear into the dark theme. Wrapping it with our own stylesheet
+ * gives it a readable default — a dark card with light text — without
+ * requiring a white background, while still letting any colors the email
+ * itself sets come through.
+ */
+function readableEmailHtml(html: string): string {
+  // Pull the live theme colors from the app shell rather than hard-coding
+  // one mode: the iframe's own document has no idea whether the app is
+  // currently in light or dark mode, so without this an email with no
+  // color of its own renders in whichever mode we guessed — invisible in
+  // the other one. Reading the CSS variables already in use on <html>
+  // keeps it correct in both, and it re-reads on every render, so it
+  // follows the Light/Dark toggle too.
+  let textColor = "#1f2937";
+  let linkColor = "#2563eb";
+  let quoteColor = "#6b7280";
+  let quoteBorder = "#d1d5db";
+  if (typeof window !== "undefined") {
+    const styles = getComputedStyle(document.documentElement);
+    textColor = styles.getPropertyValue("--ink").trim() || textColor;
+    linkColor = styles.getPropertyValue("--accent").trim() || linkColor;
+    quoteColor = styles.getPropertyValue("--ink3").trim() || quoteColor;
+    quoteBorder = styles.getPropertyValue("--border").trim() || quoteBorder;
+  }
+  return `<!doctype html><html><head><meta charset="utf-8" /><style>
+    html, body {
+      margin: 0;
+      padding: 12px;
+      background: transparent;
+      color: ${textColor};
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px;
+      line-height: 1.55;
+      word-wrap: break-word;
+    }
+    a { color: ${linkColor}; }
+    img { max-width: 100%; height: auto; }
+    blockquote { border-left: 2px solid ${quoteBorder}; margin: 0 0 0 8px; padding-left: 10px; color: ${quoteColor}; }
+    table { max-width: 100%; }
+  </style></head><body>${html}</body></html>`;
+}
+
 interface MailClientProps {
   /**
    * Controlled folder, set by a parent that renders its own rail — the new
@@ -308,40 +376,42 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
 
         {/* List column */}
         <section
-          className={`flex min-w-0 flex-col border-r border-[var(--border)] ${selectedId ? "hidden md:flex md:w-80 lg:w-96" : "flex flex-1"
+          className={`flex min-w-0 flex-col border-r border-[var(--border)] ${selectedId ? "hidden lg:flex lg:w-80 xl:w-96" : "flex flex-1"
             }`}
         >
           {/* Mobile folder switch */}
-          <div className="flex gap-1.5 overflow-x-auto border-b border-[var(--border)] p-2 lg:hidden">
-            <button
-              onClick={() => openCompose("new", null)}
-              className="zoiko-btn pri sm shrink-0"
-            >
-              <Pencil className="h-3.5 w-3.5" /> Compose
-            </button>
-            {/* Known gap: when hideRail is set (today, only /mail), mobile
-                loses folder switching here until Step 5 builds the real
-                bottom nav + folder drawer. Admin/Owner (hideRail unset)
-                are unaffected. */}
-            {!hideRail && FOLDERS.map((f) => (
+          {/* Admin/Owner's self-contained mobile strip (Compose + folder
+              pills). On /mail, hideRail is set and WebmailShell renders its
+              own FilterChips + ComposeFab instead — this whole block would
+              otherwise duplicate both. */}
+          {!hideRail && (
+            <div className="flex gap-1.5 overflow-x-auto border-b border-[var(--border)] p-2 lg:hidden">
               <button
-                key={f.key}
-                onClick={() => switchFolder(f.key)}
-                className={`shrink-0 rounded-full px-3 py-1 text-xs transition ${folder === f.key
-                  ? "bg-[var(--accent)] text-white"
-                  : "bg-[var(--surface)] text-[var(--ink2)] ring-1 ring-inset ring-[var(--border)]"
-                  }`}
+                onClick={() => openCompose("new", null)}
+                className="zoiko-btn pri sm shrink-0"
               >
-                {f.label}
+                <Pencil className="h-3.5 w-3.5" /> Compose
               </button>
-            ))}
-          </div>
+              {FOLDERS.map((f) => (
+                <button
+                  key={f.key}
+                  onClick={() => switchFolder(f.key)}
+                  className={`shrink-0 rounded-full px-3 py-1 text-xs transition ${folder === f.key
+                    ? "bg-[var(--accent)] text-white"
+                    : "bg-[var(--surface)] text-[var(--ink2)] ring-1 ring-inset ring-[var(--border)]"
+                    }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* List tabs */}
-          <div className="flex items-center gap-1 border-b border-[var(--border)] px-2 pt-2">
+          <div className="flex items-center gap-1 overflow-x-auto border-b border-[var(--border)] px-2 pt-2">
             {([
               { key: "all", label: "All", active: !unreadOnly && !starredOnly },
-              { key: "unread", label: "Unread", active: unreadOnly },
+              { key: "unread", label: unreadCounts?.INBOX ? `Unread · ${unreadCounts.INBOX}` : "Unread", active: unreadOnly },
               { key: "starred", label: "Starred", active: starredOnly },
             ] as const).map((tab) => (
               <button
@@ -359,13 +429,32 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
                     setUnreadOnly(false);
                   }
                 }}
-                className={`rounded-t-md px-3 py-1.5 text-sm transition ${
+                className={`shrink-0 rounded-t-md px-3 py-1.5 text-sm transition ${
                   tab.active
                     ? "border-b-2 border-[var(--accent)] font-medium text-[var(--ink)]"
                     : "text-[var(--ink3)] hover:text-[var(--ink2)]"
                 }`}
               >
                 {tab.label}
+              </button>
+            ))}
+            {/* Label quick-filters — mobile only (Screen 1's design shows
+                these alongside All/Unread on mobile; desktop already has
+                the separate label dropdown in the toolbar below). */}
+            {labels.length > 0 && <div className="mx-1 h-4 w-px shrink-0 self-center bg-[var(--border)] lg:hidden" />}
+            {labels.map((l) => (
+              <button
+                key={l.id}
+                onClick={() => {
+                  setPage(1);
+                  setLabelFilter((current) => (current === l.id ? "" : l.id));
+                }}
+                className={`shrink-0 rounded-full px-2.5 py-1 text-xs transition lg:hidden ${
+                  labelFilter === l.id ? "text-white" : "text-[var(--ink2)] ring-1 ring-inset ring-[var(--border)]"
+                }`}
+                style={labelFilter === l.id ? { backgroundColor: l.color } : undefined}
+              >
+                {l.name}
               </button>
             ))}
           </div>
@@ -549,7 +638,7 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
             </div>
           )}
 
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
             {isLoading && (
               <div className="flex items-center gap-2 p-6 text-sm text-[var(--ink3)]">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading…
@@ -616,7 +705,7 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
         </section>
 
         {/* Reading pane */}
-        <section className={`min-w-0 flex-1 overflow-y-auto ${selectedId ? "flex" : "hidden md:flex"}`}>
+        <section className={`min-w-0 flex-1 overflow-y-auto overflow-x-hidden ${selectedId ? "flex" : "hidden lg:flex"}`}>
           {selectedId ? (
             <ReadingPane
               messageId={selectedId}
@@ -694,6 +783,7 @@ function ReadingPane({
   const [aiTriggered, setAiTriggered] = useState<string | null>(null);
   const snooze = useSnoozeMessage();
   const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
+  const themeRev = useThemeRevision();
   // Called unconditionally, before the early returns below — item is
   // undefined on the loading render, so this passes null until it loads
   // (useThread already gates its query on `enabled: Boolean(threadId)`).
@@ -742,7 +832,7 @@ function ReadingPane({
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Toolbar */}
       <div className="flex items-center gap-1.5 border-b border-[var(--border)] p-3 overflow-x-auto min-w-0">
-        <button onClick={onClose} className="zoiko-btn sm md:hidden">
+        <button onClick={onClose} className="zoiko-btn sm lg:hidden">
           <ArrowLeft className="h-4 w-4" />
         </button>
         <button
@@ -825,17 +915,16 @@ function ReadingPane({
               );
             })}
           </DropdownMenu>
-          {/* <button onClick={() => onCompose("reply", item)} className="zoiko-btn sm" title="Reply">
-            <Reply className="h-4 w-4" /> <span className="hidden sm:inline">Reply</span>
-          </button>
-          <button onClick={() => onCompose("replyAll", item)} className="zoiko-btn sm" title="Reply all">
-            <ReplyAll className="h-4 w-4" />
-          </button>
-          <button onClick={() => onCompose("forward", item)} className="zoiko-btn sm" title="Forward">
-            <Forward className="h-4 w-4" />
-          </button> */}
           {folder === "DRAFTS" && (
             <>
+              <button
+                onClick={() => onCompose("edit", item)}
+                className="zoiko-btn sm"
+                title="Continue editing this draft"
+              >
+                <Pencil className="h-4 w-4" />
+                <span className="hidden lg:inline">Edit</span>
+              </button>
               <button
                 onClick={async () => {
                   const { sendDraft } = await import("@/lib/mail-api");
@@ -864,7 +953,7 @@ function ReadingPane({
 
           {/* AI Actions */}
           <div className="mx-1 h-5 w-px bg-[var(--border)]" /> {/* separator */}
-          <button
+          {/* <button
             onClick={() => {
               setAiTriggered("extract");
               createAiAction.mutate(
@@ -898,13 +987,13 @@ function ReadingPane({
             <span className="hidden lg:inline">
               {aiTriggered === "draft" ? "Drafting ✓" : "AI Draft"}
             </span>
-          </button>
+          </button> */}
 
         </div>
       </div>
 
       {threadMessages ? (
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
           <div className="border-b border-[var(--border)] p-5 pb-3">
             <h1 className="font-editorial text-xl font-normal text-[var(--ink)]">
               {m.subject || "(no subject)"}
@@ -943,10 +1032,11 @@ function ReadingPane({
                     </div>
                     {tm.htmlBody ? (
                       <iframe
+                        key={`${tm.id}-${themeRev}`}
                         title="message body"
                         sandbox=""
-                        srcDoc={tm.htmlBody}
-                        className="h-[40vh] w-full rounded-lg border border-[var(--border)] bg-white"
+                        srcDoc={readableEmailHtml(tm.htmlBody)}
+                        className="h-[40vh] w-full rounded-lg border border-[var(--border)] bg-[var(--s2)]"
                       />
                     ) : (
                       <pre className="whitespace-pre-wrap break-words font-[var(--ui)] text-sm text-[var(--ink)]">
@@ -985,13 +1075,14 @@ function ReadingPane({
           </div>
 
           {/* Body */}
-          <div className="min-h-0 flex-1 overflow-y-auto p-5">
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-5">
             {m.htmlBody ? (
               <iframe
+                key={`${messageId}-${themeRev}`}
                 title="message body"
                 sandbox=""
-                srcDoc={m.htmlBody}
-                className="h-[60vh] w-full rounded-lg border border-[var(--border)] bg-white"
+                srcDoc={readableEmailHtml(m.htmlBody)}
+                className="h-[60vh] w-auto md:w-full rounded-lg text-wrap border border-[var(--border)] bg-[var(--s2)]"
               />
             ) : (
               <pre className="whitespace-pre-wrap break-words font-[var(--ui)] text-sm text-[var(--ink)]">
@@ -1017,10 +1108,10 @@ function ReadingPane({
       {/* Quick reply — sends via the same reply orchestration ComposeModal
           uses (useComposerSubmit), so a gated send still saves as a draft
           rather than failing silently. */}
-      <QuickReply
+      {/* <QuickReply
         messageId={messageId}
         senderName={m.fromName || m.author?.displayName || m.fromAddress || m.author?.email || "sender"}
-      />
+      /> */}
 
       <ConfirmDialog
         open={confirmDelete}

@@ -211,7 +211,8 @@ export function useDeleteDraft() {
   });
 }
 
-export type ComposerMode = "new" | "reply" | "replyAll" | "forward";
+// export type ComposerMode = "new" | "reply" | "replyAll" | "forward";
+export type ComposerMode = "new" | "reply" | "replyAll" | "forward" | "edit";
 
 export interface ComposerPayload {
   mode: ComposerMode;

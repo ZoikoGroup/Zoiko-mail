@@ -36,6 +36,7 @@ const MODE_TITLE: Record<ComposerMode, string> = {
   reply: "Reply",
   replyAll: "Reply all",
   forward: "Forward",
+  edit: "Edit draft",
 };
 
 /** How long to wait after the last keystroke before autosaving. Long enough
@@ -89,27 +90,43 @@ export function ComposeModal({
   // Reset the form whenever the composer opens for a new context.
   useEffect(() => {
     if (!open) return;
-    setTo([]);
-    setCc([]);
-    setBcc([]);
     setShowBcc(false);
-    const sig = sigData?.signature;
-    const initial = sig ? `<p></p><p>--</p><p>${sig.replace(/\n/g, "<br/>")}</p>` : "";
-    setBodyHtml(initial);
-    setBodyText(sig ? `\n\n--\n${sig}` : "");
     setFiles([]);
     setNotice(null);
-    setDraftId(null);
     setSavedAt(null);
     // Defaults to one's own address every time the composer opens, rather than
     // remembering the last shared mailbox used: sending as the team by
     // accident is the mistake worth designing against.
     setSendAsMailboxId("");
+
+    if (mode === "edit" && source?.message) {
+      // Reopening an existing draft: load what was already saved instead of
+      // starting blank, and point every save/send at that same draft id so
+      // we PATCH it instead of creating a second draft.
+      const msg = source.message;
+      setTo(msg.recipients.filter((r) => r.type === "TO").map((r) => r.email));
+      setCc(msg.recipients.filter((r) => r.type === "CC").map((r) => r.email));
+      setBcc(msg.recipients.filter((r) => r.type === "BCC").map((r) => r.email));
+      setSubject(msg.subject ?? "");
+      setBodyHtml(msg.htmlBody ?? "");
+      setBodyText(msg.textBody ?? "");
+      setDraftId(source.messageId);
+      return;
+    }
+
+    setTo([]);
+    setCc([]);
+    setBcc([]);
+    const sig = sigData?.signature;
+    const initial = sig ? `<p></p><p>--</p><p>${sig.replace(/\n/g, "<br/>")}</p>` : "";
+    setBodyHtml(initial);
+    setBodyText(sig ? `\n\n--\n${sig}` : "");
+    setDraftId(null);
     if (mode === "new") setSubject("");
     // reply/forward subjects are derived server-side, so we don't edit them here
   }, [open, mode, source?.messageId]);
 
-  const needsRecipients = mode === "new" || mode === "forward";
+  const needsRecipients = mode === "new" || mode === "forward" || mode === "edit";
   const srcMsg = source?.message;
 
   // Debounced autosave. Skipped until there's something worth saving, and
@@ -127,7 +144,7 @@ export function ComposeModal({
           const result = await submit.mutateAsync({
             mode,
             sourceId: source?.messageId,
-            subject: mode === "new" ? subject : undefined,
+            subject: mode === "new" || mode === "edit" ? subject : undefined,
             recipients: needsRecipients ? { to, cc, bcc } : undefined,
             textBody: bodyText,
             htmlBody: bodyHtml,
@@ -137,7 +154,7 @@ export function ComposeModal({
           setDraftId(result.draftId);
         } else {
           await updateDraft(draftIdRef.current, {
-            subject: mode === "new" ? subject : undefined,
+            subject: mode === "new" || mode === "edit" ? subject : undefined,
             recipients: needsRecipients ? { to, cc, bcc } : undefined,
             textBody: bodyText,
             htmlBody: bodyHtml,
@@ -201,7 +218,7 @@ export function ComposeModal({
       void (async () => {
         try {
           await updateDraft(draftId, {
-            subject: mode === "new" ? subject : undefined,
+            subject: mode === "new" || mode === "edit" ? subject : undefined,
             recipients,
             textBody: bodyText,
             htmlBody: bodyHtml,
@@ -227,7 +244,7 @@ export function ComposeModal({
       {
         mode,
         sourceId: source?.messageId,
-        subject: mode === "new" ? subject : undefined,
+        subject: mode === "new" || mode === "edit" ? subject : undefined,
         recipients,
         textBody: bodyText,
         htmlBody: bodyHtml,
@@ -316,9 +333,17 @@ export function ComposeModal({
 
           {needsRecipients && (
             <>
-              <RecipientInput value={to} onChange={setTo} placeholder="To" autoFocus />
+              <div className="flex items-center gap-2">
+                <span className="w-9 shrink-0 text-xs md:text-sm font-medium text-[var(--ink3)]">To</span>
+                <div className="min-w-0 flex-1">
+                  <RecipientInput value={to} onChange={setTo} placeholder="Add recipients" autoFocus />
+                </div>
+              </div>
               <div className="flex items-start gap-2">
-                <RecipientInput value={cc} onChange={setCc} placeholder="Cc (optional)" />
+                <span className="w-9 shrink-0 pt-2 text-xs md:text-sm font-medium text-[var(--ink3)]">Cc</span>
+                <div className="min-w-0 flex-1">
+                  <RecipientInput value={cc} onChange={setCc} placeholder="Optional" />
+                </div>
                 {!showBcc && (
                   <button
                     onClick={() => setShowBcc(true)}
@@ -328,12 +353,27 @@ export function ComposeModal({
                   </button>
                 )}
               </div>
-              {showBcc && <RecipientInput value={bcc} onChange={setBcc} placeholder="Bcc (optional)" />}
+              {showBcc && (
+                <div className="flex items-center gap-2">
+                  <span className="w-9 shrink-0 text-xs md:text-sm font-medium text-[var(--ink3)]">Bcc</span>
+                  <div className="min-w-0 flex-1">
+                    <RecipientInput value={bcc} onChange={setBcc} placeholder="Optional" />
+                  </div>
+                </div>
+              )}
             </>
           )}
 
-          {mode === "new" && (
-            <input className={field} placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
+          {(mode === "new" || mode === "edit") && (
+            <div className="flex items-center gap-2">
+              <span className="w-9 shrink-0 text-xs md:text-sm font-medium text-[var(--ink3)]">Subj.</span>
+              <input
+                className={`${field} flex-1`}
+                placeholder="Subject"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+              />
+            </div>
           )}
 
           <RichTextEditor
