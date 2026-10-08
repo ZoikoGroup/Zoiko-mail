@@ -40,7 +40,7 @@ export function SnoozeMenu({
       <DropdownMenu
         trigger={
           <span className="zoiko-btn sm" title="Snooze">
-            <Clock className="h-4 w-4" /> <span className="hidden lg:inline">Snooze</span>
+            <Clock className="h-4 w-4" /> <span className="hidden lg:inline"></span>
           </span>
         }
       >

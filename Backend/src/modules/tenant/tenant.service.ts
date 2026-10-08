@@ -76,6 +76,8 @@ const tenantSelect = {
   updatedAt: true,
 } satisfies Prisma.TenantSelect;
 
+export const WORKSPACE_CREATOR_ROLE: MembershipRole = "ADMIN";
+
 export class TenantService {
   async getCurrent(context: TenantContext) {
     return prisma.tenant.findFirstOrThrow({
@@ -461,9 +463,99 @@ export class TenantService {
    * responsible for confirming the user doesn't already belong to a
    * workspace before calling this, and for issuing a session afterward.
    */
+  // async createWorkspace(
+  //   input: WorkspaceCreationInput,
+  //   ownerUserId: string,
+  //   context: RequestContext
+  // ): Promise<WorkspaceCreationResult> {
+  //   return prisma.$transaction(async (tx) => {
+  //     const tenant = await tenantRepository.create(
+  //       {
+  //         name: input.tenantName,
+  //         status: "ACTIVE",
+  //         planCode: input.planCode,
+  //       },
+  //       tx
+  //     );
+
+  //     const membership = await membershipRepository.create(
+  //       {
+  //         tenantId: tenant.id,
+  //         userId: ownerUserId,
+  //         role: "OWNER",
+  //       },
+  //       tx
+  //     );
+
+  //     // Bootstrap default policies inside the same transaction, so a
+  //     // workspace can never exist in a state where it cannot send.
+  //     for (const policy of DEFAULT_POLICIES) {
+  //       await tx.tenantPolicy.create({
+  //         data: {
+  //           tenantId: tenant.id,
+  //           type: policy.type,
+  //           name: policy.name,
+  //           description: policy.description,
+  //           version: 1,
+  //           status: "ACTIVE",
+  //           rules: policy.rules as Prisma.InputJsonValue,
+  //           createdByUserId: ownerUserId,
+  //           activatedAt: new Date(),
+  //         },
+  //       });
+  //     }
+
+  //     // A workspace joins on its advertised tier. When that tier is free,
+  //     // the subscription row is minted here so the billing surface has a
+  //     // real plan to show from the first request — a workspace that arrives
+  //     // advertising a paid plan stays subscription-less until checkout
+  //     // establishes one, because a subscription is never written for money
+  //     // that has not been taken.
+  //     const baselinePlan = input.planCode
+  //       ? await tx.plan.findUnique({ where: { code: input.planCode } })
+  //       : null;
+  //     if (baselinePlan?.active && baselinePlan.priceMonthly === 0) {
+  //       await tx.subscription.create({
+  //         data: {
+  //           tenantId: tenant.id,
+  //           planId: baselinePlan.id,
+  //           status: "active",
+  //         },
+  //       });
+  //     }
+
+  //     await auditService.record(
+  //       {
+  //         tenantId: tenant.id,
+  //         actorUserId: ownerUserId,
+  //         eventType: AuditEventTypes.WORKSPACE_CREATED,
+  //         targetType: "Tenant",
+  //         targetId: tenant.id,
+  //         requestId: context.requestId,
+  //         ipAddress: context.ipAddress,
+  //         userAgent: context.userAgent,
+  //         metadata: {
+  //           tenantName: tenant.name,
+  //           planCode: tenant.planCode,
+  //         },
+  //       },
+  //       tx
+  //     );
+
+  //     return { tenantId: tenant.id, membershipId: membership.id };
+  //   });
+  // }
+  // After (lines 456–546, complete function)
+  /**
+   * Creates a Tenant + a TenantMembership with WORKSPACE_CREATOR_ROLE for
+   * `creatorUserId` in a single transaction, plus the audit trail entry.
+   * The caller (auth.service.createWorkspace) is responsible for confirming
+   * the user doesn't already belong to a workspace before calling this, and
+   * for issuing a session afterward.
+   */
   async createWorkspace(
     input: WorkspaceCreationInput,
-    ownerUserId: string,
+    creatorUserId: string,
     context: RequestContext
   ): Promise<WorkspaceCreationResult> {
     return prisma.$transaction(async (tx) => {
@@ -479,8 +571,8 @@ export class TenantService {
       const membership = await membershipRepository.create(
         {
           tenantId: tenant.id,
-          userId: ownerUserId,
-          role: "OWNER",
+          userId: creatorUserId,
+          role: WORKSPACE_CREATOR_ROLE,
         },
         tx
       );
@@ -497,7 +589,7 @@ export class TenantService {
             version: 1,
             status: "ACTIVE",
             rules: policy.rules as Prisma.InputJsonValue,
-            createdByUserId: ownerUserId,
+            createdByUserId: creatorUserId,
             activatedAt: new Date(),
           },
         });
@@ -525,7 +617,7 @@ export class TenantService {
       await auditService.record(
         {
           tenantId: tenant.id,
-          actorUserId: ownerUserId,
+          actorUserId: creatorUserId,
           eventType: AuditEventTypes.WORKSPACE_CREATED,
           targetType: "Tenant",
           targetId: tenant.id,
@@ -535,6 +627,7 @@ export class TenantService {
           metadata: {
             tenantName: tenant.name,
             planCode: tenant.planCode,
+            creatorRole: WORKSPACE_CREATOR_ROLE,
           },
         },
         tx

@@ -86,6 +86,40 @@ function bytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+// Same palette + hash as MailRow's sender avatars, duplicated here (not
+// exported from MailRow.tsx) so a recipient's avatar in Sent gets the same
+// color every time it's shown, instead of a one-off generic color.
+const AVATAR_COLORS = [
+  "#0f766e", "#2563eb", "#7c3aed", "#be123c",
+  "#b45309", "#15803d", "#dc2626", "#334155", "#0369a1", "#a21caf",
+];
+
+function hashColor(input: string): string {
+  let hash = 0;
+  for (let i = 0; i < input.length; i++) {
+    hash = (hash << 5) - hash + input.charCodeAt(i);
+    hash |= 0;
+  }
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+function avatarInitials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  return (parts.length >= 2 ? parts[0][0] + parts[1][0] : name.slice(0, 2)).toUpperCase();
+}
+
+function Avatar({ name, className = "h-6 w-6 text-[10px]" }: { name?: string | null; className?: string }) {
+  const label = name && name.trim() ? name.trim() : "?";
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center justify-center rounded-full font-semibold text-white ${className}`}
+      style={{ backgroundColor: hashColor(label) }}
+    >
+      {avatarInitials(label)}
+    </span>
+  );
+}
+
 /**
  * readableEmailHtml() reads the app's current CSS variables, but it only
  * runs when the component housing the iframe re-renders — toggling
@@ -667,6 +701,7 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
                     <MailRow
                       key={it.id}
                       item={it}
+                      folder={folder}
                       selected={selectedId === it.messageId}
                       checked={checkedIds.has(it.messageId)}
                       onToggleChecked={() => toggleChecked(it.messageId)}
@@ -831,13 +866,13 @@ function ReadingPane({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Toolbar */}
-      <div className="flex items-center gap-1.5 border-b border-[var(--border)] p-3 overflow-x-auto min-w-0">
+      <div className="flex items-center gap-1.5 border-b border-[var(--border)] p-2 overflow-x-auto min-w-0">
         <button onClick={onClose} className="zoiko-btn sm lg:hidden">
           <ArrowLeft className="h-4 w-4" />
         </button>
         <button
           onClick={() => update.mutate({ messageId, isStarred: !item.isStarred })}
-          className="zoiko-btn sm"
+          className="zoiko-btn sm m-1"
           title={item.isStarred ? "Unstar" : "Star"}
         >
           <Star className={`h-4 w-4 ${item.isStarred ? "fill-[var(--warn)] text-[var(--warn)]" : ""}`} />
@@ -863,13 +898,13 @@ function ReadingPane({
           )
         )}
         {canTriage && folder !== "ARCHIVE" && (
-          <button onClick={() => { update.mutate({ messageId, folder: "ARCHIVE" }); onClose(); }} className="zoiko-btn sm">
-            <Archive className="h-4 w-4" /> <span className="hidden lg:inline">Archive</span>
+          <button title="Archive" onClick={() => { update.mutate({ messageId, folder: "ARCHIVE" }); onClose(); }} className="zoiko-btn sm m-1">
+            <Archive className="h-4 w-4" /> <span className="hidden lg:inline"></span>
           </button>
         )}
         {canTriage && folder !== "TRASH" && (
-          <button onClick={() => { update.mutate({ messageId, folder: "TRASH" }); onClose(); }} className="zoiko-btn crit sm">
-            <Trash2 className="h-4 w-4" /> <span className="hidden lg:inline">Trash</span>
+          <button  title="Trash" onClick={() => { update.mutate({ messageId, folder: "TRASH" }); onClose(); }} className="zoiko-btn crit sm">
+            <Trash2 className="h-4 w-4" /> <span className="hidden lg:inline"></span>
           </button>
         )}
         {folder === "TRASH" && (
@@ -1010,9 +1045,18 @@ function ReadingPane({
                   onClick={() => setExpandedMessageId(isOpen ? null : tm.id)}
                   className="flex w-full items-center gap-2 px-5 py-3 text-left hover:bg-[var(--s2)]"
                 >
-                  <span className="shrink-0 truncate text-sm font-medium text-[var(--ink)]">
-                    {tm.fromName || tm.author?.displayName || tm.fromAddress || tm.author?.email}
-                  </span>
+                  {folder === "SENT" ? (
+                    <>
+                      <Avatar name={tmTo[0]} />
+                      <span className="shrink-0 truncate text-sm font-medium text-[var(--ink)]">
+                        To: {tmTo.join(", ") || "—"}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="shrink-0 truncate text-sm font-medium text-[var(--ink)]">
+                      {tm.fromName || tm.author?.displayName || tm.fromAddress || tm.author?.email}
+                    </span>
+                  )}
                   {!isOpen && (
                     <span className="min-w-0 flex-1 truncate text-xs text-[var(--ink3)]">
                       {tm.textBody?.slice(0, 100) || ""}
@@ -1027,9 +1071,11 @@ function ReadingPane({
                 </button>
                 {isOpen && (
                   <div className="px-5 pb-5">
-                    <div className="mb-3 text-xs text-[var(--ink3)]">
-                      To: {tmTo.join(", ") || "—"}
-                    </div>
+                    {folder !== "SENT" && (
+                      <div className="mb-3 text-xs text-[var(--ink3)]">
+                        To: {tmTo.join(", ") || "—"}
+                      </div>
+                    )}
                     {tm.htmlBody ? (
                       <iframe
                         key={`${tm.id}-${themeRev}`}
@@ -1061,16 +1107,35 @@ function ReadingPane({
             <h1 className="font-editorial text-xl font-normal text-[var(--ink)]">
               {m.subject || "(no subject)"}
             </h1>
-            <div className="mt-2 text-sm text-[var(--ink2)]">
-              <span className="font-medium">{m.fromName || m.author?.displayName || m.fromAddress || m.author?.email}</span>
-              {(m.fromAddress || m.author?.email) && (
-                <span className="text-[var(--ink3)]"> &lt;{m.fromAddress || m.author?.email}&gt;</span>
+            <div className="mt-2 flex items-center gap-2 text-sm text-[var(--ink2)]">
+              {folder === "SENT" ? (
+                <>
+                  <Avatar name={to[0]} className="h-7 w-7 text-[11px]" />
+                  <span className="font-medium">To: {to.join(", ") || "—"}</span>
+                </>
+              ) : (
+                <>
+                  <Avatar
+                    name={m.fromName || m.author?.displayName || m.fromAddress || m.author?.email}
+                    className="h-7 w-7 text-[11px]"
+                  />
+                  <span className="font-medium">{m.fromName || m.author?.displayName || m.fromAddress || m.author?.email}</span>
+                  {(m.fromAddress || m.author?.email) && (
+                    <span className="text-[var(--ink3)]"> &lt;{m.fromAddress || m.author?.email}&gt;</span>
+                  )}
+                </>
               )}
             </div>
-            <div className="mt-1 text-xs text-[var(--ink3)]">
-              To: {to.join(", ") || "—"}
-              {cc.length > 0 && <> · Cc: {cc.join(", ")}</>}
-            </div>
+            {folder === "SENT" ? (
+              cc.length > 0 && (
+                <div className="mt-1 text-xs text-[var(--ink3)]">Cc: {cc.join(", ")}</div>
+              )
+            ) : (
+              <div className="mt-1 text-xs text-[var(--ink3)]">
+                To: {to.join(", ") || "—"}
+                {cc.length > 0 && <> · Cc: {cc.join(", ")}</>}
+              </div>
+            )}
             <div className="mt-1 text-xs text-[var(--ink3)]">{fmt(m.sentAt || m.createdAt)}</div>
           </div>
 
@@ -1082,7 +1147,7 @@ function ReadingPane({
                 title="message body"
                 sandbox=""
                 srcDoc={readableEmailHtml(m.htmlBody)}
-                className="h-[60vh] w-auto md:w-full rounded-lg text-wrap border border-[var(--border)] bg-[var(--s2)]"
+                className="h-[60vh] w-full rounded-lg border border-[var(--border)] bg-[var(--s2)]"
               />
             ) : (
               <pre className="whitespace-pre-wrap break-words font-[var(--ui)] text-sm text-[var(--ink)]">
