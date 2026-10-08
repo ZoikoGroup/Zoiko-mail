@@ -76,7 +76,7 @@ export function QuickReply({
         <button
           onClick={send}
           disabled={!body.trim() || submit.isPending}
-          className="zoiko-btn pri shrink-0"
+          className="zoiko-btn pri shrink-1"
         >
           {submit.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           <span className="hidden sm:inline">Send</span>

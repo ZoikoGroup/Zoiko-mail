@@ -1,11 +1,14 @@
 "use client";
 
-import { type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useMemberShell } from "@/lib/useMemberShell";
 import { useMyMailbox, useUnreadCounts } from "@/lib/mail-hooks";
 import type { MailListFolder } from "@/lib/mail-api";
 import { TopBar } from "@/components/mail/TopBar";
-import { FolderRail } from "@/components/mail/FolderRail";
+import { FolderRail, folderLabel } from "@/components/mail/FolderRail";
+import { MobileHeader } from "@/components/mail/MobileHeader";
+import { ComposeFab } from "@/components/mail/ComposeFab";
+import { BottomNav } from "@/components/mail/BottomNav";
 import { ToastContainer } from "@/components/ui/Toast";
 import { NetworkBanner } from "@/components/ui/NetworkBanner";
 import { AccessDenied } from "@/components/ui/AccessDenied";
@@ -20,13 +23,13 @@ import { AccessDenied } from "@/components/ui/AccessDenied";
  * AppShell uses — so the two shells can never disagree about who's allowed
  * to be here.
  *
- * Renders the rail, top bar, storage meter and toasts around whatever
- * `children` is (today, MailClient with hideRail + hideSearchBox set).
- * searchQuery/onSearchQueryChange are lifted to the page so the same text
- * reaches both TopBar and MailClient's operator parser (lib/mail-search.ts).
- * The mobile layout (bottom nav, folder drawer, compose FAB) isn't built
- * yet — that's Step 5; see MailClient's own comments for the mobile gap
- * this leaves in the meantime.
+ * Desktop (lg+): TopBar + FolderRail beside `children`.
+ * Mobile (< lg): MobileHeader (hamburger + folder title + avatar + search)
+ * replaces TopBar; tapping the hamburger opens FolderRail as a slide-out
+ * drawer instead of a fixed sidebar; a ComposeFab and BottomNav float over
+ * `children`. MailClient's own "List tabs" row (All/Unread/Starred + label
+ * chips on mobile) still renders inside `children` either way — it needed
+ * no new component here, see its own comment in MailClient.tsx.
  */
 export function WebmailShell({
   folder,
@@ -51,6 +54,7 @@ export function WebmailShell({
   const { me, status, logout, toasts, dismissToast } = useMemberShell();
   const { data: mailbox, isLoading: mailboxLoading } = useMyMailbox();
   const { data: unreadCounts } = useUnreadCounts();
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   if (status === "loading") {
     return (
@@ -66,36 +70,69 @@ export function WebmailShell({
     return <AccessDenied role={me!.membership.role} dashboard="member" />;
   }
 
+  const railProps = {
+    folder,
+    unreadCounts,
+    storageUsed: mailbox?.storageUsed ?? 0,
+    storageLimit: mailbox?.storageLimit ?? 0,
+    storageLoading: mailboxLoading,
+  };
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[var(--ground)] text-[var(--ink)]">
       <NetworkBanner />
-      <TopBar
+
+      <div className="hidden lg:block">
+        <TopBar
+          query={searchQuery}
+          onQueryChange={onSearchQueryChange}
+          accountEmail={mailbox?.address ?? me?.email}
+          onSignOut={() => logout.mutate()}
+          signingOut={logout.isPending}
+        />
+      </div>
+      <MobileHeader
+        folderLabel={folderLabel(folder)}
+        onOpenDrawer={() => setDrawerOpen(true)}
+        accountEmail={mailbox?.address ?? me?.email}
         query={searchQuery}
         onQueryChange={onSearchQueryChange}
-        accountEmail={mailbox?.address ?? me?.email}
-        onSignOut={() => logout.mutate()}
-        signingOut={logout.isPending}
       />
 
       <div className="flex min-h-0 flex-1">
-        {/* Desktop only — mobile's own folder access (drawer + bottom nav)
-            is a Step 5 item. Until then, mobile keeps whatever MailClient
-            renders in its own mobile folder-pill strip, if hideRail wasn't
-            set for this child; see MailClient's own comment on that gap. */}
         <div className="hidden lg:block">
-          <FolderRail
-            folder={folder}
-            onFolderChange={onFolderChange}
-            unreadCounts={unreadCounts}
-            onCompose={onCompose}
-            storageUsed={mailbox?.storageUsed ?? 0}
-            storageLimit={mailbox?.storageLimit ?? 0}
-            storageLoading={mailboxLoading}
-          />
+          <FolderRail {...railProps} onFolderChange={onFolderChange} onCompose={onCompose} />
         </div>
 
-        <div className="min-w-0 flex-1">{children}</div>
+        {/* Folder drawer (mobile) — same FolderRail, as a slide-out panel.
+            Picking a folder closes the drawer; Compose does too, since the
+            modal it opens covers the whole screen anyway. */}
+        {drawerOpen && (
+          <div className="fixed inset-0 z-40 lg:hidden">
+            <div className="absolute inset-0 bg-black/50" onClick={() => setDrawerOpen(false)} />
+            <div className="absolute inset-y-0 left-0 w-64 max-w-[80vw] shadow-[var(--sh3)]">
+              <FolderRail
+                {...railProps}
+                onFolderChange={(f) => {
+                  onFolderChange(f);
+                  setDrawerOpen(false);
+                }}
+                onCompose={() => {
+                  setDrawerOpen(false);
+                  onCompose();
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* pb-16 clears BottomNav + safe-area on mobile; lg:pb-0 drops it
+            on desktop, which has neither. */}
+        <div className="min-w-0 flex-1 overflow-hidden pb-16 lg:pb-0">{children}</div>
       </div>
+
+      <ComposeFab onClick={onCompose} />
+      <BottomNav folder={folder} onFolderChange={onFolderChange} />
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
