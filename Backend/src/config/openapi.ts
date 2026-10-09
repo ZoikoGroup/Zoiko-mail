@@ -1363,6 +1363,94 @@ export const openApiDocument = {
         },
       },
     },
+    "/api/v1/mail/admin/mailboxes/provisioning-options": {
+      get: {
+        tags: ["Mail"], summary: "Domains, quota choices and host readiness for the Create Email form (OWNER/ADMIN)",
+        operationId: "mailboxProvisioningOptions", security: bearer,
+        responses: { "200": ok("Provisioning options returned"), "403": { $ref: "#/components/responses/Forbidden" } },
+      },
+    },
+    "/api/v1/mail/admin/mailboxes/provision": {
+      post: {
+        tags: ["Mail"],
+        summary: "Create a hosted mailbox on the mail server and invite its owner (OWNER/ADMIN)",
+        description: "Requires an Idempotency-Key header. 201 when the mail server confirmed the account; 202 when the record exists but provisioning failed or was interrupted — retry it with the retry endpoint, which never creates a second account.",
+        operationId: "provisionMailbox", security: bearer,
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["domainId", "localPart", "displayName", "quotaBytes", "initialAccess", "recoveryEmail"],
+                properties: {
+                  domainId: { type: "string", format: "uuid" },
+                  localPart: { type: "string", maxLength: 64 },
+                  displayName: { type: "string", maxLength: 120 },
+                  quotaBytes: { type: "integer" },
+                  initialAccess: { type: "string", enum: ["INVITE"] },
+                  recoveryEmail: { type: "string", format: "email" },
+                  firstName: { type: "string" },
+                  lastName: { type: "string" },
+                },
+              },
+              example: {
+                domainId: "0f8f2b1e-6c1a-4a5e-9a2b-6d3c1f0a7e44",
+                localPart: "john",
+                displayName: "Support Team",
+                quotaBytes: 5368709120,
+                initialAccess: "INVITE",
+                recoveryEmail: "john.personal@example.org",
+              },
+            },
+          },
+        },
+        responses: {
+          "201": ok("Mailbox provisioned on the mail server"),
+          "202": ok("Mailbox recorded; provisioning failed or did not finish — see provisioningStatus"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+          "409": ok("Address taken, domain not verified, member already has a mailbox, or plan limit reached"),
+          "422": ok("Invalid or reserved address, or a quota the plan does not allow"),
+          "503": ok("Mailbox hosting is not configured on this deployment"),
+        },
+      },
+    },
+    "/api/v1/mail/admin/mailboxes/{mailboxId}/provisioning": {
+      get: {
+        tags: ["Mail"], summary: "Provisioning and invitation status of one mailbox (OWNER/ADMIN)",
+        operationId: "getMailboxProvisioning", security: bearer,
+        parameters: [{ name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: { "200": ok("Status returned"), "403": { $ref: "#/components/responses/Forbidden" }, "404": { $ref: "#/components/responses/NotFound" } },
+      },
+    },
+    "/api/v1/mail/admin/mailboxes/{mailboxId}/provisioning/retry": {
+      post: {
+        tags: ["Mail"], summary: "Finish a failed or interrupted provisioning, reconciling with the mail server first (OWNER/ADMIN)",
+        operationId: "retryMailboxProvisioning", security: bearer,
+        parameters: [{ name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: {
+          "200": ok("Retry finished; see provisioningStatus"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+          "409": ok("Already being provisioned, or not a hosted mailbox"),
+        },
+      },
+    },
+    "/api/v1/mail/admin/mailboxes/{mailboxId}/invitation/resend": {
+      post: {
+        tags: ["Mail"], summary: "Send a fresh access invitation for a provisioned mailbox (OWNER/ADMIN)",
+        operationId: "resendMailboxInvitation", security: bearer,
+        parameters: [{ name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: {
+          "200": ok("Invitation re-issued; see invitationStatus"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+          "409": ok("Not provisioned yet, or the invitation was already accepted"),
+          "429": ok("Sent too recently"),
+        },
+      },
+    },
     "/api/v1/mail/admin/mailboxes/{mailboxId}": {
       patch: {
         tags: ["Mail"],

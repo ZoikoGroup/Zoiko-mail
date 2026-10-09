@@ -6,6 +6,13 @@
  * guardrails (which have no backend endpoint yet) remain here.
  */
 
+import type {
+  InvitationStatus,
+  MailboxDisplayStatus,
+  MailboxStatusRow,
+  ProvisioningStatus,
+} from "./mailbox-provisioning-api";
+
 export type MfaMethod = "PASSKEY" | "TOTP" | "NONE";
 export type MembershipRole = "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT";
 export type MembershipStatus = "ACTIVE" | "INVITED" | "SUSPENDED" | "REMOVED";
@@ -28,7 +35,7 @@ export interface InvitationDto {
   expiresAt: string;
 }
 
-export interface MailboxDto {
+export interface MailboxDto extends MailboxStatusRow {
   id: string;
   /**
    * The member this mailbox belongs to, or null for a shared or distribution
@@ -38,11 +45,20 @@ export interface MailboxDto {
   membershipId: string | null;
   address: string;
   type: "INDIVIDUAL" | "SHARED";
-  status: "ACTIVE" | "SUSPENDED" | "PROVISIONING";
+  /** Derived from the row's facts — see mailboxDisplayStatus. */
+  status: MailboxDisplayStatus;
   storageUsedGb: number;
   storageLimitGb: number;
   aiEnabled: boolean;
   sendSuspensionReason: string | null;
+  /** Null for a mailbox that exists only in Zoiko (created before hosted provisioning). */
+  provisioningStatus: ProvisioningStatus | null;
+  provisioningError: string | null;
+  invitationStatus: InvitationStatus | null;
+  invitationError: string | null;
+  invitationRecipient: string | null;
+  membershipStatus: string | null;
+  displayName: string | null;
 }
 
 /** Summary shape for the dashboard; the domains screen uses lib/domains-api. */

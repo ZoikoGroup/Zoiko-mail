@@ -2,6 +2,7 @@ import { Router } from "express";
 import { requireCapabilityWhen, authenticate, idempotency, requireCapability, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./mail.controller.js";
 import { attachmentUpload } from "./attachment.middleware.js";
+import { provisionMailboxSchema } from "./mail.schema.js";
 import { adminDeliveryEventsQuerySchema, adminDeliverySummaryQuerySchema,updateSignatureSchema, adminUpdateMailboxSchema, adminCreateMailboxSchema, assignMailboxSchema, delegateMailboxSchema, createSharedMailboxSchema, mailboxAssigneeParamsSchema, createAliasSchema, createForwardingSchema, aliasParamsSchema, forwardingParamsSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, mailboxScopeSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, snoozeMailboxItemSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
 
 const mailRouter = Router();
@@ -154,6 +155,43 @@ mailRouter.delete(
   requireCapability("workspace.mailboxes.manage"),
   validate(forwardingParamsSchema, "params"),
   controller.deleteForwarding
+);
+// ─── Hosted mailbox provisioning (Create Email) ──────────────────────────
+// Literal paths above "/admin/mailboxes/:mailboxId" so "provision" and
+// "provisioning-options" are not read as mailbox ids. Creating an address
+// also invites its owner, so both gates apply: managing mailboxes and
+// inviting members. Owner and Admin hold both; Member and Support neither.
+mailRouter.get(
+  "/admin/mailboxes/provisioning-options",
+  requireCapability("workspace.mailboxes.manage"),
+  controller.mailboxProvisioningOptions
+);
+mailRouter.post(
+  "/admin/mailboxes/provision",
+  requireCapability("workspace.mailboxes.manage"),
+  requireCapability("people.invite.member"),
+  validate(provisionMailboxSchema),
+  controller.provisionMailbox
+);
+mailRouter.get(
+  "/admin/mailboxes/:mailboxId/provisioning",
+  requireCapability("workspace.mailboxes.manage"),
+  validate(mailboxIdParamsSchema, "params"),
+  controller.getMailboxProvisioning
+);
+mailRouter.post(
+  "/admin/mailboxes/:mailboxId/provisioning/retry",
+  requireCapability("workspace.mailboxes.manage"),
+  requireCapability("people.invite.member"),
+  validate(mailboxIdParamsSchema, "params"),
+  controller.retryMailboxProvisioning
+);
+mailRouter.post(
+  "/admin/mailboxes/:mailboxId/invitation/resend",
+  requireCapability("workspace.mailboxes.manage"),
+  requireCapability("people.invite.member"),
+  validate(mailboxIdParamsSchema, "params"),
+  controller.resendMailboxInvitation
 );
 mailRouter.get("/admin/mailboxes", requireCapability("workspace.mailboxes.manage"), controller.listAllMailboxes);
 mailRouter.post("/admin/mailboxes", requireCapability("workspace.mailboxes.manage"), validate(adminCreateMailboxSchema), controller.adminCreateMailbox);
