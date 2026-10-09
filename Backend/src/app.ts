@@ -23,6 +23,7 @@ import { operationalMetrics } from "./config/operationalMetrics.js";
 import { timingSafeEqual } from "node:crypto";
 import { imapSmtpAdapter } from "./modules/provider-mail/imap-smtp.adapter.js";
 import { providerMailService } from "./modules/provider-mail/provider-mail.service.js";
+import { stalwartClient } from "./modules/stalwart/stalwart.client.js";
 
 function operationsKeyValid(value: string | undefined) {
   if (!value) return false;
@@ -174,6 +175,28 @@ export function createApp() {
       const data = req.query.probe === "true" && status.configured
         ? { ...status, connectivity: await imapSmtpAdapter.verify() }
         : status;
+      res.status(200).json({ success: true, data, requestId: req.requestId });
+    })
+  );
+
+  // Hosted-mailbox provider readiness. Behind the operations key like the
+  // check above: it says whether the management credential works, which is
+  // not something to announce publicly. Never returns the URL or the key.
+  app.get(
+    "/api/stalwart/health",
+    asyncHandler(async (req, res) => {
+      if (!operationsKeyValid(req.header("x-operations-key"))) {
+        res.status(401).json({
+          success: false,
+          error: { code: "UNAUTHORIZED", message: "Operations authentication required" },
+          requestId: req.requestId,
+        });
+        return;
+      }
+      const configured = stalwartClient.isConfigured();
+      const data = req.query.probe === "true" && configured
+        ? { configured, ...(await stalwartClient.probe()) }
+        : { configured };
       res.status(200).json({ success: true, data, requestId: req.requestId });
     })
   );

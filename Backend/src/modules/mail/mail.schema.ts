@@ -114,6 +114,27 @@ export const adminCreateMailboxSchema = z.object({
   localPart: z.string().trim().min(1).max(64).optional(),
 });
 
+/**
+ * Create a hosted mailbox — the Create Email form.
+ *
+ * Carries business data only. The tenant comes from the session, the domain
+ * is re-checked against it, and the address is composed on the server from
+ * the domain's own name, so the browser cannot name a domain it does not own.
+ */
+export const provisionMailboxSchema = z.object({
+  domainId: z.string().uuid(),
+  localPart: z.string().trim().min(1).max(64),
+  displayName: z.string().trim().min(1).max(120),
+  quotaBytes: z.number().int().positive(),
+  /** The only access method offered: a secure invitation. Explicit so a second one is a deliberate change. */
+  initialAccess: z.literal("INVITE"),
+  /** The person's existing address, where the invitation goes. */
+  recoveryEmail: z.string().trim().toLowerCase().email().max(254),
+  firstName: z.string().trim().min(1).max(80).optional(),
+  lastName: z.string().trim().min(1).max(80).optional(),
+}).strict();
+export type ProvisionMailboxInput = z.infer<typeof provisionMailboxSchema>;
+
 export const mailboxAssigneeParamsSchema = z.object({
   mailboxId: z.string().uuid(),
   membershipId: z.string().uuid(),

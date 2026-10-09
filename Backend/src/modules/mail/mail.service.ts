@@ -1777,6 +1777,7 @@ export class MailService {
       ...mb,
       storageUsed: Number(mb.storageUsed),
       storageLimit: Number(mb.storageLimit),
+      providerQuotaBytes: mb.providerQuotaBytes === null ? null : Number(mb.providerQuotaBytes),
     }));
   }
 
@@ -1904,6 +1905,7 @@ export class MailService {
       ...mailbox,
       storageUsed: Number(mailbox.storageUsed),
       storageLimit: Number(mailbox.storageLimit),
+      providerQuotaBytes: mailbox.providerQuotaBytes === null ? null : Number(mailbox.providerQuotaBytes),
     };
   }
 
@@ -1981,6 +1983,7 @@ export class MailService {
       ...mailbox,
       storageUsed: Number(mailbox.storageUsed),
       storageLimit: Number(mailbox.storageLimit),
+      providerQuotaBytes: mailbox.providerQuotaBytes === null ? null : Number(mailbox.providerQuotaBytes),
     };
   }
 

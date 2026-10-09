@@ -4,6 +4,7 @@ import { sendSuccess } from "../../common/utils/response.js";
 import { mailService } from "./mail.service.js";
 import { sharedMailboxService } from "./shared-mailbox.service.js";
 import { aliasService } from "./alias.service.js";
+import { mailboxProvisioningService } from "./mailbox-provisioning.service.js";
 
 function context(req: Request) {
   const tenant = req.tenantContext!;
@@ -320,6 +321,34 @@ export const adminCreateMailbox = asyncHandler(async (req: Request, res: Respons
     { membershipId: req.body.membershipId, domainId: req.body.domainId, localPart: req.body.localPart },
     context(req)
   ), req.requestId);
+});
+
+// ─── Admin: Hosted mailbox provisioning (Create Email) ───────────────────────
+
+export const mailboxProvisioningOptions = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailboxProvisioningService.options(req.tenantContext!.tenantId), req.requestId);
+});
+
+/**
+ * 201 when the mail host confirmed the account; 202 when the record exists
+ * but the host half did not finish (failed or interrupted). The body says
+ * which, and a retry finishes it without creating a second mailbox.
+ */
+export const provisionMailbox = asyncHandler(async (req: Request, res: Response) => {
+  const result = await mailboxProvisioningService.create(req.body, context(req));
+  sendSuccess(res, result.provisioningStatus === "PROVISIONED" ? 201 : 202, result, req.requestId);
+});
+
+export const getMailboxProvisioning = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailboxProvisioningService.get(String(req.params.mailboxId), req.tenantContext!.tenantId), req.requestId);
+});
+
+export const retryMailboxProvisioning = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailboxProvisioningService.retry(String(req.params.mailboxId), context(req)), req.requestId);
+});
+
+export const resendMailboxInvitation = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailboxProvisioningService.resendInvitation(String(req.params.mailboxId), context(req)), req.requestId);
 });
 
 export const adminUpdateMailbox = asyncHandler(async (req: Request, res: Response) => {

@@ -1,5 +1,11 @@
 import { apiDownload, apiRequest } from "./api-client";
 import type { DnsRecord } from "./domains-api";
+import {
+  mailboxDisplayStatus,
+  type InvitationStatus,
+  type MailboxStatusRow,
+  type ProvisioningStatus,
+} from "./mailbox-provisioning-api";
 
 // ─── Membership / Users ───────────────────────────────────────────────────────
 
@@ -671,9 +677,7 @@ export async function getConnectorHealth(): Promise<ConnectorHealth[]> {
 
 // ─── Mail (admin) ─────────────────────────────────────────────────────────────
 
-export interface Mailbox {
-  id: string;
-  address: string;
+export interface Mailbox extends MailboxStatusRow {
   displayName: string;
   userId: string;
   domain: string;
@@ -687,18 +691,32 @@ export async function getAdminMailboxes(): Promise<Mailbox[]> {
   const res = await apiRequest<Array<{
     id: string; address: string; storageUsed: number; storageLimit: number;
     sendSuspendedAt: string | null; createdAt: string;
-    membership: { user: { displayName: string }; userId: string };
+    displayName?: string | null;
+    provisioningStatus?: ProvisioningStatus | null;
+    provisioningError?: string | null;
+    invitationStatus?: InvitationStatus | null;
+    invitationError?: string | null;
+    membership: { user: { displayName: string; email?: string }; userId: string; status?: string } | null;
   }>>("/mail/admin/mailboxes");
   return res.map((m) => ({
     id: m.id,
     address: m.address,
-    displayName: m.membership?.user?.displayName ?? m.address,
+    // The mailbox's own display name when it has one (hosted mailboxes);
+    // otherwise the owner's name, as before.
+    displayName: m.displayName ?? m.membership?.user?.displayName ?? m.address,
     userId: m.membership?.userId ?? "",
     domain: m.address.split("@")[1] ?? "",
     storageUsedMb: Math.round(m.storageUsed / 1048576),
     storageLimitMb: Math.round(m.storageLimit / 1048576),
     sendSuspendedAt: m.sendSuspendedAt,
     createdAt: m.createdAt,
+    status: mailboxDisplayStatus(m),
+    provisioningStatus: m.provisioningStatus ?? null,
+    provisioningError: m.provisioningError ?? null,
+    invitationStatus: m.invitationStatus ?? null,
+    invitationError: m.invitationError ?? null,
+    invitationRecipient: m.membership?.user?.email ?? null,
+    membershipStatus: m.membership?.status ?? null,
   }));
 }
 
@@ -721,6 +739,14 @@ export async function createAdminMailbox(membershipId: string): Promise<Mailbox>
     storageLimitMb: Math.round(m.storageLimit / 1048576),
     sendSuspendedAt: m.sendSuspendedAt,
     createdAt: m.createdAt,
+    // The legacy path creates a database-only mailbox: no host, no invitation.
+    status: m.sendSuspendedAt ? "SUSPENDED" : "ACTIVE",
+    provisioningStatus: null,
+    provisioningError: null,
+    invitationStatus: null,
+    invitationError: null,
+    invitationRecipient: null,
+    membershipStatus: null,
   };
 }
 

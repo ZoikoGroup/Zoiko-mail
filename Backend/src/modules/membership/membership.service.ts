@@ -231,6 +231,39 @@ export class MembershipService {
   }
 
   async createInvitation(input: CreateInvitationInput, context: ActorContext) {
+    const { membership, invitationToken, expiresAt: inviteExpiresAt } = await prisma.$transaction(
+      (tx) => this.issueInvitation(tx, input, context)
+    );
+
+    // Send invitation email (fire-and-forget — don't block the response)
+    const letter = await this.buildLetter(input, context);
+    const acceptUrl = this.acceptUrl(invitationToken);
+    systemMailer
+      .sendInvitationEmail(input.email, letter, acceptUrl)
+      .catch((err) => logger.error({ err }, "Failed to send invitation email"));
+
+    return { membership, invitationToken, expiresAt: inviteExpiresAt };
+  }
+
+  /** The link an invitation email carries. The raw token appears nowhere else. */
+  acceptUrl(invitationToken: string): string {
+    return `${env.APP_URL}/accept-invitation?token=${invitationToken}`;
+  }
+
+  /**
+   * Record an invitation inside the caller's transaction, without sending it.
+   *
+   * The half of `createInvitation` that touches the database, separated so
+   * hosted-mailbox provisioning can create the invitation and the mailbox
+   * atomically and then decide for itself when the email goes out — after the
+   * mail server has confirmed the account, never before. Only the token's
+   * hash is stored; the raw token is returned to the caller for the link.
+   */
+  async issueInvitation(
+    tx: Prisma.TransactionClient,
+    input: Pick<CreateInvitationInput, "email" | "role" | "firstName" | "lastName">,
+    context: ActorContext
+  ) {
     assertCanInviteRole(context.role, input.role);
     const invitationToken = generateOpaqueToken();
     const inviteToken = hashToken(invitationToken);
@@ -238,7 +271,7 @@ export class MembershipService {
       Date.now() + env.INVITATION_EXPIRES_IN_HOURS * 60 * 60 * 1000
     );
 
-    const membership = await prisma.$transaction(async (tx) => {
+    const membership = await (async () => {
       let user = await tx.appUser.findUnique({ where: { email: input.email } });
       if (!user) {
         // The invitee hasn't signed up yet. Create a placeholder identity
@@ -298,16 +331,48 @@ export class MembershipService {
         expiresAt: inviteExpiresAt.toISOString(),
       });
       return result;
-    });
-
-    // Send invitation email (fire-and-forget — don't block the response)
-    const letter = await this.buildLetter(input, context);
-    const acceptUrl = `${env.APP_URL}/accept-invitation?token=${invitationToken}`;
-    systemMailer
-      .sendInvitationEmail(input.email, letter, acceptUrl)
-      .catch((err) => logger.error({ err }, "Failed to send invitation email"));
+    })();
 
     return { membership, invitationToken, expiresAt: inviteExpiresAt };
+  }
+
+  /**
+   * Replace a pending invitation's token, for a resend.
+   *
+   * A fresh token rather than the old one re-sent: only the hash is stored,
+   * so the old raw token cannot be recovered, and rotating means a link that
+   * leaked from the first email stops working the moment a new one is sent.
+   */
+  async rotateInvitationToken(
+    tx: Prisma.TransactionClient,
+    membershipId: string,
+    context: ActorContext
+  ) {
+    const invitation = await tx.tenantMembership.findFirst({
+      where: { id: membershipId, tenantId: context.tenantId, status: "INVITED" },
+      select: { id: true, role: true },
+    });
+    if (!invitation) throw new AppError("Pending invitation not found", 404, ErrorCodes.NOT_FOUND);
+    assertCanInviteRole(context.role, invitation.role);
+
+    const invitationToken = generateOpaqueToken();
+    const expiresAt = new Date(Date.now() + env.INVITATION_EXPIRES_IN_HOURS * 60 * 60 * 1000);
+    await tx.tenantMembership.update({
+      where: { id: invitation.id },
+      data: { inviteToken: hashToken(invitationToken), inviteExpiresAt: expiresAt },
+    });
+    await this.audit(tx, context, "MEMBERSHIP_INVITATION_REISSUED", invitation.id, {
+      expiresAt: expiresAt.toISOString(),
+    });
+    return { invitationToken, expiresAt };
+  }
+
+  /** The letter an invitation sends, for callers that send it themselves. */
+  async invitationLetter(
+    input: Pick<CreateInvitationInput, "email" | "role" | "firstName" | "lastName" | "letterBody">,
+    context: ActorContext
+  ): Promise<InvitationLetter> {
+    return this.buildLetter(input as CreateInvitationInput, context);
   }
 
   /**
