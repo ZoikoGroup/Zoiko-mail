@@ -144,6 +144,108 @@ export async function platformSignIn(
   return auth.platformToken as string;
 }
 
+// export async function registerUser(
+//   app: Express,
+//   overrides: Partial<{
+//     email: string;
+//     password: string;
+//     displayName: string;
+//     tenantName: string;
+//     planCode: string;
+//     createWorkspace?: boolean; // optional flag, defaults to true
+//   }> = {}
+// ): Promise<RegisteredUser> {
+//   const payload = {
+//     email: overrides.email ?? `user-${Date.now()}@zoiko.test`,
+//     password: overrides.password ?? "Password123!",
+//     displayName: overrides.displayName ?? "Test User",
+//     tenantName: overrides.tenantName ?? "Test Tenant",
+//     planCode: overrides.planCode ?? "free",
+//   };
+
+//   // Register the user (pending token flow)
+//   const registerResponse = await request(app)
+//     .post("/api/v1/auth/register")
+//     .send({
+//       email: payload.email,
+//       password: payload.password,
+//       displayName: payload.displayName,
+//     })
+//     .expect(201);
+
+//   let userId = registerResponse.body.data.user.id;
+
+//   // Issued codes are bcrypt-hashed and cannot be read back, and the mailer is
+//   // disabled under test. Overwrite the hash with a known code so the suite still
+//   // exercises the real /verify-otp endpoint rather than bypassing verification.
+//   await prisma.emailOtp.updateMany({
+//     where: { userId, purpose: "EMAIL_VERIFICATION", consumedAt: null },
+//     data: { codeHash: await hashPassword(TEST_OTP_CODE) },
+//   });
+
+//   const verified = await request(app)
+//     .post("/api/v1/auth/verify-otp")
+//     .set("Authorization", `Bearer ${registerResponse.body.data.pendingToken}`)
+//     .send({ code: TEST_OTP_CODE })
+//     .expect(200);
+
+//   // verify-otp mints a fresh pending token; the register one is now consumed and
+//   // must not be reused. Exactly one create-workspace call may succeed per
+//   // registration — a second returns 409, since the user already owns a tenant.
+//   const pendingToken = verified.body.data.pendingToken;
+
+//   // By default, create a workspace for the newly registered user.
+//   const shouldCreate = overrides.createWorkspace !== false;
+//   let tenantId: string | null = null;
+//   let membershipId: string | null = null;
+//   let accessToken: string | null = null;
+//   let refreshToken: string | null = null;
+
+//   let mfaSecret: string | null = null;
+
+//   if (shouldCreate) {
+//     const workspaceResponse = await request(app)
+//       .post("/api/v1/auth/create-workspace")
+//       .set({ Authorization: `Bearer ${pendingToken}` })
+//       .send({ tenantName: payload.tenantName, planCode: payload.planCode })
+//       .expect(201);
+//     let data = workspaceResponse.body.data;
+
+//     // Creating a workspace makes this account an Owner, and AC-002 requires a
+//     // second factor before an Owner is handed a session. So the fixture does
+//     // what a real Owner does: enrol, confirm, and sign in with the same code.
+//     if (data.state === "MFA_ENROLLMENT_REQUIRED") {
+//       const completed = await completeMfa(app, data);
+//       mfaSecret = completed.mfaSecret;
+//       data = completed.session;
+//     } else {
+//       data = data.session ?? data;
+//     }
+
+//     tenantId = data.tenant.id;
+//     membershipId = data.membership.id;
+//     userId = data.user.id;
+//     accessToken = data.accessToken ?? data.tokens?.accessToken;
+//     refreshToken = data.refreshToken ?? data.tokens?.refreshToken;
+//   }
+
+//   // Also narrows the nullable locals to satisfy RegisteredUser.
+//   if (!tenantId || !membershipId || !accessToken || !refreshToken) {
+//     throw new Error("Test user registration did not create a complete workspace session");
+//   }
+
+//   return {
+//     email: payload.email,
+//     password: payload.password,
+//     tenantId,
+//     membershipId,
+//     userId,
+//     accessToken,
+//     refreshToken,
+//     mfaSecret,
+//   };
+// }
+// After (lines 147–268, complete function)
 export async function registerUser(
   app: Express,
   overrides: Partial<{
@@ -153,6 +255,13 @@ export async function registerUser(
     tenantName: string;
     planCode: string;
     createWorkspace?: boolean; // optional flag, defaults to true
+    /**
+     * Role the fixture should end up holding. Self-service creation now
+     * yields ADMIN; "OWNER" (the default, so existing suites keep testing
+     * Owner behaviour) promotes the membership and signs in again so the
+     * returned tokens carry the OWNER workspace.
+     */
+    creatorRole?: "ADMIN" | "OWNER";
   }> = {}
 ): Promise<RegisteredUser> {
   const payload = {
@@ -162,6 +271,7 @@ export async function registerUser(
     tenantName: overrides.tenantName ?? "Test Tenant",
     planCode: overrides.planCode ?? "free",
   };
+  const creatorRole = overrides.creatorRole ?? "OWNER";
 
   // Register the user (pending token flow)
   const registerResponse = await request(app)
@@ -191,7 +301,7 @@ export async function registerUser(
 
   // verify-otp mints a fresh pending token; the register one is now consumed and
   // must not be reused. Exactly one create-workspace call may succeed per
-  // registration — a second returns 409, since the user already owns a tenant.
+  // registration — a second returns 409, since the user already belongs to a tenant.
   const pendingToken = verified.body.data.pendingToken;
 
   // By default, create a workspace for the newly registered user.
@@ -211,9 +321,9 @@ export async function registerUser(
       .expect(201);
     let data = workspaceResponse.body.data;
 
-    // Creating a workspace makes this account an Owner, and AC-002 requires a
-    // second factor before an Owner is handed a session. So the fixture does
-    // what a real Owner does: enrol, confirm, and sign in with the same code.
+    // The creator is an Admin, and AC-002 requires a second factor before an
+    // Admin is handed a session. So the fixture does what a real user does:
+    // enrol, confirm, and sign in with the same code.
     if (data.state === "MFA_ENROLLMENT_REQUIRED") {
       const completed = await completeMfa(app, data);
       mfaSecret = completed.mfaSecret;
@@ -227,6 +337,18 @@ export async function registerUser(
     userId = data.user.id;
     accessToken = data.accessToken ?? data.tokens?.accessToken;
     refreshToken = data.refreshToken ?? data.tokens?.refreshToken;
+
+    if (creatorRole === "OWNER" && tenantId && membershipId) {
+      // The role lives in the token, so promotion only takes effect on a new
+      // sign-in; the earlier ADMIN session is replaced by this one.
+      await prisma.tenantMembership.update({
+        where: { id: membershipId },
+        data: { role: "OWNER" },
+      });
+      const session = await loginUser(app, payload.email, payload.password, tenantId, mfaSecret);
+      accessToken = session.accessToken ?? session.tokens?.accessToken;
+      refreshToken = session.refreshToken ?? session.tokens?.refreshToken;
+    }
   }
 
   // Also narrows the nullable locals to satisfy RegisteredUser.

@@ -28,9 +28,13 @@ const FOLDER_ROWS: FolderRow[] = [
   { key: "DRAFTS", label: "Drafts", icon: FileText, countKey: "DRAFTS" },
   { key: "ARCHIVE", label: "Archive", icon: Archive },
   { key: "SPAM", label: "Spam", icon: Ban, countKey: "SPAM" },
-  { key: "QUARANTINE", label: "Quarantine", icon: ShieldAlert },
+  // { key: "QUARANTINE", label: "Quarantine", icon: ShieldAlert },
   { key: "TRASH", label: "Trash", icon: Trash2 },
 ];
+
+export function folderLabel(folder: MailListFolder): string {
+  return FOLDER_ROWS.find((row) => row.key === folder)?.label ?? "Mail";
+}
 
 export function FolderRail({
   folder,

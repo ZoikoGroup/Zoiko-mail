@@ -249,32 +249,58 @@ export function useResendOtp() {
   });
 }
 
+// export function useCreateWorkspace() {
+//   const qc = useQueryClient();
+//   const router = useRouter();
+
+//   return useMutation({
+//     mutationFn: (
+//       input: CreateWorkspaceInput
+//     ) => createWorkspace(input),
+
+//     onSuccess: async (data) => {
+//       await qc.invalidateQueries({
+//         queryKey: ["me"],
+//       });
+
+//       // Creating a workspace makes this account an Owner, and AC-002 requires
+//       // a second factor before an Owner holds a session — so the response may
+//       // be an enrolment challenge rather than a session. routeAuthState knows
+//       // where each state goes; onboarding is only reachable once one exists.
+//       const state = (data as { state?: string }).state;
+//       if (state && state !== "SIGNED_IN") {
+//         routeAuthState(data as unknown as AuthResponse, router, { queryClient: qc });
+//         return;
+//       }
+
+//       // New workspace always needs onboarding
+//       router.replace("/owner/onboarding");
+//     },
+//   });
+// }
+
+// After (lines 252–275, complete function)
 export function useCreateWorkspace() {
   const qc = useQueryClient();
   const router = useRouter();
 
   return useMutation({
-    mutationFn: (
-      input: CreateWorkspaceInput
-    ) => createWorkspace(input),
+    mutationFn: (input: CreateWorkspaceInput) => createWorkspace(input),
 
     onSuccess: async (data) => {
-      await qc.invalidateQueries({
-        queryKey: ["me"],
+      // Every outcome goes through routeAuthState. The workspace creator is an
+      // Admin, which AC-002 still gates behind MFA, so the response may be an
+      // enrolment challenge (→ /verify-mfa, which routes here again once a
+      // session exists) or a session. A session lands on the console the
+      // server bound it to — ADMIN → /admin — never a hard-coded route,
+      // because the workspace guard signs out any session that opens a
+      // console other than its own. routeAuthState also clears the query
+      // cache, so no previous account's ["me"] survives the navigation.
+      const auth = data as unknown as AuthResponse;
+      routeAuthState(auth, router, {
+        queryClient: qc,
+        signedInHref: resolveWorkspaceHref(sessionWorkspace(auth) ?? "ADMIN"),
       });
-
-      // Creating a workspace makes this account an Owner, and AC-002 requires
-      // a second factor before an Owner holds a session — so the response may
-      // be an enrolment challenge rather than a session. routeAuthState knows
-      // where each state goes; onboarding is only reachable once one exists.
-      const state = (data as { state?: string }).state;
-      if (state && state !== "SIGNED_IN") {
-        routeAuthState(data as unknown as AuthResponse, router, { queryClient: qc });
-        return;
-      }
-
-      // New workspace always needs onboarding
-      router.replace("/owner/onboarding");
     },
   });
 }

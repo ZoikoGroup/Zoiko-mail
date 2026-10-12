@@ -77,7 +77,7 @@ export default function AuthPage() {
                 setStep("joinWorkspace");
                 return;
               }
-              // No invitations → own workspace as OWNER.
+              // No invitations → own workspace as ADMIN.
               createWorkspace.mutate(
                 {
                   token: newToken,

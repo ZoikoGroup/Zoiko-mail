@@ -41,6 +41,10 @@ export const ErrorCodes = {
   // A DNS host's API refused or failed a request. Separate from a validation
   // error: the input was fine, and the fix is on the provider's side.
   DNS_PROVIDER_ERROR: "DNS_PROVIDER_ERROR",
+  // Hosted mailboxes. Not configured is a deployment state the client can
+  // explain; it is never answered by creating a database-only mailbox.
+  MAIL_HOSTING_NOT_CONFIGURED: "MAIL_HOSTING_NOT_CONFIGURED",
+  PROVISIONING_IN_PROGRESS: "PROVISIONING_IN_PROGRESS",
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];

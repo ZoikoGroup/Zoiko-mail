@@ -351,6 +351,31 @@ model Mailbox {
   /// every existing workspace on migration, which is a product change wearing
   /// a schema change's clothes.
   aiEnabled            Boolean          @default(true) @map("ai_enabled")
+  /// The name shown beside the address. Null for mailboxes created before
+  /// hosted provisioning, which show the owner's own name instead.
+  displayName          String?          @map("display_name")
+  // ── Hosted provisioning ────────────────────────────────────────────────
+  // All null for a mailbox that only exists in this database (everything
+  // created before hosted provisioning). Not backfilled: those rows have no
+  // account on a mail host, and saying otherwise would be a fabrication.
+  /// Which mail host holds the real account.
+  provider             MailHostProvider? @map("provider")
+  /// The host's own id for the account, set once the host confirms it.
+  providerAccountId    String?          @map("provider_account_id")
+  provisioningStatus   MailboxProvisioningStatus? @map("provisioning_status")
+  /// A safe error code (never a provider response body).
+  provisioningError    String?          @map("provisioning_error")
+  provisioningAttempts Int              @default(0) @map("provisioning_attempts")
+  provisioningStartedAt DateTime?       @map("provisioning_started_at")
+  provisionedAt        DateTime?        @map("provisioned_at")
+  /// The quota the host reports having applied, which can differ from
+  /// storageLimit (what was requested) if the host rounds or caps it.
+  providerQuotaBytes   BigInt?          @map("provider_quota_bytes")
+  /// Delivery of the access invitation, tracked apart from provisioning so a
+  /// failed email never leads to a second account being created.
+  invitationStatus     MailboxInvitationStatus? @map("invitation_status")
+  invitationSentAt     DateTime?        @map("invitation_sent_at")
+  invitationError      String?          @map("invitation_error")
   createdAt            DateTime         @default(now()) @map("created_at")
   updatedAt            DateTime         @updatedAt @map("updated_at")
   tenant               Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -366,7 +391,11 @@ model Mailbox {
   sentAsMessages       EmailMessage[]   @relation("SentAsMailbox")
 
   @@unique([tenantId, address])
+  /// One Zoiko mailbox per host account, so two rows can never claim the same
+  /// real account. NULLs are distinct, so database-only mailboxes are unaffected.
+  @@unique([provider, providerAccountId])
   @@index([tenantId, membershipId])
+  @@index([provisioningStatus])
   @@map("mailboxes")
 }
 
@@ -1458,6 +1487,30 @@ enum MailboxType {
   DISTRIBUTION
   SYSTEM
   NO_REPLY
+}
+
+enum MailHostProvider {
+  STALWART
+}
+
+enum MailboxProvisioningStatus {
+  /// Recorded here; the host has not been asked yet.
+  PENDING
+  /// The host is being asked. A row stuck here was interrupted mid-call and
+  /// is reconciled against the host before anything is created again.
+  PROVISIONING
+  /// The host confirmed the account exists.
+  PROVISIONED
+  FAILED
+}
+
+enum MailboxInvitationStatus {
+  /// The mailbox went to somebody who is already an active member.
+  NOT_REQUIRED
+  /// Not sent yet: provisioning has not finished, or system mail is off.
+  PENDING
+  SENT
+  FAILED
 }
 
 enum MailFolder {

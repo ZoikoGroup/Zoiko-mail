@@ -16,6 +16,11 @@
  *     blank, because it reads as real.
  */
 import { ApiError, apiDownload, apiRequest } from "./api-client";
+import {
+  mailboxDisplayStatus,
+  type InvitationStatus,
+  type ProvisioningStatus,
+} from "./mailbox-provisioning-api";
 import type {
   AlertReviewAction,
   AuditEventDto,
@@ -179,6 +184,12 @@ interface ApiMailbox {
   sendSuspensionReason: string | null;
   aiEnabled: boolean;
   type: "USER" | "SHARED" | "DISTRIBUTION" | "SYSTEM" | "NO_REPLY";
+  displayName?: string | null;
+  provisioningStatus?: ProvisioningStatus | null;
+  provisioningError?: string | null;
+  invitationStatus?: InvitationStatus | null;
+  invitationError?: string | null;
+  membership?: { status?: string; user?: { email?: string } } | null;
 }
 
 export async function fetchMailboxes(): Promise<MailboxDto[]> {
@@ -194,7 +205,14 @@ export async function fetchMailboxes(): Promise<MailboxDto[]> {
     // as this screen is concerned; the Groups screen draws the finer
     // shared/distribution distinction.
     type: m.type === "USER" ? "INDIVIDUAL" : "SHARED",
-    status: m.sendSuspendedAt ? "SUSPENDED" : "ACTIVE",
+    status: mailboxDisplayStatus(m),
+    provisioningStatus: m.provisioningStatus ?? null,
+    provisioningError: m.provisioningError ?? null,
+    invitationStatus: m.invitationStatus ?? null,
+    invitationError: m.invitationError ?? null,
+    invitationRecipient: m.membership?.user?.email ?? null,
+    membershipStatus: m.membership?.status ?? null,
+    displayName: m.displayName ?? null,
     storageUsedGb: gb(m.storageUsed),
     storageLimitGb: gb(m.storageLimit),
     // The real column now (AC-008). A mailbox with this off is what the

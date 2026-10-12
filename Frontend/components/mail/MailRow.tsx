@@ -1,7 +1,7 @@
 "use client";
 
 import { Star, Paperclip, Trash2 } from "lucide-react";
-import type { MailItem, MailListItem } from "@/lib/mail-api";
+import type { MailItem, MailListItem, MailListFolder } from "@/lib/mail-api";
 
 // A fixed, readable-on-dark palette — hashed by sender so the same person
 // always gets the same color across the whole inbox, without needing to
@@ -31,6 +31,20 @@ function senderName(item: MailListItem | MailItem): string {
   return m.fromName || m.fromAddress || m.author?.displayName || m.author?.email || "Unknown";
 }
 
+/**
+ * In Sent and Drafts, the "sender" is always the account's own name on
+ * every row — showing it is redundant. What's actually useful there is
+ * who the message is going TO. Falls back to the sender name if, for
+ * whatever reason, a list item carries no recipients (e.g. an older API
+ * response shape) so the row still shows something rather than going blank.
+ */
+function recipientSummary(item: MailListItem | MailItem): string {
+  const recipients = (item.message as { recipients?: { type: string; email: string }[] }).recipients;
+  const to = recipients?.filter((r) => r.type === "TO").map((r) => r.email) ?? [];
+  if (to.length === 0) return senderName(item);
+  return to.join(", ");
+}
+
 function fmt(iso: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
@@ -45,6 +59,7 @@ function fmt(iso: string | null): string {
 
 export function MailRow({
   item,
+  folder,
   selected,
   checked,
   onToggleChecked,
@@ -53,6 +68,10 @@ export function MailRow({
   onDeleteDraft,
 }: {
   item: MailListItem;
+  /** Sent and Drafts show the recipient instead of the (always-you) sender.
+   * Optional so any caller that hasn't been updated yet still compiles and
+   * falls back to the old sender-name behavior. */
+  folder?: MailListFolder;
   selected: boolean;
   checked: boolean;
   onToggleChecked: () => void;
@@ -60,7 +79,9 @@ export function MailRow({
   showDeleteDraft?: boolean;
   onDeleteDraft?: () => void;
 }) {
-  const name = senderName(item);
+  const showRecipient = folder === "SENT" || folder === "DRAFTS";
+  const name = showRecipient ? recipientSummary(item) : senderName(item);
+  const label = showRecipient ? `To: ${name}` : name;
 
   return (
     <li className="flex items-start">
@@ -93,7 +114,7 @@ export function MailRow({
           <div className="flex items-center gap-2">
             {!item.isRead && <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--accent)]" />}
             <span className={`truncate text-sm ${item.isRead ? "text-[var(--ink2)]" : "font-semibold text-[var(--ink)]"}`}>
-              {name}
+              {label}
             </span>
             {item.isStarred && <Star className="h-3.5 w-3.5 shrink-0 fill-[var(--warn)] text-[var(--warn)]" />}
             <span className="ml-auto shrink-0 text-[11px] text-[var(--ink3)]">

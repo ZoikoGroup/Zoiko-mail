@@ -4,20 +4,11 @@ import { useEffect, useState } from "react";
 import { ProtectedRoute } from "@/components/owner/ProtectedRoute";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { MailboxesTable } from "@/components/owner/mailboxes/MailboxesTable";
-import { CreateMailboxModal } from "@/components/owner/mailboxes/CreateMailboxModal";
-import { useCreateAdminMailbox, useMembers, useAdminMailboxes } from "@/lib/owner-hooks";
+import { CreateEmailWizard } from "@/components/mailboxes/CreateEmailWizard";
 
 export default function MailboxesPage() {
   useEffect(() => { document.title = "Mailboxes | Zoiko Mail"; }, []);
   const [createOpen, setCreateOpen] = useState(false);
-
-  const createMailbox = useCreateAdminMailbox();
-  const { data: members = [] } = useMembers();
-  const { data: mailboxes = [] } = useAdminMailboxes();
-
-  const membersWithoutMailbox = members.filter(
-    (m) => m.status === "ACTIVE" && !mailboxes.some((mb) => mb.userId === m.userId)
-  );
 
   return (
     <ProtectedRoute>
@@ -27,17 +18,10 @@ export default function MailboxesPage() {
           description="Create and manage mailboxes across your organization."
         />
         <MailboxesTable onCreateMailbox={() => setCreateOpen(true)} />
-        <CreateMailboxModal
-          open={createOpen}
-          onClose={() => setCreateOpen(false)}
-          members={membersWithoutMailbox}
-          onSubmit={(membershipId) => {
-            createMailbox.mutate(membershipId, {
-              onSuccess: () => setCreateOpen(false),
-            });
-          }}
-          loading={createMailbox.isPending}
-        />
+        {/* The same Create Email flow the Admin dashboard uses. */}
+        {createOpen && (
+          <CreateEmailWizard domainsHref="/owner/domains" onClose={() => setCreateOpen(false)} />
+        )}
       </div>
     </ProtectedRoute>
   );

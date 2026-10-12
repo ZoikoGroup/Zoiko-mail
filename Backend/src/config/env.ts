@@ -102,6 +102,26 @@ export const envSchema = z.object({
   MAIL_PROVIDER_MEMBERSHIP_ID: z.preprocess(blankAsUndefined, z.string().uuid().optional()),
   MAIL_PROVIDER_SYNC_INTERVAL_MS: z.coerce.number().int().min(60_000).default(300_000),
   MAIL_PROVIDER_CONNECTION_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(15_000),
+  // ── Hosted mailboxes (Stalwart) ──────────────────────────────────────────
+  // The mail server that holds the real accounts behind "Create email".
+  // Off by default: with it off, provisioning refuses rather than creating a
+  // database-only mailbox and calling it hosted.
+  STALWART_ENABLED: boolFlag("false"),
+  /** Origin of the Stalwart server, e.g. https://mail.zoikomail.com. Not the admin UI path. */
+  STALWART_BASE_URL: z.preprocess(blankAsUndefined, z.string().url().optional()),
+  /**
+   * Secret-store reference holding the Stalwart API key (sent as a Bearer
+   * token). A reference rather than the key itself, so the value lives where
+   * DKIM keys and connector tokens live and never in the process environment.
+   */
+  STALWART_API_TOKEN_REF: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/).default("stalwart-api-token"),
+  STALWART_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(15_000),
+  /**
+   * Register a verified workspace domain in Stalwart the first time a mailbox
+   * is created on it. Off means the domain must already exist in Stalwart,
+   * and provisioning fails with STALWART_DOMAIN_MISSING until it does.
+   */
+  STALWART_AUTO_CREATE_DOMAINS: boolFlag("true"),
   // Floor is 4 so the test suite can hash cheaply; anything below 10 is rejected
   // outside NODE_ENV=test by the refinement below. Without this the suite could
   // not boot at all, because tests/setup.ts sets 4 for speed.
@@ -261,6 +281,19 @@ export const envSchema = z.object({
         path: ["SMTP_SECURE"],
         message: `SMTP TLS must remain enabled for ${value.SMTP_HOST}`,
       });
+    }
+  }
+  if (value.STALWART_ENABLED) {
+    if (!value.STALWART_BASE_URL) {
+      context.addIssue({ code: "custom", path: ["STALWART_BASE_URL"], message: "is required when STALWART_ENABLED=true" });
+    } else {
+      // The API key travels on every request, so plaintext is only tolerated
+      // on loopback, where a local Stalwart container has no certificate.
+      const url = new URL(value.STALWART_BASE_URL);
+      const loopback = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(url.hostname);
+      if (url.protocol !== "https:" && !loopback) {
+        context.addIssue({ code: "custom", path: ["STALWART_BASE_URL"], message: "must use https outside loopback" });
+      }
     }
   }
   if (value.FLAG_GOOGLE_LOGIN_ENABLED && !value.GOOGLE_CLIENT_ID) {

@@ -14,11 +14,13 @@ import {
 import { useCan } from "@/lib/admin-capabilities";
 import { StepUpDialog, useStepUp } from "@/components/admin/StepUpDialog";
 import {
-  CreateMailboxDialog,
   DelegateMailboxDialog,
   DeleteMailboxDialog,
   SendingDialog,
 } from "@/components/admin/MailboxDialogs";
+import { CreateEmailWizard } from "@/components/mailboxes/CreateEmailWizard";
+import { MailboxStatusCell } from "@/components/mailboxes/MailboxStatusCell";
+import { STATUS_LABEL, type MailboxDisplayStatus } from "@/lib/mailbox-provisioning-api";
 import {
   Card,
   InlineEmpty,
@@ -43,6 +45,14 @@ export default function AdminMailboxesPage() {
   const canManage = can("workspace.mailboxes.manage");
   const [openId, setOpenId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | MailboxDisplayStatus>("all");
+  const query = search.trim().toLowerCase();
+  const visible = (mailboxes ?? []).filter(
+    (m) =>
+      (statusFilter === "all" || m.status === statusFilter) &&
+      (!query || m.address.includes(query) || (m.displayName ?? "").toLowerCase().includes(query))
+  );
   /** The mailbox whose sending or deletion is being decided, and which. */
   const [acting, setActing] = useState<{
     id: string;
@@ -56,10 +66,7 @@ export default function AdminMailboxesPage() {
       <StepUpDialog {...stepUp.dialog} />
 
       {creating && (
-        <CreateMailboxDialog
-          existing={mailboxes ?? []}
-          onClose={() => setCreating(false)}
-        />
+        <CreateEmailWizard domainsHref="/admin/domains" onClose={() => setCreating(false)} />
       )}
       {actingOn && acting?.kind === "sending" && (
         <SendingDialog mailbox={actingOn} onClose={() => setActing(null)} />
@@ -73,15 +80,17 @@ export default function AdminMailboxesPage() {
 
       <PageHeader
         title="Mailboxes"
-        subtitle="Provider-backed hosted mailboxes under acme.test and zoikomail.com"
+        subtitle="Hosted mailboxes on this workspace's verified domains"
         action={
-          canManage ? (
+          // Create Email also invites the mailbox's owner, so it takes both
+          // of the server's gates, not just mailbox management.
+          canManage && can("people.invite.member") ? (
             <button
               type="button"
               className="zoiko-btn pri"
               onClick={() => setCreating(true)}
             >
-              Create mailbox
+              + Create Email
             </button>
           ) : undefined
         }
@@ -112,6 +121,31 @@ export default function AdminMailboxesPage() {
         ) : mailboxes.length === 0 ? (
           <InlineEmpty title="No mailboxes yet" hint="Create one on a verified domain." />
         ) : (
+          <>
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row">
+            <input
+              className="zoiko-input w-full sm:w-64"
+              type="search"
+              placeholder="Search mailboxes…"
+              aria-label="Search mailboxes"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+            <select
+              className="zoiko-input w-full sm:w-48"
+              aria-label="Filter by status"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
+            >
+              <option value="all">All statuses</option>
+              {(Object.keys(STATUS_LABEL) as MailboxDisplayStatus[]).map((status) => (
+                <option key={status} value={status}>{STATUS_LABEL[status]}</option>
+              ))}
+            </select>
+          </div>
+          {visible.length === 0 ? (
+            <InlineEmpty title="No mailboxes match" hint="Change the search or status filter." />
+          ) : (
           <TableWrap>
             <Table>
               <thead>
@@ -125,10 +159,13 @@ export default function AdminMailboxesPage() {
                 </tr>
               </thead>
               <tbody>
-                {mailboxes.map((mailbox) => (
+                {visible.map((mailbox) => (
                   <tr key={mailbox.id}>
                     <Td nowrap>
                       <span className="font-semibold text-[var(--ink)]">{mailbox.address}</span>
+                      {mailbox.displayName && (
+                        <span className="block text-[11px] text-[var(--ink3)]">{mailbox.displayName}</span>
+                      )}
                     </Td>
                     <Td muted>
                       {mailbox.type === "SHARED" ? "Shared" : "Individual"}
@@ -174,9 +211,7 @@ export default function AdminMailboxesPage() {
                       </button>
                     </Td>
                     <Td>
-                      <Pill tone={mailbox.status === "ACTIVE" ? "ok" : "crit"}>
-                        {mailbox.status === "ACTIVE" ? "Active" : "Suspended"}
-                      </Pill>
+                      <MailboxStatusCell row={mailbox} canManage={canManage} />
                     </Td>
                     <Td nowrap>
                       <div className="flex gap-1.5">
@@ -240,7 +275,7 @@ export default function AdminMailboxesPage() {
                 ))}
                 {/* Rendered as its own row so the panel spans the table
                     rather than squeezing into the actions column. */}
-                {mailboxes
+                {visible
                   .filter((mailbox) => mailbox.id === openId)
                   .map((mailbox) => (
                     <tr key={`${mailbox.id}-routing`}>
@@ -252,6 +287,8 @@ export default function AdminMailboxesPage() {
               </tbody>
             </Table>
           </TableWrap>
+          )}
+          </>
         )}
       </Card>
 

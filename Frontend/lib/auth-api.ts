@@ -432,7 +432,7 @@ export async function createWorkspace(
       }
     );
 
-  // AC-002: creating a workspace makes this account an Owner, so the response
+  // AC-002: creating a workspace makes this account an Admin, so the response
   // may be an MFA enrolment challenge rather than a session. Store whatever
   // tokens it did carry and let the caller route on the state.
   applyAuthTokens(data as unknown as AuthResponse);

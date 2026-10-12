@@ -2,7 +2,6 @@
 
 import { useState, useMemo } from "react";
 import { DataTable, type Column } from "@/components/ui/DataTable";
-import { StatusBadge } from "@/components/ui/StatusBadge";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { FilterBar } from "@/components/ui/FilterBar";
 import { DropdownMenu, DropdownItem } from "@/components/ui/DropdownMenu";
@@ -12,6 +11,9 @@ import { Pause, Play, Trash2, Mail, Eye } from "lucide-react";
 import { useAdminMailboxes, useDeleteAdminMailbox, useUpdateMailboxSendingStatus } from "@/lib/owner-hooks";
 import type { Mailbox } from "@/lib/owner-api";
 import { MailboxDetailsDrawer } from "./MailboxDetailsDrawer";
+import { MailboxStatusCell } from "@/components/mailboxes/MailboxStatusCell";
+import { useCan } from "@/lib/admin-capabilities";
+import { STATUS_LABEL, type MailboxDisplayStatus } from "@/lib/mailbox-provisioning-api";
 
 function formatBytes(mb: number) {
   if (mb === 0) return "—";
@@ -33,7 +35,7 @@ interface MailboxesTableProps {
 
 export function MailboxesTable({ onCreateMailbox }: MailboxesTableProps) {
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "suspended">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | MailboxDisplayStatus>("all");
   const [domainFilter, setDomainFilter] = useState("all");
   const [confirmDelete, setConfirmDelete] = useState<Mailbox | null>(null);
   const [confirmSuspend, setConfirmSuspend] = useState<Mailbox | null>(null);
@@ -41,6 +43,10 @@ export function MailboxesTable({ onCreateMailbox }: MailboxesTableProps) {
   const [detailsMailbox, setDetailsMailbox] = useState<Mailbox | null>(null);
 
   const { data: mailboxes = [], isLoading } = useAdminMailboxes();
+  const can = useCan();
+  // The server's two gates for Create Email, retry and resend. Shown only to
+  // whoever holds both; the server refuses everyone else regardless.
+  const canManage = can("workspace.mailboxes.manage") && can("people.invite.member");
   const deleteMailbox = useDeleteAdminMailbox();
   const updateSending = useUpdateMailboxSendingStatus();
 
@@ -51,8 +57,7 @@ export function MailboxesTable({ onCreateMailbox }: MailboxesTableProps) {
 
   const filtered = useMemo(() => {
     return mailboxes.filter((m) => {
-      if (statusFilter === "active" && m.sendSuspendedAt) return false;
-      if (statusFilter === "suspended" && !m.sendSuspendedAt) return false;
+      if (statusFilter !== "all" && m.status !== statusFilter) return false;
       if (domainFilter !== "all" && m.domain !== domainFilter) return false;
       if (search) {
         const q = search.toLowerCase();
@@ -95,11 +100,7 @@ export function MailboxesTable({ onCreateMailbox }: MailboxesTableProps) {
       key: "status",
       label: "Status",
       sortable: true,
-      render: (row) => (
-        <StatusBadge variant={row.sendSuspendedAt ? "warn" : "ok"} dot>
-          {row.sendSuspendedAt ? "Suspended" : "Active"}
-        </StatusBadge>
-      ),
+      render: (row) => <MailboxStatusCell row={row} canManage={canManage} />,
     },
     {
       key: "storageUsedMb",
@@ -143,8 +144,9 @@ export function MailboxesTable({ onCreateMailbox }: MailboxesTableProps) {
             className="h-9 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
           >
             <option value="all">All Status</option>
-            <option value="active">Active</option>
-            <option value="suspended">Suspended</option>
+            {(Object.keys(STATUS_LABEL) as MailboxDisplayStatus[]).map((status) => (
+              <option key={status} value={status}>{STATUS_LABEL[status]}</option>
+            ))}
           </select>
           {domains.length > 0 && (
             <select
@@ -159,10 +161,12 @@ export function MailboxesTable({ onCreateMailbox }: MailboxesTableProps) {
             </select>
           )}
         </FilterBar>
-        <button onClick={onCreateMailbox} className="zoiko-btn pri">
-          <Mail className="h-3.5 w-3.5" />
-          Create Mailbox
-        </button>
+        {canManage && (
+          <button onClick={onCreateMailbox} className="zoiko-btn pri">
+            <Mail className="h-3.5 w-3.5" />
+            + Create Email
+          </button>
+        )}
       </div>
 
       <DataTable

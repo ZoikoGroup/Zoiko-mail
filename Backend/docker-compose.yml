@@ -61,6 +61,14 @@ services:
       MAIL_PROVIDER_MEMBERSHIP_ID: ${MAIL_PROVIDER_MEMBERSHIP_ID:-}
       MAIL_PROVIDER_SYNC_INTERVAL_MS: ${MAIL_PROVIDER_SYNC_INTERVAL_MS:-300000}
       MAIL_PROVIDER_CONNECTION_TIMEOUT_MS: ${MAIL_PROVIDER_CONNECTION_TIMEOUT_MS:-15000}
+      # Hosted mailboxes (Create Email). The API key is not passed here: it is
+      # read from the secret store (STALWART_API_TOKEN_REF), which with
+      # SECRET_STORE=env is a file under SECRET_FILE_DIR on the storage volume.
+      STALWART_ENABLED: ${STALWART_ENABLED:-false}
+      STALWART_BASE_URL: ${STALWART_BASE_URL:-}
+      STALWART_API_TOKEN_REF: ${STALWART_API_TOKEN_REF:-stalwart-api-token}
+      STALWART_TIMEOUT_MS: ${STALWART_TIMEOUT_MS:-15000}
+      STALWART_AUTO_CREATE_DOMAINS: ${STALWART_AUTO_CREATE_DOMAINS:-true}
       # Where secrets live: DKIM private keys, DNS provider credentials and
       # connector tokens. The file store's default is inside the image, which
       # a rebuild wipes — so it sits on the persistent storage volume here.
