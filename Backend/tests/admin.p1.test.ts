@@ -282,7 +282,7 @@ describe("admin mailbox attribute updates", () => {
     const metadata = event!.metadata as Record<string, Record<string, number>>;
     // Audit §6.2 wants before/after for material configuration changes: a
     // quota cut that starts bouncing mail needs the prior value on record.
-    expect(metadata.before.storageLimit).toBe(1_073_741_824);
+    expect(metadata.before.storageLimit).toBe(10_737_418_240);
     expect(metadata.after.storageLimit).toBe(5_368_709_120);
   });
 
