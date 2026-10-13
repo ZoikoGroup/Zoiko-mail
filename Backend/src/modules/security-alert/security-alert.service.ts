@@ -188,6 +188,32 @@ export class SecurityAlertService {
     });
   }
 
+  /**
+   * An administrator set a new password for this account from the Mailboxes
+   * screen. Its own message: the forgot-password wording would tell a
+   * reviewer the owner did it themselves.
+   */
+  async recordPasswordResetByAdmin(
+    tenantId: string,
+    userId: string,
+    email: string,
+    actorUserId: string,
+    context: Pick<AlertContext, "ipAddress" | "userAgent" | "requestId">
+  ): Promise<void> {
+    await this.createAlert(tenantId, {
+      type: "PASSWORD_RESET",
+      title: "Password reset by an administrator",
+      message: "An administrator set a new password for this account and signed it out everywhere.",
+      userId,
+      email,
+      ipAddress: context.ipAddress ?? null,
+      userAgent: context.userAgent ?? null,
+      deviceLabel: null,
+      requestId: context.requestId,
+      metadata: { actorUserId },
+    });
+  }
+
   // ── Review surface (owner / admin) ───────────────────────────────────────
 
   async list(tenantId: string, opts: { status?: SecurityAlertStatus; type?: SecurityAlertType; limit?: number }) {

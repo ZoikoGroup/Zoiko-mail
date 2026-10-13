@@ -5,6 +5,7 @@ export { default as PasswordInput } from "./inputs/PasswordInput";
 export { default as GoogleSignInButton } from "./GoogleSignInButton";
 
 export { default as LoginForm } from "./forms/LoginForm";
+export { default as MemberLoginForm } from "./forms/MemberLoginForm";
 export { default as RegisterForm } from "./forms/RegisterForm";
 export { default as ChangePasswordForm } from "./forms/ChangePasswordForm";
 export { default as SetPasswordForm } from "./forms/SetPasswordForm";

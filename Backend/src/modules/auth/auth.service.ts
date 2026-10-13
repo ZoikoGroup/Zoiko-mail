@@ -8,7 +8,7 @@ import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { hashPassword, verifyPassword } from "../../common/utils/password.js";
 import { hashToken } from "../../common/utils/tokenHash.js";
-import { actingRole } from "../../common/utils/workspaceScope.js";
+import { actingRole, consoleAuthorized, signInWorkspace } from "../../common/utils/workspaceScope.js";
 import type {
   AccessTokenPayload,
   MfaChallengeTokenPayload,
@@ -133,6 +133,71 @@ export function workspaceScopeForRole(role: MembershipRole): WorkspaceScope {
   return role;
 }
 
+/**
+ * The account a sign-in identifier names: the account's own email, or the
+ * address of a personal mailbox it owns.
+ *
+ * Both have to work. An admin creates management@temveris.com for a person
+ * whose account email is their own (say a gmail address), sets its password
+ * on the Mailboxes page, and hands over "management@temveris.com + password".
+ * Looking up accounts by email alone rejected that as an unknown email before
+ * the password was ever checked, so a correctly saved password read as
+ * "invalid credentials". The mailbox address now resolves to its owner.
+ *
+ * Mailbox addresses are unique per workspace, not globally, so an address
+ * owned by different people in different workspaces names nobody and is
+ * refused like an unknown email. When it resolves through exactly one
+ * mailbox, that mailbox's workspace is returned so the sign-in opens there.
+ * Shared mailboxes have no owner and never sign anyone in.
+ */
+async function findSignInAccount(
+  identifier: string
+): Promise<{ user: NonNullable<Awaited<ReturnType<typeof userRepository.findByEmail>>>; tenantId?: string } | null> {
+  const byEmail = await userRepository.findByEmail(identifier);
+  if (byEmail) return { user: byEmail };
+
+  const mailboxes = await prisma.mailbox.findMany({
+    where: {
+      address: { equals: identifier, mode: "insensitive" },
+      membershipId: { not: null },
+      membership: { status: { not: "REMOVED" } },
+    },
+    select: { tenantId: true, membership: { select: { userId: true } } },
+  });
+  const owners = new Set(mailboxes.map((mailbox) => mailbox.membership!.userId));
+  if (owners.size !== 1) return null;
+  const owner = await userRepository.findById([...owners][0]!);
+  if (!owner) return null;
+  return { user: owner, tenantId: mailboxes.length === 1 ? mailboxes[0]!.tenantId : undefined };
+}
+
+/** The workspaces an admin assigned to this person's mailbox; null when they have none. */
+async function mailboxWorkspacesFor(
+  membershipId: string,
+  tx: Prisma.TransactionClient | typeof prisma = prisma
+): Promise<MembershipRole[] | null> {
+  const mailbox = await tx.mailbox.findUnique({
+    where: { membershipId },
+    select: { workspaces: true },
+  });
+  return mailbox?.workspaces ?? null;
+}
+
+/**
+ * The console a sign-in opens for this membership: the Member workspace when
+ * the Member login asked for it, otherwise the role's console if the admin's
+ * Workspace Access setting authorises it, and the Member workspace if not.
+ * See signInWorkspace.
+ */
+async function sessionWorkspaceFor(
+  membership: { id: string; role: MembershipRole },
+  requested?: WorkspaceScope,
+  tx: Prisma.TransactionClient | typeof prisma = prisma
+): Promise<WorkspaceScope> {
+  if (requested === "MEMBER") return "MEMBER";
+  return signInWorkspace(membership.role, await mailboxWorkspacesFor(membership.id, tx), requested);
+}
+
 function buildAccessToken(
   membership: MembershipWithRelations,
   workspace: WorkspaceScope,
@@ -226,7 +291,7 @@ function buildPendingToken(userId: string): {
  */
 const SELECTION_TOKEN_EXPIRES_IN = "15m";
 
-function buildSelectionToken(userId: string): {
+function buildSelectionToken(userId: string, workspace?: WorkspaceScope): {
   token: string;
   expiresIn: string;
 } {
@@ -234,6 +299,7 @@ function buildSelectionToken(userId: string): {
     sub: userId,
     type: "selection",
     jti: uuidv4(),
+    ...(workspace === "MEMBER" ? { workspace } : {}),
   };
 
   const token = jwt.sign(payload, env.JWT_ACCESS_SECRET, {
@@ -965,7 +1031,9 @@ export class AuthService {
         membership: membershipWithRelations,
         session: await issueSession(
           membershipWithRelations,
-          workspaceScopeForRole(membershipWithRelations.role),
+          // An invited Admin whose mailbox was created Member-only joins in
+          // the Member workspace, as a sign-in would put them.
+          await sessionWorkspaceFor(membershipWithRelations, undefined, tx),
           tx,
           undefined,
           {
@@ -989,7 +1057,7 @@ export class AuthService {
         kind: "tenant",
         tenantId: session.membership.tenantId,
         membershipId: session.membership.id,
-        workspace: workspaceScopeForRole(session.membership.role),
+        workspace: session.session.workspace,
       },
       session.membership.role,
       context
@@ -1097,7 +1165,10 @@ export class AuthService {
 
   async forgotPassword(input: ForgotPasswordInput, context: RequestContext): Promise<{ message: string }> {
     const genericMessage = "If an account exists for that email, a password reset code has been sent.";
-    const user = await userRepository.findByEmail(input.email);
+    // A mailbox address works here too, and the code goes to the account's
+    // own email — the one place a person reliably receives mail before they
+    // can sign in.
+    const user = (await findSignInAccount(input.email))?.user ?? null;
     if (!user || user.status === "DISABLED") return { message: genericMessage };
     try {
       await otpService.issuePasswordReset(user.id, user.email);
@@ -1120,7 +1191,9 @@ export class AuthService {
   }
 
   async resetPassword(input: ResetPasswordInput, context: RequestContext): Promise<{ message: string }> {
-    const user = await userRepository.findByEmail(input.email);
+    // The same identifier the code was requested with, so it resolves to the
+    // same account.
+    const user = (await findSignInAccount(input.email))?.user ?? null;
     if (!user || user.status === "DISABLED") {
       throw new AppError("Invalid or expired code", 400, ErrorCodes.OTP_INVALID);
     }
@@ -1157,7 +1230,9 @@ export class AuthService {
   }
 
   async login(input: LoginInput, context: RequestContext): Promise<AuthState> {
-    const user = await userRepository.findByEmail(input.email);
+    // The account email or a personal mailbox address; see findSignInAccount.
+    const account = await findSignInAccount(input.email);
+    const user = account?.user ?? null;
     if (!user) {
       await this.recordLoginFailure(null, input.email, "unknown_email", context);
       throw new AppError("Invalid email or password", 401, ErrorCodes.UNAUTHORIZED);
@@ -1182,8 +1257,54 @@ export class AuthService {
     }
 
     // Credentials are valid — from here we return typed states, never generic
-    // errors, so the client can render the right screen.
-    return this.resolveAuthState(user, input.tenantId, context);
+    // errors, so the client can render the right screen. `workspace` is set
+    // only by the Member login, which always opens the Member workspace.
+    // Signing in with a mailbox address opens that mailbox's workspace,
+    // unless the client named one explicitly.
+    return this.resolveAuthState(user, input.tenantId ?? account?.tenantId, context, input.workspace);
+  }
+
+  /**
+   * What a mailbox's Member sign-in link prefills: the workspace it belongs
+   * to and, for a personal mailbox, the owner's sign-in email.
+   *
+   * Public, because the person opening the link is not signed in yet. It
+   * proves nothing and opens nothing — the password (or Google) is still
+   * required — and the key is 122 random bits, so links cannot be guessed or
+   * enumerated. An admin who regenerates a link makes the old one answer 404.
+   */
+  async resolveMemberLoginLink(key: string): Promise<{
+    tenantId: string;
+    workspaceName: string;
+    mailboxAddress: string;
+    shared: boolean;
+    email: string | null;
+  }> {
+    const mailbox = await prisma.mailbox.findUnique({
+      where: { memberLoginKey: key },
+      select: {
+        tenantId: true,
+        address: true,
+        membershipId: true,
+        tenant: { select: { name: true } },
+        membership: { select: { status: true, user: { select: { email: true } } } },
+      },
+    });
+    if (!mailbox) {
+      throw new AppError(
+        "This sign-in link is not valid. It may have been replaced; ask your administrator for the current one.",
+        404,
+        ErrorCodes.MEMBER_LOGIN_LINK_INVALID
+      );
+    }
+    const ownerSignsIn = mailbox.membership && mailbox.membership.status !== "REMOVED";
+    return {
+      tenantId: mailbox.tenantId,
+      workspaceName: mailbox.tenant.name,
+      mailboxAddress: mailbox.address,
+      shared: mailbox.membershipId === null,
+      email: ownerSignsIn ? mailbox.membership!.user.email : null,
+    };
   }
 
   /**
@@ -1228,8 +1349,9 @@ export class AuthService {
       });
       return this.resolveAuthState(
         identity.user,
-        undefined,
-        context
+        input.tenantId,
+        context,
+        input.workspace
       );
     }
 
@@ -1280,8 +1402,9 @@ export class AuthService {
 
       return this.resolveAuthState(
         created,
-        undefined,
-        context
+        input.tenantId,
+        context,
+        input.workspace
       );
     }
 
@@ -1350,8 +1473,9 @@ export class AuthService {
 
     return this.resolveAuthState(
       linked,
-      undefined,
-      context
+      input.tenantId,
+      context,
+      input.workspace
     );
   }
 
@@ -1473,7 +1597,7 @@ export class AuthService {
     if (selectedTenantId) {
       const chosen = nonRemoved.find((m) => m.tenantId === selectedTenantId);
       if (!chosen) {
-        const selection = buildSelectionToken(user.id);
+        const selection = buildSelectionToken(user.id, intendedWorkspace);
         return {
           state: "WORKSPACE_SELECTION",
           user: publicUser,
@@ -1504,8 +1628,9 @@ export class AuthService {
     // 5. Multiple workspaces — let the client pick (statuses drive greying-out).
 
     // Issue a short-lived selection token so the client can call /auth/select-
-    // workspace without asking the user for their password again.
-    const selection = buildSelectionToken(user.id);
+    // workspace without asking the user for their password again. A Member
+    // login's intent rides along, so the pick still opens the Member workspace.
+    const selection = buildSelectionToken(user.id, intendedWorkspace);
     return {
       state: "WORKSPACE_SELECTION",
       user: publicUser,
@@ -1525,7 +1650,7 @@ export class AuthService {
     context: RequestContext
   ): Promise<AuthState> {
     // 1. Verify the selection token and extract userId.
-    const { userId, jti, expiresAt } = this.verifySelectionToken(
+    const { userId, jti, expiresAt, workspace } = this.verifySelectionToken(
       input.selectionToken
     );
 
@@ -1549,7 +1674,7 @@ export class AuthService {
       // All the membership-lookup, account-status, tenant-status and
       // membership-status logic lives in the shared resolver — we just point
       // it at the picked workspace.
-      result = await this.resolveAuthState(user, input.tenantId, context);
+      result = await this.resolveAuthState(user, input.tenantId, context, workspace);
     } catch (error) {
       // The pick blew up rather than resolving, so nothing was issued. Hand
       // the token back or a transient fault would cost the user their login.
@@ -1637,6 +1762,13 @@ export class AuthService {
     role: MembershipRole | Exclude<PlatformRole, "NONE">,
     context: RequestContext
   ): Promise<AuthState | null> {
+    // A session opened for the Member workspace owes no second factor,
+    // whatever the role (product decision, 13 Oct 2026: the Member login is
+    // email and password only). That session acts as a member — actingRole
+    // narrows it and the console gate refuses it any privileged console — so
+    // what AC-002 protects, the Owner, Admin and Support authority, is not in
+    // it. Those consoles still require MFA through the standard sign-in.
+    if (intent.kind === "tenant" && intent.workspace === "MEMBER") return null;
     // const required =
     // intent.kind === "platform" || roleRequiresMfa(role as MembershipRole);
     const required = mfaEnforcementEnabled() && (intent.kind === "platform" || roleRequiresMfa(role as MembershipRole));
@@ -1883,6 +2015,9 @@ export class AuthService {
     intendedWorkspace?: WorkspaceScope
   ): Promise<AuthState> {
     const workspace = toWorkspaceOption(membership);
+    // Decided once, here, so the MFA challenge and the session it completes
+    // name the same console.
+    const scope = await sessionWorkspaceFor(membership, intendedWorkspace);
 
     if (membership.tenant.status === "DELETED_PENDING") {
       return { state: "WORKSPACE_DELETING", user: publicUser, workspace };
@@ -1927,7 +2062,7 @@ export class AuthService {
         kind: "tenant",
         tenantId: membership.tenantId,
         membershipId: membership.id,
-        workspace: intendedWorkspace ?? workspaceScopeForRole(membership.role),
+        workspace: scope,
       },
       membership.role,
       context
@@ -1952,7 +2087,7 @@ export class AuthService {
 
     const session = await issueSession(
       membership,
-      intendedWorkspace ?? workspaceScopeForRole(membership.role),
+      scope,
       undefined,
       undefined,
       {
@@ -2043,6 +2178,19 @@ export class AuthService {
       throw new AppError("User account is disabled", 403, ErrorCodes.FORBIDDEN);
     }
 
+    // A console an admin has since removed from this person's mailbox is not
+    // renewed. Same rule and message as the per-request check, so the client
+    // handles both the same way: sign in again, landing in Member.
+    const scope = payload.workspace ?? workspaceScopeForRole(membership.role);
+    if (!consoleAuthorized(membership.role, scope, await mailboxWorkspacesFor(membership.id))) {
+      throw new AppError(
+        "Your access to this workspace was removed by an administrator. Sign in again to continue in the Member workspace.",
+        403,
+        ErrorCodes.WORKSPACE_ACCESS_NOT_ASSIGNED,
+        { workspace: scope }
+      );
+    }
+
     const session = await prisma.$transaction(async (tx) => {
       const claimed = await tx.refreshToken.updateMany({
         where: { id: storedToken.id, revokedAt: null },
@@ -2056,7 +2204,7 @@ export class AuthService {
       // than being re-scoped to whatever the role now allows.
       const nextSession = await issueSession(
         membership,
-        payload.workspace ?? workspaceScopeForRole(membership.role),
+        scope,
         tx,
         // Continue the same session across the rotation. A token minted
         // before session ids existed has no sid, and seeds one from its own
@@ -2374,6 +2522,7 @@ export class AuthService {
     userId: string;
     jti: string;
     expiresAt: Date;
+    workspace?: WorkspaceScope;
   } {
     let payload: unknown;
 
@@ -2402,6 +2551,7 @@ export class AuthService {
       userId: payload.sub,
       jti: payload.jti,
       expiresAt: new Date((exp ?? Math.floor(Date.now() / 1000)) * 1000),
+      workspace: payload.workspace === "MEMBER" ? "MEMBER" : undefined,
     };
   }
 

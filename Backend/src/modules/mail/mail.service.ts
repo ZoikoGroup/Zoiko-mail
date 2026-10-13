@@ -20,6 +20,8 @@ import { participantService } from "../participant/participant.service.js";
 import { jobService } from "../job/job.service.js";
 import { membershipService } from "../membership/membership.service.js";
 import { mailboxCleanupService } from "./mailbox-cleanup.service.js";
+import { memberLoginUrl, resolveWorkspaces } from "./mailbox-access.service.js";
+import { reachableWorkspaces } from "../../common/utils/workspaceScope.js";
 import type { BulkMailboxActionInput, CreateDraftInput, CreateLabelInput, ListMailInput, UpdateDraftInput, UpdateLabelInput, UpdateMailboxItemInput } from "./mail.schema.js";
 
 /**
@@ -73,6 +75,10 @@ interface MailContext {
   userId: string;
   membershipId: string;
   role: MembershipRole;
+  /** The console the session was opened for; absent for internal (system) contexts. */
+  workspace?: MembershipRole;
+  /** The membership's own role, which `role` may be narrowed from by the session. */
+  membershipRole?: MembershipRole;
   email: string;
   requestId?: string;
   ipAddress?: string | null;
@@ -172,6 +178,21 @@ export class MailService {
         tenantId: context.tenantId,
         membershipId: context.membershipId,
         address: context.email.toLowerCase(),
+        // Created implicitly on first use, so no admin chose anything: the
+        // Member workspace plus every console the person's role reaches.
+        // Without a mailbox the console gate already followed the role; the
+        // mailbox this creates must not narrow that, or an Admin whose first
+        // mail was read through the Member login would find the Admin console
+        // closed at their next sign-in. Admin-created mailboxes take the
+        // admin's selection (Member by default) instead.
+        workspaces: resolveWorkspaces([
+          "MEMBER",
+          ...(context.membershipRole
+            ? reachableWorkspaces(context.membershipRole)
+            : context.workspace
+              ? [context.workspace]
+              : []),
+        ]),
       },
       update: {},
     });
@@ -1779,7 +1800,13 @@ export class MailService {
   async listSendableMailboxes(context: MailContext) {
     const own = await this.mailbox(context);
     const shared = await prisma.mailboxAccess.findMany({
-      where: { tenantId: context.tenantId, membershipId: context.membershipId, canSend: true },
+      where: {
+        tenantId: context.tenantId,
+        membershipId: context.membershipId,
+        canSend: true,
+        // A shared mailbox not assigned to this workspace cannot be sent from here.
+        ...(context.workspace ? { mailbox: { workspaces: { has: context.workspace } } } : {}),
+      },
       select: {
         mailbox: { select: { id: true, address: true, type: true, sendSuspendedAt: true } },
       },
@@ -1826,6 +1853,7 @@ export class MailService {
       storageUsed: Number(mb.storageUsed),
       storageLimit: Number(mb.storageLimit),
       providerQuotaBytes: mb.providerQuotaBytes === null ? null : Number(mb.providerQuotaBytes),
+      memberLoginUrl: memberLoginUrl(mb.memberLoginKey),
     }));
   }
 
@@ -1865,6 +1893,8 @@ export class MailService {
           newMember?: { email: string; firstName?: string; lastName?: string };
           domainId?: string;
           localPart?: string;
+          /** Workspaces the mailbox opens in; Member only when omitted. */
+          workspaces?: MembershipRole[];
         },
     context: MailContext
   ) {
@@ -1872,6 +1902,7 @@ export class MailService {
     let membershipId = typeof input === "string" ? input : input.membershipId ?? "";
     const domainId = typeof input === "string" ? undefined : input.domainId;
     const requestedLocalPart = typeof input === "string" ? undefined : input.localPart;
+    const workspaces = resolveWorkspaces(typeof input === "string" ? undefined : input.workspaces);
 
     // A new person's mailbox has to be on a workspace domain: without one the
     // address would be their personal email, which the workspace does not own.
@@ -1993,6 +2024,7 @@ export class MailService {
         membershipId,
         domainId: resolvedDomainId,
         address,
+        workspaces,
       },
       include: {
         membership: {
@@ -2020,7 +2052,7 @@ export class MailService {
       requestId: context.requestId,
       ipAddress: context.ipAddress,
       userAgent: context.userAgent,
-      metadata: { address: mailbox.address, membershipId },
+      metadata: { address: mailbox.address, membershipId, workspaces },
     });
 
     return {

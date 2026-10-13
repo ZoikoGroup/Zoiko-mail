@@ -10,6 +10,7 @@ import {
   useMailboxes,
   useMailboxRouting,
   useSetMailboxAi,
+  useUpdateMailboxWorkspaces,
 } from "@/lib/admin-hooks";
 import { useCan } from "@/lib/admin-capabilities";
 import { StepUpDialog, useStepUp } from "@/components/admin/StepUpDialog";
@@ -20,6 +21,9 @@ import {
 } from "@/components/admin/MailboxDialogs";
 import { CreateEmailWizard } from "@/components/mailboxes/CreateEmailWizard";
 import { MailboxStatusCell } from "@/components/mailboxes/MailboxStatusCell";
+import { MailboxCredentialsDialog } from "@/components/mailboxes/MailboxCredentialsDialog";
+import { MemberLoginLinkDialog } from "@/components/mailboxes/MemberLoginLinkDialog";
+import { WorkspaceMultiSelect, workspaceSummary } from "@/components/mailboxes/WorkspaceMultiSelect";
 import { STATUS_LABEL, type MailboxDisplayStatus } from "@/lib/mailbox-provisioning-api";
 import {
   Card,
@@ -39,6 +43,7 @@ export default function AdminMailboxesPage() {
   const can = useCan();
   const { data: mailboxes, isLoading, error } = useMailboxes();
   const setAi = useSetMailboxAi();
+  const setWorkspaces = useUpdateMailboxWorkspaces();
   // Enabling AI on a mailbox is step-up (RBAC §2); restricting it is not, so
   // the safe direction stays one click.
   const stepUp = useStepUp();
@@ -56,7 +61,7 @@ export default function AdminMailboxesPage() {
   /** The mailbox whose sending or deletion is being decided, and which. */
   const [acting, setActing] = useState<{
     id: string;
-    kind: "sending" | "delete" | "delegate";
+    kind: "sending" | "delete" | "delegate" | "credentials" | "memberLogin";
   } | null>(null);
   const actingOn = mailboxes?.find((m) => m.id === acting?.id) ?? null;
   const suspended = mailboxes?.filter((m) => m.status === "SUSPENDED") ?? [];
@@ -73,6 +78,12 @@ export default function AdminMailboxesPage() {
       )}
       {actingOn && acting?.kind === "delete" && (
         <DeleteMailboxDialog mailbox={actingOn} onClose={() => setActing(null)} />
+      )}
+      {actingOn && acting?.kind === "credentials" && (
+        <MailboxCredentialsDialog mailbox={actingOn} onClose={() => setActing(null)} />
+      )}
+      {actingOn && acting?.kind === "memberLogin" && (
+        <MemberLoginLinkDialog mailbox={actingOn} onClose={() => setActing(null)} />
       )}
       {actingOn && acting?.kind === "delegate" && (
         <DelegateMailboxDialog mailbox={actingOn} onClose={() => setActing(null)} />
@@ -100,6 +111,13 @@ export default function AdminMailboxesPage() {
         Shared mailboxes live on the Groups screen, where assignments and their
         read, send, manage and assign permissions are set.
       </Notice>
+
+      {setWorkspaces.isError && (
+        <Notice tone="crit">
+          <b className="text-[var(--crit)]">Could not change workspace access.</b>{" "}
+          {(setWorkspaces.error as Error).message} The previous assignment was kept.
+        </Notice>
+      )}
 
       {setAi.isError && (
         <Notice tone="crit">
@@ -154,6 +172,7 @@ export default function AdminMailboxesPage() {
                   <Th>Type</Th>
                   <Th>Quota</Th>
                   <Th>AI</Th>
+                  <Th>Workspaces</Th>
                   <Th>Status</Th>
                   <Th srOnly>Actions</Th>
                 </tr>
@@ -210,6 +229,24 @@ export default function AdminMailboxesPage() {
                         </Pill>
                       </button>
                     </Td>
+                    <Td nowrap>
+                      {/*
+                        Which workspace consoles this mailbox opens in. The
+                        mail API refuses it from a console not ticked here, and
+                        for a personal mailbox it also decides whether its
+                        owner may sign into Admin, Owner or Support at all.
+                      */}
+                      {canManage ? (
+                        <WorkspaceMultiSelect
+                          label={`Workspaces for ${mailbox.address}`}
+                          value={mailbox.workspaces}
+                          pending={setWorkspaces.isPending && setWorkspaces.variables?.mailboxId === mailbox.id}
+                          onApply={(workspaces) => setWorkspaces.mutate({ mailboxId: mailbox.id, workspaces })}
+                        />
+                      ) : (
+                        <span className="text-[12px] text-[var(--ink3)]">{workspaceSummary(mailbox.workspaces)}</span>
+                      )}
+                    </Td>
                     <Td>
                       <MailboxStatusCell row={mailbox} canManage={canManage} />
                     </Td>
@@ -237,6 +274,26 @@ export default function AdminMailboxesPage() {
                               }
                             >
                               {mailbox.status === "SUSPENDED" ? "Resume" : "Stop sending"}
+                            </button>
+                            <button
+                              type="button"
+                              className="zoiko-btn sm"
+                              onClick={() => setActing({ id: mailbox.id, kind: "credentials" })}
+                              title={
+                                mailbox.type === "SHARED"
+                                  ? "Shared mailboxes have no password of their own"
+                                  : "Reset or change this mailbox's sign-in password"
+                              }
+                            >
+                              Credentials
+                            </button>
+                            <button
+                              type="button"
+                              className="zoiko-btn sm"
+                              onClick={() => setActing({ id: mailbox.id, kind: "memberLogin" })}
+                              title="Copy the Member sign-in link for this mailbox"
+                            >
+                              Member login
                             </button>
                             <button
                               type="button"
@@ -279,7 +336,7 @@ export default function AdminMailboxesPage() {
                   .filter((mailbox) => mailbox.id === openId)
                   .map((mailbox) => (
                     <tr key={`${mailbox.id}-routing`}>
-                      <td colSpan={6} className="bg-[var(--s2)] px-4 py-3">
+                      <td colSpan={7} className="bg-[var(--s2)] px-4 py-3">
                         <Routing mailboxId={mailbox.id} address={mailbox.address} />
                       </td>
                     </tr>

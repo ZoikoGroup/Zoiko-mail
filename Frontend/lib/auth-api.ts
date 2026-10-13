@@ -5,6 +5,25 @@ export interface LoginInput {
   email: string;
   password: string;
   tenantId?: string;
+  /**
+   * Set by the Member login only: the session opens the Member workspace
+   * whatever the account's role. The server accepts no other value.
+   */
+  workspace?: "MEMBER";
+}
+
+/** What a mailbox's Member sign-in link fills in. */
+export interface MemberLoginLink {
+  tenantId: string;
+  workspaceName: string;
+  mailboxAddress: string;
+  shared: boolean;
+  /** The owner's sign-in email; null for a shared mailbox. */
+  email: string | null;
+}
+
+export async function fetchMemberLoginLink(key: string): Promise<MemberLoginLink> {
+  return apiRequest<MemberLoginLink>(`/auth/member-login/${encodeURIComponent(key)}`, { auth: false });
 }
 
 export interface RegisterInput {
@@ -209,10 +228,13 @@ export async function login(input: LoginInput): Promise<AuthResponse> {
   return data;
 }
 
-export async function googleLogin(idToken: string): Promise<AuthResponse> {
+export async function googleLogin(
+  idToken: string,
+  options: { tenantId?: string; workspace?: "MEMBER" } = {}
+): Promise<AuthResponse> {
   const data = await apiRequest<AuthResponse>("/auth/google", {
     method: "POST",
-    body: { idToken },
+    body: { idToken, ...options },
     auth: false,
   });
   const { accessToken, refreshToken, platformToken } = extractTokens(data);

@@ -100,8 +100,11 @@ function refuse(actorRole: MembershipRole, role: MembershipRole, capability: str
   );
 }
 
-/** Acting on somebody who is already here. */
-function assertCanManageRole(actorRole: MembershipRole, role: MembershipRole): void {
+/**
+ * Acting on somebody who is already here. Exported so other screens that act
+ * on a person (the Mailboxes credential reset) observe the same ceiling.
+ */
+export function assertCanManageRole(actorRole: MembershipRole, role: MembershipRole): void {
   const capability = MANAGE_CAPABILITY[role];
   if (!can(capability, { role: actorRole, membershipActive: true })) {
     refuse(actorRole, role, capability);

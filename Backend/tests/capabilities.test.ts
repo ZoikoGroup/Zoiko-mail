@@ -30,6 +30,9 @@ const SPEC_ADMIN_CAPABILITIES: Capability[] = [
   // §2 "Assign roles": Admin = Limited — may act on an Admin, never an Owner.
   "people.member.manage",
   "people.admin.manage",
+  // Setting a mailbox owner's sign-in password: step-up, and never on an
+  // Owner (the service applies the same role ceiling as member management).
+  "people.credentials.reset",
   // §2 workspace rows.
   "workspace.settings.read",
   "workspace.settings.write",
@@ -365,8 +368,8 @@ describe("vocabulary integrity", () => {
     expect(orphans).toEqual([]);
   });
 
-  it("declares forty-one capabilities", () => {
-    expect(CAPABILITIES).toHaveLength(41);
-    expect(new Set(CAPABILITIES).size).toBe(41);
+  it("declares forty-two capabilities", () => {
+    expect(CAPABILITIES).toHaveLength(42);
+    expect(new Set(CAPABILITIES).size).toBe(42);
   });
 });

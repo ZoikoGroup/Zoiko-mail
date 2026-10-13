@@ -1,4 +1,5 @@
 import { apiRequest } from "./api-client";
+import type { MailboxWorkspace } from "./admin-api";
 
 /**
  * Hosted mailbox creation (Create Email).
@@ -48,6 +49,8 @@ export interface ProvisionMailboxInput {
   quotaBytes: number;
   initialAccess: "INVITE";
   recoveryEmail: string;
+  /** Workspace consoles the mailbox opens in. The server defaults to Member alone. */
+  workspaces?: MailboxWorkspace[];
 }
 
 export interface ProvisionedMailbox {

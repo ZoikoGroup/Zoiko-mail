@@ -70,7 +70,14 @@ function Get-DatabaseUrl {
   $line = (Select-String -Path (Join-Path $BackendDir '.env') -Pattern '^POSTGRES_PASSWORD=' -ErrorAction SilentlyContinue).Line
   if (-not $line) { throw "POSTGRES_PASSWORD not found in Backend\.env" }
   $pw = $line -replace '^POSTGRES_PASSWORD=', ''
-  return "postgresql://zoiko:$pw@localhost:$DbPort/zoiko_mail?schema=public"
+  # 127.0.0.1, not localhost. Windows resolves localhost to ::1 first, and the
+  # IPv6 side of Docker's port forward (wslrelay) can stay dead after the
+  # postgres container restarts: TCP still connects, the Postgres handshake
+  # never answers, and every API query fails after Prisma's 5s timeout with
+  # "Can't reach database server". IPv4 goes through Docker's own forward and
+  # keeps working — and it is what Test-Port checks, so the status table and
+  # the API now agree.
+  return "postgresql://zoiko:$pw@127.0.0.1:$DbPort/zoiko_mail?schema=public"
 }
 
 <#

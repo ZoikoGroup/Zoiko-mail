@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { Prisma, type MembershipRole } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 import { withCrossTenant } from "../../config/tenantScope.js";
+import { resolveWorkspaces } from "./mailbox-access.service.js";
 import { env } from "../../config/env.js";
 import { logger } from "../../config/logger.js";
 import { AppError } from "../../common/errors/AppError.js";
@@ -364,6 +365,8 @@ export class MailboxProvisioningService {
             provider: this.provider.name,
             provisioningStatus: "PENDING",
             invitationStatus,
+            // Member workspace only, unless the admin chose otherwise.
+            workspaces: resolveWorkspaces(input.workspaces),
           },
           select: { id: true },
         });

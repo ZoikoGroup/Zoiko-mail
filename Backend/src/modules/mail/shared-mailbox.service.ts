@@ -4,6 +4,7 @@ import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
 import { policyService } from "../policy/policy.service.js";
+import { mailboxNotInWorkspace } from "./mailbox-workspace.guard.js";
 
 /**
  * Shared and distribution mailboxes — Security §10 and §9.1.
@@ -266,7 +267,7 @@ export class SharedMailboxService {
    * the difference.
    */
   async resolveAccessibleMailbox(
-    context: { tenantId: string; membershipId: string },
+    context: { tenantId: string; membershipId: string; workspace?: MembershipRole },
     mailboxId: string,
     permission: MailboxPermission
   ) {
@@ -282,12 +283,21 @@ export class SharedMailboxService {
         membershipId: true,
         aiEnabled: true,
         sendSuspendedAt: true,
+        workspaces: true,
       },
     });
     if (!mailbox) throw new AppError("Mailbox not found", 404, ErrorCodes.NOT_FOUND);
 
+    // A mailbox only opens in the workspaces it is assigned to. Checked for
+    // the owner here as well as at the route, because this is the path every
+    // explicit ?mailboxId= read and send-as goes through.
+    const inWorkspace = !context.workspace || mailbox.workspaces.includes(context.workspace);
+
     // Your own mailbox needs no assignment.
-    if (mailbox.membershipId && mailbox.membershipId === context.membershipId) return mailbox;
+    if (mailbox.membershipId && mailbox.membershipId === context.membershipId) {
+      if (!inWorkspace) throw mailboxNotInWorkspace(context.workspace!, mailbox.address, mailbox.workspaces);
+      return mailbox;
+    }
 
     const access = await prisma.mailboxAccess.findUnique({
       where: {
@@ -299,6 +309,10 @@ export class SharedMailboxService {
     // 404 rather than 403 for an unassigned caller: whether a particular
     // shared mailbox exists is itself information they have no claim to.
     if (!access) throw new AppError("Mailbox not found", 404, ErrorCodes.NOT_FOUND);
+
+    // After the access check, so an unassigned caller still learns nothing
+    // about whether the mailbox exists.
+    if (!inWorkspace) throw mailboxNotInWorkspace(context.workspace!, mailbox.address, mailbox.workspaces);
 
     if (!access[permission]) {
       const needed = permission.replace("can", "").toLowerCase();

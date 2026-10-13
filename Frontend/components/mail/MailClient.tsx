@@ -66,6 +66,12 @@ import { ApiError } from "@/lib/api-client";
 function folderErrorReason(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 0) return error.message;
+    // The mailbox exists but an admin has not assigned it to the workspace
+    // this session opened. The server names both; switching workspace or
+    // asking for it to be assigned is the fix, not retrying.
+    if (error.code === "MAILBOX_NOT_IN_WORKSPACE") {
+      return `${error.message} Switch to one of those workspaces, or ask an admin to add this one under Mailboxes → Workspaces.`;
+    }
     if (error.status === 400) {
       return "The server did not accept this folder. It is usually running an older build than this screen — restart or rebuild the API, which also applies any new database migrations.";
     }

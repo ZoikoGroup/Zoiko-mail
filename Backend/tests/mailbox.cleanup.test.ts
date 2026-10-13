@@ -84,6 +84,8 @@ class FakeHost implements MailHostingProvider {
     if (this.deleteError) throw this.deleteError;
     return this.accounts.delete(id) ? "DELETED" : "ALREADY_ABSENT";
   }
+  /** Not exercised by cleanup; present because the provider contract has it. */
+  async setAccountPassword() {}
   async probe() {
     return { reachable: true, authenticated: true, managementCapability: true };
   }

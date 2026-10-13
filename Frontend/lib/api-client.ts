@@ -253,6 +253,17 @@ export async function apiRequest<T = unknown>(
         }
     }
 
+    // An admin removed this console from the person's mailbox. The server
+    // refuses every request and every refresh for it, so end the session here
+    // and say why; signing in again lands them in the Member workspace.
+    if (res.status === 403 && auth && errorCode === "WORKSPACE_ACCESS_NOT_ASSIGNED") {
+        setSignOutNotice(
+            json?.error?.message ??
+                "Your access to this workspace was removed by an administrator."
+        );
+        clearTokens();
+    }
+
     // No content
     if (res.status === 204) return undefined as T;
 

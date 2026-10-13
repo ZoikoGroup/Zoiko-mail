@@ -70,7 +70,12 @@ import {
   setMailboxAi,
   setMailboxSending,
   updateMember,
-  updateWorkspaceSettings
+  updateWorkspaceSettings,
+  updateMailboxWorkspaces,
+  regenerateMemberLoginLink,
+  fetchMailboxCredentialStatus,
+  resetMailboxCredentials,
+  sendMailboxCredentialResetEmail,
 } from "./admin-queries";
 import type {
   AuditPage,
@@ -96,6 +101,7 @@ import type {
   GuardrailDto,
   InvitationDto,
   MailboxDto,
+  MailboxWorkspace,
   MemberDto,
   MembershipRole,
   NotificationDto,
@@ -176,6 +182,74 @@ export function useSetMailboxAi() {
       stepUpToken?: string;
     }) => setMailboxAi(mailboxId, aiEnabled, stepUpToken),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["mailboxes"] }),
+  });
+}
+
+/**
+ * Replace the workspaces a mailbox opens in.
+ *
+ * Optimistic, so the table shows the new assignment at once; rolled back if
+ * the server refuses, and re-read either way so the row matches what was
+ * actually saved.
+ */
+export function useUpdateMailboxWorkspaces() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ mailboxId, workspaces }: { mailboxId: string; workspaces: MailboxWorkspace[] }) =>
+      updateMailboxWorkspaces(mailboxId, workspaces),
+    onMutate: async ({ mailboxId, workspaces }) => {
+      await qc.cancelQueries({ queryKey: ["mailboxes"] });
+      const previous = qc.getQueryData<MailboxDto[]>(["mailboxes"]);
+      qc.setQueryData<MailboxDto[]>(["mailboxes"], (rows) =>
+        rows?.map((row) => (row.id === mailboxId ? { ...row, workspaces } : row))
+      );
+      return { previous };
+    },
+    onError: (_error, _vars, context) => {
+      if (context?.previous) qc.setQueryData(["mailboxes"], context.previous);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["mailboxes"] }),
+  });
+}
+
+/** Replace a mailbox's Member sign-in link, then re-read the list so the row shows the new one. */
+export function useRegenerateMemberLoginLink() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (mailboxId: string) => regenerateMemberLoginLink(mailboxId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["mailboxes"] }),
+  });
+}
+
+/** What the credentials dialog may offer for one mailbox. Read fresh each time it opens. */
+export function useMailboxCredentialStatus(mailboxId: string | null) {
+  return useQuery({
+    queryKey: ["mailbox-credentials", mailboxId],
+    queryFn: () => fetchMailboxCredentialStatus(mailboxId!),
+    enabled: Boolean(mailboxId),
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+  });
+}
+
+/** Set the owner's password (step-up). */
+export function useResetMailboxCredentials() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { mailboxId: string; newPassword: string; confirmPassword: string; stepUpToken?: string }) =>
+      resetMailboxCredentials(vars.mailboxId, vars.newPassword, vars.confirmPassword, vars.stepUpToken),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["mailboxes"] });
+      qc.invalidateQueries({ queryKey: ["audit"] });
+    },
+  });
+}
+
+/** Email the owner a one-time reset code. */
+export function useSendMailboxCredentialResetEmail() {
+  return useMutation({
+    mutationFn: (mailboxId: string) => sendMailboxCredentialResetEmail(mailboxId),
   });
 }
 
