@@ -55,6 +55,13 @@ class FakeHost implements MailHostingProvider {
   async getAccount(id: string) {
     return [...this.accounts.values()].find((a) => a.id === id) ?? null;
   }
+  // Cleanup has its own suite (mailbox.cleanup.test.ts); creation never calls these.
+  async countMessages(): Promise<number> {
+    throw new StalwartError("not used by provisioning", "COUNT_UNAVAILABLE", false);
+  }
+  async deleteAccount(): Promise<"DELETED" | "ALREADY_ABSENT"> {
+    throw new StalwartError("not used by provisioning", "UNEXPECTED_RESPONSE", false);
+  }
   async createAccount(input: CreateHostedAccountInput) {
     this.createCalls.push(input);
     if (this.failBefore) {

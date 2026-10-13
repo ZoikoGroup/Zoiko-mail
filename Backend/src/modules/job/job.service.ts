@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import { providerMailService } from "../provider-mail/provider-mail.service.js";
 import { aiService } from "../ai/ai.service.js";
 import { deleteSecret } from "../../common/secrets/secrets.js";
+import { mailboxCleanupService } from "../mail/mailbox-cleanup.service.js";
 export class JobService {
   enqueue(input: { tenantId: string; userId: string; type: JobType; payload: Prisma.InputJsonValue; idempotencyKey: string }, tx: Prisma.TransactionClient = prisma) {
     return tx.backgroundJob.upsert({
@@ -320,13 +321,32 @@ export class JobService {
       policies: counts[3],
     };
     const receipt = await prisma.$transaction(async (tx) => {
+      // Every account this workspace holds on the mail host has to be removed
+      // as well, and the tenant delete below takes the rows that say they
+      // exist. The cleanup tasks are written here, in the same transaction, to
+      // a table with no relation to the tenant, so they survive it. The
+      // credential secrets are not in the best-effort list further down: a
+      // credential is deleted only after its account is confirmed gone.
+      const hostedMailboxCleanupTasks = await mailboxCleanupService.enqueueForErasure(
+        tx,
+        await tx.mailbox.findMany({
+          where: { tenantId, provider: { not: null } },
+          select: { id: true, tenantId: true, provider: true, providerAccountId: true, address: true },
+        }),
+        "TENANT_ERASURE",
+        { userId: actorUserId }
+      );
       const created = await tx.tenantDeletionReceipt.create({
         data: {
           tenantId,
           requestId,
           requestedByUserId: actorUserId,
           tenantNameHash: createHash("sha256").update(tenant.name).digest("hex"),
-          deletedRecordCounts,
+          // Only present when there was something to clean up, so a workspace
+          // with no hosted mailboxes gets the receipt it always did.
+          deletedRecordCounts: hostedMailboxCleanupTasks > 0
+            ? { ...deletedRecordCounts, hostedMailboxCleanupTasks }
+            : deletedRecordCounts,
         },
       });
       // audit_events is append-only (see migration

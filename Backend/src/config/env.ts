@@ -122,6 +122,23 @@ export const envSchema = z.object({
    * and provisioning fails with STALWART_DOMAIN_MISSING until it does.
    */
   STALWART_AUTO_CREATE_DOMAINS: boolFlag("true"),
+  /**
+   * Allow the cleanup worker to destroy accounts on Stalwart, and allow an
+   * admin to delete a hosted mailbox at all.
+   *
+   * Off by default and meant to stay off until the staging checks in
+   * docs/DEPLOYMENT.md are done: whether the management key may count another
+   * account's mail, and what destroying an account does to its stored mail,
+   * are not verified. With it off, deleting a hosted mailbox is refused
+   * (nothing is deleted and no orphan is left), and cleanup tasks that erasure
+   * has queued wait rather than run.
+   */
+  STALWART_DELETE_ENABLED: boolFlag("false"),
+  MAIL_CLEANUP_INTERVAL_MS: z.coerce.number().int().min(1_000).default(30_000),
+  /** How long a worker may hold a cleanup task before another may take it over. */
+  MAIL_CLEANUP_LEASE_MS: z.coerce.number().int().min(10_000).default(300_000),
+  /** Completed cleanup tasks are kept this long as evidence, then purged. */
+  MAIL_CLEANUP_RETENTION_DAYS: z.coerce.number().int().min(1).default(90),
   // Floor is 4 so the test suite can hash cheaply; anything below 10 is rejected
   // outside NODE_ENV=test by the refinement below. Without this the suite could
   // not boot at all, because tests/setup.ts sets 4 for speed.

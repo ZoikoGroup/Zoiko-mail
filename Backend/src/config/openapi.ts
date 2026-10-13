@@ -1483,13 +1483,32 @@ export const openApiDocument = {
         },
       },
       delete: {
-        tags: ["Mail"], summary: "Delete a mailbox (OWNER/ADMIN)",
+        tags: ["Mail"], summary: "Delete a mailbox (OWNER/ADMIN, step-up)",
+        description:
+          "A mailbox that was never hosted is deleted at once (200). A hosted mailbox is not: it is marked, and the account on the mail server is removed first by a background task (202, status DELETING); the Zoiko record is deleted only once the server confirms. Refused with nothing deleted when the mailbox holds mail here or on the server (409), when the server cannot confirm it is empty (503 MAIL_HOSTING_UNAVAILABLE), or when hosted deletion is not enabled on the deployment (503 MAILBOX_DELETE_DISABLED).",
         operationId: "adminDeleteMailbox", security: bearer,
         parameters: [{ name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
         responses: {
           "200": ok("Mailbox deleted"),
+          "202": ok("Hosted mailbox deletion accepted; see status DELETING"),
           "403": { $ref: "#/components/responses/Forbidden" },
           "404": { $ref: "#/components/responses/NotFound" },
+          "409": ok("The mailbox still holds mail, or is still being provisioned"),
+          "503": ok("Deletion is not enabled, or the mail server could not confirm the mailbox is empty"),
+        },
+      },
+    },
+    "/api/v1/mail/admin/mailboxes/{mailboxId}/deletion/retry": {
+      post: {
+        tags: ["Mail"], summary: "Retry a hosted mailbox deletion that ran out of attempts (OWNER/ADMIN, step-up)",
+        operationId: "retryMailboxDeletion", security: bearer,
+        parameters: [{ name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: {
+          "200": ok("The deletion is queued again"),
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+          "409": ok("There is no failed deletion to retry"),
+          "503": ok("Deletion is not enabled on this deployment"),
         },
       },
     },

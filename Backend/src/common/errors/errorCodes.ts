@@ -45,6 +45,12 @@ export const ErrorCodes = {
   // explain; it is never answered by creating a database-only mailbox.
   MAIL_HOSTING_NOT_CONFIGURED: "MAIL_HOSTING_NOT_CONFIGURED",
   PROVISIONING_IN_PROGRESS: "PROVISIONING_IN_PROGRESS",
+  // Deleting a hosted mailbox: the host could not be asked (or its answer
+  // could not be trusted), the mailbox still holds mail, or the deployment has
+  // not enabled deletion. Every one of these deletes nothing.
+  MAIL_HOSTING_UNAVAILABLE: "MAIL_HOSTING_UNAVAILABLE",
+  MAILBOX_NOT_EMPTY: "MAILBOX_NOT_EMPTY",
+  MAILBOX_DELETE_DISABLED: "MAILBOX_DELETE_DISABLED",
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];

@@ -180,3 +180,145 @@ describe("StalwartClient", () => {
     expect(await client.probe()).toEqual({ reachable: true, authenticated: false, managementCapability: false });
   });
 });
+
+const MAIL_SESSION = {
+  capabilities: { "urn:ietf:params:jmap:core": {}, "urn:ietf:params:jmap:mail": {}, "urn:stalwart:jmap": {} },
+  accounts: { acc1: { name: "john", isPersonal: false } },
+};
+
+const countResponse = (over: Record<string, unknown> = {}) => ({
+  json: { methodResponses: [["Email/query", { accountId: "acc1", total: 0, ids: [], ...over }, "c"]] },
+});
+
+describe("StalwartClient.countMessages", () => {
+  it("returns the total the server reports for exactly that account", async () => {
+    const { client, calls } = fakeServer(() => countResponse({ total: 42 }), MAIL_SESSION);
+    expect(await client.countMessages("acc1")).toBe(42);
+    const call = calls.find((c) => c.method === "POST")!;
+    expect(call.body.using).toEqual(["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"]);
+    expect(call.body.methodCalls[0][0]).toBe("Email/query");
+    expect(call.body.methodCalls[0][1]).toMatchObject({ accountId: "acc1", calculateTotal: true });
+  });
+
+  it("reads a genuine zero as zero", async () => {
+    const { client } = fakeServer(() => countResponse({ total: 0 }), MAIL_SESSION);
+    expect(await client.countMessages("acc1")).toBe(0);
+  });
+
+  it("fails closed when the session cannot address the account", async () => {
+    const { client, calls } = fakeServer(() => countResponse(), { ...MAIL_SESSION, accounts: { other: {} } });
+    await expect(client.countMessages("acc1")).rejects.toMatchObject({ code: "COUNT_UNAVAILABLE" });
+    // It never even asked: there was nothing to read the answer from.
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+  });
+
+  it("fails closed when the session does not offer the mail capability", async () => {
+    const { client } = fakeServer(() => countResponse(), {
+      ...MAIL_SESSION,
+      capabilities: { "urn:ietf:params:jmap:core": {}, "urn:stalwart:jmap": {} },
+    });
+    await expect(client.countMessages("acc1")).rejects.toMatchObject({ code: "COUNT_UNAVAILABLE" });
+  });
+
+  it("fails closed on every answer it cannot rely on", async () => {
+    const bad: Array<[string, Record<string, unknown>]> = [
+      ["no total", { total: undefined }],
+      ["string total", { total: "0" }],
+      ["negative total", { total: -1 }],
+      ["fractional total", { total: 1.5 }],
+      ["null total", { total: null }],
+      ["a different account", { accountId: "acc2", total: 0 }],
+    ];
+    for (const [label, over] of bad) {
+      const { client } = fakeServer(() => countResponse(over), MAIL_SESSION);
+      const error = await client.countMessages("acc1").catch((e) => e);
+      expect(error, label).toBeInstanceOf(StalwartError);
+      expect(error.code, label).toBe("COUNT_UNAVAILABLE");
+    }
+  });
+
+  it("fails closed when the response is not an Email/query answer", async () => {
+    const { client } = fakeServer(() => ({ json: { methodResponses: [["Email/get", { accountId: "acc1", list: [] }, "c"]] } }), MAIL_SESSION);
+    await expect(client.countMessages("acc1")).rejects.toMatchObject({ code: "COUNT_UNAVAILABLE" });
+  });
+
+  it("fails closed on a method-level refusal, whatever the server calls it", async () => {
+    for (const type of ["forbidden", "accountNotFound", "accountNotSupportedByMethod", "serverFail"]) {
+      const { client } = fakeServer(() => ({ json: { methodResponses: [["error", { type }, "c"]] } }), MAIL_SESSION);
+      const error = await client.countMessages("acc1").catch((e) => e);
+      expect(error, type).toMatchObject({ code: "COUNT_UNAVAILABLE", jmapType: type });
+    }
+  });
+
+  it("fails closed on HTTP and transport failures, keeping retryability", async () => {
+    for (const [status, retryable] of [[401, false], [403, false], [429, true], [503, true]] as const) {
+      const { client } = fakeServer(() => ({ status, json: {} }), MAIL_SESSION);
+      await expect(client.countMessages("acc1")).rejects.toMatchObject({ code: "COUNT_UNAVAILABLE", retryable });
+    }
+    const timeout = (async () => {
+      const error = new Error("timed out");
+      error.name = "TimeoutError";
+      throw error;
+    }) as unknown as typeof fetch;
+    const client = new StalwartClient({ fetch: timeout, token: async () => TOKEN, baseUrl: BASE, enabled: true });
+    await expect(client.countMessages("acc1")).rejects.toMatchObject({ code: "COUNT_UNAVAILABLE", retryable: true });
+  });
+
+  it("never lets the response body or the credential into the error", async () => {
+    const { client } = fakeServer(() => ({ status: 500, json: { detail: "secret-internal-detail" } }), MAIL_SESSION);
+    const error = await client.countMessages("acc1").catch((e) => e);
+    expect(String(error.message)).not.toContain("secret-internal-detail");
+    expect(String(error.message)).not.toContain(TOKEN);
+  });
+});
+
+describe("StalwartClient.deleteAccount", () => {
+  /** A server whose x:Account/set destroy is scripted, and whose get reports what remains. */
+  function destroyServer(setResult: Record<string, unknown>, stillThere = false) {
+    return fakeServer((body) => {
+      const method = body.methodCalls[0][0];
+      if (method === "x:Account/set") return { json: { methodResponses: [["x:Account/set", setResult, "d"]] } };
+      return { json: { methodResponses: [["x:Account/get", { list: stillThere ? [account] : [] }, "g"]] } };
+    });
+  }
+
+  it("destroys by id with the documented set shape and confirms by reading it back", async () => {
+    const { client, calls } = destroyServer({ destroyed: ["acc1"] });
+    expect(await client.deleteAccount("acc1")).toBe("DELETED");
+    const set = calls.filter((c) => c.method === "POST")[0]!;
+    expect(set.body.using).toEqual(["urn:ietf:params:jmap:core", "urn:stalwart:jmap"]);
+    expect(set.body.methodCalls[0][0]).toBe("x:Account/set");
+    expect(set.body.methodCalls[0][1]).toMatchObject({ destroy: ["acc1"] });
+    // The read-back is part of the contract: success is an account that is absent.
+    expect(calls.filter((c) => c.method === "POST")[1]!.body.methodCalls[0][0]).toBe("x:Account/get");
+  });
+
+  it("treats notFound as already gone", async () => {
+    const { client } = destroyServer({ notDestroyed: { acc1: { type: "notFound" } } });
+    expect(await client.deleteAccount("acc1")).toBe("ALREADY_ABSENT");
+  });
+
+  it("refuses to report success for an account that is still there", async () => {
+    const { client } = destroyServer({ destroyed: ["acc1"] }, true);
+    await expect(client.deleteAccount("acc1")).rejects.toMatchObject({ code: "UNEXPECTED_RESPONSE", retryable: true });
+  });
+
+  it("maps a refusal to a non-retryable code, forbidden included", async () => {
+    const forbidden = destroyServer({ notDestroyed: { acc1: { type: "forbidden" } } });
+    await expect(forbidden.client.deleteAccount("acc1")).rejects.toMatchObject({ code: "FORBIDDEN", retryable: false });
+    const other = destroyServer({ notDestroyed: { acc1: { type: "invalidProperties" } } });
+    await expect(other.client.deleteAccount("acc1")).rejects.toMatchObject({ code: "INVALID_REQUEST", retryable: false });
+  });
+
+  it("does not take silence for success", async () => {
+    for (const result of [{}, { destroyed: [] }, { destroyed: ["someone-else"] }, { notDestroyed: {} }]) {
+      const { client } = destroyServer(result);
+      await expect(client.deleteAccount("acc1")).rejects.toMatchObject({ code: "UNEXPECTED_RESPONSE", retryable: true });
+    }
+  });
+
+  it("maps a method-level forbidden error", async () => {
+    const { client } = fakeServer(() => ({ json: { methodResponses: [["error", { type: "forbidden" }, "d"]] } }));
+    await expect(client.deleteAccount("acc1")).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+});

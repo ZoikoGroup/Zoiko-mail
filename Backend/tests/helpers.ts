@@ -341,6 +341,10 @@ export async function registerUser(
     if (creatorRole === "OWNER" && tenantId && membershipId) {
       // The role lives in the token, so promotion only takes effect on a new
       // sign-in; the earlier ADMIN session is replaced by this one.
+      await prisma.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
       await prisma.tenantMembership.update({
         where: { id: membershipId },
         data: { role: "OWNER" },

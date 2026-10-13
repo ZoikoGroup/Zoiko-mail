@@ -8,7 +8,7 @@ import { domainService } from "../src/modules/domain/domain.service.js";
 import { dkimService } from "../src/modules/domain/dkim.service.js";
 import { runDueDomainSyncs } from "../src/modules/domain/domain.sync.js";
 import { clearSecretCache, getSecret } from "../src/common/secrets/secrets.js";
-import { authHeader, registerUser, stepUpHeader } from "./helpers.js";
+import { authHeader, loginUser, registerUser, stepUpHeader } from "./helpers.js";
 import { FakeDns } from "./dns-fakes.js";
 
 const app = createApp();
@@ -474,5 +474,42 @@ describe("configuration and lifecycle", () => {
     await request(app).get("/api/v1/domains/").set(authHeader(token)).expect(403);
     await request(app).post("/api/v1/domains/").set(authHeader(token)).send({ domainName: "nope.zoiko.test" }).expect(403);
     await request(app).get("/api/v1/domains/dns-providers").set(authHeader(token)).expect(403);
+  });
+
+  it("forbids a support seat from managing the workspace's domains", async () => {
+    const owner = await registerUser(app, { email: "dom-rbac-support-owner@zoiko.test" });
+    const seat = await registerUser(app, { email: "dom-rbac-support-seat@zoiko.test" });
+    await request(app)
+      .post("/api/v1/membership/members")
+      .set(authHeader(owner.accessToken))
+      .send({ email: seat.email, role: "SUPPORT" })
+      .expect(201);
+    const login = await loginUser(app, seat.email, seat.password, owner.tenantId);
+    const token = login.accessToken as string;
+
+    // Every route the domain router stacks on `workspace.domains.manage`.
+    // SUPPORT holds that capability in no form — the architecture keeps the
+    // support console and workspace domain management apart, and this pins
+    // the wall between them rather than assuming it.
+    const list = await request(app).get("/api/v1/domains/").set(authHeader(token)).expect(403);
+    expect(list.body.error.code).toBe("FORBIDDEN");
+    expect(list.body.error.details.capability).toBe("workspace.domains.manage");
+
+    await request(app)
+      .post("/api/v1/domains/")
+      .set(authHeader(token))
+      .send({ domainName: "support-nope.zoiko.test" })
+      .expect(403);
+    await request(app).get("/api/v1/domains/dns-providers").set(authHeader(token)).expect(403);
+    await request(app)
+      .post("/api/v1/domains/some-domain-id/diagnostics")
+      .set(authHeader(token))
+      .expect(403);
+
+    // The same seat still reads this workspace's domains through the support
+    // console, which opens on `support.workspace.investigate`. Denying one
+    // must not deny the other.
+    const readable = await request(app).get("/api/v1/support/domains").set(authHeader(token)).expect(200);
+    expect(Array.isArray(readable.body.data.domains)).toBe(true);
   });
 });

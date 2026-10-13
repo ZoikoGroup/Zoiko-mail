@@ -5,6 +5,7 @@ import { mailService } from "./mail.service.js";
 import { sharedMailboxService } from "./shared-mailbox.service.js";
 import { aliasService } from "./alias.service.js";
 import { mailboxProvisioningService } from "./mailbox-provisioning.service.js";
+import { mailboxCleanupService } from "./mailbox-cleanup.service.js";
 
 function context(req: Request) {
   const tenant = req.tenantContext!;
@@ -367,8 +368,17 @@ export const adminUpdateMailbox = asyncHandler(async (req: Request, res: Respons
   ), req.requestId);
 });
 
+/**
+ * 200 when the mailbox is gone; 202 for a hosted mailbox, whose deletion
+ * finishes once the mail host confirms the account is removed.
+ */
 export const adminDeleteMailbox = asyncHandler(async (req: Request, res: Response) => {
-  sendSuccess(res, 200, await mailService.adminDeleteMailbox(req.tenantContext!.tenantId, String(req.params.mailboxId), context(req)), req.requestId);
+  const result = await mailService.adminDeleteMailbox(req.tenantContext!.tenantId, String(req.params.mailboxId), context(req));
+  sendSuccess(res, result.deleted ? 200 : 202, result, req.requestId);
+});
+
+export const retryMailboxDeletion = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailboxCleanupService.retryDeletion(String(req.params.mailboxId), context(req)), req.requestId);
 });
 
 // ─── Add these to mail.controller.ts ─────────────────────────────────────────

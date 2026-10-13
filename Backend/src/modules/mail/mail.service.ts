@@ -19,6 +19,7 @@ import { sharedMailboxService } from "./shared-mailbox.service.js";
 import { participantService } from "../participant/participant.service.js";
 import { jobService } from "../job/job.service.js";
 import { membershipService } from "../membership/membership.service.js";
+import { mailboxCleanupService } from "./mailbox-cleanup.service.js";
 import type { BulkMailboxActionInput, CreateDraftInput, CreateLabelInput, ListMailInput, UpdateDraftInput, UpdateLabelInput, UpdateMailboxItemInput } from "./mail.schema.js";
 
 /**
@@ -2153,9 +2154,19 @@ export class MailService {
   async adminDeleteMailbox(tenantId: string, mailboxId: string, context: MailContext) {
     const mailbox = await prisma.mailbox.findFirst({
       where: { id: mailboxId, tenantId },
-      select: { id: true, address: true },
+      select: { id: true, address: true, provider: true },
     });
     if (!mailbox) throw new AppError("Mailbox not found", 404, ErrorCodes.NOT_FOUND);
+
+    // A mailbox with an account on the mail host is not deleted here: the row
+    // stays until the host confirms the account is gone, so a failure leaves a
+    // visible, retryable deletion rather than an orphaned account. It returns
+    // not-yet-deleted; the worker finishes it. A mailbox that was never hosted
+    // takes the path below, exactly as before.
+    if (mailbox.provider) {
+      const requested = await mailboxCleanupService.requestDeletion(mailboxId, context);
+      if (requested) return requested;
+    }
 
     // This used to refuse any mailbox holding mail, which is every mailbox
     // anybody has used — so Delete could never succeed. Deleting a mailbox
