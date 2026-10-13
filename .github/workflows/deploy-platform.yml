@@ -1,0 +1,21 @@
+name: Deploy platform
+on:
+  workflow_dispatch:
+concurrency:
+  group: deploy-platform
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PLATFORM_HOST }}
+          username: ${{ secrets.PLATFORM_USER }}
+          key: ${{ secrets.PLATFORM_SSH_KEY }}
+          command_timeout: 25m
+          script: |
+            set -e
+            zoikomail-deploy
+            curl -fsS https://api.zoikomail.com/api/ready
