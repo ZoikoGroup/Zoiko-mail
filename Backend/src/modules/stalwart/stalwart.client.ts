@@ -3,9 +3,11 @@ import { logger } from "../../config/logger.js";
 import { getSecret, invalidateSecret } from "../../common/secrets/secrets.js";
 import {
   JMAP_CORE,
+  JMAP_MAIL,
   STALWART_CAPABILITY,
   StalwartError,
   type CreateHostedAccountInput,
+  type DeleteAccountResult,
   type HostedAccount,
   type HostedDomain,
   type MailHostingProvider,
@@ -18,6 +20,10 @@ interface SessionInfo {
   apiUrl: string;
   /** The account management calls run against, when the session names one. */
   accountId?: string;
+  /** Capability URIs the session advertises. */
+  capabilities: ReadonlySet<string>;
+  /** Ids of the accounts this credential can address (RFC 8620 §2 `accounts`). */
+  accountIds: ReadonlySet<string>;
   expiresAt: number;
 }
 
@@ -166,12 +172,17 @@ export class StalwartClient implements MailHostingProvider {
     this.session = {
       apiUrl,
       accountId: typeof primary === "string" ? primary : undefined,
+      capabilities: new Set(Object.keys(body.capabilities)),
+      accountIds: new Set(isRecord(body.accounts) ? Object.keys(body.accounts) : []),
       expiresAt: Date.now() + SESSION_TTL_MS,
     };
     return this.session;
   }
 
-  private async call(invocations: Invocation[]): Promise<Map<string, [string, Record<string, unknown>]>> {
+  private async call(
+    invocations: Invocation[],
+    using: string[] = [JMAP_CORE, STALWART_CAPABILITY]
+  ): Promise<Map<string, [string, Record<string, unknown>]>> {
     const session = await this.resolveSession();
     const methodCalls = invocations.map(([method, args, id]) => [
       method,
@@ -180,7 +191,7 @@ export class StalwartClient implements MailHostingProvider {
     ]);
     const body = await this.http(session.apiUrl, {
       method: "POST",
-      body: { using: [JMAP_CORE, STALWART_CAPABILITY], methodCalls },
+      body: { using, methodCalls },
     });
     if (!isRecord(body) || !Array.isArray(body.methodResponses)) {
       fail("Stalwart returned an unexpected JMAP response", "UNEXPECTED_RESPONSE", true);
@@ -345,6 +356,84 @@ export class StalwartClient implements MailHostingProvider {
     if (!account) fail("Stalwart reported the account created but cannot find it", "UNEXPECTED_RESPONSE", true);
     logger.info({ provider: "stalwart", accountId: id }, "Stalwart account created");
     return account;
+  }
+
+  /**
+   * How many messages the account holds — or a refusal to say.
+   *
+   * Uses the standard JMAP `Email/query` with `calculateTotal` (RFC 8621
+   * §4.4, RFC 8620 §5.5) against the account being counted. Whether Stalwart
+   * lets the management key query another account's mail is NOT verified:
+   * Stalwart's documentation names the impersonate permission as the way to
+   * reach other mailboxes over JMAP and says administrator credentials should
+   * not be used for mail access. So this fails closed. Every doubt — the
+   * session not advertising the mail capability or not listing the account,
+   * any error from the server, a missing or non-integer total, a response
+   * about a different account — throws COUNT_UNAVAILABLE. It never returns a
+   * number it did not read, and "could not tell" is never zero.
+   */
+  async countMessages(accountId: string): Promise<number> {
+    const unavailable = (reason: string, retryable: boolean, cause?: StalwartError): never =>
+      fail(`Could not establish how many messages the account holds: ${reason}`, "COUNT_UNAVAILABLE", retryable, cause?.httpStatus, cause?.jmapType);
+
+    let responses: Map<string, [string, Record<string, unknown>]>;
+    try {
+      const session = await this.resolveSession();
+      if (!session.capabilities.has(JMAP_MAIL)) return unavailable("the session does not offer the mail capability", false);
+      if (!session.accountIds.has(accountId)) return unavailable("the credential cannot address that account", false);
+      responses = await this.call(
+        [["Email/query", { accountId, calculateTotal: true, limit: 1 }, "c"]],
+        [JMAP_CORE, JMAP_MAIL]
+      );
+    } catch (error) {
+      if (error instanceof StalwartError) return unavailable(error.message, error.retryable, error);
+      throw error;
+    }
+
+    const response = responses.get("c");
+    if (!response || response[0] !== "Email/query") return unavailable("unexpected response", true);
+    const args = response[1];
+    if (args.accountId !== accountId) return unavailable("the answer was for a different account", false);
+    const total = args.total;
+    if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0) return unavailable("no reliable total in the answer", true);
+    return total;
+  }
+
+  /**
+   * Destroy an account (`x:Account/set` with `destroy`, which needs the
+   * `sysAccountDestroy` permission — Stalwart account object reference).
+   *
+   * An account that is already gone counts as deleted: a retry after a lost
+   * response, or an operator removing it by hand, must be able to finish.
+   * Success is only reported once the account reads back as absent. What
+   * happens to the account's stored mail is not documented by Stalwart and is
+   * not verified here.
+   */
+  async deleteAccount(id: string): Promise<DeleteAccountResult> {
+    const responses = await this.call([["x:Account/set", { destroy: [id] }, "d"]]);
+    const response = responses.get("d");
+    if (!response) fail("Stalwart returned no set response", "UNEXPECTED_RESPONSE", true);
+    const args = response[1];
+
+    let result: DeleteAccountResult;
+    if (Array.isArray(args.destroyed) && args.destroyed.includes(id)) {
+      result = "DELETED";
+    } else {
+      const refusal = isRecord(args.notDestroyed) ? args.notDestroyed[id] : undefined;
+      if (!isRecord(refusal)) fail("Stalwart did not confirm the account was destroyed", "UNEXPECTED_RESPONSE", true);
+      const type = typeof refusal.type === "string" ? refusal.type : "unknown";
+      if (type === "notFound") {
+        result = "ALREADY_ABSENT";
+      } else if (type === "forbidden") {
+        fail("The Stalwart API key lacks the required permission", "FORBIDDEN", false, undefined, type);
+      } else {
+        fail("Stalwart refused to destroy the account", "INVALID_REQUEST", false, undefined, type);
+      }
+    }
+
+    if (await this.getAccount(id)) fail("Stalwart reported the account destroyed but it is still there", "UNEXPECTED_RESPONSE", true);
+    logger.info({ provider: "stalwart", accountId: id, result }, "Stalwart account removed");
+    return result;
   }
 
   async probe() {

@@ -15,6 +15,8 @@
 
 export const JMAP_CORE = "urn:ietf:params:jmap:core";
 export const STALWART_CAPABILITY = "urn:stalwart:jmap";
+/** RFC 8621. Only used to count an account's mail before it is destroyed. */
+export const JMAP_MAIL = "urn:ietf:params:jmap:mail";
 
 /** Errors the provider can raise, in terms the provisioning flow can act on. */
 export type StalwartErrorCode =
@@ -29,7 +31,14 @@ export type StalwartErrorCode =
   | "DOMAIN_MISSING"
   | "INVALID_REQUEST"
   | "NOT_SUPPORTED"
-  | "UNEXPECTED_RESPONSE";
+  | "UNEXPECTED_RESPONSE"
+  /**
+   * The number of messages in an account could not be established reliably:
+   * the key may not read that account's mail, or the answer was missing,
+   * malformed or about another account. Callers must treat this as "not known
+   * to be empty" and refuse — never as zero.
+   */
+  | "COUNT_UNAVAILABLE";
 
 /**
  * A failure talking to Stalwart.
@@ -76,6 +85,9 @@ export interface CreateHostedAccountInput {
   description: string;
 }
 
+/** What destroying an account found. Both mean the account is gone. */
+export type DeleteAccountResult = "DELETED" | "ALREADY_ABSENT";
+
 /**
  * What the provisioning flow needs from a mail host.
  *
@@ -89,6 +101,16 @@ export interface MailHostingProvider {
   createDomain(domainName: string): Promise<HostedDomain>;
   findAccount(name: string, domainId: string): Promise<HostedAccount | null>;
   getAccount(id: string): Promise<HostedAccount | null>;
+  /**
+   * The number of messages the account holds, or a thrown `StalwartError`.
+   * Never returns a guess: any doubt about the answer throws COUNT_UNAVAILABLE.
+   */
+  countMessages(accountId: string): Promise<number>;
+  /**
+   * Destroy an account. "Not found" is success (it is already gone), and a
+   * destroyed account is read back to confirm it is absent before returning.
+   */
+  deleteAccount(id: string): Promise<DeleteAccountResult>;
   createAccount(input: CreateHostedAccountInput): Promise<HostedAccount>;
   /** Authenticated session check: credentials valid and management capability present. */
   probe(): Promise<{ reachable: boolean; authenticated: boolean; managementCapability: boolean }>;

@@ -12,6 +12,7 @@ import { apiRequest } from "./api-client";
 export type ProvisioningStatus = "PENDING" | "PROVISIONING" | "PROVISIONED" | "FAILED";
 export type InvitationStatus = "NOT_REQUIRED" | "PENDING" | "SENT" | "FAILED";
 export type MailboxDisplayStatus =
+  | "DELETING"
   | "ACTIVE"
   | "PROVISIONING"
   | "INVITATION_PENDING"
@@ -121,10 +122,13 @@ export function resendMailboxInvitation(mailboxId: string): Promise<ProvisionedM
  * invitation nobody has accepted yet.
  */
 export function mailboxDisplayStatus(row: {
+  deletionRequestedAt?: string | null;
   provisioningStatus?: ProvisioningStatus | null;
   sendSuspendedAt?: string | null;
   membership?: { status?: string } | null;
 }): MailboxDisplayStatus {
+  // A requested deletion outranks everything, as on the server.
+  if (row.deletionRequestedAt) return "DELETING";
   if (row.provisioningStatus === "FAILED") return "FAILED";
   if (row.provisioningStatus === "PENDING" || row.provisioningStatus === "PROVISIONING") return "PROVISIONING";
   if (row.sendSuspendedAt) return "SUSPENDED";
@@ -133,6 +137,7 @@ export function mailboxDisplayStatus(row: {
 }
 
 export const STATUS_LABEL: Record<MailboxDisplayStatus, string> = {
+  DELETING: "Deleting",
   ACTIVE: "Active",
   PROVISIONING: "Provisioning",
   INVITATION_PENDING: "Invitation Pending",
@@ -141,6 +146,7 @@ export const STATUS_LABEL: Record<MailboxDisplayStatus, string> = {
 };
 
 export const STATUS_TONE: Record<MailboxDisplayStatus, "ok" | "warn" | "crit" | "ai" | "nu"> = {
+  DELETING: "warn",
   ACTIVE: "ok",
   PROVISIONING: "ai",
   INVITATION_PENDING: "warn",

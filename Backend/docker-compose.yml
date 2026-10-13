@@ -69,6 +69,11 @@ services:
       STALWART_API_TOKEN_REF: ${STALWART_API_TOKEN_REF:-stalwart-api-token}
       STALWART_TIMEOUT_MS: ${STALWART_TIMEOUT_MS:-15000}
       STALWART_AUTO_CREATE_DOMAINS: ${STALWART_AUTO_CREATE_DOMAINS:-true}
+      # Off until the staging checks in docs/DEPLOYMENT.md pass.
+      STALWART_DELETE_ENABLED: ${STALWART_DELETE_ENABLED:-false}
+      MAIL_CLEANUP_INTERVAL_MS: ${MAIL_CLEANUP_INTERVAL_MS:-30000}
+      MAIL_CLEANUP_LEASE_MS: ${MAIL_CLEANUP_LEASE_MS:-300000}
+      MAIL_CLEANUP_RETENTION_DAYS: ${MAIL_CLEANUP_RETENTION_DAYS:-90}
       # Where secrets live: DKIM private keys, DNS provider credentials and
       # connector tokens. The file store's default is inside the image, which
       # a rebuild wipes — so it sits on the persistent storage volume here.

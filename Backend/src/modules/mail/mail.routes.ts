@@ -199,6 +199,14 @@ mailRouter.post("/admin/mailboxes", requireCapability("workspace.mailboxes.manag
 // suspended first and an export offered; that sequencing is the console's,
 // but the fresh authentication is enforced here.
 mailRouter.delete("/admin/mailboxes/:mailboxId", requireCapability("workspace.mailboxes.delete"), validate(mailboxIdParamsSchema, "params"), controller.adminDeleteMailbox);
+// Puts a dead-lettered hosted deletion back in the queue. Same capability as
+// the delete it continues, so it needs the same fresh authentication.
+mailRouter.post(
+  "/admin/mailboxes/:mailboxId/deletion/retry",
+  requireCapability("workspace.mailboxes.delete"),
+  validate(mailboxIdParamsSchema, "params"),
+  controller.retryMailboxDeletion
+);
 // Declared before the ":mailboxId" patch so "sending" is not read as an update
 // field set on the mailbox itself.
 mailRouter.patch(

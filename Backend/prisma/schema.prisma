@@ -376,6 +376,13 @@ model Mailbox {
   invitationStatus     MailboxInvitationStatus? @map("invitation_status")
   invitationSentAt     DateTime?        @map("invitation_sent_at")
   invitationError      String?          @map("invitation_error")
+  /// Set when an admin asked for a hosted mailbox to be deleted. The row is
+  /// kept until the mail host confirms the account is gone, so a failed
+  /// deletion stays visible and retryable. Null for every other mailbox.
+  deletionRequestedAt  DateTime?        @map("deletion_requested_at")
+  /// A safe code for why a requested deletion has not finished (never a
+  /// provider response body).
+  deletionError        String?          @map("deletion_error")
   createdAt            DateTime         @default(now()) @map("created_at")
   updatedAt            DateTime         @updatedAt @map("updated_at")
   tenant               Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -1511,6 +1518,75 @@ enum MailboxInvitationStatus {
   PENDING
   SENT
   FAILED
+}
+
+enum MailProviderCleanupStatus {
+  /// Waiting to run. Also the state between retries.
+  PENDING
+  /// Leased by a worker. Reclaimable once the lease expires.
+  RUNNING
+  /// The host account is gone and the credential secret is removed.
+  COMPLETED
+  /// Refused on purpose — the account holds mail, or is not ours — and needs a person.
+  BLOCKED
+  /// Retries exhausted or a non-retryable refusal. The dead-letter state.
+  FAILED
+}
+
+enum MailProviderCleanupReason {
+  ADMIN_DELETE
+  USER_ERASURE
+  TENANT_ERASURE
+}
+
+/// Work still owed to the mail host after a Zoiko mailbox is deleted.
+///
+/// Deliberately has no foreign keys. It is written in the same transaction
+/// that deletes the mailbox, the member or the whole workspace, and it has to
+/// outlive all three: a relation to Tenant would cascade-delete the very task
+/// that says an account on the host still has to be removed.
+model MailProviderCleanupTask {
+  id                String                    @id @default(uuid()) @db.Uuid
+  tenantId          String                    @map("tenant_id") @db.Uuid
+  /// One task per mailbox, which is what makes enqueueing idempotent.
+  mailboxId         String                    @map("mailbox_id") @db.Uuid
+  provider          MailHostProvider
+  /// Null when the host account may exist but the row never recorded it, for
+  /// instance a provisioning that died between "account created" and the
+  /// database update. The worker then finds it by name and ownership marker.
+  providerAccountId String?                   @map("provider_account_id")
+  /// Needed to find an unrecorded account and to prove ownership. Replaced by
+  /// a hash once an erasure task completes.
+  address           String
+  /// The secret-store reference only, never a value.
+  credentialRef     String                    @map("credential_ref")
+  reason            MailProviderCleanupReason
+  /// An admin delete refuses to destroy an account that holds mail; an erasure
+  /// is already an authorised destruction of the data.
+  requireEmpty      Boolean                   @map("require_empty")
+  status            MailProviderCleanupStatus @default(PENDING)
+  attempts          Int                       @default(0)
+  maxAttempts       Int                       @default(10) @map("max_attempts")
+  runAt             DateTime                  @default(now()) @map("run_at")
+  /// The lease. A RUNNING row whose lock is older than the lease is reclaimed.
+  lockedAt          DateTime?                 @map("locked_at")
+  /// Checkpoints, so a retry resumes rather than repeating work.
+  providerGoneAt    DateTime?                 @map("provider_gone_at")
+  secretRemovedAt   DateTime?                 @map("secret_removed_at")
+  /// A safe code only (never a provider response body).
+  lastErrorCode     String?                   @map("last_error_code")
+  /// DELETED, ALREADY_ABSENT, NON_EMPTY, OWNERSHIP_MISMATCH.
+  outcome           String?
+  requestedByUserId String?                   @map("requested_by_user_id") @db.Uuid
+  requestId         String?                   @map("request_id")
+  completedAt       DateTime?                 @map("completed_at")
+  createdAt         DateTime                  @default(now()) @map("created_at")
+  updatedAt         DateTime                  @updatedAt @map("updated_at")
+
+  @@unique([mailboxId])
+  @@index([status, runAt])
+  @@index([tenantId])
+  @@map("mail_provider_cleanup_tasks")
 }
 
 enum MailFolder {

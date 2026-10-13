@@ -61,7 +61,7 @@ STALWART_TIMEOUT_MS=15000
 STALWART_AUTO_CREATE_DOMAINS=true
 ```
 
-1. **Create a dedicated API key in Stalwart** (WebUI → Account → Credentials → API Keys) for a service account. Use the permission mode *Replace* and grant only `authenticate`, `sysAccountGet`, `sysAccountQuery`, `sysAccountCreate`, `sysDomainGet`, `sysDomainQuery` and `sysDomainCreate`. Leave out every `*Destroy` permission. The key is shown once.
+1. **Create a dedicated API key in Stalwart** (WebUI → Account → Credentials → API Keys) for a service account. Use the permission mode *Replace* and grant only `authenticate`, `sysAccountGet`, `sysAccountQuery`, `sysAccountCreate`, `sysDomainGet`, `sysDomainQuery` and `sysDomainCreate`. Leave out every `*Destroy` permission **for as long as deletion is off** (see *Deleting hosted mailboxes* below, which is the only reason to add `sysAccountDestroy`). The key is shown once.
 2. **Store the key in the secret store**, never in `.env` or the compose file:
    - `SECRET_STORE=gcp`: create the secret named by `STALWART_API_TOKEN_REF` in Secret Manager.
    - `SECRET_STORE=env`: write it to `$SECRET_FILE_DIR/stalwart-api-token.secret` (in docker-compose, `/app/storage/secrets/` on the `zoiko_storage` volume), readable only by the API user.
@@ -94,7 +94,56 @@ Run against a staging Stalwart, never against production mailboxes.
 - [ ] `audit_events` shows `MAILBOX_PROVISIONING_REQUESTED`, `MAILBOX_PROVISIONED` and `MAILBOX_INVITATION_SENT`, with no password or token in metadata. API logs contain no API key, password or invitation token.
 - [ ] Send and receive a test message to and from the new address once the DNS readiness checks pass.
 
-Not handled yet: deleting a mailbox and changing its quota update Zoiko only, not Stalwart; reading and sending mail for these mailboxes still goes through the existing single-account IMAP/SMTP pilot configuration.
+Not handled yet: changing a mailbox's quota updates Zoiko only, not Stalwart; reading and sending mail for these mailboxes still goes through the existing single-account IMAP/SMTP pilot configuration.
+
+### Deleting hosted mailboxes
+
+Deleting a hosted mailbox, erasing a member, or erasing a workspace has to remove the account on Stalwart as well. Zoiko records that work in a durable table (`mail_provider_cleanup_tasks`, written in the same transaction that deletes its own rows, with no foreign keys so it survives the tenant) and a background worker does it.
+
+**It is off by default and must stay off until the checks below pass:**
+
+```env
+STALWART_DELETE_ENABLED=false     # default
+MAIL_CLEANUP_INTERVAL_MS=30000    # how often the worker looks for due tasks
+MAIL_CLEANUP_LEASE_MS=300000      # a task held longer than this is taken over (worker crash)
+MAIL_CLEANUP_RETENTION_DAYS=90    # completed tasks are kept this long, then purged
+```
+
+While it is off: an admin's request to delete a hosted mailbox is refused (`503 MAILBOX_DELETE_DISABLED`) and nothing changes — no orphaned account, no half-deleted row. Mailboxes that were never hosted delete exactly as before. Tasks queued by member or workspace erasure are still written, and wait: the worker does not run and uses no attempts. Turning the flag on lets them run.
+
+**What is verified, and what is not.** Against Stalwart's published documentation (account object reference, https://stalw.art/docs/ref/object/account/):
+
+| Behaviour | Status |
+|---|---|
+| Destroy is `x:Account/set` with `destroy: [id]`, standard JMAP set semantics | Documented |
+| Destroy needs the `sysAccountDestroy` permission | Documented |
+| `description` is a free-text account property (carries the `zoiko:mailbox:<id>` marker) | Documented |
+| `usedDiskQuota` is a server-set byte count; there is **no message-count property** | Documented. It is deliberately not used as a substitute for a count |
+| The management API key may query another account's mail (`Email/query`, `accountId`) | **Not verified.** Stalwart documents the *impersonate* permission as the way to reach other mailboxes over JMAP, and advises against using administrator credentials for mail access. Until this is verified the count fails closed (`COUNT_UNAVAILABLE`), so an admin delete is refused rather than assumed safe |
+| What destroying an account does to its stored mail | **Not documented.** Erasure relies on it; confirm it |
+| The response shape of a refused destroy (`notDestroyed` with `notFound`/`forbidden`) | Standard RFC 8620; confirm against the server |
+
+**The count never guesses.** `countMessages` returns a number only for a reliably read, non-negative integer total for exactly the account asked about. A session that does not list the account, does not offer the JMAP mail capability, any error, or any malformed answer is "could not tell", and an admin delete is refused. Do not grant the *impersonate* permission to the management key to make it pass without a deliberate security decision: it would let that key read every customer's mail.
+
+**Ownership is proved before any account is destroyed.** The account must carry `zoiko:mailbox:<mailboxId>` in its description and have the mailbox's own name and domain. Anything else is left alone and the task is marked blocked.
+
+**Permission to add, only when deletion is enabled:** `sysAccountDestroy` (and keep `sysAccountGet`/`sysAccountQuery`). Without it a destroy is refused (`FORBIDDEN`) and the task is dead-lettered with a visible error.
+
+**Migration:** `20261013120000_mail_provider_cleanup` is additive (two nullable columns on `mailboxes`, one new table and its enums, with row-level security). Review it, take a backup, and apply it with `prisma migrate deploy` as usual. It has been applied only to the local throwaway test database.
+
+#### Staging checks before enabling `STALWART_DELETE_ENABLED`
+
+Run against a staging Stalwart with test mailboxes, never production customers.
+
+- [ ] Using the management key: `Email/query` with `calculateTotal` on a *test* account returns the right total — or is refused. If refused, decide deliberately how to count (do not use `usedDiskQuota` as a stand-in, and do not add *impersonate* casually). Until then keep deletion off.
+- [ ] A mailbox holding a few messages: `DELETE /mail/admin/mailboxes/:id` returns `409 MAILBOX_NOT_EMPTY`; nothing is destroyed.
+- [ ] An empty hosted mailbox: returns `202`, status *Deleting*; within a worker interval the account disappears from Stalwart, then the Zoiko row, then the secret `mailbox-credential-<id>`; `audit_events` has `MAILBOX_DELETION_REQUESTED`, `MAILBOX_DELETED`, `MAILBOX_PROVIDER_CLEANUP_COMPLETED`.
+- [ ] The same address can be created again afterwards, as a new account.
+- [ ] Destroying an account really removes its stored mail (check blob storage / the account's data), since erasure depends on it.
+- [ ] Remove `sysAccountDestroy` from the key: the task is dead-lettered (`STALWART_FORBIDDEN`), the mailbox stays *Deleting* with the error shown. Restore it, call `POST /mail/admin/mailboxes/:id/deletion/retry`: it completes.
+- [ ] Rename an account's description in the WebUI so the marker is gone, then delete its mailbox: the task is *blocked* (`OWNERSHIP_MISMATCH`) and the account is untouched.
+- [ ] Stop the API mid-deletion and restart it: the task is taken over after `MAIL_CLEANUP_LEASE_MS` and finishes without creating or destroying anything twice.
+- [ ] Erase a test member who has a hosted mailbox, and a test workspace: the tasks are written, survive the tenant, and the accounts are removed once enabled. Completed tasks show a redacted address and are purged after `MAIL_CLEANUP_RETENTION_DAYS`.
 
 ## Start
 

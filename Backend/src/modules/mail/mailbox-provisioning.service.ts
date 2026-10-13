@@ -14,6 +14,7 @@ import { membershipService } from "../membership/membership.service.js";
 import { stalwartClient } from "../stalwart/stalwart.client.js";
 import { StalwartError, type HostedAccount, type MailHostingProvider } from "../stalwart/stalwart.types.js";
 import type { ProvisionMailboxInput } from "./mail.schema.js";
+import { credentialRef, ownershipMarker } from "./mailbox-identity.js";
 
 interface ProvisioningContext {
   tenantId: string;
@@ -65,24 +66,19 @@ const mailboxInclude = {
 
 type MailboxRow = Prisma.MailboxGetPayload<{ include: typeof mailboxInclude }>;
 
-/** The marker that ties a host account to the Zoiko mailbox that created it. */
-function ownershipMarker(mailboxId: string): string {
-  return `zoiko:mailbox:${mailboxId}`;
-}
-
-function credentialRef(mailboxId: string): string {
-  return `mailbox-credential-${mailboxId}`;
-}
-
 /**
  * The status a person reads, derived from the facts rather than stored
  * beside them, so it cannot disagree with them.
  */
 export function mailboxDisplayStatus(row: {
+  deletionRequestedAt?: Date | null;
   provisioningStatus: string | null;
   sendSuspendedAt: Date | null;
   membership: { status: string } | null;
-}): "PROVISIONING" | "FAILED" | "SUSPENDED" | "INVITATION_PENDING" | "ACTIVE" {
+}): "DELETING" | "PROVISIONING" | "FAILED" | "SUSPENDED" | "INVITATION_PENDING" | "ACTIVE" {
+  // A requested deletion outranks everything: whatever else is true of the
+  // mailbox, it is on its way out and nothing about it should be acted on.
+  if (row.deletionRequestedAt) return "DELETING";
   if (row.provisioningStatus === "FAILED") return "FAILED";
   if (row.provisioningStatus === "PENDING" || row.provisioningStatus === "PROVISIONING") return "PROVISIONING";
   if (row.sendSuspendedAt) return "SUSPENDED";
@@ -107,6 +103,8 @@ function toView(row: MailboxRow) {
     invitationStatus: row.invitationStatus,
     invitationSentAt: row.invitationSentAt,
     invitationError: row.invitationError,
+    deletionRequestedAt: row.deletionRequestedAt,
+    deletionError: row.deletionError,
     invitationRecipient: row.membership?.user.email ?? null,
     membershipStatus: row.membership?.status ?? null,
     status: mailboxDisplayStatus(row),
@@ -588,11 +586,22 @@ export class MailboxProvisioningService {
   // ─── Retry and resend ─────────────────────────────────────────────────────
 
   /**
+   * A mailbox that is being deleted must not be re-provisioned or re-invited:
+   * a retry would create the very account the cleanup is about to remove.
+   */
+  private refuseWhileDeleting(row: MailboxRow) {
+    if (row.deletionRequestedAt) {
+      throw new AppError("This mailbox is being deleted", 409, ErrorCodes.CONFLICT, { reason: "MAILBOX_DELETING" });
+    }
+  }
+
+  /**
    * Finish whatever did not finish: the host half if it failed or was
    * interrupted, then the invitation if it is still owed.
    */
   async retry(mailboxId: string, context: ProvisioningContext) {
     const row = await this.load(context.tenantId, mailboxId);
+    this.refuseWhileDeleting(row);
     if (!row.provider) {
       throw new AppError("This mailbox is not managed by a mail host", 409, ErrorCodes.CONFLICT, {
         reason: "NOT_HOSTED",
@@ -624,6 +633,7 @@ export class MailboxProvisioningService {
 
   async resendInvitation(mailboxId: string, context: ProvisioningContext) {
     const row = await this.load(context.tenantId, mailboxId);
+    this.refuseWhileDeleting(row);
     if (row.provisioningStatus !== "PROVISIONED") {
       throw new AppError(
         "The mailbox has to exist on the mail server before an invitation is sent",
