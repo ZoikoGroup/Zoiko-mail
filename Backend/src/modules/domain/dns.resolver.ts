@@ -72,21 +72,31 @@ type ResolverLike = Pick<typeof dns, "resolveTxt" | "resolveMx" | "resolveCname"
  * so a record the owner just published is seen as soon as it propagates
  * rather than whenever the host's cache expires.
  *
+ * A resolver is created per query rather than shared: c-ares sends concurrent
+ * queries on one instance from a single socket, and on Windows all but one of
+ * them loses its answer and waits out the full timeout before the retry — so
+ * the parallel lookups a verification run does all come back late, or not at
+ * all inside `attempt`'s own deadline. Separate resolvers answer in
+ * milliseconds.
+ *
  * `dns.Resolver` is only touched when configured: the test suites mock this
  * module with the three lookup functions and nothing else.
  */
-function resolver(): ResolverLike {
-  if (!env.DNS_RESOLVER_SERVERS) return dns;
-  const instance = new dns.Resolver({ timeout: env.DNS_RESOLVER_TIMEOUT_MS, tries: 2 });
-  instance.setServers(env.DNS_RESOLVER_SERVERS.split(",").map((server) => server.trim()).filter(Boolean));
-  return instance;
+function resolver(): () => ResolverLike {
+  if (!env.DNS_RESOLVER_SERVERS) return () => dns;
+  const servers = env.DNS_RESOLVER_SERVERS.split(",").map((server) => server.trim()).filter(Boolean);
+  return () => {
+    const instance = new dns.Resolver({ timeout: env.DNS_RESOLVER_TIMEOUT_MS, tries: 2 });
+    instance.setServers(servers);
+    return instance;
+  };
 }
 
 export function createDnsLookup(): DnsLookup {
-  const r = resolver();
+  const resolverFor = resolver();
   return {
-    txt: (name) => attempt(name, async () => (await r.resolveTxt(name)).map((parts) => parts.join(""))),
-    mx: (name) => attempt(name, () => r.resolveMx(name)),
-    cname: (name) => attempt(name, () => r.resolveCname(name)),
+    txt: (name) => attempt(name, async () => (await resolverFor().resolveTxt(name)).map((parts) => parts.join(""))),
+    mx: (name) => attempt(name, () => resolverFor().resolveMx(name)),
+    cname: (name) => attempt(name, () => resolverFor().resolveCname(name)),
   };
 }
