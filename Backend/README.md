@@ -344,7 +344,11 @@ The backend currently supports provider-independent workflows. The following req
 - Sending mail to external internet recipients
 - Receiving external email
 - Gmail and Microsoft 365 synchronization
-- Live DNS and custom-domain verification
+- Automatic publication of custom-domain DNS records through GoDaddy or
+  Cloudflare — this needs the tenant's own DNS-provider API credential.
+  Verification itself is implemented: record generation, manual zone-file
+  export, live lookup, DKIM/MX/SPF/DMARC evaluation, the verification
+  scheduler and the admin re-check all work without one.
 - AI drafting and summarization execution
 - Hosted object storage for production-scale attachments and exports
 

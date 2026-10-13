@@ -13,6 +13,7 @@ import { gmailConnector } from "./modules/connector/gmail/gmail.connector.js";
 import { microsoftConnector } from "./modules/connector/m365/m365.connector.js";
 import { withTenant } from "./config/tenantScope.js";
 import { runDueDomainSyncs } from "./modules/domain/domain.sync.js";
+import { mailboxCleanupService } from "./modules/mail/mailbox-cleanup.service.js";
 
 const app = createApp();
 const PORT = env.PORT;
@@ -135,10 +136,10 @@ let complianceSweepRunning = false;
 const complianceSweep = setInterval(() => {
   if (complianceSweepRunning) return;
   complianceSweepRunning = true;
-  void Promise.all([lifecycleService.sweepOverdue(), purgeExpiredIdempotencyRecords()])
-    .then(([sla, purged]) => {
-      if (sla.breached > 0 || purged > 0) {
-        logger.info({ ...sla, purgedIdempotencyRecords: purged }, "Compliance sweep completed");
+  void Promise.all([lifecycleService.sweepOverdue(), purgeExpiredIdempotencyRecords(), mailboxCleanupService.purgeCompleted()])
+    .then(([sla, purged, purgedCleanup]) => {
+      if (sla.breached > 0 || purged > 0 || purgedCleanup > 0) {
+        logger.info({ ...sla, purgedIdempotencyRecords: purged, purgedCleanupTasks: purgedCleanup }, "Compliance sweep completed");
       }
     })
     .catch((error: unknown) => logger.error({ error }, "Compliance sweep failed"))
@@ -147,6 +148,27 @@ const complianceSweep = setInterval(() => {
     });
 }, env.COMPLIANCE_SWEEP_INTERVAL_MS);
 complianceSweep.unref();
+
+// ─── Hosted mailbox cleanup ─────────────────────────────────────────────────
+//
+// Removes the accounts that deleted mailboxes, erased members and erased
+// workspaces still have on the mail host. Does nothing at all while
+// STALWART_DELETE_ENABLED is off: queued tasks wait, and no attempts are used.
+
+let mailboxCleanupRunning = false;
+const mailboxCleanup = setInterval(() => {
+  if (mailboxCleanupRunning) return;
+  mailboxCleanupRunning = true;
+  void mailboxCleanupService.processDue()
+    .then((processed) => {
+      if (processed > 0) logger.info({ processed }, "Hosted mailbox cleanup completed");
+    })
+    .catch((error: unknown) => logger.error({ error }, "Hosted mailbox cleanup failed"))
+    .finally(() => {
+      mailboxCleanupRunning = false;
+    });
+}, env.MAIL_CLEANUP_INTERVAL_MS);
+mailboxCleanup.unref();
 
 // ─── Custom-domain DNS synchronization ──────────────────────────────────────
 //

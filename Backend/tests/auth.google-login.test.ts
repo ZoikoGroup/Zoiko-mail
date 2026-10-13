@@ -132,7 +132,8 @@ describe("Google sign-in opens a session in one step", () => {
     const start = await signInWithGoogle().expect(200);
     expect(start.body.data.state).toBe("NO_WORKSPACE");
 
-    // Creating the workspace makes this account an Owner, so AC-002 stops it
+    // Creating the workspace makes this account an Admin (the self-service
+    // creator role), so AC-002 stops it
     // at an enrolment challenge rather than handing over a session. Carrying
     // that through is what the client does, and what completes the signup.
     const createdRaw = await request(app)
@@ -145,7 +146,7 @@ describe("Google sign-in opens a session in one step", () => {
 
     expect(created.body.data.accessToken).toBeTruthy();
     expect(created.body.data.refreshToken).toBeTruthy();
-    expect(created.body.data.membership.role).toBe("OWNER");
+    expect(created.body.data.membership.role).toBe("ADMIN");
 
     // And signing in again now resolves to a real session rather than
     // NO_WORKSPACE, which is what the user sees as "it finally lets me in".
