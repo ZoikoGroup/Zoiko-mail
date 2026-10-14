@@ -9,6 +9,7 @@ import { attachmentStorage } from "../mail/attachment.storage.js";
 import { lifecycleService } from "../lifecycle/lifecycle.service.js";
 import { createHash } from "node:crypto";
 import { providerMailService } from "../provider-mail/provider-mail.service.js";
+import { sendOutbound } from "../mail-transport/outbound.js";
 import { aiService } from "../ai/ai.service.js";
 import { deleteSecret } from "../../common/secrets/secrets.js";
 import { mailboxCleanupService } from "../mail/mailbox-cleanup.service.js";
@@ -80,7 +81,8 @@ export class JobService {
           const messageId = typeof job.payload === "object" && job.payload !== null && !Array.isArray(job.payload)
             && typeof job.payload.messageId === "string" ? job.payload.messageId : null;
           if (!messageId) throw new Error("SMTP job has no message id");
-          const result = await providerMailService.sendMessage(messageId, job.tenantId);
+          // The relay when configured, else the legacy provider account.
+          const result = await sendOutbound(messageId, job.tenantId);
 
           // Real SMTP delivery happened — flip the message from SENDING → SENT.
           // No-op if it's already SENT (idempotent retry after a race).

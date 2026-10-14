@@ -49,14 +49,32 @@ export class DkimService {
    * Generates a key pair and stores the private half. The caller writes the
    * row; if that fails it must call `discard` so no orphaned secret remains.
    */
-  async generate(domainId: string, tenantId: string, existingSelectors: string[]): Promise<GeneratedDkimKey> {
+  async generate(
+    domainId: string,
+    tenantId: string,
+    existingSelectors: string[],
+    /**
+     * Whether a selector's DNS name is already in use outside this database
+     * — another mail service, or another Zoiko installation that added the
+     * same domain this month. Such selectors are skipped, so the generated
+     * name is unique in DNS and publishing never meets someone else's key.
+     */
+    selectorInUse?: (selector: string) => Promise<boolean>
+  ): Promise<GeneratedDkimKey> {
     const keyBits = env.DNS_DKIM_KEY_BITS;
     const { publicKey, privateKey } = await generateKeyPairAsync("rsa", {
       modulusLength: keyBits,
       publicKeyEncoding: { type: "spki", format: "der" },
       privateKeyEncoding: { type: "pkcs8", format: "pem" },
     });
-    const selector = nextSelector(existingSelectors);
+    const taken = [...existingSelectors];
+    let selector = nextSelector(taken);
+    // Bounded: nextSelector runs out of letters after 25 and falls back to a
+    // timestamp, which nobody else will hold.
+    for (let attempt = 0; selectorInUse && attempt < 27 && (await selectorInUse(selector)); attempt += 1) {
+      taken.push(selector);
+      selector = nextSelector(taken);
+    }
     const privateKeySecretRef = dkimSecretRef(domainId, selector);
     await setSecret(privateKeySecretRef, privateKey, { purpose: "DKIM private key (generate)", tenantId });
     return {

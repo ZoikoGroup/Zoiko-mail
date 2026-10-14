@@ -28,11 +28,19 @@ export const loginSchema = z.object({
   workspace: requestedWorkspace,
 });
 
-/** Google login schema. */
+/**
+ * Google login schema.
+ *
+ * Google opens the role's console only. The Member workspace is email and
+ * password only (decision of 14 Oct 2026), so a Google sign-in asking for it
+ * is refused rather than quietly opening some other console instead.
+ */
 export const googleLoginSchema = z.object({
   idToken: z.string().min(1),
-  tenantId: z.string().uuid().optional(),
-  workspace: requestedWorkspace,
+  // Absent is the only accepted value.
+  workspace: z
+    .never({ message: "Google sign-in is not available for the Member workspace. Sign in with your email and password." })
+    .optional(),
 });
 
 /** GET /auth/member-login/:key — the key behind a mailbox's Member sign-in link. */

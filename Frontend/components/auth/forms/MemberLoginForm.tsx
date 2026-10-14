@@ -6,9 +6,9 @@ import { FaArrowLeft, FaEnvelope, FaInbox } from "react-icons/fa";
 import { ApiError } from "@/lib/api-client";
 import type { MemberLoginLink } from "@/lib/auth-api";
 import { clearSignOutNotice, peekSignOutNotice } from "@/lib/auth-storage";
-import { useGoogleLogin, useLogin } from "@/lib/auth-hooks";
+import { useLogin } from "@/lib/auth-hooks";
 
-import { FormInput, GoogleSignInButton, PasswordInput } from "@/components/auth";
+import { FormInput, PasswordInput } from "@/components/auth";
 
 interface MemberLoginFormProps {
   /** What a mailbox's sign-in link filled in; absent on the plain /login/member. */
@@ -31,10 +31,13 @@ type FormErrors = {
  * authority to a member's, so an Admin or Owner signing in here cannot reach
  * a console from it; that needs the standard sign-in and the admin's
  * Workspace Access setting.
+ *
+ * Email (or mailbox address) and password only, by decision: no Google
+ * sign-in here, and the API refuses a Google sign-in that asks for the Member
+ * workspace. Google remains on the standard sign-in.
  */
 export default function MemberLoginForm({ link, linkError }: MemberLoginFormProps) {
   const loginMutation = useLogin();
-  const googleLoginMutation = useGoogleLogin();
 
   const [email, setEmail] = useState(link?.email ?? "");
   const [password, setPassword] = useState("");
@@ -88,8 +91,8 @@ export default function MemberLoginForm({ link, linkError }: MemberLoginFormProp
     });
   };
 
-  const busy = loginMutation.isPending || googleLoginMutation.isPending;
-  const failure = loginMutation.error ?? googleLoginMutation.error;
+  const busy = loginMutation.isPending;
+  const failure = loginMutation.error;
   const errorMessage = failure ? (failure instanceof ApiError ? failure.message : "Something went wrong.") : null;
 
   return (
@@ -123,32 +126,6 @@ export default function MemberLoginForm({ link, linkError }: MemberLoginFormProp
           {linkError}
         </div>
       )}
-
-      <div className="mt-3">
-        <GoogleSignInButton
-          onSuccess={(idToken) => {
-            dismissSignOutNotice();
-            googleLoginMutation.mutate({
-              idToken,
-              // Google says who it is only after the click, so the link's
-              // workspace is offered as-is; an account that does not belong
-              // there is shown its own workspaces to pick from instead.
-              tenantId: link?.tenantId,
-              workspace: "MEMBER",
-            });
-          }}
-          disabled={busy}
-        />
-      </div>
-
-      <div className="relative m-2">
-        <div className="absolute inset-0 flex items-center">
-          <div className="w-full border-t border-slate-200 dark:border-slate-700" />
-        </div>
-        <div className="relative flex justify-center">
-          <span className="bg-white px-4 text-sm text-slate-500 dark:bg-slate-900 dark:text-slate-400">OR</span>
-        </div>
-      </div>
 
       <form onSubmit={onSubmit} className="space-y-3" aria-label="Member sign in">
         <FormInput

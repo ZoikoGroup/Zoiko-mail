@@ -3,12 +3,10 @@
 import { useEffect } from "react";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { GoogleOAuthProvider } from "@react-oauth/google";
 
 import { AuthContainer, AuthLayout, MemberLoginForm } from "@/components/auth";
 import { ApiError } from "@/lib/api-client";
 import { fetchMemberLoginLink } from "@/lib/auth-api";
-import { GOOGLE_CLIENT_ID } from "@/lib/config";
 
 /**
  * A mailbox's Member sign-in link, as copied from the admin Mailboxes page.
@@ -40,16 +38,14 @@ export default function MemberLoginLinkPage() {
     : null;
 
   return (
-    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
-      <AuthLayout>
-        <AuthContainer>
-          {link.isLoading ? (
-            <p className="py-16 text-center text-sm text-slate-500 dark:text-slate-400">Checking your sign-in link…</p>
-          ) : (
-            <MemberLoginForm link={link.data ?? null} linkError={linkError} />
-          )}
-        </AuthContainer>
-      </AuthLayout>
-    </GoogleOAuthProvider>
+    <AuthLayout>
+      <AuthContainer>
+        {link.isLoading ? (
+          <p className="py-16 text-center text-sm text-slate-500 dark:text-slate-400">Checking your sign-in link…</p>
+        ) : (
+          <MemberLoginForm link={link.data ?? null} linkError={linkError} />
+        )}
+      </AuthContainer>
+    </AuthLayout>
   );
 }

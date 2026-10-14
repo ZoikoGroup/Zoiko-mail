@@ -218,8 +218,7 @@ export function useGoogleLogin() {
   const router = useRouter();
 
   return useMutation({
-    mutationFn: ({ idToken, ...options }: { idToken: string; tenantId?: string; workspace?: "MEMBER" }) =>
-      googleLogin(idToken, options),
+    mutationFn: ({ idToken }: { idToken: string }) => googleLogin(idToken),
 
     onSuccess: async (data) => {
       // clear(), not invalidate(["me"]): invalidating one key leaves every

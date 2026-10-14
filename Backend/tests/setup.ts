@@ -24,6 +24,13 @@ process.env.FLAG_MFA_ENFORCEMENT_ENABLED = "true";
 process.env.SECRET_FILE_DIR ||= mkdtempSync(resolve(tmpdir(), "zoiko-secrets-"));
 // Never touch real SMTP from tests — the system mailer falls back to log-only.
 process.env.SYSTEM_MAIL_ENABLED = "false";
+// Mailbox hosting and real mail transport at their defaults, whatever a
+// developer's .env enables: mail-server accounts on (STALWART_ACCOUNT_PROVISIONING
+// unset), no outbound relay, no inbound secret. Suites that exercise the Zoiko
+// store, the relay or ingest switch them on themselves.
+process.env.STALWART_ACCOUNT_PROVISIONING = "true";
+process.env.RELAY_ENABLED = "false";
+process.env.INBOUND_WEBHOOK_SECRET = "";
 // Suites re-check a domain several times in a row; the cooldown that stops an
 // admin hammering the resolver is asserted on its own in domain.test.ts.
 process.env.DNS_MANUAL_CHECK_COOLDOWN_MS ??= "0";

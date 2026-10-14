@@ -1349,9 +1349,8 @@ export class AuthService {
       });
       return this.resolveAuthState(
         identity.user,
-        input.tenantId,
-        context,
-        input.workspace
+        undefined,
+        context
       );
     }
 
@@ -1402,9 +1401,8 @@ export class AuthService {
 
       return this.resolveAuthState(
         created,
-        input.tenantId,
-        context,
-        input.workspace
+        undefined,
+        context
       );
     }
 
@@ -1473,9 +1471,8 @@ export class AuthService {
 
     return this.resolveAuthState(
       linked,
-      input.tenantId,
-      context,
-      input.workspace
+      undefined,
+      context
     );
   }
 

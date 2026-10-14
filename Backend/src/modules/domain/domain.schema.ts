@@ -41,5 +41,19 @@ export const connectProviderSchema = z.discriminatedUnion("provider", [
   }).strict(),
 ]);
 
+/**
+ * A new token for an existing credential. Which fields apply depends on the
+ * credential's provider, which the service checks; the label and provider
+ * stay as they are.
+ */
+export const replaceProviderSecretSchema = z
+  .object({
+    apiToken: z.string().trim().min(20).max(200).optional(),
+    apiKey: z.string().trim().min(8).max(200).optional(),
+    apiSecret: z.string().trim().min(8).max(200).optional(),
+  })
+  .strict()
+  .refine((value) => Boolean(value.apiToken || (value.apiKey && value.apiSecret)), "Enter the new API token");
+
 /** Cursor pagination — API §4. Shared so every list answers the same way. */
 export { paginationQuerySchema as listQuerySchema } from "../../common/utils/pagination.js";

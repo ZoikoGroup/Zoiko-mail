@@ -187,6 +187,19 @@ export class DomainService {
   private lookupFactory: () => DnsLookup = createDnsLookup;
 
   /** Test seam: answer DNS lookups from a fake. */
+  /**
+   * Whether `<selector>._domainkey.<domain>` already answers in DNS. A failed
+   * lookup reads as free: a resolver's bad minute must not block creating a
+   * domain, and the publisher still refuses to overwrite a key it finds.
+   */
+  private selectorInUse(domainName: string) {
+    const lookup = this.lookupFactory();
+    return async (selector: string) => {
+      const answer = await lookup.txt(`${selector}._domainkey.${domainName}`);
+      return answer.ok && answer.values.length > 0;
+    };
+  }
+
   setLookupFactory(factory: () => DnsLookup): () => void {
     const previous = this.lookupFactory;
     this.lookupFactory = factory;
@@ -253,7 +266,7 @@ export class DomainService {
     const now = new Date();
     // Generated before the transaction because it writes to the secret
     // store; discarded again if the transaction does not commit.
-    const key = await dkimService.generate(id, tenantId, []);
+    const key = await dkimService.generate(id, tenantId, [], this.selectorInUse(domainName));
     try {
       await prisma.$transaction(async (tx) => {
         const domain = await tx.mailDomain.create({
@@ -392,7 +405,12 @@ export class DomainService {
     let generated: GeneratedDkimKey | null = null;
     if (domain.type === "CUSTOM" && !domain.dkimKeys.some((key) => key.status === "ACTIVE" || key.status === "PENDING")) {
       const selectors = await prisma.domainDkimKey.findMany({ where: { domainId: domain.id, tenantId: domain.tenantId }, select: { selector: true } });
-      generated = await dkimService.generate(domain.id, domain.tenantId, selectors.map((row) => row.selector));
+      generated = await dkimService.generate(
+        domain.id,
+        domain.tenantId,
+        selectors.map((row) => row.selector),
+        this.selectorInUse(domain.domainName)
+      );
     }
 
     try {
@@ -488,7 +506,12 @@ export class DomainService {
    */
   private async publishRecords(domain: DomainDetail, context: { tenantId: string; userId?: string | null; requestId?: string }, mode: "pending" | "all") {
     if (domain.dnsProvider === "MANUAL" || !domain.dnsCredentialId) return { published: [], failed: [], skipped: true as const };
-    const targets = domain.records.filter((record) => mode === "all" || record.publishState === "PENDING" || record.publishState === "FAILED");
+    // `pending` leaves out records the last check already found live: what
+    // they need is in DNS, so writing them again only risks a provider error
+    // (an unusable credential) being reported against a record that works.
+    // A changed value resets its state, so changes are still published.
+    const targets = domain.records.filter((record) =>
+      mode === "all" || ((record.publishState === "PENDING" || record.publishState === "FAILED") && record.state !== "VERIFIED"));
     if (targets.length === 0) return { published: [], failed: [], skipped: false as const };
 
     const published: string[] = [];
@@ -586,6 +609,34 @@ export class DomainService {
     }
     const result = await this.publishRecords(domain, context, "all");
     return { ...(await this.get(domainId, context.tenantId)), publishResult: { published: result.published, failed: result.failed } };
+  }
+
+  /**
+   * Publish every domain that writes through one credential — after its token
+   * is replaced, so domains that failed while it was unusable catch up now
+   * rather than at their next scheduled check. One domain failing does not
+   * stop the others.
+   */
+  async republishForCredential(credentialId: string, context: AuditContext) {
+    const domains = await prisma.mailDomain.findMany({
+      where: { tenantId: context.tenantId, dnsCredentialId: credentialId, dnsProvider: { not: "MANUAL" } },
+      select: { id: true, domainName: true },
+      orderBy: { domainName: "asc" },
+    });
+    const results: Array<{ domainName: string; published: number; failed: Array<{ recordKey: string; error: string }> }> = [];
+    for (const target of domains) {
+      try {
+        const outcome = await this.publishRecords(await this.load(target.id, context.tenantId), context, "all");
+        results.push({ domainName: target.domainName, published: outcome.published.length, failed: outcome.failed });
+      } catch (error) {
+        results.push({
+          domainName: target.domainName,
+          published: 0,
+          failed: [{ recordKey: "*", error: error instanceof Error ? error.message : "Publishing failed" }],
+        });
+      }
+    }
+    return results;
   }
 
   // ── verification ─────────────────────────────────────────────────────────
@@ -744,6 +795,12 @@ export class DomainService {
             lastCheckedAt: now,
             required: requiredFor(record),
             ...(evaluation.state === "VERIFIED" ? { lastVerifiedAt: now } : {}),
+            // Found live while still marked pending or failed: the record is
+            // where it needs to be (merged into an existing SPF, published by
+            // hand, or written before a failed retry), so it is published.
+            ...(evaluation.state === "VERIFIED" && (record.publishState === "PENDING" || record.publishState === "FAILED")
+              ? { publishState: "PUBLISHED" as const, publishError: null, publishedAt: record.publishedAt ?? now }
+              : {}),
           },
         });
       }
@@ -765,6 +822,12 @@ export class DomainService {
           lastCheckedAt: now,
           nextCheckAt: new Date(now.getTime() + delay),
           ...(ready.sendReady ? { lastVerifiedAt: now } : {}),
+          // The publishing error is history once nothing is still failing to
+          // publish — every failed record either published or turned out live.
+          ...(domain.records.every((record) =>
+            record.publishState !== "FAILED" || evaluations.get(record.recordKey)!.state === "VERIFIED")
+            ? { lastSyncError: null }
+            : {}),
           ...(events.includes("SUSPENDED")
             ? { sendingSuspendedAt: now, activatedAt: null, suspensionReason: `Required DNS records failing: ${ready.blocking.join(", ")}` }
             : {}),
@@ -856,7 +919,12 @@ export class DomainService {
       throw new AppError(`A rotation is already waiting for ${pending.selector}._domainkey to be published`, 409, ErrorCodes.CONFLICT);
     }
     const selectors = await prisma.domainDkimKey.findMany({ where: { domainId: domain.id, tenantId: context.tenantId }, select: { selector: true } });
-    const key = await dkimService.generate(domain.id, context.tenantId, selectors.map((row) => row.selector));
+    const key = await dkimService.generate(
+      domain.id,
+      context.tenantId,
+      selectors.map((row) => row.selector),
+      this.selectorInUse(domain.domainName)
+    );
     try {
       await prisma.$transaction(async (tx) => {
         await dkimService.createRow(tx, { ...key, domainId: domain.id, tenantId: context.tenantId, active: false });

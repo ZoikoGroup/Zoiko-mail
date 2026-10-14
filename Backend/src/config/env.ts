@@ -123,6 +123,42 @@ export const envSchema = z.object({
    */
   STALWART_AUTO_CREATE_DOMAINS: boolFlag("true"),
   /**
+   * Decision D1 (implementation guide v2.5 §12): set to false to make Zoiko
+   * itself the mailbox store. Create Email then creates the Zoiko mailbox and
+   * its owner's invitation and never an account on the mail server, whether
+   * or not one is connected. Mail for such a mailbox lives in Zoiko's
+   * database; it is never described as hosted on the mail server.
+   *
+   * Left unset (true), creation works as before: an account on the mail
+   * server, and a refusal when none is configured.
+   */
+  STALWART_ACCOUNT_PROVISIONING: boolFlag("true"),
+
+  // ── Outbound relay (decision D2) ──────────────────────────────────────────
+  // An authenticated SMTP relay that sends mail from any mailbox on a
+  // sending-enabled domain, as that mailbox's own address: Amazon SES
+  // (email-smtp.<region>.amazonaws.com:587), Brevo (smtp-relay.brevo.com:587)
+  // or any provider with SMTP submission. Off until configured; with it off,
+  // mail to outside addresses fails honestly as EXTERNAL_DELIVERY_NOT_CONFIGURED.
+  RELAY_ENABLED: boolFlag("false"),
+  RELAY_SMTP_HOST: z.preprocess(blankAsUndefined, z.string().optional()),
+  RELAY_SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
+  /** true for implicit TLS (465); false upgrades with STARTTLS (587), which is then required. */
+  RELAY_SMTP_SECURE: boolFlag("false"),
+  RELAY_SMTP_USERNAME: z.preprocess(blankAsUndefined, z.string().optional()),
+  RELAY_SMTP_PASSWORD: z.preprocess(blankAsUndefined, z.string().optional()),
+  RELAY_SMTP_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
+
+  // ── Inbound ingest ────────────────────────────────────────────────────────
+  // POST /api/v1/internal/inbound/messages takes a raw message from the
+  // inbound edge (the Cloudflare Email Worker in the pilot, Stalwart later)
+  // signed with this shared secret. Unset, the endpoint refuses everything.
+  INBOUND_WEBHOOK_SECRET: z.preprocess(blankAsUndefined, z.string().min(32).optional()),
+  /** Largest raw message accepted, in bytes (Cloudflare Email Routing's own cap is 25 MiB). */
+  INBOUND_MAX_MESSAGE_BYTES: z.coerce.number().int().min(1_024).default(26_214_400),
+  /** How old a signed request may be before it is refused as a replay. */
+  INBOUND_SIGNATURE_TOLERANCE_MS: z.coerce.number().int().min(10_000).default(300_000),
+  /**
    * Allow the cleanup worker to destroy accounts on Stalwart, and allow an
    * admin to delete a hosted mailbox at all.
    *
@@ -298,6 +334,11 @@ export const envSchema = z.object({
         path: ["SMTP_SECURE"],
         message: `SMTP TLS must remain enabled for ${value.SMTP_HOST}`,
       });
+    }
+  }
+  if (value.RELAY_ENABLED) {
+    for (const key of ["RELAY_SMTP_HOST", "RELAY_SMTP_USERNAME", "RELAY_SMTP_PASSWORD"] as const) {
+      if (!value[key]) context.addIssue({ code: "custom", path: [key], message: "is required when RELAY_ENABLED=true" });
     }
   }
   if (value.STALWART_ENABLED) {

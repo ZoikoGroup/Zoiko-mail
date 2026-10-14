@@ -50,6 +50,9 @@ const PUBLIC_FIELDS = {
   updatedAt: true,
 } satisfies Prisma.DnsProviderCredentialSelect;
 
+const MISSING_SECRET_MESSAGE =
+  "The stored API token for this connection is missing. Enter the token again (Domains → DNS providers → Update token) to reconnect.";
+
 function secretRef(credentialId: string): string {
   return `dns-provider/${credentialId}`;
 }
@@ -142,9 +145,104 @@ export class DnsProviderService {
     return credential;
   }
 
-  private async secretOf(credential: { secretRef: string; tenantId: string }): Promise<ProviderSecret> {
-    const raw = await getSecret(credential.secretRef, { purpose: "DNS provider credential (use)", tenantId: credential.tenantId });
+  /**
+   * The stored API token, or a clear refusal when it is gone.
+   *
+   * The row and the secret live in different places — the database and the
+   * secret store — so the row can outlive its secret (a local .secrets folder
+   * wiped, a vault restored from an older snapshot). That used to surface as
+   * "Secret not available: dns-provider/<id>" on every publish while the
+   * credential still read ACTIVE, so domains sat unverified with nothing on
+   * screen saying why. Now the credential is marked INVALID with an
+   * instruction the admin can act on, and replaceSecret() restores it.
+   */
+  private async secretOf(credential: {
+    id: string;
+    secretRef: string;
+    tenantId: string;
+    provider: DnsProviderKind;
+    status?: string;
+  }): Promise<ProviderSecret> {
+    let raw: string;
+    try {
+      raw = await getSecret(credential.secretRef, { purpose: "DNS provider credential (use)", tenantId: credential.tenantId });
+    } catch (error) {
+      if (!(error instanceof AppError && error.message.startsWith("Secret not available"))) throw error;
+      await this.markInvalid(credential, MISSING_SECRET_MESSAGE);
+      throw new DnsProviderError(MISSING_SECRET_MESSAGE, 403);
+    }
     return JSON.parse(raw) as ProviderSecret;
+  }
+
+  /** Records that a credential cannot be used, once, with the reason. */
+  private async markInvalid(
+    credential: { id: string; tenantId: string; provider: DnsProviderKind; status?: string },
+    reason: string
+  ): Promise<void> {
+    const updated = await prisma.dnsProviderCredential.updateMany({
+      where: { id: credential.id, tenantId: credential.tenantId, status: "ACTIVE" },
+      data: { status: "INVALID", lastError: reason, lastValidatedAt: new Date() },
+    });
+    if (updated.count === 0) return;
+    await auditService.record({
+      tenantId: credential.tenantId,
+      actorType: "SYSTEM",
+      eventType: "DNS_PROVIDER_INVALID",
+      targetType: "DnsProviderCredential",
+      targetId: credential.id,
+      metadata: { provider: credential.provider, error: reason },
+    });
+  }
+
+  /**
+   * Replace the API token of an existing credential, keeping its id — and so
+   * every domain that publishes through it. The new token is proved against
+   * the provider first; a wrong one changes nothing.
+   */
+  async replaceSecret(
+    credentialId: string,
+    input: { apiToken?: string; apiKey?: string; apiSecret?: string },
+    context: AuditContext
+  ) {
+    const credential = await this.load(credentialId, context.tenantId);
+    const adapter = dnsProviderAdapter(credential.provider);
+    if (!adapter) throw new AppError(`${credential.provider} is not supported`, 400, ErrorCodes.VALIDATION_ERROR);
+    const secret = toSecret({
+      provider: credential.provider as ConnectProviderInput["provider"],
+      label: credential.label,
+      ...input,
+    });
+    try {
+      await adapter.verify(secret, (credential.settings ?? {}) as ProviderSettings);
+    } catch (error) {
+      throw providerFailure(error);
+    }
+
+    // Same ref: the row already names it, and nothing else has to change.
+    await setSecret(credential.secretRef, JSON.stringify(secret), {
+      purpose: "DNS provider credential (replace)",
+      tenantId: context.tenantId,
+      requestId: context.requestId,
+    });
+    return prisma.$transaction(async (tx) => {
+      const updated = await tx.dnsProviderCredential.update({
+        where: { id: credential.id, tenantId: context.tenantId },
+        data: { status: "ACTIVE", lastError: null, lastValidatedAt: new Date() },
+        select: PUBLIC_FIELDS,
+      });
+      await auditService.record({
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        actorType: "ADMIN",
+        eventType: "DNS_PROVIDER_SECRET_REPLACED",
+        targetType: "DnsProviderCredential",
+        targetId: credential.id,
+        requestId: context.requestId,
+        // Never the token.
+        metadata: { provider: credential.provider, label: credential.label, wasStatus: credential.status },
+      }, tx);
+      return updated;
+    });
   }
 
   /** Re-proves a stored credential and records the outcome. */
