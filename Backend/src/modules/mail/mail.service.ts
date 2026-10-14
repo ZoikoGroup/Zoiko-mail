@@ -18,6 +18,8 @@ import { deliveryProtectionService } from "../delivery-protection/delivery-prote
 import { sharedMailboxService } from "./shared-mailbox.service.js";
 import { participantService } from "../participant/participant.service.js";
 import { jobService } from "../job/job.service.js";
+import { sseManager } from "../../common/sse/sse.manager.js";
+import { outboundAvailable } from "../mail-transport/outbound.js";
 import { membershipService } from "../membership/membership.service.js";
 import { mailboxCleanupService } from "./mailbox-cleanup.service.js";
 import { memberLoginUrl, resolveWorkspaces } from "./mailbox-access.service.js";
@@ -199,6 +201,49 @@ export class MailService {
   }
 
   /**
+   * The member of this workspace that a recipient address reaches.
+   *
+   * People are given mailbox addresses (info@temveris.com), not the email
+   * they sign in with, so the mailbox address is tried first, then an alias
+   * of a mailbox, and only then the sign-in email — the one key this used to
+   * try. Matching on the sign-in email alone sent mail between two hosted
+   * colleagues to "external", where it failed as
+   * EXTERNAL_DELIVERY_NOT_CONFIGURED. Only active people with an active
+   * membership in this workspace are returned, so a mailbox address never
+   * reaches anyone outside it.
+   */
+  private async internalRecipient(
+    tenantId: string,
+    email: string,
+    tx: Prisma.TransactionClient = prisma
+  ): Promise<{ id: string; userId: string; user: { email: string } } | null> {
+    const reachable = { status: "ACTIVE" as const, user: { status: "ACTIVE" as const } };
+    const membershipSelect = { id: true, userId: true, user: { select: { email: true } } } as const;
+
+    const byMailbox = await tx.mailbox.findFirst({
+      where: { tenantId, address: { equals: email, mode: "insensitive" }, membershipId: { not: null }, membership: reachable },
+      select: { membership: { select: membershipSelect } },
+    });
+    if (byMailbox?.membership) return byMailbox.membership;
+
+    const byAlias = await tx.alias.findFirst({
+      where: {
+        tenantId,
+        status: "ACTIVE",
+        address: { equals: email, mode: "insensitive" },
+        mailbox: { membershipId: { not: null }, membership: reachable },
+      },
+      select: { mailbox: { select: { membership: { select: membershipSelect } } } },
+    });
+    if (byAlias?.mailbox.membership) return byAlias.mailbox.membership;
+
+    return tx.tenantMembership.findFirst({
+      where: { tenantId, ...reachable, user: { email: { equals: email, mode: "insensitive" }, status: "ACTIVE" } },
+      select: membershipSelect,
+    });
+  }
+
+  /**
    * The shared mailbox a draft was composed in, if it was, having re-checked
    * that the caller may still send from it.
    *
@@ -240,13 +285,16 @@ export class MailService {
       // shared draft is visible to everyone assigned to that mailbox rather
       // than hidden in the author's own folder.
       const mailbox = sendAs ? { id: sendAs.id } : own;
+      // Sent from the mailbox address, not the sign-in email: the address is
+      // what recipients see and reply to.
+      const from = sendAs?.address ?? own.address;
       const now = new Date();
       const thread = await tx.messageThread.create({
         data: {
           tenantId: context.tenantId,
           subjectNormalized: normalizeSubject(input.subject),
           participants: uniqueParticipants([
-            sendAs?.address ?? context.email,
+            from,
             ...input.recipients.to,
             ...input.recipients.cc,
             ...input.recipients.bcc,
@@ -266,7 +314,7 @@ export class MailService {
           // §10: the actor is authorUserId, the mailbox is this. Both are
           // needed to answer "who sent that, as whom".
           sentAsMailboxId: sendAs?.id ?? null,
-          fromAddress: sendAs?.address ?? null,
+          fromAddress: from,
           recipients: {
             create: recipientRows(input)!.map((recipient) => ({ ...recipient, tenantId: context.tenantId })),
           },
@@ -285,7 +333,7 @@ export class MailService {
           threadId: thread.id,
           messageId: message.id,
           addresses: [
-            { email: sendAs?.address ?? context.email, role: "SENDER" },
+            { email: from, role: "SENDER" },
             ...input.recipients.to.map((email) => ({ email, role: "RECIPIENT" as const })),
             ...input.recipients.cc.map((email) => ({ email, role: "CC" as const })),
             ...input.recipients.bcc.map((email) => ({ email, role: "BCC" as const })),
@@ -440,13 +488,19 @@ export class MailService {
       input.sendAsMailboxId
     );
     if (!source.threadId) throw new AppError("Source message has no thread", 409, ErrorCodes.CONFLICT);
+    // The person's own mailbox address is who they are in mail; their
+    // sign-in email is only how they log in.
+    const ownAddress = (await this.mailbox(context)).address.toLowerCase();
     // The addresses that are "us" for this reply. With a send-as that includes
     // the shared address, or reply-all would put the team mailbox in its own
     // reply's To line.
-    const ours = new Set([context.email.toLowerCase()]);
+    const ours = new Set([context.email.toLowerCase(), ownAddress]);
     if (sendAs) ours.add(sendAs.address.toLowerCase());
-    const self = (sendAs?.address ?? context.email).toLowerCase();
-    const author = source.author.email.toLowerCase();
+    const self = (sendAs?.address ?? ownAddress).toLowerCase();
+    // Reply to the address the message came from. The author's sign-in email
+    // is the wrong target: for a colleague it is their personal login, and
+    // for imported mail it is not the sender at all.
+    const author = (source.fromAddress ?? source.author.email).toLowerCase();
     const to = new Set<string>();
     const cc = new Set<string>();
     if (!ours.has(author)) to.add(author);
@@ -477,7 +531,7 @@ export class MailService {
           htmlBody,
           // §10, as on any other send-as draft.
           sentAsMailboxId: sendAs?.id ?? null,
-          fromAddress: sendAs?.address ?? null,
+          fromAddress: self,
           recipients: {
             create: [
               ...[...to].map((email) => ({ tenantId: context.tenantId, email, type: "TO" as const })),
@@ -612,7 +666,39 @@ export class MailService {
     if (!draft.recipients.some((recipient) => recipient.type === "TO")) {
       throw new AppError("At least one TO recipient is required", 400, ErrorCodes.VALIDATION_ERROR);
     }
-    const senderDomain = context.email.split("@")[1]?.toLowerCase();
+    const externalEmails: string[] = [];
+    for (const recipient of draft.recipients) {
+      const internal = await this.internalRecipient(context.tenantId, recipient.email);
+      if (!internal) externalEmails.push(recipient.email);
+      const decision = await policyService.evaluate({
+        type: "SENDING",
+        context: { recipient: { email: recipient.email, external: !internal }, sender: { role: context.role } },
+      }, context);
+      if (decision.effect === "DENY") {
+        await auditService.record({
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          eventType: "MAIL_SEND_POLICY_DENIED",
+          targetType: "EmailMessage",
+          targetId: draft.id,
+          requestId: context.requestId,
+          ipAddress: context.ipAddress,
+          userAgent: context.userAgent,
+          metadata: { reason: decision.reason, recipientDomain: recipient.email.split("@")[1] ?? null },
+        });
+        throw new AppError(`Sending denied by tenant policy (${decision.reason})`, 403, ErrorCodes.FORBIDDEN);
+      }
+    }
+
+    // The domain the message is sent from — the mailbox address — not the
+    // domain of the address the person signs in with. Checked only when the
+    // message leaves Zoiko: SPF, DKIM and DMARC authenticate mail to outside
+    // servers, and mail between Zoiko mailboxes never reaches one, so a
+    // domain still completing them must not stop colleagues writing to each
+    // other.
+    const senderDomain = externalEmails.length > 0
+      ? (draft.fromAddress ?? context.email).split("@")[1]?.toLowerCase()
+      : undefined;
     if (senderDomain) {
       const configuredDomain = await prisma.mailDomain.findFirst({
         where: { tenantId: context.tenantId, domainName: senderDomain, type: "CUSTOM" },
@@ -633,37 +719,6 @@ export class MailService {
           403,
           ErrorCodes.FORBIDDEN
         );
-      }
-    }
-
-    const externalEmails: string[] = [];
-    for (const recipient of draft.recipients) {
-      const internal = await prisma.tenantMembership.findFirst({
-        where: {
-          tenantId: context.tenantId,
-          status: "ACTIVE",
-          user: { email: { equals: recipient.email, mode: "insensitive" }, status: "ACTIVE" },
-        },
-        select: { id: true },
-      });
-      if (!internal) externalEmails.push(recipient.email);
-      const decision = await policyService.evaluate({
-        type: "SENDING",
-        context: { recipient: { email: recipient.email, external: !internal }, sender: { role: context.role } },
-      }, context);
-      if (decision.effect === "DENY") {
-        await auditService.record({
-          tenantId: context.tenantId,
-          actorUserId: context.userId,
-          eventType: "MAIL_SEND_POLICY_DENIED",
-          targetType: "EmailMessage",
-          targetId: draft.id,
-          requestId: context.requestId,
-          ipAddress: context.ipAddress,
-          userAgent: context.userAgent,
-          metadata: { reason: decision.reason, recipientDomain: recipient.email.split("@")[1] ?? null },
-        });
-        throw new AppError(`Sending denied by tenant policy (${decision.reason})`, 403, ErrorCodes.FORBIDDEN);
       }
     }
     await deliveryProtectionService.assertRecipientsAllowed(context.tenantId, externalEmails);
@@ -750,22 +805,18 @@ export class MailService {
       );
     }
 
+    // Colleagues who received it, told after the commit so nobody is notified
+    // of a message that then rolled back.
+    const deliveredTo = new Set<string>();
     try {
-      return await prisma.$transaction(async (tx) => {
+      const sent = await prisma.$transaction(async (tx) => {
         const sentAt = new Date();
         const recipients = await tx.messageRecipient.findMany({
           where: { tenantId: context.tenantId, messageId },
         });
 
         for (const recipient of recipients) {
-          const membership = await tx.tenantMembership.findFirst({
-            where: {
-              tenantId: context.tenantId,
-              status: "ACTIVE",
-              user: { email: { equals: recipient.email, mode: "insensitive" }, status: "ACTIVE" },
-            },
-            include: { user: { select: { email: true } } },
-          });
+          const membership = await this.internalRecipient(context.tenantId, recipient.email, tx);
           if (membership) {
             const recipientMailbox = await this.mailbox({
               ...context,
@@ -774,6 +825,7 @@ export class MailService {
               email: membership.user.email,
             }, tx);
             if (recipientMailbox.id !== senderMailbox.id) {
+              deliveredTo.add(membership.userId);
               await tx.mailboxMessage.upsert({
                 where: {
                   mailboxId_messageId: { mailboxId: recipientMailbox.id, messageId },
@@ -830,9 +882,9 @@ export class MailService {
           where: { tenantId: context.tenantId, messageId, recipientMembershipId: null },
         }) > 0;
 
-        const canEnqueueSmtp = env.MAIL_PROVIDER_ENABLED
-          && context.tenantId === env.MAIL_PROVIDER_TENANT_ID
-          && context.membershipId === env.MAIL_PROVIDER_MEMBERSHIP_ID;
+        // The relay sends for every mailbox; without one, only the single
+        // legacy provider member can reach outside addresses.
+        const canEnqueueSmtp = outboundAvailable(context);
 
         let status: MessageStatus;
         let scheduleLastError: string | null = null;
@@ -887,7 +939,14 @@ export class MailService {
 
         const message = await tx.emailMessage.update({
           where: { id: messageId, tenantId: context.tenantId },
-          data: { status, sentAt: messageSentAt, scheduledAt: null, scheduleLastError },
+          data: {
+            status,
+            sentAt: messageSentAt,
+            scheduledAt: null,
+            scheduleLastError,
+            // Drafts saved before senders were recorded by mailbox address.
+            ...(draft.fromAddress ? {} : { fromAddress: senderMailbox.address }),
+          },
           include: messageInclude,
         });
 
@@ -920,6 +979,17 @@ export class MailService {
       });
         return message;
       });
+      // The recipient's open inbox refreshes on this (useMemberShell), so a
+      // colleague's mail appears without a reload.
+      for (const userId of deliveredTo) {
+        sseManager.sendToUser(userId, {
+          type: "NEW_MAIL",
+          tenantId: context.tenantId,
+          userId,
+          payload: { count: 1, folder: "INBOX", messageId },
+        });
+      }
+      return sent;
     } catch (error) {
       await prisma.deliveryEvent.createMany({
         data: draft.recipients.map((recipient) => ({

@@ -34,8 +34,14 @@ export interface ProvisioningDomain {
 }
 
 export interface ProvisioningOptions {
+  /** Whether Create Email can create mailboxes at all. */
   providerConfigured: boolean;
   provider: string;
+  /**
+   * Where new mailboxes live: an account on the mail server, or Zoiko's own
+   * store (decision D1). Optional for API builds that predate it.
+   */
+  hostingMode?: "MAIL_SERVER" | "ZOIKO_STORE";
   domains: ProvisioningDomain[];
   quota: { optionsBytes: number[]; defaultBytes: number | null; maxBytes: number | null };
   mailboxes: { used: number; limit: number | null };

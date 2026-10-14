@@ -343,13 +343,17 @@ export const mailboxProvisioningOptions = asyncHandler(async (req: Request, res:
 });
 
 /**
- * 201 when the mail host confirmed the account; 202 when the record exists
+ * 201 when the mail host confirmed the account, or when the mailbox lives in
+ * Zoiko's own store and needs no account; 202 when the record exists
  * but the host half did not finish (failed or interrupted). The body says
  * which, and a retry finishes it without creating a second mailbox.
  */
 export const provisionMailbox = asyncHandler(async (req: Request, res: Response) => {
   const result = await mailboxProvisioningService.create(req.body, context(req));
-  sendSuccess(res, result.provisioningStatus === "PROVISIONED" ? 201 : 202, result, req.requestId);
+  // A Zoiko-store mailbox (no provider) has no host half to finish: it is
+  // complete the moment it is created.
+  const complete = result.provisioningStatus === "PROVISIONED" || result.provider === null;
+  sendSuccess(res, complete ? 201 : 202, result, req.requestId);
 });
 
 export const getMailboxProvisioning = asyncHandler(async (req: Request, res: Response) => {

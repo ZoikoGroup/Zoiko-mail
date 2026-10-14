@@ -158,6 +158,8 @@ test.describe("Create Email", () => {
       quotaBytes: 5 * GIB,
       initialAccess: "INVITE",
       recoveryEmail: "john.personal@elsewhere.test",
+      // The Workspace Access choice; Member only unless the admin ticks more.
+      workspaces: ["MEMBER"],
     });
     expect(captured.provision[0]!.idempotencyKey).toBeTruthy();
   });

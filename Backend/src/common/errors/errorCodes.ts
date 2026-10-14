@@ -65,6 +65,13 @@ export const ErrorCodes = {
   // The database could not be reached or the connection pool was exhausted.
   // Temporary by nature, so a 503 the client can retry rather than a 500.
   DATABASE_UNAVAILABLE: "DATABASE_UNAVAILABLE",
+  // Inbound mail (POST /internal/inbound/messages). Not configured: no shared
+  // secret, so nothing is accepted. Signature invalid: not from our edge, or
+  // replayed. Recipient unknown: no mailbox or alias takes any of the
+  // envelope recipients — the edge rejects the message during SMTP.
+  INBOUND_NOT_CONFIGURED: "INBOUND_NOT_CONFIGURED",
+  INBOUND_SIGNATURE_INVALID: "INBOUND_SIGNATURE_INVALID",
+  INBOUND_RECIPIENT_UNKNOWN: "INBOUND_RECIPIENT_UNKNOWN",
   // A Member sign-in link that matches no mailbox: mistyped, or regenerated.
   MEMBER_LOGIN_LINK_INVALID: "MEMBER_LOGIN_LINK_INVALID",
 } as const;

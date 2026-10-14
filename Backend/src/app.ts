@@ -15,6 +15,7 @@ import {
 import { apiRouter } from "./routes/index.js";
 import { openApiSpec } from "./config/openapi.js";
 import { billingController } from "./modules/billing/billing.controller.js";
+import { inboundRouter } from "./modules/mail-ingest/ingest.routes.js";
 import { prisma } from "./config/prisma.js";
 import { asyncHandler } from "./common/middleware/asyncHandler.js";
 import { attachmentStorage } from "./modules/mail/attachment.storage.js";
@@ -76,6 +77,10 @@ export function createApp() {
     express.raw({ type: "application/json" }),
     billingController.webhook
   );
+
+  // Inbound mail from the edge: raw message bytes, verified by HMAC over
+  // exactly those bytes, so it too is registered before the JSON parser.
+  app.use("/api/v1/internal/inbound", inboundRouter);
 
   app.use(express.json({ limit: env.JSON_BODY_LIMIT }));
   app.use(

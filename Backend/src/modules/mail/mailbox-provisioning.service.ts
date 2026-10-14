@@ -210,9 +210,14 @@ export class MailboxProvisioningService {
       ? DEFAULT_QUOTA_GIB * GIB
       : optionsBytes[optionsBytes.length - 1] ?? null;
 
+    const zoikoStore = this.zoikoStore();
     return {
-      providerConfigured: this.provider.isConfigured(),
+      // Whether Create Email can create mailboxes at all: always with the
+      // Zoiko store, otherwise only with a configured mail server.
+      providerConfigured: zoikoStore || this.provider.isConfigured(),
       provider: this.provider.name,
+      /** Where new mailboxes live: an account on the mail server, or Zoiko's own store (D1). */
+      hostingMode: zoikoStore ? ("ZOIKO_STORE" as const) : ("MAIL_SERVER" as const),
       domains: domains.map((domain) => ({
         ...domain,
         usable: domain.verificationStatus === "VERIFIED",
@@ -234,8 +239,19 @@ export class MailboxProvisioningService {
 
   // ─── Create ───────────────────────────────────────────────────────────────
 
+  /**
+   * Zoiko is the mailbox store (D1): mailboxes are created here with no
+   * account on the mail server. Explicit opt-in — see
+   * STALWART_ACCOUNT_PROVISIONING — so a deployment that relies on mail
+   * server accounts keeps refusing when the server is unreachable.
+   */
+  private zoikoStore(): boolean {
+    return !env.STALWART_ACCOUNT_PROVISIONING;
+  }
+
   async create(input: ProvisionMailboxInput, context: ProvisioningContext) {
-    if (!this.provider.isConfigured()) {
+    const zoikoStore = this.zoikoStore();
+    if (!zoikoStore && !this.provider.isConfigured()) {
       throw new AppError(
         "Mailbox hosting is not configured on this deployment",
         503,
@@ -362,8 +378,10 @@ export class MailboxProvisioningService {
             address,
             displayName: input.displayName.trim(),
             storageLimit: BigInt(input.quotaBytes),
-            provider: this.provider.name,
-            provisioningStatus: "PENDING",
+            // A Zoiko-store mailbox has no mail-server side, so nothing about
+            // it claims one: no provider, and no provisioning to wait for.
+            provider: zoikoStore ? null : this.provider.name,
+            provisioningStatus: zoikoStore ? null : "PENDING",
             invitationStatus,
             // Member workspace only, unless the admin chose otherwise.
             workspaces: resolveWorkspaces(input.workspaces),
@@ -375,7 +393,7 @@ export class MailboxProvisioningService {
           address,
           domainId: domain.id,
           quotaBytes: input.quotaBytes,
-          provider: this.provider.name,
+          provider: zoikoStore ? "ZOIKO_STORE" : this.provider.name,
           invitation: invitationStatus === "PENDING" ? "REQUIRED" : "NOT_REQUIRED",
         }, tx);
         return mailbox.id;
@@ -386,6 +404,14 @@ export class MailboxProvisioningService {
         throw new AppError(`${address} is already in use`, 409, ErrorCodes.CONFLICT, { reason: "ADDRESS_TAKEN" });
       }
       throw error;
+    }
+
+    if (zoikoStore) {
+      // Nothing to provision: the mailbox is ready the moment its row
+      // exists. The owner still has to accept their invitation.
+      const row = await this.load(context.tenantId, mailboxId);
+      if (row.invitationStatus === "PENDING" && invitationToken) await this.deliverInvitation(row, invitationToken, context);
+      return toView(await this.load(context.tenantId, mailboxId));
     }
 
     await this.provisionOnHost(mailboxId, context);
@@ -637,7 +663,8 @@ export class MailboxProvisioningService {
   async resendInvitation(mailboxId: string, context: ProvisioningContext) {
     const row = await this.load(context.tenantId, mailboxId);
     this.refuseWhileDeleting(row);
-    if (row.provisioningStatus !== "PROVISIONED") {
+    // A Zoiko-store mailbox (no provider) has no mail-server side to wait for.
+    if (row.provider !== null && row.provisioningStatus !== "PROVISIONED") {
       throw new AppError(
         "The mailbox has to exist on the mail server before an invitation is sent",
         409,

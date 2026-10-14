@@ -263,6 +263,13 @@ export function CreateEmailWizard({ onClose, domainsHref }: { onClose: () => voi
             created yet. An operator needs to connect the mail server first.
           </Callout>
         )}
+        {data.hostingMode === "ZOIKO_STORE" && (
+          <Callout tone="info">
+            New mailboxes are kept in Zoiko&apos;s own mail store. They can send to and receive from other
+            Zoiko mailboxes straight away; mail to and from outside addresses needs the outbound relay and
+            inbound mail routing to be set up for the domain.
+          </Callout>
+        )}
         {atLimit && (
           <Callout tone="warn">
             This workspace has reached its plan&apos;s mailbox limit ({data.mailboxes.used}/{data.mailboxes.limit}).

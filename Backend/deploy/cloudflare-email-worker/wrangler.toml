@@ -1,0 +1,14 @@
+# Zoiko Mail inbound edge (pilot). Deploy with:  npx wrangler deploy
+# Then: npx wrangler secret put INBOUND_WEBHOOK_SECRET   (same value as the backend's)
+# and in Cloudflare → Email → Email Routing for the domain: route a catch-all
+# (or each address) to this Worker.
+name = "zoiko-mail-inbound"
+main = "worker.js"
+compatibility_date = "2024-09-23"
+
+[vars]
+# Zoiko's public ingest URL. Must be reachable from Cloudflare (a public API
+# host, or a Cloudflare Tunnel to it).
+ZOIKO_INBOUND_URL = "https://api.zoikomail.com/api/v1/internal/inbound/messages"
+# Optional: a verified Email Routing destination that receives mail when Zoiko is down.
+# BACKUP_FORWARD = "ops@example.com"

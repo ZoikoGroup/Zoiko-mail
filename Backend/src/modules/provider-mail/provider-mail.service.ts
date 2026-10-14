@@ -145,7 +145,12 @@ export class ProviderMailService {
             providerUid: String(item.uid),
             fromAddress: sender?.address ?? null,
             fromName: sender?.name ?? null,
-            securityFlags: { metadataOnly: true, size: item.size },
+            // The adapter parses the full message; these were discarded,
+            // so every imported message arrived as headers only. HTML is
+            // shown in the mail client's sandboxed frame, like any other.
+            textBody: item.textBody ?? null,
+            htmlBody: item.htmlBody ?? null,
+            securityFlags: { metadataOnly: !item.textBody && !item.htmlBody, size: item.size },
             recipients: {
               create: recipients.map((recipient) => ({
                 tenantId: mapping.tenantId,

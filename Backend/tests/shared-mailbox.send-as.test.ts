@@ -279,7 +279,12 @@ describe("a send as a shared mailbox", () => {
       select: { sentAsMailboxId: true, fromAddress: true },
     });
     expect(row.sentAsMailboxId).toBeNull();
-    expect(row.fromAddress).toBeNull();
+    // From the member's own mailbox — never the shared one.
+    const own = await prisma.mailbox.findFirstOrThrow({
+      where: { tenantId: owner.tenantId, membership: { user: { email: member.email } } },
+      select: { address: true },
+    });
+    expect(row.fromAddress).toBe(own.address);
   });
 
   it("refuses the send if access was revoked while the draft sat", async () => {
