@@ -504,3 +504,21 @@ describe("second factor", () => {
     expect((await login(owner.email)).body.data.state).toMatch(/^MFA_(REQUIRED|ENROLLMENT_REQUIRED)$/);
   });
 });
+
+/** The Member login is email and password only; Google stays on the standard sign-in. */
+describe("Google sign-in", () => {
+  it("refuses a Google sign-in that asks for the Member workspace", async () => {
+    const refused = await request(app)
+      .post("/api/v1/auth/google")
+      .send({ idToken: "any-id-token", workspace: "MEMBER" })
+      .expect(400);
+    expect(JSON.stringify(refused.body)).toMatch(/not available for the Member workspace/);
+  });
+
+  it("still accepts an ordinary Google sign-in request past validation", async () => {
+    // A fake token fails Google's verification, but not this schema: the
+    // standard sign-in's Google path is untouched.
+    const response = await request(app).post("/api/v1/auth/google").send({ idToken: "any-id-token" });
+    expect(response.status).not.toBe(400);
+  });
+});

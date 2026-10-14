@@ -66,6 +66,21 @@ test("the login page offers a clearly labelled Member sign-in", async ({ page })
   await expect(page.getByText("Member workspace", { exact: true })).toBeVisible();
 });
 
+test("the Member login is email and password only, while the standard login keeps Google", async ({ page }) => {
+  await page.goto("/login/member");
+  await expect(page.getByRole("heading", { name: "Member Sign In" })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByPlaceholder("john@example.com")).toBeVisible();
+  await expect(page.getByPlaceholder("Enter your password")).toBeVisible();
+  await expect(page.getByText("Continue with Google")).toHaveCount(0);
+  await expect(page.getByText("OR", { exact: true })).toHaveCount(0);
+  // Google's sign-in client is not even loaded on this page.
+  await expect(page.locator('script[src*="accounts.google.com/gsi/client"]')).toHaveCount(0);
+
+  // Our painted label, with Google's own transparent button over it.
+  await page.goto("/login");
+  await expect(page.getByText("Continue with Google").first()).toBeVisible({ timeout: 60_000 });
+});
+
 test("signs in for the Member workspace and lands in webmail", async ({ page }) => {
   await stubMemberShell(page);
   const bodies = await captureLogin(page);

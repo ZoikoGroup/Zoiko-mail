@@ -228,13 +228,10 @@ export async function login(input: LoginInput): Promise<AuthResponse> {
   return data;
 }
 
-export async function googleLogin(
-  idToken: string,
-  options: { tenantId?: string; workspace?: "MEMBER" } = {}
-): Promise<AuthResponse> {
+export async function googleLogin(idToken: string): Promise<AuthResponse> {
   const data = await apiRequest<AuthResponse>("/auth/google", {
     method: "POST",
-    body: { idToken, ...options },
+    body: { idToken },
     auth: false,
   });
   const { accessToken, refreshToken, platformToken } = extractTokens(data);
