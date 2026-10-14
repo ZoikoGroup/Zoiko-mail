@@ -4,8 +4,14 @@ import { useState } from "react";
 import { Card, InlineEmpty, InlineError, LoadingRows, Pill, Row } from "@/components/admin/ui";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { StepUpDialog, useStepUp } from "@/components/admin/StepUpDialog";
-import type { ConnectProviderInput } from "@/lib/domains-api";
-import { useConnectDnsProvider, useDnsProviders, useRemoveDnsProvider, useVerifyDnsProvider } from "@/lib/domains-hooks";
+import type { ConnectProviderInput, RepublishOutcome } from "@/lib/domains-api";
+import {
+  useConnectDnsProvider,
+  useDnsProviders,
+  useRemoveDnsProvider,
+  useReplaceDnsProviderSecret,
+  useVerifyDnsProvider,
+} from "@/lib/domains-hooks";
 import { relativeTime } from "./format";
 
 /**
@@ -21,7 +27,41 @@ export function DnsProvidersPanel({ canManage }: { canManage: boolean }) {
   const connect = useConnectDnsProvider();
   const verify = useVerifyDnsProvider();
   const remove = useRemoveDnsProvider();
+  const replace = useReplaceDnsProviderSecret();
   const stepUp = useStepUp();
+
+  // Replacing an existing credential's token: which one, the new value(s),
+  // and what republishing its domains did afterwards.
+  const [updating, setUpdating] = useState<{ id: string; label: string; provider: "CLOUDFLARE" | "GODADDY" } | null>(null);
+  const [newToken, setNewToken] = useState("");
+  const [newKey, setNewKey] = useState("");
+  const [newSecret, setNewSecret] = useState("");
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [republished, setRepublished] = useState<{ label: string; results: RepublishOutcome[] } | null>(null);
+
+  const closeUpdate = () => {
+    setUpdating(null);
+    setNewToken("");
+    setNewKey("");
+    setNewSecret("");
+    setUpdateError(null);
+  };
+
+  const submitUpdate = () => {
+    if (!updating) return;
+    const target = updating;
+    setUpdateError(null);
+    const secret = target.provider === "CLOUDFLARE"
+      ? { apiToken: newToken.trim() }
+      : { apiKey: newKey.trim(), apiSecret: newSecret.trim() };
+    void stepUp
+      .attempt(`Updating the ${target.label} token`, (stepUpToken) =>
+        replace.mutateAsync({ credentialId: target.id, secret, stepUpToken }).then((result) => {
+          setRepublished({ label: target.label, results: result.republished });
+          closeUpdate();
+        }))
+      .catch((cause: Error) => setUpdateError(cause.message));
+  };
 
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<"CLOUDFLARE" | "GODADDY">("CLOUDFLARE");
@@ -86,6 +126,16 @@ export function DnsProvidersPanel({ canManage }: { canManage: boolean }) {
                 <Pill tone={credential.status === "ACTIVE" ? "ok" : "crit"}>{credential.status === "ACTIVE" ? "Working" : "Invalid"}</Pill>
                 {canManage && (
                   <>
+                    <button
+                      type="button"
+                      className={`zoiko-btn sm${credential.status === "ACTIVE" ? "" : " pri"}`}
+                      onClick={() => {
+                        setRepublished(null);
+                        setUpdating({ id: credential.id, label: credential.label, provider: credential.provider as "CLOUDFLARE" | "GODADDY" });
+                      }}
+                    >
+                      Update token
+                    </button>
                     <button type="button" className="zoiko-btn sm" disabled={verify.isPending} onClick={() => verify.mutate(credential.id)}>
                       Re-verify
                     </button>
@@ -98,6 +148,65 @@ export function DnsProvidersPanel({ canManage }: { canManage: boolean }) {
             }
           />
         ))
+      )}
+
+      {updating && (
+        <div className="space-y-3 border-t border-[var(--border)] px-4 py-4" aria-label={`Update the ${updating.label} token`} role="group">
+          <p className="text-[12px] font-semibold text-[var(--ink)]">
+            New {updating.provider === "CLOUDFLARE" ? "Cloudflare API token" : "GoDaddy API key"} for {updating.label}
+          </p>
+          {updating.provider === "CLOUDFLARE" ? (
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-semibold text-[var(--ink2)]">API token</span>
+              <input className={field} type="password" autoComplete="off" value={newToken} onChange={(event) => setNewToken(event.target.value)} />
+              <span className="mt-1 block text-[11px] text-[var(--ink3)]">Zone → Zone: Read and Zone → DNS: Edit, covering every zone this connection publishes to.</span>
+            </label>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="mb-1 block text-[11px] font-semibold text-[var(--ink2)]">API key</span>
+                <input className={field} type="password" autoComplete="off" value={newKey} onChange={(event) => setNewKey(event.target.value)} />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-[11px] font-semibold text-[var(--ink2)]">API secret</span>
+                <input className={field} type="password" autoComplete="off" value={newSecret} onChange={(event) => setNewSecret(event.target.value)} />
+              </label>
+            </div>
+          )}
+          <p className="text-[11px] text-[var(--ink3)]">
+            Checked with the provider before it replaces the stored one. Domains using this connection stay linked and are published again straight away.
+          </p>
+          {updateError && <p className="text-[11.5px] text-[var(--crit)]">{updateError}</p>}
+          <div className="flex justify-end gap-2">
+            <button type="button" className="zoiko-btn sm" onClick={closeUpdate} disabled={replace.isPending}>Cancel</button>
+            <button
+              type="button"
+              className="zoiko-btn pri sm"
+              disabled={replace.isPending || (updating.provider === "CLOUDFLARE" ? !newToken.trim() : !newKey.trim() || !newSecret.trim())}
+              onClick={submitUpdate}
+            >
+              {replace.isPending ? "Checking…" : "Save token"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {republished && (
+        <div className="space-y-1 border-t border-[var(--border)] px-4 py-3 text-[11.5px]" role="status">
+          <p className="font-semibold text-[var(--ok)]">{republished.label} token updated.</p>
+          {republished.results.length === 0 ? (
+            <p className="text-[var(--ink3)]">No domains publish through this connection yet.</p>
+          ) : (
+            republished.results.map((result) => (
+              <p key={result.domainName} className={result.failed.length ? "text-[var(--crit)]" : "text-[var(--ink2)]"}>
+                {result.domainName}:{" "}
+                {result.failed.length
+                  ? `${result.failed.length} record(s) could not be published — ${result.failed[0]!.error}`
+                  : `${result.published} record(s) published. Verification follows in about a minute.`}
+              </p>
+            ))
+          )}
+        </div>
       )}
 
       {open && (

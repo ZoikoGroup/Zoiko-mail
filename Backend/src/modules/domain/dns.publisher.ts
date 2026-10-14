@@ -47,6 +47,23 @@ export function removeSpfInclude(record: string, include: string): string | null
   return meaningful.length === 0 ? null : tokens.join(" ");
 }
 
+/** A TXT value as providers may return it: quoted, or split into 255-byte strings. */
+const unquote = (value: string) => value.trim().replace(/"\s+"/g, "").replace(/^"|"$/g, "");
+
+/**
+ * Whether a published value is this record. DKIM compares the public key
+ * (p=), so spacing or tag order a provider normalises does not read as a
+ * different key; host records compare the normalised host.
+ */
+function sameRecordValue(spec: DnsRecordSpec, published: string): boolean {
+  if (spec.purpose === "DKIM") {
+    const ours = parseTags(spec.value).get("p");
+    return Boolean(ours) && parseTags(unquote(published)).get("p") === ours;
+  }
+  if (spec.type === "CNAME") return normalizeHost(published) === normalizeHost(spec.value);
+  return unquote(published) === spec.value;
+}
+
 const includeOf = (spec: DnsRecordSpec) => /include:(\S+)/i.exec(spec.value)?.[1] ?? "";
 const contents = (values: ProviderRecordValue[]) => values.map((value) => value.content);
 
@@ -86,8 +103,23 @@ export async function publishRecord(zone: DnsZoneClient, spec: DnsRecordSpec, op
       case "DKIM":
       case "AUTODISCOVER":
       case "AUTOCONFIG": {
-        // These names belong to us: the selector is ours, and the
-        // autoconfiguration hosts only mean one thing.
+        // Written only when the name is empty or already holds exactly this
+        // value. These names used to be treated as ours alone, but a dated
+        // selector (zm202610) is the same for every Zoiko installation that
+        // adds the domain that month, and another mail service may use the
+        // name too: overwriting replaced someone else's live DKIM key and
+        // broke their signing. A different value is a conflict to resolve —
+        // rotating the key picks a selector nobody holds — never a write.
+        const current = await zone.get(spec.type, spec.fqdn);
+        if (current.some((value) => sameRecordValue(spec, value.content))) return { status: "PUBLISHED", note: null };
+        if (current.length > 0) {
+          return {
+            status: "FAILED",
+            error: spec.purpose === "DKIM"
+              ? `${spec.fqdn} already holds a different DKIM key (another mail service or Zoiko installation uses this selector), so it was not overwritten. Rotate the DKIM key to publish under a new selector.`
+              : `${spec.fqdn} already points somewhere else, so it was not overwritten. Remove that record if it is no longer used.`,
+          };
+        }
         await zone.set(spec.type, spec.fqdn, [{ content: spec.value }], spec.ttl);
         return { status: "PUBLISHED", note: null };
       }

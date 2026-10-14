@@ -8,6 +8,7 @@ import {
   credentialIdSchema,
   domainIdSchema,
   listQuerySchema,
+  replaceProviderSecretSchema,
   updateDomainSchema,
 } from "./domain.schema.js";
 import { domainService } from "./domain.service.js";
@@ -47,6 +48,14 @@ domainRouter.post("/dns-providers", requireCapability("connector.credentials.rot
 }));
 domainRouter.post("/dns-providers/:credentialId/verify", validate(credentialIdSchema, "params"), asyncHandler(async (req, res) => {
   sendSuccess(res, 200, await dnsProviderService.revalidate(String(req.params.credentialId), ctx(req)), req.requestId);
+}));
+// Replace the token of an existing credential (same gate as connecting one),
+// then publish every domain using it so they catch up straight away.
+domainRouter.put("/dns-providers/:credentialId/secret", requireCapability("connector.credentials.rotate"), validate(credentialIdSchema, "params"), validate(replaceProviderSecretSchema), asyncHandler(async (req, res) => {
+  const credentialId = String(req.params.credentialId);
+  const credential = await dnsProviderService.replaceSecret(credentialId, req.body, ctx(req));
+  const republished = await domainService.republishForCredential(credentialId, ctx(req));
+  sendSuccess(res, 200, { credential, republished }, req.requestId);
 }));
 domainRouter.delete("/dns-providers/:credentialId", requireCapability("connector.credentials.rotate"), validate(credentialIdSchema, "params"), asyncHandler(async (req, res) => {
   sendSuccess(res, 200, await dnsProviderService.remove(String(req.params.credentialId), ctx(req)), req.requestId);

@@ -14,6 +14,7 @@ import {
   recheckDomain,
   removeDnsProvider,
   removeDomain,
+  replaceDnsProviderSecret,
   rotateDkim,
   updateDomain,
   verifyDnsProvider,
@@ -84,5 +85,11 @@ export const useRemoveDomainDetail = () =>
 export const useConnectDnsProvider = () =>
   useInvalidating(({ input, stepUpToken }: { input: ConnectProviderInput; stepUpToken?: string }) => connectDnsProvider(input, stepUpToken), [PROVIDERS]);
 export const useVerifyDnsProvider = () => useInvalidating((credentialId: string) => verifyDnsProvider(credentialId), [PROVIDERS]);
+export const useReplaceDnsProviderSecret = () =>
+  useInvalidating(
+    ({ credentialId, secret, stepUpToken }: { credentialId: string; secret: { apiToken?: string; apiKey?: string; apiSecret?: string }; stepUpToken?: string }) =>
+      replaceDnsProviderSecret(credentialId, secret, stepUpToken),
+    [PROVIDERS]
+  );
 export const useRemoveDnsProvider = () =>
   useInvalidating(({ credentialId, stepUpToken }: { credentialId: string; stepUpToken?: string }) => removeDnsProvider(credentialId, stepUpToken), [PROVIDERS]);

@@ -2,10 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
-import { clearSecretCache, getSecret } from "../src/common/secrets/secrets.js";
+import { clearSecretCache, deleteSecret, getSecret } from "../src/common/secrets/secrets.js";
 import { domainService } from "../src/modules/domain/domain.service.js";
 import { runDueDomainSyncs } from "../src/modules/domain/domain.sync.js";
-import { mergeSpfInclude, removeSpfInclude } from "../src/modules/domain/dns.publisher.js";
+import { mergeSpfInclude, publishRecord, removeSpfInclude } from "../src/modules/domain/dns.publisher.js";
+import { nextSelector } from "../src/modules/domain/dkim.service.js";
 import { DnsProviderError, setDnsProviderAdapter, type DnsProviderAdapter } from "../src/modules/domain/providers/index.js";
 import { cloudflareAdapter } from "../src/modules/domain/providers/cloudflare.js";
 import { godaddyAdapter } from "../src/modules/domain/providers/godaddy.js";
@@ -299,5 +300,173 @@ describe("provider HTTP adapters", () => {
   it("GoDaddy: says when the account has no API access", async () => {
     stubFetch(() => ({ status: 403, body: { code: "ACCESS_DENIED", message: "Authenticated user is not allowed access" } }));
     await expect(godaddyAdapter.verify({ provider: "GODADDY", apiKey: "k", apiSecret: "s" }, {})).rejects.toThrow(/account types/);
+  });
+});
+
+/**
+ * A credential whose stored token is gone — the row survives in the database
+ * but its secret does not (a wiped local .secrets folder, a restored vault).
+ * It used to keep reading ACTIVE while every publish failed with "Secret not
+ * available", leaving domains unverified with no explanation.
+ */
+describe("a credential whose stored token is lost", () => {
+  const NEW_TOKEN = "cf-token-replaced-0123456789";
+
+  async function loseToken(credentialId: string) {
+    const row = await prisma.dnsProviderCredential.findUniqueOrThrow({ where: { id: credentialId } });
+    await deleteSecret(row.secretRef, { purpose: "test" });
+    clearSecretCache();
+    return row;
+  }
+
+  it("is marked invalid with an instruction, instead of failing silently", async () => {
+    const { owner, credential } = await ownerWithCredential("dnsp-lost-owner@zoiko.test");
+    const domain = await addDomain(owner.accessToken, credential.id, "lost.example.test");
+    await loseToken(credential.id);
+
+    const published = await request(app).post(`/api/v1/domains/${domain.id}/publish`).set(authHeader(owner.accessToken)).expect(200);
+    expect(published.body.data.publishResult.failed[0].error).toMatch(/stored API token for this connection is missing/);
+
+    const row = await prisma.dnsProviderCredential.findUniqueOrThrow({ where: { id: credential.id } });
+    expect(row.status).toBe("INVALID");
+    expect(row.lastError).toMatch(/Update token/);
+    const audit = await prisma.auditEvent.findFirst({ where: { tenantId: owner.tenantId, eventType: "DNS_PROVIDER_INVALID", targetId: credential.id } });
+    expect(audit).not.toBeNull();
+  });
+
+  it("gets a new token in place, keeps its domains, and republishes them", async () => {
+    const { owner, credential } = await ownerWithCredential("dnsp-replace-owner@zoiko.test");
+    const domain = await addDomain(owner.accessToken, credential.id, "replace.example.test");
+    const row = await loseToken(credential.id);
+    await request(app).post(`/api/v1/domains/${domain.id}/publish`).set(authHeader(owner.accessToken)).expect(200);
+    calls.length = 0;
+
+    const url = `/api/v1/domains/dns-providers/${credential.id}/secret`;
+    const refused = await request(app).put(url).set(authHeader(owner.accessToken)).send({ apiToken: NEW_TOKEN }).expect(403);
+    expect(refused.body.error.details?.requiresStepUp).toBe(true);
+
+    const replaced = await request(app)
+      .put(url)
+      .set(authHeader(owner.accessToken))
+      .set(await stepUpHeader(app, owner.accessToken))
+      .send({ apiToken: NEW_TOKEN })
+      .expect(200);
+    expect(calls).toContain("verify");
+    expect(replaced.body.data.credential).toMatchObject({ id: credential.id, status: "ACTIVE", lastError: null });
+    expect(JSON.stringify(replaced.body)).not.toContain(NEW_TOKEN);
+    expect(replaced.body.data.republished).toEqual([
+      expect.objectContaining({ domainName: "replace.example.test", failed: [] }),
+    ]);
+    expect(replaced.body.data.republished[0].published).toBeGreaterThan(0);
+
+    // Same ref, new value; the domain is still linked and its records are out.
+    expect(JSON.parse(await getSecret(row.secretRef, { purpose: "test" }))).toEqual({ provider: "CLOUDFLARE", apiToken: NEW_TOKEN });
+    const after = await prisma.mailDomain.findUniqueOrThrow({ where: { id: domain.id }, include: { records: true } });
+    expect(after.dnsCredentialId).toBe(credential.id);
+    expect(after.records.every((record) => record.publishState === "PUBLISHED")).toBe(true);
+
+    const audit = await prisma.auditEvent.findFirstOrThrow({ where: { tenantId: owner.tenantId, eventType: "DNS_PROVIDER_SECRET_REPLACED" } });
+    expect(JSON.stringify(audit.metadata)).not.toContain(NEW_TOKEN);
+  });
+
+  it("changes nothing when the provider rejects the new token", async () => {
+    const { owner, credential } = await ownerWithCredential("dnsp-replace-bad-owner@zoiko.test");
+    const domain = await addDomain(owner.accessToken, credential.id, "replace-bad.example.test");
+    await loseToken(credential.id);
+    await request(app).post(`/api/v1/domains/${domain.id}/publish`).set(authHeader(owner.accessToken)).expect(200);
+
+    restoreAdapter();
+    restoreAdapter = setDnsProviderAdapter("CLOUDFLARE", dns.adapter({ rejectCredential: true }));
+    const res = await request(app)
+      .put(`/api/v1/domains/dns-providers/${credential.id}/secret`)
+      .set(authHeader(owner.accessToken))
+      .set(await stepUpHeader(app, owner.accessToken))
+      .send({ apiToken: NEW_TOKEN })
+      .expect(422);
+    expect(res.body.error.code).toBe("DNS_PROVIDER_ERROR");
+    const row = await prisma.dnsProviderCredential.findUniqueOrThrow({ where: { id: credential.id } });
+    expect(row.status).toBe("INVALID");
+  });
+});
+
+/**
+ * DKIM selectors are dated (zmYYYYMM), so every Zoiko installation that adds
+ * a domain in the same month picks the same name. Publishing used to write
+ * that name unconditionally, replacing whatever key was live there — another
+ * installation's or another mail service's.
+ */
+describe("DKIM names already in use", () => {
+  const thisMonth = () => nextSelector([]);
+  const FOREIGN = "v=DKIM1; k=rsa; p=FOREIGNKEYforeignkeyFOREIGNKEY";
+
+  it("gives a new domain a selector nobody holds, and leaves the other key alone", async () => {
+    const { owner, credential } = await ownerWithCredential("dnsp-dkim-free-owner@zoiko.test");
+    const name = "dkim-free.example.test";
+    dns.add("TXT", `${thisMonth()}._domainkey.${name}`, FOREIGN);
+
+    const domain = await addDomain(owner.accessToken, credential.id, name);
+    const dkim = await prisma.domainDnsRecord.findFirstOrThrow({ where: { domainId: domain.id, purpose: "DKIM" } });
+    expect(dkim.fqdn).toBe(`${thisMonth()}b._domainkey.${name}`);
+    expect(dkim.publishState).toBe("PUBLISHED");
+
+    // The other key is untouched; ours sits under its own name.
+    expect(dns.get("TXT", `${thisMonth()}._domainkey.${name}`).map((value) => value.content)).toEqual([FOREIGN]);
+    expect(dns.get("TXT", dkim.fqdn).map((value) => value.content)).toEqual([dkim.value]);
+  });
+
+  it("refuses to overwrite a different key already at the name, and says how to fix it", async () => {
+    const zone = dnsZoneOver(dns);
+    const fqdn = "zm209901._domainkey.conflict.example.test";
+    dns.add("TXT", fqdn, FOREIGN);
+    const spec = { purpose: "DKIM", type: "TXT", fqdn, value: "v=DKIM1; k=rsa; p=OURKEYourkeyOURKEY", ttl: 3600 } as never;
+
+    const refused = await publishRecord(zone, spec, { replaceExistingMx: false, platformMx: [] });
+    expect(refused).toMatchObject({ status: "FAILED" });
+    expect((refused as { error: string }).error).toMatch(/Rotate the DKIM key/);
+    expect(dns.get("TXT", fqdn).map((value) => value.content)).toEqual([FOREIGN]);
+
+    // Our own value already there (even quoted by the provider) is a success, not a write.
+    dns.set("TXT", fqdn, [{ content: '"v=DKIM1; k=rsa; p=OURKEYourkeyOURKEY"' }]);
+    expect(await publishRecord(zone, spec, { replaceExistingMx: false, platformMx: [] })).toMatchObject({ status: "PUBLISHED" });
+  });
+});
+
+/** A zone client writing straight into the fake DNS, for driving the publisher directly. */
+function dnsZoneOver(fake: FakeDns) {
+  return {
+    get: async (type: never, fqdn: string) => fake.get(type, fqdn),
+    set: async (type: never, fqdn: string, values: never[]) => fake.set(type, fqdn, values),
+  } as never;
+}
+
+/**
+ * temveris.com: SPF verified (Zoiko's include was already live) yet showed
+ * "Publish failed" with the credential error, because every check retried a
+ * write the record did not need.
+ */
+describe("a record already live in DNS", () => {
+  it("is published, not failed, even while the credential is unusable", async () => {
+    const { owner, credential } = await ownerWithCredential("dnsp-live-owner@zoiko.test");
+    const domain = await addDomain(owner.accessToken, credential.id, "live.example.test");
+    // Records are now live in DNS. Then the token goes missing, and SPF is
+    // left marked failed — the state the screen showed.
+    const row = await prisma.dnsProviderCredential.findUniqueOrThrow({ where: { id: credential.id } });
+    await deleteSecret(row.secretRef, { purpose: "test" });
+    clearSecretCache();
+    await prisma.domainDnsRecord.updateMany({
+      where: { domainId: domain.id, purpose: "SPF" },
+      data: { publishState: "FAILED", publishError: "The CLOUDFLARE credential is marked invalid", state: "VERIFIED" },
+    });
+    await prisma.mailDomain.update({ where: { id: domain.id }, data: { lastCheckedAt: null, lastSyncError: "Publishing failed: credential" } });
+    calls.length = 0;
+
+    await request(app).post(`/api/v1/domains/${domain.id}/diagnostics`).set(authHeader(owner.accessToken)).expect(200);
+
+    const spf = await prisma.domainDnsRecord.findFirstOrThrow({ where: { domainId: domain.id, purpose: "SPF" } });
+    expect(spf).toMatchObject({ state: "VERIFIED", publishState: "PUBLISHED", publishError: null });
+    const after = await prisma.mailDomain.findUniqueOrThrow({ where: { id: domain.id } });
+    expect(after.lastSyncError).toBeNull();
+    // Nothing was written for it: the provider was not even asked.
+    expect(calls.filter((call) => call !== "verify")).toEqual([]);
   });
 });

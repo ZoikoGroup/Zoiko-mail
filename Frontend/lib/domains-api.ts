@@ -225,6 +225,27 @@ export const connectDnsProvider = (input: ConnectProviderInput, stepUpToken?: st
 export const verifyDnsProvider = (credentialId: string) =>
   apiRequest<DnsProviderCredential>(`/domains/dns-providers/${credentialId}/verify`, { method: "POST" });
 
+/** What publishing looked like for each domain after a token was replaced. */
+export interface RepublishOutcome {
+  domainName: string;
+  published: number;
+  failed: Array<{ recordKey: string; error: string }>;
+}
+
+/**
+ * Give an existing credential a new token. The connection keeps its id, so
+ * every domain using it stays linked; the server then republishes them.
+ */
+export const replaceDnsProviderSecret = (
+  credentialId: string,
+  secret: { apiToken?: string; apiKey?: string; apiSecret?: string },
+  stepUpToken?: string
+) =>
+  apiRequest<{ credential: DnsProviderCredential; republished: RepublishOutcome[] }>(
+    `/domains/dns-providers/${credentialId}/secret`,
+    { method: "PUT", body: secret, stepUpToken }
+  );
+
 export const removeDnsProvider = (credentialId: string, stepUpToken?: string) =>
   apiRequest<{ id: string }>(`/domains/dns-providers/${credentialId}`, { method: "DELETE", stepUpToken });
 
