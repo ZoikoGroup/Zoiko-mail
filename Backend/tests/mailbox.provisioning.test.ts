@@ -88,6 +88,21 @@ class FakeHost implements MailHostingProvider {
     }
     return account;
   }
+  /** Password changes, by account id. Recorded so a test can assert the sync. */
+  passwords = new Map<string, string>();
+  /** Fail the next setAccountPassword with this error. */
+  failPassword: StalwartError | null = null;
+  async setAccountPassword(id: string, secret: string) {
+    if (this.failPassword) {
+      const error = this.failPassword;
+      this.failPassword = null;
+      throw error;
+    }
+    if (![...this.accounts.values()].some((a) => a.id === id)) {
+      throw new StalwartError("not found", "INVALID_REQUEST", false, undefined, "notFound");
+    }
+    this.passwords.set(id, secret);
+  }
   async probe() {
     return { reachable: true, authenticated: true, managementCapability: true };
   }

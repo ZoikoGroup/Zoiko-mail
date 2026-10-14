@@ -17,12 +17,16 @@ const app = createApp();
  * restricted mailbox.
  */
 
-/** A mailbox for the caller, which is what the AI service looks up. */
+/**
+ * A mailbox for the caller, which is what the AI service looks up. Assigned
+ * to the Owner workspace too, since the fixture works from the Owner console
+ * and a new mailbox otherwise opens in the Member workspace alone.
+ */
 async function mailboxFor(owner: { accessToken: string; membershipId: string }) {
   const created = await request(app)
     .post("/api/v1/mail/admin/mailboxes")
     .set(authHeader(owner.accessToken))
-    .send({ membershipId: owner.membershipId })
+    .send({ membershipId: owner.membershipId, workspaces: ["MEMBER", "OWNER"] })
     .expect(201);
   return created.body.data.id as string;
 }

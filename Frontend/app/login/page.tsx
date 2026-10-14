@@ -23,6 +23,13 @@ import { GOOGLE_CLIENT_ID } from "@/lib/config";
 export default function AuthPage() {
   useEffect(() => { document.title = "Sign In | Zoiko Mail"; }, []);
   const [step, setStep] = useState<AuthStep>("login");
+  // The Member sign-in links here for "Forgot password?" rather than carrying
+  // its own copy of the reset flow; the account and password are the same.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("step") === "forgotPassword") {
+      setStep("forgotPassword");
+    }
+  }, []);
   const [pendingToken, setPendingToken] = useState("");
   const [verificationEmail, setVerificationEmail] = useState("");
   const [resetEmail, setResetEmail] = useState("");

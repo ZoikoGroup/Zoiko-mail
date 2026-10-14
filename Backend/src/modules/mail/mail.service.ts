@@ -18,14 +18,67 @@ import { deliveryProtectionService } from "../delivery-protection/delivery-prote
 import { sharedMailboxService } from "./shared-mailbox.service.js";
 import { participantService } from "../participant/participant.service.js";
 import { jobService } from "../job/job.service.js";
+import { membershipService } from "../membership/membership.service.js";
 import { mailboxCleanupService } from "./mailbox-cleanup.service.js";
+import { memberLoginUrl, resolveWorkspaces } from "./mailbox-access.service.js";
+import { reachableWorkspaces } from "../../common/utils/workspaceScope.js";
 import type { BulkMailboxActionInput, CreateDraftInput, CreateLabelInput, ListMailInput, UpdateDraftInput, UpdateLabelInput, UpdateMailboxItemInput } from "./mail.schema.js";
+
+/**
+ * Why a member cannot be given a personal mailbox, or null when they can.
+ *
+ * One rule for the candidate list and for creation alike. Pending invitees
+ * are eligible: the mailbox waits for them, exactly as when one is created
+ * together with the invitation. Support seats are not members of the
+ * workspace's mail, and a suspended or disabled account cannot use one.
+ */
+export type MailboxIneligibility =
+  | "NOT_A_MEMBER"
+  | "MEMBERSHIP_SUSPENDED"
+  | "SUPPORT_SEAT"
+  | "ACCOUNT_DISABLED"
+  | "HAS_MAILBOX";
+
+export function mailboxIneligibility(member: {
+  status: string;
+  role: string;
+  user: { status: string };
+  mailbox: unknown;
+}): MailboxIneligibility | null {
+  if (member.status !== "ACTIVE" && member.status !== "INVITED") {
+    return member.status === "SUSPENDED" ? "MEMBERSHIP_SUSPENDED" : "NOT_A_MEMBER";
+  }
+  if (member.role === "SUPPORT") return "SUPPORT_SEAT";
+  if (member.user.status === "SUSPENDED" || member.user.status === "DISABLED") return "ACCOUNT_DISABLED";
+  if (member.mailbox) return "HAS_MAILBOX";
+  return null;
+}
+
+function ineligibleError(reason: MailboxIneligibility, email?: string, mailboxAddress?: string): AppError {
+  const who = email ?? "This person";
+  switch (reason) {
+    case "NOT_A_MEMBER":
+      return new AppError(`${who} is no longer a member of this workspace`, 404, ErrorCodes.NOT_FOUND, { reason });
+    case "MEMBERSHIP_SUSPENDED":
+      return new AppError(`${who} is suspended in this workspace. Reinstate them first.`, 409, ErrorCodes.CONFLICT, { reason });
+    case "SUPPORT_SEAT":
+      return new AppError("Support seats do not get a workspace mailbox", 409, ErrorCodes.CONFLICT, { reason });
+    case "ACCOUNT_DISABLED":
+      return new AppError(`${who}'s account is disabled`, 409, ErrorCodes.CONFLICT, { reason });
+    case "HAS_MAILBOX":
+      return new AppError(`${who} already has a mailbox${mailboxAddress ? `: ${mailboxAddress}` : ""}`, 409, ErrorCodes.CONFLICT, { reason });
+  }
+}
 
 interface MailContext {
   tenantId: string;
   userId: string;
   membershipId: string;
   role: MembershipRole;
+  /** The console the session was opened for; absent for internal (system) contexts. */
+  workspace?: MembershipRole;
+  /** The membership's own role, which `role` may be narrowed from by the session. */
+  membershipRole?: MembershipRole;
   email: string;
   requestId?: string;
   ipAddress?: string | null;
@@ -125,6 +178,21 @@ export class MailService {
         tenantId: context.tenantId,
         membershipId: context.membershipId,
         address: context.email.toLowerCase(),
+        // Created implicitly on first use, so no admin chose anything: the
+        // Member workspace plus every console the person's role reaches.
+        // Without a mailbox the console gate already followed the role; the
+        // mailbox this creates must not narrow that, or an Admin whose first
+        // mail was read through the Member login would find the Admin console
+        // closed at their next sign-in. Admin-created mailboxes take the
+        // admin's selection (Member by default) instead.
+        workspaces: resolveWorkspaces([
+          "MEMBER",
+          ...(context.membershipRole
+            ? reachableWorkspaces(context.membershipRole)
+            : context.workspace
+              ? [context.workspace]
+              : []),
+        ]),
       },
       update: {},
     });
@@ -1732,7 +1800,13 @@ export class MailService {
   async listSendableMailboxes(context: MailContext) {
     const own = await this.mailbox(context);
     const shared = await prisma.mailboxAccess.findMany({
-      where: { tenantId: context.tenantId, membershipId: context.membershipId, canSend: true },
+      where: {
+        tenantId: context.tenantId,
+        membershipId: context.membershipId,
+        canSend: true,
+        // A shared mailbox not assigned to this workspace cannot be sent from here.
+        ...(context.workspace ? { mailbox: { workspaces: { has: context.workspace } } } : {}),
+      },
       select: {
         mailbox: { select: { id: true, address: true, type: true, sendSuspendedAt: true } },
       },
@@ -1779,6 +1853,7 @@ export class MailService {
       storageUsed: Number(mb.storageUsed),
       storageLimit: Number(mb.storageLimit),
       providerQuotaBytes: mb.providerQuotaBytes === null ? null : Number(mb.providerQuotaBytes),
+      memberLoginUrl: memberLoginUrl(mb.memberLoginKey),
     }));
   }
 
@@ -1805,25 +1880,57 @@ export class MailService {
    */
   async adminCreateMailbox(
     tenantId: string,
-    input: string | { membershipId: string; domainId?: string; localPart?: string },
+    input:
+      | string
+      | {
+          membershipId?: string;
+          /**
+           * Somebody who is not in the workspace yet. They are invited at
+           * their own (personal) address and the mailbox is created on the
+           * workspace domain at once, so it is waiting for them when they
+           * accept — the admin never chooses or learns their password.
+           */
+          newMember?: { email: string; firstName?: string; lastName?: string };
+          domainId?: string;
+          localPart?: string;
+          /** Workspaces the mailbox opens in; Member only when omitted. */
+          workspaces?: MembershipRole[];
+        },
     context: MailContext
   ) {
-    const membershipId = typeof input === "string" ? input : input.membershipId;
+    const newMember = typeof input === "string" ? undefined : input.newMember;
+    let membershipId = typeof input === "string" ? input : input.membershipId ?? "";
     const domainId = typeof input === "string" ? undefined : input.domainId;
     const requestedLocalPart = typeof input === "string" ? undefined : input.localPart;
+    const workspaces = resolveWorkspaces(typeof input === "string" ? undefined : input.workspaces);
 
-    const membership = await prisma.tenantMembership.findFirst({
-      where: { id: membershipId, tenantId, status: "ACTIVE" },
-      include: { user: { select: { id: true, email: true } }, mailbox: true },
-    });
-    if (!membership) throw new AppError("Active membership not found", 404, ErrorCodes.NOT_FOUND);
-    if (membership.mailbox) throw new AppError("Mailbox already exists for this member", 409, ErrorCodes.CONFLICT);
+    // A new person's mailbox has to be on a workspace domain: without one the
+    // address would be their personal email, which the workspace does not own.
+    if (newMember && !domainId) {
+      throw new AppError("Choose a domain for the new person's mailbox", 400, ErrorCodes.VALIDATION_ERROR, { parameter: "domainId" });
+    }
+
+    let ownEmail: string;
+    if (newMember) {
+      ownEmail = newMember.email.toLowerCase();
+    } else {
+      const membership = await prisma.tenantMembership.findFirst({
+        where: { id: membershipId, tenantId },
+        include: { user: { select: { id: true, email: true, status: true } }, mailbox: { select: { address: true } } },
+      });
+      // The same rule the candidate list applies, so the server never accepts
+      // somebody the picker would not have offered — a stale screen, or two
+      // admins at once, cannot provision a mailbox for a removed member.
+      const ineligible = membership ? mailboxIneligibility(membership) : "NOT_A_MEMBER";
+      if (ineligible) throw ineligibleError(ineligible, membership?.user.email, membership?.mailbox?.address);
+      ownEmail = membership!.user.email;
+    }
 
     // Enforce the tenant-level mailbox limit before provisioning a new mailbox.
     await billingService.assertMailboxWithinLimit(tenantId);
 
     // ── Domain readiness check ──────────────────────────────────────────
-    let address = membership.user.email.toLowerCase();
+    let address = ownEmail.toLowerCase();
     let resolvedDomainId: string | null = null;
 
     if (domainId) {
@@ -1845,9 +1952,23 @@ export class MailService {
 
       // Defaults to the local part they already use, which is what somebody
       // expects when they invite dana@old-company.com and pick acme.com.
-      const localPart = (requestedLocalPart ?? membership.user.email.split("@")[0] ?? "")
+      let localPart = (requestedLocalPart ?? ownEmail.split("@")[0] ?? "")
         .trim()
         .toLowerCase();
+      // People type the whole address. On this domain that is unambiguous;
+      // on any other it is a mistake worth naming rather than a bad character.
+      const at = localPart.indexOf("@");
+      if (at >= 0) {
+        if (localPart.slice(at + 1) !== domain.domainName.toLowerCase()) {
+          throw new AppError(
+            `Enter only the part before the @ — the domain is ${domain.domainName}`,
+            422,
+            ErrorCodes.VALIDATION_ERROR,
+            { parameter: "localPart" }
+          );
+        }
+        localPart = localPart.slice(0, at);
+      }
       if (!/^[a-z0-9._%+-]{1,64}$/.test(localPart)) {
         throw new AppError(
           "That mailbox name contains characters an address cannot carry",
@@ -1874,12 +1995,36 @@ export class MailService {
       }
     }
 
+    // Invited only now, once the address is known to be free: refusing after
+    // the invitation went out would leave a stranger with an email for a
+    // mailbox that does not exist.
+    if (newMember) {
+      const invited = await membershipService.createInvitation(
+        { email: ownEmail, role: "MEMBER", firstName: newMember.firstName, lastName: newMember.lastName },
+        { tenantId, userId: context.userId, role: context.role, requestId: context.requestId, ipAddress: context.ipAddress, userAgent: context.userAgent }
+      ).catch((error: unknown) => {
+        if (error instanceof AppError && error.message === "User already belongs to this tenant") {
+          throw new AppError(`${ownEmail} is already a member of this workspace. Choose them from the member list instead.`, 409, ErrorCodes.CONFLICT, { reason: "ALREADY_A_MEMBER" });
+        }
+        throw error;
+      });
+      membershipId = invited.membership.id;
+      // A re-invitation reuses an earlier membership, which may already hold one.
+      if (await prisma.mailbox.findFirst({ where: { tenantId, membershipId }, select: { id: true } })) {
+        throw new AppError("Mailbox already exists for this member", 409, ErrorCodes.CONFLICT, { reason: "HAS_MAILBOX" });
+      }
+    }
+
+    // The checks above read, then this writes; two admins acting at once can
+    // both pass them. The unique constraints (one mailbox per member, one
+    // address per workspace) decide the race — the loser gets a sentence.
     const mailbox = await prisma.mailbox.create({
       data: {
         tenantId,
         membershipId,
         domainId: resolvedDomainId,
         address,
+        workspaces,
       },
       include: {
         membership: {
@@ -1888,6 +2033,14 @@ export class MailService {
           },
         },
       },
+    }).catch((error: unknown) => {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const target = String(error.meta?.target ?? "");
+        throw target.includes("address")
+          ? new AppError(`${address} was just taken in this workspace`, 409, ErrorCodes.CONFLICT, { reason: "ADDRESS_TAKEN" })
+          : new AppError("This member was just given a mailbox by someone else", 409, ErrorCodes.CONFLICT, { reason: "HAS_MAILBOX" });
+      }
+      throw error;
     });
 
     await auditService.record({
@@ -1899,7 +2052,7 @@ export class MailService {
       requestId: context.requestId,
       ipAddress: context.ipAddress,
       userAgent: context.userAgent,
-      metadata: { address: mailbox.address, membershipId },
+      metadata: { address: mailbox.address, membershipId, workspaces },
     });
 
     return {
@@ -1908,6 +2061,46 @@ export class MailService {
       storageLimit: Number(mailbox.storageLimit),
       providerQuotaBytes: mailbox.providerQuotaBytes === null ? null : Number(mailbox.providerQuotaBytes),
     };
+  }
+
+  // ─── Admin: Who can be given a mailbox ──────────────────────────────────────
+
+  /**
+   * Every current member of the workspace, each marked with whether a
+   * personal mailbox can be created for them right now — and why not.
+   *
+   * Read straight from the database on every call rather than assembled in
+   * the browser from two cached lists (members, mailboxes), which is how the
+   * picker kept offering people removed or provisioned in another tab.
+   * Ineligible members are returned too, so the screen can say "already has
+   * vivek@acme.com" when someone types their address as a new person.
+   */
+  async adminMailboxCandidates(tenantId: string) {
+    const members = await prisma.tenantMembership.findMany({
+      where: { tenantId, status: { in: ["ACTIVE", "INVITED", "SUSPENDED"] }, role: { not: "SUPPORT" } },
+      select: {
+        id: true,
+        role: true,
+        status: true,
+        user: { select: { email: true, displayName: true, status: true } },
+        mailbox: { select: { id: true, address: true } },
+      },
+      orderBy: [{ user: { displayName: "asc" } }, { user: { email: "asc" } }],
+    });
+    return members.map((member) => {
+      const reason = mailboxIneligibility(member);
+      return {
+        membershipId: member.id,
+        email: member.user.email,
+        displayName: member.user.displayName,
+        role: member.role,
+        membershipStatus: member.status,
+        accountStatus: member.user.status,
+        mailbox: member.mailbox,
+        eligible: reason === null,
+        reason,
+      };
+    });
   }
 
   // ─── Admin: Update mailbox attributes ───────────────────────────────────────
@@ -2007,28 +2200,59 @@ export class MailService {
       if (requested) return requested;
     }
 
-    const messageCount = await prisma.mailboxMessage.count({
-      where: { mailboxId, tenantId },
+    // This used to refuse any mailbox holding mail, which is every mailbox
+    // anybody has used — so Delete could never succeed. Deleting a mailbox
+    // deletes its mail, which is what the confirmation says and why the
+    // action is step-up.
+    //
+    // A message is a row shared by every mailbox it reached; this mailbox
+    // holds a copy (mailbox_messages). The copies go with the mailbox (the
+    // relation cascades). The message itself goes only when no other
+    // mailbox still holds it — mail a colleague also received stays theirs.
+    const removed = await prisma.$transaction(async (tx) => {
+      const copies = await tx.mailboxMessage.findMany({
+        where: { mailboxId, tenantId },
+        select: { messageId: true },
+      });
+      const messageIds = [...new Set(copies.map((copy) => copy.messageId))];
+
+      await tx.mailbox.delete({ where: { id: mailboxId, tenantId } });
+
+      const orphaned = messageIds.length
+        ? await tx.emailMessage.findMany({
+            where: { tenantId, id: { in: messageIds }, mailboxItems: { none: {} } },
+            select: { id: true, attachments: { select: { storageKey: true } } },
+          })
+        : [];
+      if (orphaned.length) {
+        await tx.emailMessage.deleteMany({ where: { tenantId, id: { in: orphaned.map((message) => message.id) } } });
+      }
+
+      await auditService.record({
+        tenantId,
+        actorUserId: context.userId,
+        actorType: "ADMIN",
+        eventType: "MAILBOX_DELETED",
+        targetType: "Mailbox",
+        targetId: mailboxId,
+        requestId: context.requestId,
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+        metadata: { address: mailbox.address, copiesRemoved: copies.length, messagesDeleted: orphaned.length },
+      }, tx);
+
+      return {
+        copies: copies.length,
+        messages: orphaned.length,
+        storageKeys: orphaned.flatMap((message) => message.attachments.map((attachment) => attachment.storageKey)),
+      };
     });
-    if (messageCount > 0) {
-      throw new AppError("Cannot delete mailbox with messages", 409, ErrorCodes.CONFLICT);
-    }
 
-    await prisma.mailbox.delete({ where: { id: mailboxId, tenantId } });
+    // Files outside the database, after the rows are gone for certain. A
+    // file that fails to delete is unreachable either way.
+    await Promise.allSettled(removed.storageKeys.map((key) => attachmentStorage.delete(key)));
 
-    await auditService.record({
-      tenantId,
-      actorUserId: context.userId,
-      eventType: "MAILBOX_DELETED",
-      targetType: "Mailbox",
-      targetId: mailboxId,
-      requestId: context.requestId,
-      ipAddress: context.ipAddress,
-      userAgent: context.userAgent,
-      metadata: { address: mailbox.address },
-    });
-
-    return { deleted: true };
+    return { deleted: true, address: mailbox.address, copiesRemoved: removed.copies, messagesDeleted: removed.messages };
   }
 
   private async audit(

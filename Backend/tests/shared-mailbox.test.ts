@@ -331,10 +331,12 @@ describe("a personal mailbox is unaffected", () => {
   it("still opens without any assignment", async () => {
     const suffix = String(Date.now());
     const { owner } = await workspace(suffix);
+    // Opened from the Owner console, so assigned to that workspace as well
+    // as the Member default.
     const own = await request(app)
       .post("/api/v1/mail/admin/mailboxes")
       .set(authHeader(owner.accessToken))
-      .send({ membershipId: owner.membershipId })
+      .send({ membershipId: owner.membershipId, workspaces: ["MEMBER", "OWNER"] })
       .expect(201);
 
     // Nobody has to be assigned to their own mailbox, and the default

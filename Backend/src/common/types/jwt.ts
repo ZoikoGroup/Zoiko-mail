@@ -127,6 +127,12 @@ export interface SelectionTokenPayload {
    * belongs to.
    */
   jti: string;
+  /**
+   * Set when the sign-in came through the Member login, so the workspace
+   * picked afterwards still opens the Member workspace rather than the role's
+   * console.
+   */
+  workspace?: "MEMBER";
 }
 
 /**

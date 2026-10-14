@@ -3,7 +3,7 @@ import type { MembershipRole } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 import { AppError } from "../errors/AppError.js";
 import { ErrorCodes } from "../errors/errorCodes.js";
-import { actingRole } from "../utils/workspaceScope.js";
+import { actingRole, consoleAuthorized } from "../utils/workspaceScope.js";
 import { withCrossTenant, withTenant } from "../../config/tenantScope.js";
 
 export async function tenantContext(
@@ -34,6 +34,9 @@ export async function tenantContext(
     include: {
       tenant: true,
       user: true,
+      // The admin's Workspace Access setting, read in the same query so the
+      // console check below costs nothing extra.
+      mailbox: { select: { workspaces: true } },
     },
   });
 
@@ -102,6 +105,21 @@ export async function tenantContext(
         "This session was not opened for this workspace. Sign in again to continue.",
         403,
         ErrorCodes.WORKSPACE_MISMATCH
+      )
+    );
+    return;
+  }
+
+  // Checked per request rather than only at sign-in, so removing a console
+  // from someone's mailbox takes effect on their next call instead of when
+  // their session happens to end.
+  if (!consoleAuthorized(membership.role, workspace, membership.mailbox?.workspaces ?? null)) {
+    next(
+      new AppError(
+        "Your access to this workspace was removed by an administrator. Sign in again to continue in the Member workspace.",
+        403,
+        ErrorCodes.WORKSPACE_ACCESS_NOT_ASSIGNED,
+        { workspace }
       )
     );
     return;

@@ -2,7 +2,8 @@ import { Router } from "express";
 import { requireCapabilityWhen, authenticate, idempotency, requireCapability, tenantContext, validate } from "../../common/middleware/index.js";
 import * as controller from "./mail.controller.js";
 import { attachmentUpload } from "./attachment.middleware.js";
-import { provisionMailboxSchema } from "./mail.schema.js";
+import { provisionMailboxSchema, resetMailboxCredentialsSchema, updateMailboxWorkspacesSchema } from "./mail.schema.js";
+import { requireMailboxInWorkspace } from "./mailbox-workspace.guard.js";
 import { adminDeliveryEventsQuerySchema, adminDeliverySummaryQuerySchema,updateSignatureSchema, adminUpdateMailboxSchema, adminCreateMailboxSchema, assignMailboxSchema, delegateMailboxSchema, createSharedMailboxSchema, mailboxAssigneeParamsSchema, createAliasSchema, createForwardingSchema, aliasParamsSchema, forwardingParamsSchema, attachmentParamsSchema, bulkMailboxActionSchema, createDraftSchema, createLabelSchema, forwardSchema, labelIdParamsSchema, listMailSchema, mailboxIdParamsSchema, mailboxScopeSchema, messageIdParamsSchema, messageLabelParamsSchema, replySchema, scheduleDraftSchema, snoozeMailboxItemSchema, updateDraftSchema, updateLabelSchema, updateMailboxItemSchema, updateSendingStatusSchema } from "./mail.schema.js";
 
 const mailRouter = Router();
@@ -12,6 +13,10 @@ const mailRouter = Router();
 // and the admin paths below still add their own capability on top. The role
 // list was a second copy of a matrix row, which is how the two drift.
 mailRouter.use(authenticate, tenantContext, requireCapability("mail.own.rw"), idempotency);
+// The caller's own mail only opens in the workspaces their mailbox is
+// assigned to. The admin routes manage mailboxes rather than open one, so
+// they are not subject to the caller's own assignment.
+mailRouter.use(requireMailboxInWorkspace({ skip: (req) => req.path.startsWith("/admin/") }));
 // Admin literal paths MUST be registered before any /:messageId routes,
 // otherwise "/admin/delivery-events" is captured as messageId="admin".
 // The count goes before the feed: both are exact literals so Express would
@@ -193,8 +198,63 @@ mailRouter.post(
   validate(mailboxIdParamsSchema, "params"),
   controller.resendMailboxInvitation
 );
+// ─── Workspace assignment ────────────────────────────────────────────────
+// Which workspace consoles a mailbox opens in. Managing a mailbox, so the
+// same gate as its other settings.
+mailRouter.put(
+  "/admin/mailboxes/:mailboxId/workspaces",
+  requireCapability("workspace.mailboxes.manage"),
+  validate(mailboxIdParamsSchema, "params"),
+  validate(updateMailboxWorkspacesSchema),
+  controller.updateMailboxWorkspaces
+);
+// ─── Member sign-in link ─────────────────────────────────────────────────
+// Every mailbox carries one (listed with the mailbox). Replacing it retires
+// the old link; it is not a credential, so mailbox management suffices.
+mailRouter.post(
+  "/admin/mailboxes/:mailboxId/member-login-link/regenerate",
+  requireCapability("workspace.mailboxes.manage"),
+  validate(mailboxIdParamsSchema, "params"),
+  controller.regenerateMemberLoginLink
+);
+// ─── Owner credentials ───────────────────────────────────────────────────
+// Reading what the dialog may offer is routine. Setting a password is its
+// own step-up capability, and the service adds the member-management role
+// ceiling (an Admin never sets an Owner's password) and refuses accounts
+// that also sign in to another workspace. Sending a reset code lets the
+// owner choose the password themselves, so it needs only mailbox management.
+mailRouter.get(
+  "/admin/mailboxes/:mailboxId/credentials",
+  requireCapability("workspace.mailboxes.manage"),
+  validate(mailboxIdParamsSchema, "params"),
+  controller.getMailboxCredentialStatus
+);
+mailRouter.post(
+  "/admin/mailboxes/:mailboxId/credentials",
+  requireCapability("workspace.mailboxes.manage"),
+  requireCapability("people.credentials.reset"),
+  validate(mailboxIdParamsSchema, "params"),
+  validate(resetMailboxCredentialsSchema),
+  controller.resetMailboxCredentials
+);
+mailRouter.post(
+  "/admin/mailboxes/:mailboxId/credentials/reset-email",
+  requireCapability("workspace.mailboxes.manage"),
+  validate(mailboxIdParamsSchema, "params"),
+  controller.sendMailboxCredentialResetEmail
+);
 mailRouter.get("/admin/mailboxes", requireCapability("workspace.mailboxes.manage"), controller.listAllMailboxes);
-mailRouter.post("/admin/mailboxes", requireCapability("workspace.mailboxes.manage"), validate(adminCreateMailboxSchema), controller.adminCreateMailbox);
+mailRouter.get("/admin/mailbox-candidates", requireCapability("workspace.mailboxes.manage"), controller.adminMailboxCandidates);
+// Adding a new person here also invites them, so it needs the invite
+// capability too — a mailbox screen must not be a way around the Users one.
+const inviteCapability = requireCapability("people.invite.member");
+mailRouter.post(
+  "/admin/mailboxes",
+  requireCapability("workspace.mailboxes.manage"),
+  validate(adminCreateMailboxSchema),
+  (req, res, next) => (req.body?.newMember ? inviteCapability(req, res, next) : next()),
+  controller.adminCreateMailbox
+);
 // Destructive, and step-up per RBAC §2. The mailbox is expected to be
 // suspended first and an export offered; that sequencing is the console's,
 // but the fresh authentication is enforced here.

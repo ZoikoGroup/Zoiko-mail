@@ -51,6 +51,22 @@ export const ErrorCodes = {
   MAIL_HOSTING_UNAVAILABLE: "MAIL_HOSTING_UNAVAILABLE",
   MAILBOX_NOT_EMPTY: "MAILBOX_NOT_EMPTY",
   MAILBOX_DELETE_DISABLED: "MAILBOX_DELETE_DISABLED",
+  // The mail server refused or failed a credential change. Nothing was
+  // changed in Zoiko either, so the two never disagree about the password.
+  MAIL_SERVER_SYNC_FAILED: "MAIL_SERVER_SYNC_FAILED",
+  // The mailbox exists but is not assigned to the workspace this session was
+  // opened for. Distinct from FORBIDDEN so the client can say which console
+  // to use instead of showing a bare permission failure.
+  MAILBOX_NOT_IN_WORKSPACE: "MAILBOX_NOT_IN_WORKSPACE",
+  // The session is for an Admin, Owner or Support console that an admin has
+  // since removed from this person's mailbox. The client signs out with the
+  // message rather than retrying, because a refresh would be refused too.
+  WORKSPACE_ACCESS_NOT_ASSIGNED: "WORKSPACE_ACCESS_NOT_ASSIGNED",
+  // The database could not be reached or the connection pool was exhausted.
+  // Temporary by nature, so a 503 the client can retry rather than a 500.
+  DATABASE_UNAVAILABLE: "DATABASE_UNAVAILABLE",
+  // A Member sign-in link that matches no mailbox: mistyped, or regenerated.
+  MEMBER_LOGIN_LINK_INVALID: "MEMBER_LOGIN_LINK_INVALID",
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];

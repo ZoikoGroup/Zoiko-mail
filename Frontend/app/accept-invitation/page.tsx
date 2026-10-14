@@ -11,6 +11,7 @@ import {
   type InvitationLookup,
 } from "@/lib/owner-api";
 import { isLoggedIn } from "@/lib/auth-storage";
+import { ApiError } from "@/lib/api-client";
 import { logout } from "@/lib/auth-api";
 
 /**
@@ -41,6 +42,7 @@ type Phase =
   | "set-password"   // no account yet: choose one
   | "needs-signin"   // account exists: sign in and accept
   | "accepting"      // signed in already: the original path
+  | "already-accepted" // this link was used to join earlier: sign in
   | "done"
   | "error"
   | "no-token";
@@ -86,6 +88,14 @@ function AcceptInvitationInner() {
     lookupInvitation(token)
       .then(async (found) => {
         setInvite(found);
+
+        // Opened again after joining — from the email, a tab, the back
+        // button. They succeeded the first time; this is a sign-in.
+        if (found.alreadyAccepted) {
+          sessionStorage.removeItem("pendingInvitationToken");
+          setPhase("already-accepted");
+          return;
+        }
 
         // No account behind this address yet: a password is the only way
         // forward, and no session — stale, valid or otherwise — changes that.
@@ -139,6 +149,12 @@ function AcceptInvitationInner() {
       // depend on it, and it puts them on the path where MFA enrolment lives.
       setTimeout(() => router.push("/login"), 1400);
     } catch (e) {
+      // A second submit after the first one landed (double click, retry
+      // after a slow response): the account is set up, so send them on.
+      if (e instanceof ApiError && !Array.isArray(e.details) && (e.details as { reason?: string } | undefined)?.reason === "ALREADY_ACCEPTED") {
+        setPhase("already-accepted");
+        return;
+      }
       setErrorMsg(e instanceof Error ? e.message : "Could not set your password.");
       setBusy(false);
     }
@@ -252,6 +268,31 @@ function AcceptInvitationInner() {
               </>
             ) : (
               "Please sign in to accept this invitation."
+            )}
+          </p>
+          <Link
+            href="/login"
+            className="mt-6 inline-block rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-teal-700"
+          >
+            Sign in
+          </Link>
+        </div>
+      )}
+
+      {phase === "already-accepted" && (
+        <div className="text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-green-100 text-2xl dark:bg-green-900/30">
+            ✓
+          </div>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">You&apos;ve already joined</h2>
+          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+            {invite ? (
+              <>
+                <strong className="break-all">{invite.email}</strong> is already a member of{" "}
+                <strong>{invite.tenantName}</strong>. Sign in to continue.
+              </>
+            ) : (
+              "This invitation has already been accepted. Sign in to continue."
             )}
           </p>
           <Link

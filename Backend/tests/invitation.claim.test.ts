@@ -112,11 +112,24 @@ describe("claiming an invitation", () => {
   });
 
   it("cannot be replayed once claimed", async () => {
-    const { token } = await invite("replay");
+    const { email, token } = await invite("replay");
     await claim(token).expect(200);
     // The membership is ACTIVE now, so the invitation is spent. A second
-    // claim must not reset the password somebody is already using.
-    await claim(token, "DifferentOne1").expect(401);
+    // claim must not reset the password somebody is already using — but it
+    // says why, so the page can send them to sign in.
+    const again = await claim(token, "DifferentOne1").expect(409);
+    expect(again.body.error.details.reason).toBe("ALREADY_ACCEPTED");
+    await request(app).post("/api/v1/auth/login").send({ email, password: "DifferentOne1" }).expect(401);
+    await request(app).post("/api/v1/auth/login").send({ email, password: PASSWORD }).expect(200);
+  });
+
+  it("reads as already accepted, not failed, when the link is opened again", async () => {
+    const { email, token } = await invite("reopen");
+    await claim(token).expect(200);
+
+    // The same email link, clicked a second time after joining.
+    const res = await lookup(token).expect(200);
+    expect(res.body.data).toMatchObject({ email, alreadyAccepted: true, needsPassword: false });
   });
 
   /**

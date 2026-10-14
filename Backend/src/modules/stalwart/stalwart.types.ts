@@ -112,6 +112,8 @@ export interface MailHostingProvider {
    */
   deleteAccount(id: string): Promise<DeleteAccountResult>;
   createAccount(input: CreateHostedAccountInput): Promise<HostedAccount>;
+  /** Replace the account's sign-in password (IMAP, SMTP submission, JMAP). */
+  setAccountPassword(id: string, secret: string): Promise<void>;
   /** Authenticated session check: credentials valid and management capability present. */
   probe(): Promise<{ reachable: boolean; authenticated: boolean; managementCapability: boolean }>;
 }

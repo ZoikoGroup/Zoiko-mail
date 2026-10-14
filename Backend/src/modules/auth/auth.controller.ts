@@ -136,6 +136,11 @@ function respondWithGoogleAuthState(
   sendSuccess(res, 200, result, req.requestId);
 }
 
+export const memberLoginLink = asyncHandler(async (req: Request, res: Response) => {
+  const result = await authService.resolveMemberLoginLink(String(req.params.key));
+  sendSuccess(res, 200, result, req.requestId);
+});
+
 export const loginWithGoogle = asyncHandler(async (req: Request, res: Response) => {
   const result = await authService.loginWithGoogle(req.body, getRequestContext(req));
   respondWithGoogleAuthState(req, res, result);

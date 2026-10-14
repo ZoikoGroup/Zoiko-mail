@@ -22,6 +22,8 @@ import {
   useResendMailboxInvitation,
   useRetryMailboxProvisioning,
 } from "@/lib/mailbox-provisioning-hooks";
+import type { MailboxWorkspace } from "@/lib/admin-api";
+import { WorkspaceMultiSelect, workspaceSummary } from "@/components/mailboxes/WorkspaceMultiSelect";
 
 /**
  * Create Email — form, review, result.
@@ -41,9 +43,11 @@ interface Draft {
   displayName: string;
   quotaBytes: number | null;
   recoveryEmail: string;
+  workspaces: MailboxWorkspace[];
 }
 
-const EMPTY: Draft = { domainId: "", localPart: "", displayName: "", quotaBytes: null, recoveryEmail: "" };
+// A new mailbox opens in the Member workspace alone until the admin adds more.
+const EMPTY: Draft = { domainId: "", localPart: "", displayName: "", quotaBytes: null, recoveryEmail: "", workspaces: ["MEMBER"] };
 
 const label = "font-mono-num mb-1 block text-[9.5px] uppercase tracking-[0.1em] text-[var(--ink3)]";
 const field =
@@ -152,6 +156,7 @@ export function CreateEmailWizard({ onClose, domainsHref }: { onClose: () => voi
       quotaBytes: draft.quotaBytes,
       initialAccess: "INVITE",
       recoveryEmail: draft.recoveryEmail.trim().toLowerCase(),
+      workspaces: draft.workspaces,
     };
     setSubmitError(null);
     try {
@@ -387,6 +392,18 @@ export function CreateEmailWizard({ onClose, domainsHref }: { onClose: () => voi
             </p>
           )}
         </div>
+        <div>
+          <span className={label}>Workspace access</span>
+          <WorkspaceMultiSelect
+            label="Workspaces this mailbox opens in"
+            value={draft.workspaces}
+            onApply={(workspaces) => set("workspaces", workspaces)}
+          />
+          <p className={hint}>
+            Which workspace consoles can open this mailbox. User/Member is the default; add others only
+            if it should also open there.
+          </p>
+        </div>
         {/* Enter submits from any field. */}
         <button type="submit" hidden aria-hidden tabIndex={-1} />
       </form>
@@ -412,6 +429,7 @@ export function CreateEmailWizard({ onClose, domainsHref }: { onClose: () => voi
           </ReviewRow>
           <ReviewRow term="Quota">{formatQuota(draft.quotaBytes)}</ReviewRow>
           <ReviewRow term="Initial access">Secure invitation</ReviewRow>
+          <ReviewRow term="Workspaces">{workspaceSummary(draft.workspaces)}</ReviewRow>
           <ReviewRow term="Invitation to">{draft.recoveryEmail.trim().toLowerCase()}</ReviewRow>
         </dl>
 

@@ -59,6 +59,41 @@ export interface MailboxDto extends MailboxStatusRow {
   invitationRecipient: string | null;
   membershipStatus: string | null;
   displayName: string | null;
+  /**
+   * The workspace consoles this mailbox opens in. A new mailbox opens in the
+   * Member workspace alone; the server refuses it from any console not listed.
+   */
+  workspaces: MailboxWorkspace[];
+  /**
+   * The mailbox's Member sign-in link. It opens the Member login with the
+   * owner's email and workspace filled in; the password is still required.
+   * Null only from an API build that predates the link.
+   */
+  memberLoginUrl: string | null;
+}
+
+/** The four workspace consoles a mailbox can be assigned to, in display order. */
+export type MailboxWorkspace = "MEMBER" | "SUPPORT" | "ADMIN" | "OWNER";
+export const MAILBOX_WORKSPACES: MailboxWorkspace[] = ["MEMBER", "ADMIN", "OWNER", "SUPPORT"];
+export const MAILBOX_WORKSPACE_LABEL: Record<MailboxWorkspace, string> = {
+  MEMBER: "User/Member",
+  ADMIN: "Admin",
+  OWNER: "Owner",
+  SUPPORT: "Support",
+};
+
+export type MailboxCredentialMode = "SET_PASSWORD" | "RESET_EMAIL" | "UNAVAILABLE";
+
+/** What the credentials dialog may offer for one mailbox, and why. */
+export interface MailboxCredentialStatusDto {
+  mailboxId: string;
+  address: string;
+  mode: MailboxCredentialMode;
+  reason: string | null;
+  message: string | null;
+  owner: { email: string; displayName: string; role: MembershipRole; hasPassword: boolean } | null;
+  /** HOSTED: the mail server holds a password too, and it is changed with this one. */
+  mailServer: "HOSTED" | "ZOIKO";
 }
 
 /** Summary shape for the dashboard; the domains screen uses lib/domains-api. */

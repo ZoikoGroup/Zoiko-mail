@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { FaEnvelope } from "react-icons/fa";
+import { FaEnvelope, FaUser } from "react-icons/fa";
 
 import { ApiError } from "@/lib/api-client";
 import { clearSignOutNotice, peekSignOutNotice } from "@/lib/auth-storage";
@@ -256,6 +256,16 @@ export default function LoginForm({
             ? "Signing In..."
             : "Sign In"}
         </button>
+
+        {/* The dedicated Member sign-in: same account and password, but it
+            always opens the Member workspace (webmail) whatever the role. */}
+        <Link
+          href="/login/member"
+          className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-teal-600 bg-white text-sm font-semibold text-teal-700 transition-all duration-300 hover:bg-teal-50 dark:border-teal-500 dark:bg-slate-900 dark:text-teal-300 dark:hover:bg-slate-800"
+        >
+          <FaUser className="h-3.5 w-3.5" aria-hidden />
+          Login as Member/User
+        </Link>
       </form>
 
       {/* =====================================================

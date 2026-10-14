@@ -34,6 +34,7 @@ export type Capability =
   // only, step-up. The one MFA path an administrator holds — and it forces
   // re-enrolment rather than switching the factor off.
   | "people.mfa.reset"
+  | "people.credentials.reset"
   // Workspace
   | "workspace.settings.read"
   | "workspace.settings.write"

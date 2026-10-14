@@ -6,6 +6,7 @@ import { sharedMailboxService } from "./shared-mailbox.service.js";
 import { aliasService } from "./alias.service.js";
 import { mailboxProvisioningService } from "./mailbox-provisioning.service.js";
 import { mailboxCleanupService } from "./mailbox-cleanup.service.js";
+import { mailboxAccessService } from "./mailbox-access.service.js";
 
 function context(req: Request) {
   const tenant = req.tenantContext!;
@@ -14,6 +15,10 @@ function context(req: Request) {
     userId: tenant.userId,
     membershipId: tenant.membershipId,
     role: tenant.role,
+    // The console this session was opened for; mailbox access is checked against it.
+    workspace: tenant.workspace,
+    // The membership's own role, not the session's narrowed one.
+    membershipRole: tenant.membershipRole,
     email: tenant.user.email,
     requestId: req.requestId,
     ipAddress: req.ip ?? null,
@@ -316,10 +321,17 @@ export const listAllMailboxes = asyncHandler(async (req: Request, res: Response)
   sendSuccess(res, 200, await mailService.listAllMailboxes(tenant.tenantId), req.requestId);
 });
 
+export const adminMailboxCandidates = asyncHandler(async (req: Request, res: Response) => {
+  // Never cached: this list has to match the database at the moment the
+  // dialog asks, or it offers people who were removed seconds ago.
+  res.setHeader("Cache-Control", "no-store");
+  sendSuccess(res, 200, { members: await mailService.adminMailboxCandidates(req.tenantContext!.tenantId) }, req.requestId);
+});
+
 export const adminCreateMailbox = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 201, await mailService.adminCreateMailbox(
     req.tenantContext!.tenantId,
-    { membershipId: req.body.membershipId, domainId: req.body.domainId, localPart: req.body.localPart },
+    { membershipId: req.body.membershipId, newMember: req.body.newMember, domainId: req.body.domainId, localPart: req.body.localPart, workspaces: req.body.workspaces },
     context(req)
   ), req.requestId);
 });
@@ -387,4 +399,19 @@ export const updateSignature = asyncHandler(async (req: Request, res: Response) 
     await mailService.updateSignature(req.body.signature, context(req)),
     req.requestId
   );
+});
+export const updateMailboxWorkspaces = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailboxAccessService.updateWorkspaces(String(req.params.mailboxId), req.body.workspaces, context(req)), req.requestId);
+});
+export const getMailboxCredentialStatus = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailboxAccessService.credentialStatus(String(req.params.mailboxId), context(req)), req.requestId);
+});
+export const resetMailboxCredentials = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailboxAccessService.resetPassword(String(req.params.mailboxId), req.body.newPassword, context(req)), req.requestId);
+});
+export const regenerateMemberLoginLink = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailboxAccessService.regenerateMemberLoginLink(String(req.params.mailboxId), context(req)), req.requestId);
+});
+export const sendMailboxCredentialResetEmail = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailboxAccessService.sendResetEmail(String(req.params.mailboxId), context(req)), req.requestId);
 });

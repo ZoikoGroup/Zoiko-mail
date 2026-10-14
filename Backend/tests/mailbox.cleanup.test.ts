@@ -84,6 +84,8 @@ class FakeHost implements MailHostingProvider {
     if (this.deleteError) throw this.deleteError;
     return this.accounts.delete(id) ? "DELETED" : "ALREADY_ABSENT";
   }
+  /** Not exercised by cleanup; present because the provider contract has it. */
+  async setAccountPassword() {}
   async probe() {
     return { reachable: true, authenticated: true, managementCapability: true };
   }
@@ -212,7 +214,8 @@ describe("deleting a hosted mailbox: the request", () => {
     });
 
     const res = await deleteRequest(w.owner.accessToken, legacy.id, 200);
-    expect(res.body.data).toEqual({ deleted: true });
+    // The existing path also reports what it removed (copies, messages).
+    expect(res.body.data).toMatchObject({ deleted: true });
     expect(await mailboxRow(legacy.id)).toBeNull();
     expect(await withCrossTenant(() => prisma.mailProviderCleanupTask.count({ where: { mailboxId: legacy.id } }))).toBe(0);
   });

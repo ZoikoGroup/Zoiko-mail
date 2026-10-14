@@ -436,6 +436,34 @@ export class StalwartClient implements MailHostingProvider {
     return result;
   }
 
+  /**
+   * Replace an account's password credential.
+   *
+   * The whole credentials list is set, so any earlier password — including
+   * the random one stored at provisioning — stops working at once. The
+   * secret is sent only in the request body, never logged.
+   */
+  async setAccountPassword(id: string, secret: string): Promise<void> {
+    const responses = await this.call([
+      ["x:Account/set", { update: { [id]: { credentials: [{ "@type": "Password", secret }] } } }, "s"],
+    ]);
+    const response = responses.get("s");
+    if (!response) fail("Stalwart returned no set response", "UNEXPECTED_RESPONSE", true);
+    const args = response[1];
+    if (isRecord(args.updated) && id in args.updated) {
+      logger.info({ provider: "stalwart", accountId: id }, "Stalwart account password replaced");
+      return;
+    }
+    const notUpdated = isRecord(args.notUpdated) ? args.notUpdated[id] : undefined;
+    if (isRecord(notUpdated)) {
+      const type = typeof notUpdated.type === "string" ? notUpdated.type : "unknown";
+      if (type === "forbidden") fail("The Stalwart API key lacks the required permission", "FORBIDDEN", false, undefined, type);
+      if (type === "notFound") fail("The account no longer exists on the mail server", "INVALID_REQUEST", false, undefined, type);
+      fail("Stalwart refused the password change", "INVALID_REQUEST", false, undefined, type);
+    }
+    fail("Stalwart did not confirm the password change", "UNEXPECTED_RESPONSE", true);
+  }
+
   async probe() {
     try {
       this.session = null;

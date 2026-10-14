@@ -40,6 +40,9 @@ const OWNER: RoleMatrix = {
   "people.admin.manage": "ALLOW",
   "people.owner.manage": "ALLOW",
   "people.mfa.reset": "STEP_UP",
+  // Replacing someone's password ends their sessions and hands the account
+  // to whoever chose it, so it is a fresh-authentication action.
+  "people.credentials.reset": "STEP_UP",
   // Workspace.
   "workspace.settings.read": "ALLOW",
   "workspace.settings.write": "ALLOW",
@@ -118,6 +121,8 @@ const ADMIN: RoleMatrix = {
   // admin boundary refuses an Owner target, because seniority is a property
   // of the target row rather than of the capability.
   "people.admin.manage": "ALLOW",
+  // Same ceiling as member management: the service refuses an Owner target.
+  "people.credentials.reset": "STEP_UP",
   "workspace.settings.read": "ALLOW",
   "workspace.settings.write": "ALLOW",
   "workspace.mailboxes.manage": "ALLOW",

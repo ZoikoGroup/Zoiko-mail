@@ -37,6 +37,7 @@ import {
   fetchGroupAssignees,
   fetchGroups,
   fetchInvitations,
+  fetchMailboxCandidates,
   fetchMailboxRouting,
   fetchMailboxes,
   fetchMembers,
@@ -69,11 +70,17 @@ import {
   setMailboxAi,
   setMailboxSending,
   updateMember,
-  updateWorkspaceSettings
+  updateWorkspaceSettings,
+  updateMailboxWorkspaces,
+  regenerateMemberLoginLink,
+  fetchMailboxCredentialStatus,
+  resetMailboxCredentials,
+  sendMailboxCredentialResetEmail,
 } from "./admin-queries";
 import type {
   AuditPage,
   AuditQuery,
+  CreateMailboxInput,
   GroupAssigneeDto,
   MailboxRoutingDto,
   InvitationDraftInput,
@@ -94,6 +101,7 @@ import type {
   GuardrailDto,
   InvitationDto,
   MailboxDto,
+  MailboxWorkspace,
   MemberDto,
   MembershipRole,
   NotificationDto,
@@ -174,6 +182,74 @@ export function useSetMailboxAi() {
       stepUpToken?: string;
     }) => setMailboxAi(mailboxId, aiEnabled, stepUpToken),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["mailboxes"] }),
+  });
+}
+
+/**
+ * Replace the workspaces a mailbox opens in.
+ *
+ * Optimistic, so the table shows the new assignment at once; rolled back if
+ * the server refuses, and re-read either way so the row matches what was
+ * actually saved.
+ */
+export function useUpdateMailboxWorkspaces() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ mailboxId, workspaces }: { mailboxId: string; workspaces: MailboxWorkspace[] }) =>
+      updateMailboxWorkspaces(mailboxId, workspaces),
+    onMutate: async ({ mailboxId, workspaces }) => {
+      await qc.cancelQueries({ queryKey: ["mailboxes"] });
+      const previous = qc.getQueryData<MailboxDto[]>(["mailboxes"]);
+      qc.setQueryData<MailboxDto[]>(["mailboxes"], (rows) =>
+        rows?.map((row) => (row.id === mailboxId ? { ...row, workspaces } : row))
+      );
+      return { previous };
+    },
+    onError: (_error, _vars, context) => {
+      if (context?.previous) qc.setQueryData(["mailboxes"], context.previous);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["mailboxes"] }),
+  });
+}
+
+/** Replace a mailbox's Member sign-in link, then re-read the list so the row shows the new one. */
+export function useRegenerateMemberLoginLink() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (mailboxId: string) => regenerateMemberLoginLink(mailboxId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["mailboxes"] }),
+  });
+}
+
+/** What the credentials dialog may offer for one mailbox. Read fresh each time it opens. */
+export function useMailboxCredentialStatus(mailboxId: string | null) {
+  return useQuery({
+    queryKey: ["mailbox-credentials", mailboxId],
+    queryFn: () => fetchMailboxCredentialStatus(mailboxId!),
+    enabled: Boolean(mailboxId),
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+  });
+}
+
+/** Set the owner's password (step-up). */
+export function useResetMailboxCredentials() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { mailboxId: string; newPassword: string; confirmPassword: string; stepUpToken?: string }) =>
+      resetMailboxCredentials(vars.mailboxId, vars.newPassword, vars.confirmPassword, vars.stepUpToken),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["mailboxes"] });
+      qc.invalidateQueries({ queryKey: ["audit"] });
+    },
+  });
+}
+
+/** Email the owner a one-time reset code. */
+export function useSendMailboxCredentialResetEmail() {
+  return useMutation({
+    mutationFn: (mailboxId: string) => sendMailboxCredentialResetEmail(mailboxId),
   });
 }
 
@@ -524,6 +600,8 @@ function invalidatePeople(qc: ReturnType<typeof useQueryClient>) {
   return Promise.all([
     qc.invalidateQueries({ queryKey: ["members"] }),
     qc.invalidateQueries({ queryKey: ["invitations"] }),
+    // A removed or suspended member must leave the mailbox picker too.
+    qc.invalidateQueries({ queryKey: ["mailbox-candidates"] }),
   ]);
 }
 
@@ -805,24 +883,50 @@ export function useDomainChecks(domainId: string | null): QueryLike<DomainCheckD
 
 /* ── mailbox lifecycle ─────────────────────────────────────────────────── */
 
-/** Every mailbox write moves the list and the dashboard tile counted off it. */
+/**
+ * Every mailbox write moves the list, the dashboard tile counted off it, and
+ * who can still be given one. On settle rather than success: a refusal
+ * ("already has a mailbox", "no longer a member") usually means this screen
+ * was behind, and re-reading is how it catches up.
+ */
 function useMailboxMutation<TInput>(fn: (input: TInput) => Promise<void>) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: fn,
-    onSuccess: async () => {
+    onSettled: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["mailboxes"] }),
         qc.invalidateQueries({ queryKey: ["admin-dashboard"] }),
+        qc.invalidateQueries({ queryKey: ["mailbox-candidates"] }),
+        // Adding a new person here creates an invitation and a member.
+        qc.invalidateQueries({ queryKey: ["members"] }),
+        qc.invalidateQueries({ queryKey: ["invitations"] }),
       ]);
     },
   });
 }
 
+/**
+ * Who can be given a mailbox, kept current while the dialog is open.
+ *
+ * Re-read every time the dialog mounts and every 15 seconds while it stays
+ * open, and on window focus: someone removed in another tab, or given a
+ * mailbox by another admin, drops out of the picker without a reload.
+ */
+export function useMailboxCandidates() {
+  return useQuery({
+    queryKey: ["mailbox-candidates"],
+    queryFn: fetchMailboxCandidates,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    refetchInterval: 15_000,
+  });
+}
+
 export function useCreateMailbox() {
   return useMailboxMutation(
-    (input: { membershipId: string; domainId?: string; localPart?: string }) =>
-      createMailbox(input)
+    (input: CreateMailboxInput) => createMailbox(input)
   );
 }
 

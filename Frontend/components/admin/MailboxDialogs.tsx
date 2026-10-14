@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -9,6 +9,7 @@ import {
   useDelegateMailbox,
   useDomains,
   useDeleteMailbox,
+  useMailboxCandidates,
   useMailboxDelegates,
   useRevokeMailboxDelegate,
   useSetMailboxSending,
@@ -16,6 +17,8 @@ import {
 } from "@/lib/admin-hooks";
 import { StepUpDialog, useStepUp } from "@/components/admin/StepUpDialog";
 import type { MailboxDto } from "@/lib/admin-api";
+import type { MailboxIneligibility } from "@/lib/admin-queries";
+import { ApiError } from "@/lib/api-client";
 
 /**
  * Provision a mailbox for a member who has none.
@@ -26,18 +29,24 @@ import type { MailboxDto } from "@/lib/admin-api";
  * rather than a form.
  */
 export function CreateMailboxDialog({
-  existing,
   onClose,
 }: {
-  existing: MailboxDto[];
+  /** No longer read: eligibility comes from the server's candidate list. */
+  existing?: MailboxDto[];
   onClose: () => void;
 }) {
-  const { data: people, isLoading, error } = useWorkspacePeople();
+  const { data: members, isLoading, error } = useMailboxCandidates();
   const { data: domains } = useDomains();
   const create = useCreateMailbox();
   const [membershipId, setMembershipId] = useState("");
   const [domainId, setDomainId] = useState("");
   const [localPart, setLocalPart] = useState("");
+  // Somebody not in the workspace yet: invited at their own address, with the
+  // mailbox ready for them when they accept.
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [personalEmail, setPersonalEmail] = useState("");
+  const adding = membershipId === NEW_PERSON;
 
   /**
    * Only verified domains are offered.
@@ -50,18 +59,47 @@ export function CreateMailboxDialog({
   const usable = (domains ?? []).filter((d) => d.verificationStatus === "VERIFIED");
   const pending = (domains ?? []).filter((d) => d.verificationStatus !== "VERIFIED");
 
-  // A member already holding a mailbox is not a candidate — the server
-  // refuses a second one with a 409, so offering them would be inviting it.
-  const taken = new Set(existing.map((mailbox) => mailbox.membershipId).filter(Boolean));
-  const candidates = (people ?? []).filter((person) => !taken.has(person.id));
+  // The server decides who is eligible, from the database, every time this
+  // list is read: removed, suspended, disabled and already-provisioned
+  // members are never offered, and pending invitees are.
+  const candidates = (members ?? []).filter((member) => member.eligible);
 
-  const chosen = candidates.find((person) => person.id === membershipId);
+  const chosen = candidates.find((member) => member.membershipId === membershipId);
+  // Selected, then removed or provisioned elsewhere while this was open: the
+  // refreshed list no longer has them, so neither does the selection.
+  const lostSelection = Boolean(membershipId) && !adding && Boolean(members) && !chosen;
+  useEffect(() => {
+    if (lostSelection) setMembershipId("");
+  }, [lostSelection]);
+  const [lostNotice, setLostNotice] = useState(false);
+  useEffect(() => {
+    if (lostSelection) setLostNotice(true);
+  }, [lostSelection]);
+
+  // Somebody typed as a "new person" who is in fact already here.
+  const typedEmail = personalEmail.trim().toLowerCase();
+  const existingMatch = adding && typedEmail ? (members ?? []).find((member) => member.email.toLowerCase() === typedEmail) : undefined;
+
   // What they already use, which is what somebody expects when they invite
-  // dana@old-company.com and then pick acme.com.
-  const suggested = chosen?.user.email.split("@")[0] ?? "";
-  const effectiveLocal = (localPart || suggested).trim().toLowerCase();
+  // dana@old-company.com and then pick acme.com. A new person's first name
+  // is the more likely choice than whatever their personal address says.
+  const suggested = adding
+    ? (firstName.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "") || personalEmail.split("@")[0] || "").toLowerCase()
+    : chosen?.email.split("@")[0] ?? "";
   const chosenDomain = usable.find((d) => d.id === domainId);
-  const preview = chosenDomain ? `${effectiveLocal}@${chosenDomain.domainName}` : null;
+  // People type the whole address. On the chosen domain that is clear enough
+  // to accept; the screen used to append the domain again and show
+  // vivek@acme.com@acme.com.
+  const typed = (localPart || suggested).trim().toLowerCase();
+  const at = typed.indexOf("@");
+  const wrongDomain = at >= 0 && chosenDomain !== undefined && typed.slice(at + 1) !== chosenDomain.domainName.toLowerCase();
+  const effectiveLocal = at >= 0 ? typed.slice(0, at) : typed;
+  const preview = chosenDomain && effectiveLocal && !wrongDomain ? `${effectiveLocal}@${chosenDomain.domainName}` : null;
+  const personalValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(personalEmail.trim());
+
+  const ready = adding
+    ? Boolean(chosenDomain) && personalValid && Boolean(firstName.trim()) && Boolean(effectiveLocal) && !wrongDomain && !existingMatch
+    : Boolean(chosen) && (usable.length === 0 || Boolean(domainId)) && !wrongDomain;
 
   return (
     <Modal
@@ -76,22 +114,32 @@ export function CreateMailboxDialog({
           </button>
           <button
             className="zoiko-btn pri"
-            disabled={create.isPending || !membershipId || (usable.length > 0 && !domainId)}
+            disabled={create.isPending || !ready}
             onClick={() =>
               create.mutate(
-                {
-                  membershipId,
-                  // Absent when the workspace has no verified domain yet, and
-                  // the server falls back to the member's signup address —
-                  // the old behaviour, kept so a workspace mid-setup is not
-                  // blocked from provisioning anything at all.
-                  ...(domainId ? { domainId, localPart: effectiveLocal } : {}),
-                },
+                adding
+                  ? {
+                      newMember: {
+                        email: personalEmail.trim().toLowerCase(),
+                        firstName: firstName.trim(),
+                        ...(lastName.trim() ? { lastName: lastName.trim() } : {}),
+                      },
+                      domainId,
+                      localPart: effectiveLocal,
+                    }
+                  : {
+                      membershipId,
+                      // Absent when the workspace has no verified domain yet,
+                      // and the server falls back to the member's signup
+                      // address — the old behaviour, kept so a workspace
+                      // mid-setup is not blocked from provisioning anything.
+                      ...(domainId ? { domainId, localPart: effectiveLocal } : {}),
+                    },
                 { onSuccess: onClose }
               )
             }
           >
-            {create.isPending ? "Creating…" : "Create mailbox"}
+            {create.isPending ? "Creating…" : adding ? "Create mailbox and invite" : "Create mailbox"}
           </button>
         </>
       }
@@ -102,11 +150,6 @@ export function CreateMailboxDialog({
         </p>
       ) : isLoading ? (
         <p className="text-[12.5px] text-[var(--ink3)]">Loading members…</p>
-      ) : candidates.length === 0 ? (
-        <p className="text-[12.5px] text-[var(--ink2)]">
-          Every active member already has a mailbox. Invite someone from the Users screen
-          first, then come back here.
-        </p>
       ) : (
         <div>
           <label
@@ -119,17 +162,87 @@ export function CreateMailboxDialog({
             id="mailbox-member"
             value={membershipId}
             disabled={create.isPending}
-            onChange={(event) => setMembershipId(event.target.value)}
+            onChange={(event) => {
+              setMembershipId(event.target.value);
+              setLostNotice(false);
+            }}
             className="w-full rounded-lg border border-[var(--border)] bg-[var(--s2)] px-3 py-2 text-[12.6px] text-[var(--ink)]"
           >
-            <option value="">Choose a member…</option>
-            {candidates.map((person) => (
-              <option key={person.id} value={person.id}>
-                {person.user.displayName} — {person.user.email}
+            <option value="">
+              {candidates.length ? "Choose a member…" : "Every member already has a mailbox"}
+            </option>
+            <option value={NEW_PERSON}>+ Add a new person…</option>
+            {candidates.map((member) => (
+              <option key={member.membershipId} value={member.membershipId}>
+                {member.displayName || member.email} — {member.email}
+                {member.membershipStatus === "INVITED" ? " (invitation pending)" : ""}
               </option>
             ))}
           </select>
-          {usable.length > 0 ? (
+          {lostNotice && (
+            <p className="mt-1.5 text-[11.5px] text-[var(--warn)]">
+              The member you picked was just removed or given a mailbox elsewhere. Choose again.
+            </p>
+          )}
+
+          {adding && (
+            <div className="mt-3 space-y-3 rounded-lg border border-[var(--border)] bg-[var(--s2)] p-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <TextField id="new-first" label="First name" value={firstName} onChange={setFirstName} disabled={create.isPending} />
+                <TextField id="new-last" label="Last name (optional)" value={lastName} onChange={setLastName} disabled={create.isPending} />
+              </div>
+              <TextField
+                id="new-email"
+                label="Their current email"
+                type="email"
+                placeholder="name@gmail.com"
+                value={personalEmail}
+                onChange={setPersonalEmail}
+                disabled={create.isPending}
+              />
+              <p className="text-[11px] text-[var(--ink3)]">
+                The invitation goes here. They choose their own password, then sign in to the new
+                mailbox below. They join as a member.
+              </p>
+              {personalEmail.trim() && !personalValid && (
+                <p className="text-[11.5px] text-[var(--crit)]">Enter a full email address.</p>
+              )}
+              {existingMatch && (
+                <div className="rounded-md border border-[var(--warn)] bg-[var(--warn-soft)] px-3 py-2 text-[11.5px] text-[var(--ink2)]">
+                  {existingMatch.eligible ? (
+                    <>
+                      <b>{existingMatch.displayName || existingMatch.email}</b> is already in this workspace
+                      {existingMatch.membershipStatus === "INVITED" ? " (invitation pending)" : ""}.{" "}
+                      <button
+                        type="button"
+                        className="font-semibold text-[var(--accent)] underline"
+                        onClick={() => {
+                          setMembershipId(existingMatch.membershipId);
+                          setPersonalEmail("");
+                          setFirstName("");
+                          setLastName("");
+                        }}
+                      >
+                        Select them instead
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <b>{existingMatch.displayName || existingMatch.email}</b> is already in this workspace and{" "}
+                      {INELIGIBLE_TEXT[existingMatch.reason ?? "NOT_A_MEMBER"](existingMatch.mailbox?.address)}.
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {adding && usable.length === 0 ? (
+            <p className="mt-3 text-[11.5px] text-[var(--crit)]">
+              A new person&apos;s mailbox has to be on one of your domains, and none has passed its DNS
+              checks yet. Verify a domain on the Domains screen first.
+            </p>
+          ) : usable.length > 0 ? (
             <>
               <label
                 htmlFor="mailbox-domain"
@@ -158,18 +271,29 @@ export function CreateMailboxDialog({
               >
                 Mailbox name
               </label>
-              <input
-                id="mailbox-local"
-                value={localPart}
-                placeholder={suggested}
-                disabled={create.isPending}
-                onChange={(event) => setLocalPart(event.target.value)}
-                className="w-full rounded-lg border border-[var(--border)] bg-[var(--s2)] px-3 py-2 text-[12.6px] text-[var(--ink)] placeholder:text-[var(--ink3)]"
-              />
+              <div className="flex items-center overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--s2)]">
+                <input
+                  id="mailbox-local"
+                  value={localPart}
+                  placeholder={suggested || "name"}
+                  disabled={create.isPending}
+                  onChange={(event) => setLocalPart(event.target.value)}
+                  className="min-w-0 flex-1 bg-transparent px-3 py-2 text-[12.6px] text-[var(--ink)] placeholder:text-[var(--ink3)] focus:outline-none"
+                />
+                {chosenDomain && (
+                  <span className="shrink-0 border-l border-[var(--border)] px-3 py-2 font-mono-num text-[12px] text-[var(--ink3)]">
+                    @{chosenDomain.domainName}
+                  </span>
+                )}
+              </div>
 
-              {preview && (
+              {wrongDomain ? (
+                <p className="mt-2 text-[11.5px] text-[var(--crit)]">
+                  Enter only the part before the @ — the domain is {chosenDomain?.domainName}.
+                </p>
+              ) : preview ? (
                 <p className="mt-2 font-mono-num text-[12px] text-[var(--ink)]">{preview}</p>
-              )}
+              ) : null}
               <p className="mt-1 text-[11.5px] text-[var(--ink3)]">
                 Receiving works as soon as the mailbox exists. Sending stays off until the
                 domain is activated on the Domains screen.
@@ -198,6 +322,45 @@ export function CreateMailboxDialog({
         </div>
       )}
     </Modal>
+  );
+}
+
+/** The member picker's value for "somebody not in the workspace yet". */
+const NEW_PERSON = "__new_person__";
+
+/** Why an existing member cannot be picked, finishing "…is already in this workspace and". */
+const INELIGIBLE_TEXT: Record<MailboxIneligibility, (address?: string) => string> = {
+  HAS_MAILBOX: (address) => `already has a mailbox${address ? ` (${address})` : ""}`,
+  MEMBERSHIP_SUSPENDED: () => "is suspended — reinstate them on the Users screen first",
+  ACCOUNT_DISABLED: () => "their account is disabled",
+  SUPPORT_SEAT: () => "holds a support seat, which does not get a mailbox",
+  NOT_A_MEMBER: () => "cannot be given a mailbox",
+};
+
+function TextField({ id, label, value, onChange, disabled, type = "text", placeholder }: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  type?: string;
+  placeholder?: string;
+}) {
+  return (
+    <div>
+      <label htmlFor={id} className="font-mono-num mb-1 block text-[9.5px] uppercase tracking-[0.1em] text-[var(--ink3)]">
+        {label}
+      </label>
+      <input
+        id={id}
+        type={type}
+        value={value}
+        placeholder={placeholder}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[12.6px] text-[var(--ink)] placeholder:text-[var(--ink3)]"
+      />
+    </div>
   );
 }
 
@@ -316,7 +479,23 @@ export function DeleteMailboxDialog({
 }) {
   const remove = useDeleteMailbox();
   const stepUp = useStepUp();
+  const [error, setError] = useState<string | null>(null);
   const stillSending = mailbox.status !== "SUSPENDED";
+
+  // Closes only once the server has said yes. It used to close first, which
+  // unmounted the step-up prompt this very component renders — deleting is
+  // step-up, so the server asked for a password and nothing was left on
+  // screen to ask with. Any other refusal went into a discarded promise.
+  const run = (stepUpToken?: string) =>
+    remove
+      .mutateAsync({ mailboxId: mailbox.id, stepUpToken })
+      .then(onClose)
+      .catch((cause: unknown) => {
+        // The step-up refusal has to reach useStepUp so it can prompt; any
+        // other failure is shown here, on the dialog that stays open.
+        if (cause instanceof ApiError && cause.needsStepUp) throw cause;
+        setError(cause instanceof Error ? cause.message : "The mailbox could not be deleted.");
+      });
 
   return (
     <>
@@ -324,22 +503,26 @@ export function DeleteMailboxDialog({
 
       <ConfirmDialog
         open={!stepUp.dialog.open}
-        onClose={onClose}
+        onClose={() => {
+          if (!remove.isPending) onClose();
+        }}
         onConfirm={() => {
-          onClose();
-          void stepUp.attempt(`Deleting ${mailbox.address}`, (stepUpToken) =>
-            remove.mutateAsync({ mailboxId: mailbox.id, stepUpToken })
-          );
+          setError(null);
+          stepUp
+            .attempt(`Deleting ${mailbox.address}`, run)
+            .catch((cause: Error) => setError(cause.message || "The mailbox could not be deleted."));
         }}
         title={`Delete ${mailbox.address}?`}
         message={
           stillSending
-            ? "This mailbox is still able to send. Stop sending first, and offer the owner an export — deleting removes the mail as well as the address."
-            : "The mailbox and its mail are removed. Offer the owner an export first if they may need the contents; this cannot be undone."
+            ? "This mailbox can still send. Deleting removes the address and the mail in it; anything a colleague also received stays in their mailbox. Offer the owner an export first if they may need the contents. This cannot be undone."
+            : "The mailbox and its mail are removed; anything a colleague also received stays in their mailbox. Offer the owner an export first if they may need the contents. This cannot be undone."
         }
-        confirmLabel="Delete mailbox"
+        confirmLabel={remove.isPending ? "Deleting…" : "Delete mailbox"}
         loading={remove.isPending}
-      />
+      >
+        {error && <p className="mt-2 text-[12px] text-[var(--crit)]">{error}</p>}
+      </ConfirmDialog>
     </>
   );
 }

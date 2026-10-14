@@ -101,6 +101,40 @@ export const assignMailboxSchema = z.object({
 });
 
 /**
+ * The workspace consoles a mailbox can be opened in. At least one: a mailbox
+ * that opens nowhere is unreachable mail. Duplicates are collapsed by the
+ * service rather than refused.
+ */
+export const mailboxWorkspacesSchema = z
+  .array(z.enum(["MEMBER", "SUPPORT", "ADMIN", "OWNER"]))
+  .min(1, "Choose at least one workspace")
+  .max(8);
+
+export const updateMailboxWorkspacesSchema = z.object({ workspaces: mailboxWorkspacesSchema }).strict();
+
+/**
+ * A new sign-in password for a mailbox's owner, typed twice.
+ *
+ * Stricter than self-registration (a letter and a digit as well as the
+ * length) because the person choosing it is not the person who will use it.
+ */
+export const resetMailboxCredentialsSchema = z
+  .object({
+    newPassword: z
+      .string()
+      .min(8, "Password must be at least 8 characters")
+      .max(128, "Password must be at most 128 characters")
+      .refine((value) => value.trim() === value, "Password cannot start or end with a space")
+      .refine((value) => /[A-Za-z]/.test(value) && /\d/.test(value), "Password must contain at least one letter and one number"),
+    confirmPassword: z.string().max(128),
+  })
+  .strict()
+  .refine((value) => value.newPassword === value.confirmPassword, {
+    message: "The passwords do not match",
+    path: ["confirmPassword"],
+  });
+
+/**
  * Provisioning a member's mailbox.
  *
  * `domainId` is optional so callers that predate it keep working, and the
@@ -109,9 +143,20 @@ export const assignMailboxSchema = z.object({
  * actually carry, next to the domain it will be joined to.
  */
 export const adminCreateMailboxSchema = z.object({
-  membershipId: z.string().uuid(),
+  membershipId: z.string().uuid().optional(),
+  /** Someone not in the workspace yet: invited, with the mailbox ready for them. */
+  newMember: z.object({
+    email: z.string().trim().toLowerCase().email().max(254),
+    firstName: z.string().trim().min(1).max(80).optional(),
+    lastName: z.string().trim().min(1).max(80).optional(),
+  }).strict().optional(),
   domainId: z.string().uuid().optional(),
-  localPart: z.string().trim().min(1).max(64).optional(),
+  localPart: z.string().trim().min(1).max(320).optional(),
+  /** Defaults to the Member workspace only. */
+  workspaces: mailboxWorkspacesSchema.optional(),
+}).refine((value) => Boolean(value.membershipId) !== Boolean(value.newMember), {
+  message: "Choose an existing member or describe a new one, not both",
+  path: ["membershipId"],
 });
 
 /**
@@ -132,6 +177,8 @@ export const provisionMailboxSchema = z.object({
   recoveryEmail: z.string().trim().toLowerCase().email().max(254),
   firstName: z.string().trim().min(1).max(80).optional(),
   lastName: z.string().trim().min(1).max(80).optional(),
+  /** Defaults to the Member workspace only. */
+  workspaces: mailboxWorkspacesSchema.optional(),
 }).strict();
 export type ProvisionMailboxInput = z.infer<typeof provisionMailboxSchema>;
 

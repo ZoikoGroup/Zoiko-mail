@@ -14,15 +14,30 @@ export const createWorkspaceSchema = z.object({
   planCode: z.string().trim().min(1).max(64).default("free"),
 });
 
+/**
+ * Set only by the Member login. MEMBER is the one value accepted: a sign-in
+ * may ask for less than the role's console, never for more, so there is no
+ * way to request a privileged console from here.
+ */
+const requestedWorkspace = z.literal("MEMBER").optional();
+
 export const loginSchema = z.object({
   email: z.string().email().transform((value) => value.toLowerCase()),
   password: z.string().min(1),
   tenantId: z.string().uuid().optional(),
+  workspace: requestedWorkspace,
 });
 
 /** Google login schema. */
 export const googleLoginSchema = z.object({
   idToken: z.string().min(1),
+  tenantId: z.string().uuid().optional(),
+  workspace: requestedWorkspace,
+});
+
+/** GET /auth/member-login/:key — the key behind a mailbox's Member sign-in link. */
+export const memberLoginKeyParamsSchema = z.object({
+  key: z.string().regex(/^[0-9a-f]{32}$/, "Invalid sign-in link"),
 });
 
 export const refreshSchema = z.object({

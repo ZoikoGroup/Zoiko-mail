@@ -26,6 +26,10 @@ export const CAPABILITIES = [
   "people.admin.manage",
   "people.owner.manage",
   "people.mfa.reset",
+  // Setting a new sign-in password for a mailbox's owner from the Mailboxes
+  // screen. Its own capability so it can be step-up without making routine
+  // member management step-up.
+  "people.credentials.reset",
   // Workspace.
   "workspace.settings.read",
   "workspace.settings.write",

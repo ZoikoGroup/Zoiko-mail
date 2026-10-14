@@ -33,7 +33,9 @@ import type {
   DomainDto,
   GroupDto,
   InvitationDto,
+  MailboxCredentialStatusDto,
   MailboxDto,
+  MailboxWorkspace,
   MemberDto,
   MembershipRole,
   NotificationDto,
@@ -190,6 +192,8 @@ interface ApiMailbox {
   invitationStatus?: InvitationStatus | null;
   invitationError?: string | null;
   membership?: { status?: string; user?: { email?: string } } | null;
+  workspaces?: MailboxWorkspace[];
+  memberLoginUrl?: string;
 }
 
 export async function fetchMailboxes(): Promise<MailboxDto[]> {
@@ -213,6 +217,9 @@ export async function fetchMailboxes(): Promise<MailboxDto[]> {
     invitationRecipient: m.membership?.user?.email ?? null,
     membershipStatus: m.membership?.status ?? null,
     displayName: m.displayName ?? null,
+    // Older API builds sent no assignment; the server default is Member only.
+    workspaces: m.workspaces?.length ? m.workspaces : ["MEMBER"],
+    memberLoginUrl: m.memberLoginUrl ?? null,
     storageUsedGb: gb(m.storageUsed),
     storageLimitGb: gb(m.storageLimit),
     // The real column now (AC-008). A mailbox with this off is what the
@@ -244,6 +251,63 @@ export async function setMailboxAi(
 }
 
 /**
+ * Replace the workspaces a mailbox opens in. At least one is required; the
+ * server stores them in a fixed order and returns what it saved.
+ */
+export async function updateMailboxWorkspaces(
+  mailboxId: string,
+  workspaces: MailboxWorkspace[]
+): Promise<MailboxWorkspace[]> {
+  const res = await apiRequest<{ workspaces: MailboxWorkspace[] }>(
+    `/mail/admin/mailboxes/${encodeURIComponent(mailboxId)}/workspaces`,
+    { method: "PUT", body: { workspaces } }
+  );
+  return res.workspaces;
+}
+
+/** Replace a mailbox's Member sign-in link; the old one stops working at once. */
+export async function regenerateMemberLoginLink(mailboxId: string): Promise<string> {
+  const res = await apiRequest<{ memberLoginUrl: string }>(
+    `/mail/admin/mailboxes/${encodeURIComponent(mailboxId)}/member-login-link/regenerate`,
+    { method: "POST" }
+  );
+  return res.memberLoginUrl;
+}
+
+/** Whether this mailbox's owner can be given a password here, or only a reset code. */
+export async function fetchMailboxCredentialStatus(
+  mailboxId: string
+): Promise<MailboxCredentialStatusDto> {
+  return apiRequest<MailboxCredentialStatusDto>(
+    `/mail/admin/mailboxes/${encodeURIComponent(mailboxId)}/credentials`
+  );
+}
+
+/**
+ * Set a new sign-in password for the mailbox's owner. Step-up is required;
+ * the owner is signed out everywhere when it succeeds.
+ */
+export async function resetMailboxCredentials(
+  mailboxId: string,
+  newPassword: string,
+  confirmPassword: string,
+  stepUpToken?: string
+): Promise<{ ownerEmail: string; sessionsRevoked: number; mailServer: "HOSTED" | "ZOIKO"; updatedAt: string }> {
+  return apiRequest(`/mail/admin/mailboxes/${encodeURIComponent(mailboxId)}/credentials`, {
+    method: "POST",
+    body: { newPassword, confirmPassword },
+    stepUpToken,
+  });
+}
+
+/** Email the owner a one-time reset code, so they choose the password themselves. */
+export async function sendMailboxCredentialResetEmail(mailboxId: string): Promise<{ sentTo: string }> {
+  return apiRequest(`/mail/admin/mailboxes/${encodeURIComponent(mailboxId)}/credentials/reset-email`, {
+    method: "POST",
+  });
+}
+
+/**
  * Provision a mailbox for a member who has none.
  *
  * Takes a membership rather than an address: the server names the mailbox
@@ -253,18 +317,56 @@ export async function setMailboxAi(
 /**
  * Provision a member's mailbox on one of the workspace's own domains.
  *
+ * Either an existing member (`membershipId`) or somebody new (`newMember`):
+ * a new person is invited at their own address, and the mailbox is ready for
+ * them when they accept.
+ *
  * `domainId` is what makes the address theirs rather than whatever they
  * happened to register with. Without it the server falls back to the signup
  * email — which is how a workspace with a verified domain ended up handing
  * out mailboxes at gmail.com, on a domain it can never publish SPF for.
  */
-export async function createMailbox(input: {
-  membershipId: string;
-  domainId?: string;
-  localPart?: string;
-}): Promise<void> {
+export async function createMailbox(input: CreateMailboxInput): Promise<void> {
   await apiRequest("/mail/admin/mailboxes", { method: "POST", body: input });
 }
+
+/** Why a member cannot be given a mailbox; mirrors the server's rule. */
+export type MailboxIneligibility =
+  | "NOT_A_MEMBER"
+  | "MEMBERSHIP_SUSPENDED"
+  | "SUPPORT_SEAT"
+  | "ACCOUNT_DISABLED"
+  | "HAS_MAILBOX";
+
+export interface MailboxCandidateDto {
+  membershipId: string;
+  email: string;
+  displayName: string | null;
+  role: "OWNER" | "ADMIN" | "MEMBER" | "SUPPORT";
+  membershipStatus: "ACTIVE" | "INVITED" | "SUSPENDED";
+  accountStatus: string;
+  mailbox: { id: string; address: string } | null;
+  eligible: boolean;
+  reason: MailboxIneligibility | null;
+}
+
+/**
+ * Every current member, each marked eligible for a mailbox or not — decided
+ * by the server from the database at the moment of asking, so the picker
+ * never shows somebody removed, suspended or already provisioned.
+ */
+export async function fetchMailboxCandidates(): Promise<MailboxCandidateDto[]> {
+  const res = await apiRequest<{ members: MailboxCandidateDto[] }>("/mail/admin/mailbox-candidates");
+  return res.members;
+}
+
+export type CreateMailboxInput = {
+  domainId?: string;
+  localPart?: string;
+} & (
+  | { membershipId: string; newMember?: never }
+  | { newMember: { email: string; firstName?: string; lastName?: string }; membershipId?: never }
+);
 
 /** Remove a mailbox. Step-up per RBAC §2; suspend first and offer an export. */
 export async function deleteMailbox(
