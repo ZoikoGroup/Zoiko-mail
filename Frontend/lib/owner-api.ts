@@ -755,8 +755,13 @@ export async function createAdminMailbox(membershipId: string): Promise<Mailbox>
   };
 }
 
-export async function deleteAdminMailbox(mailboxId: string): Promise<void> {
-  await apiRequest(`/mail/admin/mailboxes/${mailboxId}`, { method: "DELETE" });
+/**
+ * Deleting a mailbox is a step-up action (RBAC §2): the server refuses it
+ * without a fresh password confirmation, so the token has to travel with it.
+ * Without it every delete from this screen was refused with a 403.
+ */
+export async function deleteAdminMailbox(mailboxId: string, stepUpToken?: string): Promise<void> {
+  await apiRequest(`/mail/admin/mailboxes/${mailboxId}`, { method: "DELETE", stepUpToken });
 }
 
 export async function updateMailboxSendingStatus(

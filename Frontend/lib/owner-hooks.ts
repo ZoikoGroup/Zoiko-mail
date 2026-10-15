@@ -367,7 +367,8 @@ export function useCreateAdminMailbox() {
 export function useDeleteAdminMailbox() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (mailboxId: string) => deleteAdminMailbox(mailboxId),
+    mutationFn: ({ mailboxId, stepUpToken }: { mailboxId: string; stepUpToken?: string }) =>
+      deleteAdminMailbox(mailboxId, stepUpToken),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["owner", "admin-mailboxes"] }),
   });
 }
