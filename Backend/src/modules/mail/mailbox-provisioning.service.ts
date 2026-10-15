@@ -636,6 +636,28 @@ export class MailboxProvisioningService {
         reason: "NOT_HOSTED",
       });
     }
+
+    // A mailbox that failed on the mail server, retried after the deployment
+    // switched to Zoiko as the mail store: finish it as a Zoiko-store mailbox
+    // rather than calling a server it no longer needs. Only when no account
+    // was ever created there, so nothing is left behind on the server.
+    if (this.zoikoStore() && row.provisioningStatus !== "PROVISIONED" && !row.providerAccountId) {
+      await prisma.mailbox.update({
+        where: { id: row.id },
+        data: { provider: null, provisioningStatus: null, provisioningError: null, provisioningStartedAt: null },
+      });
+      await this.audit(context, "MAILBOX_MOVED_TO_ZOIKO_STORE", row.id, {
+        address: row.address,
+        previousStatus: row.provisioningStatus,
+        previousError: row.provisioningError,
+      });
+      const moved = await this.load(context.tenantId, mailboxId);
+      if ((moved.invitationStatus === "PENDING" || moved.invitationStatus === "FAILED") && moved.membership?.status === "INVITED") {
+        await this.reissueAndDeliver(moved, context);
+      }
+      return toView(await this.load(context.tenantId, mailboxId));
+    }
+
     if (!this.provider.isConfigured()) {
       throw new AppError("Mailbox hosting is not configured on this deployment", 503, ErrorCodes.MAIL_HOSTING_NOT_CONFIGURED);
     }

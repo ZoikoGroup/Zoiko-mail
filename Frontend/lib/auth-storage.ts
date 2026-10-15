@@ -7,9 +7,10 @@
 // (a backend change) and keep only the short-lived access token in memory. Fine
 // for local development and learning as-is.
 
-const ACCESS_KEY = "zoiko.access_token";
+// Exported so other tabs' changes can be recognised (cross-tab-session.ts).
+export const ACCESS_KEY = "zoiko.access_token";
 const REFRESH_KEY = "zoiko.refresh_token";
-const PLATFORM_KEY = "zoiko.platform_token";
+export const PLATFORM_KEY = "zoiko.platform_token";
 
 const hasWindow = () => typeof window !== "undefined";
 

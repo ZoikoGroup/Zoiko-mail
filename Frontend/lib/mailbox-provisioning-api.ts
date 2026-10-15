@@ -173,11 +173,16 @@ export function describeProvisioningError(code: string | null): string {
       return "The mail server could not be reached. Retry when it is back.";
     case "STALWART_RATE_LIMITED":
       return "The mail server is limiting requests. Retry in a minute.";
+    // Four different operator fixes, so each says which one — they used to
+    // share one sentence, which left nobody able to tell them apart.
     case "STALWART_AUTH_FAILED":
+      return "The mail server rejected the platform's API key. An operator needs to update the key before this can succeed.";
     case "STALWART_FORBIDDEN":
+      return "The platform's API key lacks permission to manage accounts on the mail server. An operator needs to grant it.";
     case "STALWART_NOT_CONFIGURED":
+      return "The mail server's API key is not in this deployment's secret store. An operator needs to add it — or, if mailboxes should live in Zoiko's own store, set STALWART_ACCOUNT_PROVISIONING=false and retry.";
     case "STALWART_NOT_SUPPORTED":
-      return "The platform's connection to the mail server is misconfigured. An operator needs to fix it before this can succeed.";
+      return "This mail server does not offer the account management API Zoiko Mail needs. An operator needs to upgrade it or change its configuration.";
     case "STALWART_ALREADY_EXISTS":
       return "This address already exists on the mail server and was not created by Zoiko Mail, so it was not taken over.";
     case "STALWART_DOMAIN_MISSING":
