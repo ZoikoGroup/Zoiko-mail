@@ -193,11 +193,18 @@ export class GcpSecretManagerStore implements WritableSecretStore {
     const name = this.secretName(ref);
     // Create the secret if it does not exist (NOT_FOUND), then add a version.
     try {
+      // await client.createSecret({
+      //   parent: this.parent(),
+      //   secretId: name.split("/").pop()!,
+      //   secret: {},
+      // });
+
       await client.createSecret({
         parent: this.parent(),
         secretId: name.split("/").pop()!,
-        secret: {},
+        secret: { replication: { automatic: {} } },
       });
+
     } catch (error) {
       const code = (error as { code?: number })?.code;
       if (code !== 6 /* ALREADY_EXISTS */ && code !== 409) throw error;
