@@ -71,7 +71,7 @@ export function InviteUserModal({ open, onClose, onInvite, loading }: InviteUser
           </select>
         </div>
         <p className="text-[11px] text-[var(--ink3)]">
-          An invitation email will be sent. The user will be able to accept and join your organization.
+          An invitation email will be sent. If email is turned off on this deployment, you will get a link to pass on to them yourself.
         </p>
       </div>
     </Modal>

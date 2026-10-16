@@ -6,10 +6,14 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { UsersTable } from "@/components/owner/users/UsersTable";
 import { InviteUserModal } from "@/components/owner/users/InviteUserModal";
 import { ChangeRoleModal } from "@/components/owner/users/ChangeRoleModal";
+import { Modal } from "@/components/ui/Modal";
+import { InvitationLinkBox } from "@/components/mailboxes/InvitationLinkBox";
 import { useInviteMember, useUpdateMember } from "@/lib/owner-hooks";
 
 export default function UsersPage() {
   const [inviteOpen, setInviteOpen] = useState(false);
+  /** The link to pass on, when this deployment cannot email it. In memory only. */
+  const [sentInvite, setSentInvite] = useState<{ email: string; link: string } | null>(null);
   const [roleModalUser, setRoleModalUser] = useState<{ id: string; name: string; role: string } | null>(null);
 
   const inviteMember = useInviteMember();
@@ -33,11 +37,38 @@ export default function UsersPage() {
           onInvite={(email, role) => {
             inviteMember.mutate(
               { email, role: role as "ADMIN" | "MEMBER" | "SUPPORT" },
-              { onSuccess: () => setInviteOpen(false) }
+              {
+                onSuccess: (sent) => {
+                  setInviteOpen(false);
+                  if (sent.invitationLink) setSentInvite({ email, link: sent.invitationLink });
+                },
+              }
             );
           }}
           loading={inviteMember.isPending}
         />
+
+        <Modal
+          open={sentInvite !== null}
+          onClose={() => setSentInvite(null)}
+          title="Invitation created"
+          size="sm"
+          footer={
+            <button type="button" className="zoiko-btn pri" onClick={() => setSentInvite(null)}>
+              Done
+            </button>
+          }
+        >
+          {sentInvite && (
+            <div className="space-y-2">
+              <p className="text-[12.5px] text-[var(--ink2)]">
+                The invitation for {sentInvite.email} was created. Email is turned off on this deployment, so nothing was
+                sent: copy the link and send it to them yourself.
+              </p>
+              <InvitationLinkBox link={sentInvite.link} recipient={sentInvite.email} />
+            </div>
+          )}
+        </Modal>
 
         {roleModalUser && (
           <ChangeRoleModal

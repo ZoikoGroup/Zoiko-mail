@@ -1324,8 +1324,11 @@ export async function previewInvitation(
  */
 export async function sendInvitation(
   input: InvitationDraftInput & { letterBody?: string[] }
-): Promise<void> {
-  await apiRequest("/membership/invitations", { method: "POST", body: input });
+): Promise<{ invitationLink?: string | null }> {
+  // When this deployment cannot email invitations the server also returns the
+  // link, once, for the admin to pass on. It is a credential: it is shown on
+  // screen and never stored.
+  return apiRequest<{ invitationLink?: string | null }>("/membership/invitations", { method: "POST", body: input });
 }
 
 /**
