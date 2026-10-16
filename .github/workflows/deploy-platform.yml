@@ -1,15 +1,19 @@
 name: Deploy platform
+
 on:
   workflow_dispatch:
+
 concurrency:
   group: deploy-platform
   cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: appleboy/ssh-action@v1.0.3
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.PLATFORM_HOST }}
           username: ${{ secrets.PLATFORM_USER }}
@@ -17,5 +21,14 @@ jobs:
           command_timeout: 25m
           script: |
             set -e
+            export PATH="$PATH:/usr/local/bin:/snap/bin"
             zoikomail-deploy
-            curl -fsS https://api.zoikomail.com/api/ready
+            for i in 1 2 3 4 5 6; do
+              if curl -fsS https://api.zoikomail.com/api/ready | grep -q READY; then
+                echo "API ready"
+                exit 0
+              fi
+              sleep 10
+            done
+            echo "API not ready after 60 seconds"
+            exit 1
