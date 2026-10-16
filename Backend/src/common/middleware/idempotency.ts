@@ -98,6 +98,29 @@ function payloadHash(req: Request): string {
   return hash.digest("hex");
 }
 
+/**
+ * A response body with the fields a handler marked as secret taken out.
+ *
+ * Replays are served from a copy stored in the database for 24 hours. A field
+ * that is a credential (an invitation link, for one) has to reach the person
+ * who asked, once, and must not also be kept for a day. A handler names such
+ * fields in `res.locals.redactFromReplay`; the caller still gets the full
+ * body, and a replay gets it without them.
+ */
+function redactForReplay(body: unknown, fields: unknown): unknown {
+  if (!Array.isArray(fields) || fields.length === 0 || !body || typeof body !== "object") return body;
+  const strip = (target: Record<string, unknown>) => {
+    const copy = { ...target };
+    for (const field of fields) delete copy[String(field)];
+    return copy;
+  };
+  const record = strip(body as Record<string, unknown>);
+  if (record.data && typeof record.data === "object" && !Array.isArray(record.data)) {
+    record.data = strip(record.data as Record<string, unknown>);
+  }
+  return record;
+}
+
 /** Whether the response says the work happened. */
 const isSuccess = (status: number) => status >= 200 && status < 300;
 
@@ -242,7 +265,7 @@ export async function idempotency(
           data: {
             status: "COMPLETED",
             responseStatus: status,
-            responseBody: body as Prisma.InputJsonValue,
+            responseBody: redactForReplay(body, res.locals.redactFromReplay) as Prisma.InputJsonValue,
           },
         })
       : // Not successful, so the key is released rather than burned: the

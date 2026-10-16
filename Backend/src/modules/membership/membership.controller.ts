@@ -1,3 +1,4 @@
+import { env } from "../../config/env.js";
 import type { Request, Response } from "express";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
@@ -32,9 +33,20 @@ export const add = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 201, member, req.requestId);
 });
 
+/**
+ * Creates the invitation. With system email off nobody can receive it, so the
+ * link is handed back here, to the admin who asked, to pass on themselves; with
+ * email on it is null and the invitation went out by email.
+ *
+ * The link is a credential. The response carries it once, and the idempotency
+ * layer is told to keep the link and the raw token out of the 24-hour replay
+ * copy it stores in the database.
+ */
 export const createInvitation = asyncHandler(async (req: Request, res: Response) => {
+  res.locals.redactFromReplay = ["invitationToken", "invitationLink"];
   const invitation = await membershipService.createInvitation(req.body, requestContext(req));
-  sendSuccess(res, 201, invitation, req.requestId);
+  const invitationLink = env.SYSTEM_MAIL_ENABLED ? null : membershipService.acceptUrl(invitation.invitationToken);
+  sendSuccess(res, 201, { ...invitation, invitationLink }, req.requestId);
 });
 
 // 200, not 201: nothing is created. Drafting a letter for review is a read of

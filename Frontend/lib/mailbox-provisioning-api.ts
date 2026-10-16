@@ -73,6 +73,12 @@ export interface ProvisionedMailbox {
   invitationRecipient: string | null;
   membershipStatus: string | null;
   status: MailboxDisplayStatus;
+  /**
+   * Present only in the response to creating, retrying or resending, and only
+   * when this deployment cannot email the invitation. A credential: show it
+   * once, never store it.
+   */
+  invitationLink?: string | null;
 }
 
 /** What a mailbox list row needs to show its status and its next action. */
@@ -204,7 +210,7 @@ export function describeInvitation(status: InvitationStatus | null, error: strin
       return `${recipient ?? "The member"} already belongs to this workspace — the mailbox appears for them directly.`;
     case "PENDING":
       return error === "SYSTEM_MAIL_DISABLED"
-        ? "Email delivery is turned off on this deployment, so the invitation was not sent."
+        ? "Email delivery is turned off on this deployment, so the invitation was not emailed. Use Send invitation to get a link you can pass on yourself."
         : "The invitation will be sent once the mailbox is provisioned.";
     default:
       return "";

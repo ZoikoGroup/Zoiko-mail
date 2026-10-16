@@ -5,6 +5,7 @@ import Image from "next/image";
 import { X } from "lucide-react";
 
 import { ApiError } from "@/lib/api-client";
+import { InvitationLinkBox } from "@/components/mailboxes/InvitationLinkBox";
 import { usePreviewInvitation, useSendInvitation } from "@/lib/admin-hooks";
 import type { InvitationLetterDto } from "@/lib/admin-queries";
 
@@ -41,6 +42,8 @@ export function InviteMemberDialog({
   /** The body as the admin has it, one string per paragraph. */
   const [body, setBody] = useState<string[]>([]);
   const [fieldError, setFieldError] = useState<string | null>(null);
+  /** The link to pass on, when this deployment cannot email it. In memory only. */
+  const [sentLink, setSentLink] = useState<string | null>(null);
 
   const draft = usePreviewInvitation();
   const send = useSendInvitation();
@@ -96,7 +99,14 @@ export function InviteMemberDialog({
         role,
         letterBody: edited,
       },
-      { onSuccess: onClose }
+      {
+        // With email off the invitation exists but nobody received it, so stay
+        // open to show the link; otherwise the email went out and we are done.
+        onSuccess: (sent) => {
+          if (sent?.invitationLink) setSentLink(sent.invitationLink);
+          else onClose();
+        },
+      }
     );
   };
 
@@ -122,7 +132,7 @@ export function InviteMemberDialog({
       >
         <header className="flex items-center gap-3 border-b border-[var(--border)] px-5 py-4">
           <h2 className="flex-1 text-sm font-semibold text-[var(--ink)]">
-            {letter ? "Review the invitation" : "New invitation"}
+            {sentLink ? "Invitation created" : letter ? "Review the invitation" : "New invitation"}
           </h2>
           <button
             type="button"
@@ -135,7 +145,15 @@ export function InviteMemberDialog({
         </header>
 
         <div className="px-5 py-5">
-          {!letter ? (
+          {sentLink ? (
+            <div className="space-y-3">
+              <p className="text-[12.5px] text-[var(--ink2)]">
+                The invitation for {trimmed.email} was created. Email is turned off on this deployment, so nothing was
+                sent: copy the link below and send it to them yourself.
+              </p>
+              <InvitationLinkBox link={sentLink} recipient={trimmed.email} />
+            </div>
+          ) : !letter ? (
             <div className="space-y-4">
               <p className="text-[12.5px] text-[var(--ink3)]">
                 Their name is used to address the letter, so it reads as a
@@ -200,7 +218,7 @@ export function InviteMemberDialog({
         </div>
 
         <footer className="flex items-center gap-2 border-t border-[var(--border)] px-5 py-4">
-          {letter && (
+          {letter && !sentLink && (
             <button
               type="button"
               className="zoiko-btn"
@@ -213,10 +231,10 @@ export function InviteMemberDialog({
             </button>
           )}
           <div className="flex-1" />
-          <button type="button" className="zoiko-btn" onClick={onClose}>
-            Cancel
+          <button type="button" className={sentLink ? "zoiko-btn pri" : "zoiko-btn"} onClick={onClose}>
+            {sentLink ? "Done" : "Cancel"}
           </button>
-          {!letter ? (
+          {sentLink ? null : !letter ? (
             <button
               type="button"
               className="zoiko-btn pri"

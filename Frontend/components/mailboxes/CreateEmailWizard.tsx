@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Modal } from "@/components/ui/Modal";
+import { InvitationLinkBox } from "@/components/mailboxes/InvitationLinkBox";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ApiError, newIdempotencyKey } from "@/lib/api-client";
 import {
@@ -456,7 +457,7 @@ export function CreateEmailWizard({ onClose, domainsHref }: { onClose: () => voi
 
         {data.invitationDelivery === "DISABLED" && (
           <Callout tone="warn">
-            Email delivery is turned off on this deployment, so the invitation will be recorded but not sent.
+            Email delivery is turned off on this deployment, so no invitation email will be sent. After the mailbox is created you will get a link to pass on to the new user yourself.
           </Callout>
         )}
 
@@ -477,8 +478,12 @@ export function CreateEmailWizard({ onClose, domainsHref }: { onClose: () => voi
   function renderResult() {
     if (!result) return null;
     const provisioned = result.provisioningStatus === "PROVISIONED";
+    // Zoiko-store mailbox: there is no mail-server half, so it is complete as created.
+    const zoikoStore = result.provisioningStatus === null;
+    const ready = provisioned || zoikoStore;
+    const mailDisabled = result.invitationError === "SYSTEM_MAIL_DISABLED";
     const canResend =
-      provisioned &&
+      ready &&
       result.membershipStatus === "INVITED" &&
       (result.invitationStatus === "FAILED" || result.invitationStatus === "PENDING" || result.invitationStatus === "SENT");
     return (
@@ -492,7 +497,11 @@ export function CreateEmailWizard({ onClose, domainsHref }: { onClose: () => voi
 
         <section>
           <p className={label}>Mailbox</p>
-          {provisioned ? (
+          {zoikoStore ? (
+            <Callout tone="ok">
+              Mailbox created. Mail for this address is stored by Zoiko Mail, with a {formatQuota(result.quotaBytes)} quota.
+            </Callout>
+          ) : provisioned ? (
             <Callout tone="ok">
               Mailbox created on the mail server with a {formatQuota(result.appliedQuotaBytes ?? result.quotaBytes)} quota.
             </Callout>
@@ -503,7 +512,7 @@ export function CreateEmailWizard({ onClose, domainsHref }: { onClose: () => voi
           ) : (
             <Callout tone="info">Provisioning is still in progress. Check the mailbox list shortly.</Callout>
           )}
-          {!provisioned && (
+          {!ready && (
             <button type="button" className="zoiko-btn sm mt-2" disabled={busy} onClick={() => void runAction("retry")}>
               {retry.isPending ? "Retrying…" : "Retry provisioning"}
             </button>
@@ -515,9 +524,18 @@ export function CreateEmailWizard({ onClose, domainsHref }: { onClose: () => voi
           <p className="text-[12.4px] text-[var(--ink2)]" data-testid="invitation-status">
             {describeInvitation(result.invitationStatus, result.invitationError, result.invitationRecipient)}
           </p>
+          {result.invitationLink && (
+            <InvitationLinkBox link={result.invitationLink} recipient={result.invitationRecipient} />
+          )}
           {canResend && (
             <button type="button" className="zoiko-btn sm mt-2" disabled={busy} onClick={() => void runAction("resend")}>
-              {resend.isPending ? "Sending…" : result.invitationStatus === "SENT" ? "Resend invitation" : "Send invitation"}
+              {resend.isPending
+                ? "Sending…"
+                : mailDisabled
+                  ? "Get a new invitation link"
+                  : result.invitationStatus === "SENT"
+                    ? "Resend invitation"
+                    : "Send invitation"}
             </button>
           )}
         </section>
