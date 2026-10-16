@@ -2,6 +2,7 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
+import { useCrossTabSession } from "@/lib/cross-tab-session";
 
 export function Providers({ children }: { children: ReactNode }) {
   // Cache tuning keeps dashboard-to-dashboard navigation fast:
@@ -23,6 +24,8 @@ export function Providers({ children }: { children: ReactNode }) {
         },
       })
   );
+  // Follow sign-ins and sign-outs made in other tabs (see cross-tab-session.ts).
+  useCrossTabSession();
   return (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );

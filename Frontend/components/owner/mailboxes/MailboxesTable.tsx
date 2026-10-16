@@ -7,6 +7,8 @@ import { FilterBar } from "@/components/ui/FilterBar";
 import { DropdownMenu, DropdownItem } from "@/components/ui/DropdownMenu";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { StepUpDialog, useStepUp } from "@/components/admin/StepUpDialog";
+import { ApiError } from "@/lib/api-client";
 import { Pause, Play, Trash2, Mail, Eye } from "lucide-react";
 import { useAdminMailboxes, useDeleteAdminMailbox, useUpdateMailboxSendingStatus } from "@/lib/owner-hooks";
 import type { Mailbox } from "@/lib/owner-api";
@@ -48,6 +50,23 @@ export function MailboxesTable({ onCreateMailbox }: MailboxesTableProps) {
   // whoever holds both; the server refuses everyone else regardless.
   const canManage = can("workspace.mailboxes.manage") && can("people.invite.member");
   const deleteMailbox = useDeleteAdminMailbox();
+  const stepUp = useStepUp();
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Deleting is a step-up action: the server answers the first attempt by
+  // asking for the password again, and useStepUp turns that into a prompt and
+  // repeats this call with the token. The dialog closes only once the server
+  // has said yes; any other refusal stays on screen, where it used to vanish.
+  const runDelete = (stepUpToken?: string) =>
+    deleteMailbox
+      .mutateAsync({ mailboxId: confirmDelete!.id, stepUpToken })
+      .then(() => {
+        setConfirmDelete(null);
+      })
+      .catch((cause: unknown) => {
+        if (cause instanceof ApiError && cause.needsStepUp) throw cause;
+        setDeleteError(cause instanceof Error ? cause.message : "The mailbox could not be deleted.");
+      });
   const updateSending = useUpdateMailboxSendingStatus();
 
   const domains = useMemo(() => {
@@ -207,19 +226,31 @@ export function MailboxesTable({ onCreateMailbox }: MailboxesTableProps) {
         onDelete={(m) => { setDetailsMailbox(null); setConfirmDelete(m); }}
       />
 
+      <StepUpDialog {...stepUp.dialog} />
+
       <ConfirmDialog
-        open={!!confirmDelete}
-        onClose={() => { setConfirmDelete(null); setSuspendReason(""); }}
+        open={!!confirmDelete && !stepUp.dialog.open}
+        onClose={() => {
+          if (!deleteMailbox.isPending) {
+            setConfirmDelete(null);
+            setDeleteError(null);
+          }
+        }}
         onConfirm={() => {
-          if (confirmDelete) deleteMailbox.mutate(confirmDelete.id);
-          setConfirmDelete(null);
-          setSuspendReason("");
+          if (!confirmDelete) return;
+          setDeleteError(null);
+          stepUp
+            .attempt(`Deleting ${confirmDelete.address}`, runDelete)
+            .catch((cause: Error) => setDeleteError(cause.message || "The mailbox could not be deleted."));
         }}
         title="Delete Mailbox"
-        message={`Are you sure you want to delete the mailbox for ${confirmDelete?.displayName}? This action cannot be undone.`}
-        confirmLabel="Delete"
+        message={`Are you sure you want to delete the mailbox for ${confirmDelete?.displayName}? Its mail is deleted with it, and this cannot be undone.`}
+        confirmLabel={deleteMailbox.isPending ? "Deleting…" : "Delete"}
+        loading={deleteMailbox.isPending}
         variant="danger"
-      />
+      >
+        {deleteError && <p className="mt-2 text-[12px] text-[var(--crit)]">{deleteError}</p>}
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={!!confirmSuspend}

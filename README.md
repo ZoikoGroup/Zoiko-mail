@@ -88,8 +88,8 @@ shapes a lot of the code in `modules/support`.
   with backoff, dead-letter replay and provider health
 - Hosted mail over IMAP/SMTP, sending as background jobs
 - AI commitment detection with a policy gate and per-mailbox opt-out
-- Domains: DNS verification for MX, SPF, DKIM and DMARC before sending is
-  allowed
+- Domains: DNS verification of the ownership TXT, SPF, DKIM and DMARC before
+  sending is allowed, and of MX for receiving mail
 - Deliverability: mailbox warm-up, send caps, bounce and complaint suppression
 - Authentication: MFA, recovery codes, step-up, rotating refresh tokens
 - Billing via Stripe; audit log that the application cannot edit

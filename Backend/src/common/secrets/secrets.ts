@@ -196,7 +196,7 @@ export class GcpSecretManagerStore implements WritableSecretStore {
       await client.createSecret({
         parent: this.parent(),
         secretId: name.split("/").pop()!,
-        secret: {},
+        secret: { replication: { automatic: {} } },
       });
     } catch (error) {
       const code = (error as { code?: number })?.code;
