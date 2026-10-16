@@ -1,6 +1,10 @@
 "use client";
 
+import { useState } from "react";
+
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { Modal } from "@/components/ui/Modal";
+import { InvitationLinkBox } from "@/components/mailboxes/InvitationLinkBox";
 import {
   describeInvitation,
   describeProvisioningError,
@@ -24,6 +28,8 @@ import {
 export function MailboxStatusCell({ row, canManage }: { row: MailboxStatusRow; canManage: boolean }) {
   const retry = useRetryMailboxProvisioning();
   const resend = useResendMailboxInvitation();
+  // Held in memory only, and dropped when the dialog closes.
+  const [shownLink, setShownLink] = useState<string | null>(null);
 
   const detail =
     row.status === "FAILED"
@@ -35,7 +41,7 @@ export function MailboxStatusCell({ row, canManage }: { row: MailboxStatusRow; c
   const canRetry = canManage && row.provisioningStatus !== null && row.provisioningStatus !== "PROVISIONED";
   const canResend =
     canManage &&
-    row.provisioningStatus === "PROVISIONED" &&
+    (row.provisioningStatus === "PROVISIONED" || row.provisioningStatus === null) &&
     row.membershipStatus === "INVITED" &&
     row.invitationStatus !== null &&
     row.invitationStatus !== "NOT_REQUIRED";
@@ -60,7 +66,7 @@ export function MailboxStatusCell({ row, canManage }: { row: MailboxStatusRow; c
             // Rows open a details drawer on click in the Owner list.
             event.stopPropagation();
             if (canRetry) retry.mutate(row.id);
-            else resend.mutate(row.id);
+            else resend.mutate(row.id, { onSuccess: (sent) => setShownLink(sent.invitationLink ?? null) });
           }}
           aria-label={`${canRetry ? "Retry provisioning" : "Resend invitation"} for ${row.address}`}
         >
@@ -70,6 +76,19 @@ export function MailboxStatusCell({ row, canManage }: { row: MailboxStatusRow; c
         </button>
       )}
       {error && <span className="max-w-[220px] text-[10.5px] text-[var(--crit)]">{error.message}</span>}
+      <Modal
+        open={shownLink !== null}
+        onClose={() => setShownLink(null)}
+        title={`Invitation link for ${row.address}`}
+        size="sm"
+        footer={
+          <button type="button" className="zoiko-btn pri" onClick={() => setShownLink(null)}>
+            Done
+          </button>
+        }
+      >
+        {shownLink && <InvitationLinkBox link={shownLink} recipient={row.invitationRecipient} />}
+      </Modal>
     </div>
   );
 }

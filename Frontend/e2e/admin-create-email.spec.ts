@@ -219,6 +219,73 @@ test.describe("Create Email", () => {
     expect(captured.provision).toHaveLength(1);
   });
 
+  test("shows the invitation link, once, when email is off — for a mailbox Zoiko stores", async ({ page }) => {
+    const link = "https://app.test/accept-invitation?token=first-token-123";
+    const fresh = "https://app.test/accept-invitation?token=second-token-456";
+    const captured = await open(page, {
+      options: { hostingMode: "ZOIKO_STORE", invitationDelivery: "DISABLED" },
+      provision: (route) =>
+        route.fulfill({
+          ...json(
+            result({
+              provisioningStatus: null,
+              invitationStatus: "PENDING",
+              invitationError: "SYSTEM_MAIL_DISABLED",
+              invitationLink: link,
+            })
+          ),
+          status: 201,
+        }),
+      resend: {
+        provisioningStatus: null,
+        invitationStatus: "PENDING",
+        invitationError: "SYSTEM_MAIL_DISABLED",
+        invitationLink: fresh,
+      },
+    });
+    await page.getByRole("button", { name: "+ Create Email" }).click();
+    const dialog = await fillForm(page);
+    // Told up front, on the review step, that no email will go out.
+    await dialog.getByRole("button", { name: "Review" }).click();
+    await expect(dialog).toContainText("no invitation email will be sent");
+    await dialog.getByRole("button", { name: "Confirm & create" }).click();
+
+    // A mailbox with no mail-server half is complete as created: it does not
+    // claim to be provisioning, and offers no Retry.
+    await expect(dialog).toContainText("Mailbox created. Mail for this address is stored by Zoiko Mail");
+    await expect(dialog).not.toContainText("Provisioning is still in progress");
+    await expect(dialog.getByRole("button", { name: "Retry provisioning" })).toHaveCount(0);
+
+    // The link is on screen, to copy.
+    const box = dialog.getByTestId("invitation-link-box");
+    await expect(box).toBeVisible();
+    await expect(box.getByLabel("Invitation link")).toHaveValue(link);
+    await expect(box).toContainText("Anyone who has the link");
+
+    // It never reaches the address bar.
+    expect(page.url()).not.toContain("token=");
+
+    // A new link replaces it, and the old one is no longer shown.
+    await dialog.getByRole("button", { name: "Get a new invitation link" }).click();
+    await expect(box.getByLabel("Invitation link")).toHaveValue(fresh);
+    await expect(dialog).not.toContainText("first-token-123");
+    expect(captured.resend).toBe(1);
+    expect(captured.provision).toHaveLength(1);
+  });
+
+  test("shows no link when the invitation was emailed", async ({ page }) => {
+    await open(page, {
+      provision: (route) => route.fulfill({ ...json(result({ invitationLink: null })), status: 201 }),
+    });
+    await page.getByRole("button", { name: "+ Create Email" }).click();
+    const dialog = await fillForm(page);
+    await dialog.getByRole("button", { name: "Review" }).click();
+    await dialog.getByRole("button", { name: "Confirm & create" }).click();
+
+    await expect(dialog.getByTestId("invitation-status")).toHaveText("Invitation sent to john.personal@elsewhere.test.");
+    await expect(dialog.getByTestId("invitation-link-box")).toHaveCount(0);
+  });
+
   test("keeps invitation status apart, and resends without creating again", async ({ page }) => {
     const captured = await open(page, {
       provision: (route) =>

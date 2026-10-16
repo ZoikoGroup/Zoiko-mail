@@ -74,6 +74,28 @@ services:
       MAIL_CLEANUP_INTERVAL_MS: ${MAIL_CLEANUP_INTERVAL_MS:-30000}
       MAIL_CLEANUP_LEASE_MS: ${MAIL_CLEANUP_LEASE_MS:-300000}
       MAIL_CLEANUP_RETENTION_DAYS: ${MAIL_CLEANUP_RETENTION_DAYS:-90}
+      # The container receives only the variables named in this file, so a
+      # setting that is not listed here never reaches the API, whatever the
+      # server's .env says.
+      #
+      # Zoiko as the mail store (decision D1). false: Create Email makes the
+      # mailbox in Zoiko and does not ask Stalwart for an account. true (the
+      # default) keeps the mail-server behaviour.
+      STALWART_ACCOUNT_PROVISIONING: ${STALWART_ACCOUNT_PROVISIONING:-true}
+      # The address an invitation link points at. Must be the public site.
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      # Outbound relay (decision D2): sends to outside recipients through an
+      # authenticated SMTP relay (Amazon SES, Brevo). Off until configured.
+      RELAY_ENABLED: ${RELAY_ENABLED:-false}
+      RELAY_SMTP_HOST: ${RELAY_SMTP_HOST:-}
+      RELAY_SMTP_PORT: ${RELAY_SMTP_PORT:-587}
+      RELAY_SMTP_SECURE: ${RELAY_SMTP_SECURE:-false}
+      RELAY_SMTP_USERNAME: ${RELAY_SMTP_USERNAME:-}
+      RELAY_SMTP_PASSWORD: ${RELAY_SMTP_PASSWORD:-}
+      # Inbound mail (decision D1): the shared secret the edge (the Cloudflare
+      # Email Worker) signs messages with. Unset, the inbound endpoint answers
+      # 503 and no outside mail is accepted. At least 32 characters.
+      INBOUND_WEBHOOK_SECRET: ${INBOUND_WEBHOOK_SECRET:-}
       # Where secrets live: DKIM private keys, DNS provider credentials and
       # connector tokens. The file store's default is inside the image, which
       # a rebuild wipes — so it sits on the persistent storage volume here.
