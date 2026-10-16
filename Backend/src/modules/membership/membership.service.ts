@@ -176,6 +176,26 @@ async function protectLastOwner(
   }
 }
 
+/**
+ * Why an address cannot be invited or added right now.
+ *
+ * This used to answer "User account is disabled" for every account that was
+ * not active, which covers three different things: somebody who started
+ * signing up and never verified their email, a suspended account, and a
+ * disabled one. An admin told "disabled" about a colleague who simply has not
+ * entered their verification code has nothing to act on. The states are not
+ * named in the message — which state an address is in is not the inviter's to
+ * learn — but it says what to do, and `details.reason` is machine-readable.
+ */
+function notInvitable(): AppError {
+  return new AppError(
+    "This address cannot be invited right now: its account is not active. If they started signing up, ask them to finish verifying their email first. Otherwise invite a different address.",
+    409,
+    ErrorCodes.CONFLICT,
+    { reason: "ACCOUNT_NOT_ACTIVE" }
+  );
+}
+
 export class MembershipService {
   /**
    * The workspace's people, a page at a time — API §4.
@@ -202,9 +222,7 @@ export class MembershipService {
     return prisma.$transaction(async (tx) => {
       const user = await tx.appUser.findUnique({ where: { email: input.email } });
       if (!user) throw new AppError("Registered user not found", 404, ErrorCodes.NOT_FOUND);
-      if (user.status !== "ACTIVE") {
-        throw new AppError("User account is disabled", 409, ErrorCodes.CONFLICT);
-      }
+      if (user.status !== "ACTIVE") throw notInvitable();
 
       const existing = await tx.tenantMembership.findFirst({
         where: { tenantId: context.tenantId, userId: user.id },
@@ -295,9 +313,7 @@ export class MembershipService {
           },
         });
       }
-      if (user.status !== "ACTIVE" && user.status !== "INVITED") {
-        throw new AppError("User account is disabled", 409, ErrorCodes.CONFLICT);
-      }
+      if (user.status !== "ACTIVE" && user.status !== "INVITED") throw notInvitable();
 
       if (input.role === "SUPPORT") {
         await assertSupportNotElsewhere(context.tenantId, user.id);
