@@ -142,6 +142,21 @@ describe("Create Email with Zoiko as the mail store", () => {
     expect(replyTo).toEqual([infoAddress]);
     await request(app).post(`/api/v1/mail/drafts/${reply.body.data.id}/send`).set(authHeader(mgmtToken)).expect(200);
     expect(await prisma.mailboxMessage.findFirst({ where: { mailboxId: info.body.data.id, messageId: reply.body.data.id, folder: "INBOX" } })).not.toBeNull();
+    // The reply quotes the original under an attribution line.
+    expect(reply.body.data.textBody).toMatch(/^Approved\n\nOn .+, info@.+ wrote:\n> Please approve$/);
+
+    // 7. info@ replies from Sent to its own message: that continues with the
+    // person it went to, not with info@ itself ("Reply has no eligible recipient").
+    const followUp = await request(app)
+      .post(`/api/v1/mail/${draft.body.data.id}/reply`)
+      .set(authHeader(infoToken))
+      .send({ textBody: "Following up", htmlBody: "<p>Following up</p><p>quoted by the composer</p>", includesQuote: true })
+      .expect(201);
+    expect((followUp.body.data.recipients as Array<{ email: string; type: string }>).map((r) => [r.type, r.email])).toEqual([["TO", mgmtAddress]]);
+    expect(followUp.body.data.subject).toBe("Re: Leave approval");
+    // The composer already quoted the original, so the server adds nothing.
+    expect(followUp.body.data.textBody).toBe("Following up");
+    expect(followUp.body.data.htmlBody).toBe("<p>Following up</p><p>quoted by the composer</p>");
   });
 
   it("still blocks mail to outside addresses from a domain whose SPF/DKIM/DMARC are not passing", async () => {

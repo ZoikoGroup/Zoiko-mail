@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "./api-client";
+import { getSSEStatus } from "./sse-client";
 import {
   listMail,
   getMessage,
@@ -39,6 +40,17 @@ import {
   snoozeMessage,
 } from "./mail-api";
 
+/**
+ * How often the mailbox is re-read without being told to.
+ *
+ * The live stream (useMemberShell → NEW_MAIL) is what makes new mail appear;
+ * this is the net under it. While the stream is down the mailbox is polled so
+ * mail still arrives within seconds, and while it is up a slow re-read covers
+ * an event that was lost on the way. Hidden tabs don't poll (React Query's
+ * default), and catch up when they are shown again.
+ */
+export const mailRefetchInterval = () => (getSSEStatus() === "open" ? 120_000 : 15_000);
+
 const listKey = (params: ListMailParams) =>
   ["mail", "list", params.folder ?? "INBOX", params.starredOnly ?? false, params.unreadOnly ?? false, params.labelId ?? null, params.page ?? 1] as const;
 
@@ -47,8 +59,9 @@ export function useMailList(params: ListMailParams) {
     queryKey: listKey(params),
     queryFn: () => listMail(params),
     staleTime: 15_000,
-    // Polling removed — SSE pushes NEW_MAIL events to invalidate this cache.
-    // Keep refetchOnWindowFocus so switching tabs still refreshes.
+    // SSE pushes NEW_MAIL events to invalidate this cache; polling is only
+    // the fallback (mailRefetchInterval). refetchOnWindowFocus stays on.
+    refetchInterval: mailRefetchInterval,
   });
 }
 
@@ -57,7 +70,8 @@ export function useUnreadCounts() {
     queryKey: ["mail", "unread-counts"],
     queryFn: fetchUnreadCounts,
     staleTime: 15_000,
-    // Polling removed — SSE pushes UNREAD_COUNT events to invalidate.
+    // NEW_MAIL invalidates this; polling is only the fallback.
+    refetchInterval: mailRefetchInterval,
   });
 }
 
@@ -229,6 +243,8 @@ export interface ComposerPayload {
   files?: File[]; // attachments to upload after draft creation
   /** Compose as a shared mailbox; omitted means the caller's own address. */
   sendAsMailboxId?: string;
+  /** Reply/forward: the body already carries the quoted original. */
+  includesQuote?: boolean;
 }
 
 /**
@@ -276,12 +292,14 @@ export function useComposerSubmit() {
           textBody: p.textBody,
           htmlBody: p.htmlBody,
           sendAsMailboxId: p.sendAsMailboxId,
+          includesQuote: p.includesQuote,
         });
       } else if (p.mode === "replyAll") {
         draft = await replyAllApi(p.sourceId as string, {
           textBody: p.textBody,
           htmlBody: p.htmlBody,
           sendAsMailboxId: p.sendAsMailboxId,
+          includesQuote: p.includesQuote,
         });
       } else {
         draft = await forwardApi(p.sourceId as string, {
@@ -289,6 +307,7 @@ export function useComposerSubmit() {
           textBody: p.textBody,
           htmlBody: p.htmlBody,
           sendAsMailboxId: p.sendAsMailboxId,
+          includesQuote: p.includesQuote,
         });
       }
 
@@ -346,6 +365,7 @@ export function useThreads(params: ListThreadsParams) {
     queryKey: threadsListKey(params),
     queryFn: () => listThreads(params),
     staleTime: 15_000,
+    refetchInterval: mailRefetchInterval,
   });
 }
 

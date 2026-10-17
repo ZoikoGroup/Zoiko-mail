@@ -1196,16 +1196,9 @@ function ReadingPane({
             )}
 
             {/* Attachments */}
-            {m.attachments.length > 0 && (
-              <div className="mt-6">
-                <div className="font-mono-num mb-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
-                  {m.attachments.length} attachment{m.attachments.length > 1 ? "s" : ""}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <AttachmentList messageId={messageId} attachments={m.attachments} />
-                </div>
-              </div>
-            )}
+            {/* AttachmentList carries its own heading and layout. */}
+            <AttachmentList messageId={messageId} attachments={m.attachments} />
+
           </div>
         </>
       )}
