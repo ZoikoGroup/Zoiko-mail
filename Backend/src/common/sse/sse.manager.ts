@@ -65,6 +65,11 @@ class SSEManager {
 
   /**
    * Send an event to all connections for a specific user.
+   *
+   * An event that names a workspace goes only to that user's streams for
+   * that workspace. One person can belong to several, each signed in with its
+   * own session, and mail for one is not the other's business — the event
+   * carries a message id and the refetch it triggers would be wasted anyway.
    */
   sendToUser(userId: string, event: Omit<SSEEvent, "timestamp">): void {
     const set = this.clients.get(userId);
@@ -72,6 +77,7 @@ class SSEManager {
 
     const message = this.format({ ...event, timestamp: new Date().toISOString() });
     for (const client of set) {
+      if (event.tenantId && client.tenantId !== event.tenantId) continue;
       this.writeToClient(client, message);
     }
   }

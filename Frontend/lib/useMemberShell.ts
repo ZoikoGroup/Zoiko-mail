@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -12,7 +12,7 @@ import {
 import { useMe, useLogout } from "@/lib/auth-hooks";
 import type { MeResponse } from "@/lib/auth-api";
 import { workspaceDenialNotice } from "@/lib/workspace";
-import { useSSE, type SSEEvent } from "@/lib/sse-client";
+import { useSSE, useSSEStatus, type SSEEvent } from "@/lib/sse-client";
 import { useToast } from "@/components/ui/Toast";
 
 /** This hook is the member workspace; only sessions opened for it belong. */
@@ -52,17 +52,38 @@ export function useMemberShell() {
   const qc = useQueryClient();
   const { toasts, add: addToast, dismiss } = useToast();
 
+  // New mail arrives in bursts (a send to several of one's addresses, a
+  // provider sync). One refetch and one toast per burst, and an event seen
+  // before — a redelivery, or the same message announced twice — is ignored.
+  const seenMail = useRef(new Set<string>());
+  const pendingMail = useRef(0);
+  const mailTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(mailTimer.current), []);
+
   // ── SSE real-time event handlers ──────────────────────────────────────────
   useSSE({
     NEW_MAIL: useCallback((e: SSEEvent) => {
-      qc.invalidateQueries({ queryKey: ["mail"] });
-      qc.invalidateQueries({ queryKey: ["mail", "unread"] });
-      const count = e.payload?.count ?? 1;
-      addToast({
-        type: "mail",
-        title: `${count} new email${count > 1 ? "s" : ""} arrived`,
-        duration: 4000,
-      });
+      const id = e.payload?.messageId;
+      if (id) {
+        if (seenMail.current.has(id)) return;
+        seenMail.current.add(id);
+        if (seenMail.current.size > 500) seenMail.current.delete(seenMail.current.values().next().value!);
+      }
+      pendingMail.current += e.payload?.count ?? 1;
+      clearTimeout(mailTimer.current);
+      mailTimer.current = setTimeout(() => {
+        const count = pendingMail.current;
+        pendingMail.current = 0;
+        // Lists, threads, unread counts — everything under "mail" that is on
+        // screen refetches; the lists are replaced, never appended to, so a
+        // message can't appear twice.
+        void qc.invalidateQueries({ queryKey: ["mail"] });
+        addToast({
+          type: "mail",
+          title: `${count} new email${count > 1 ? "s" : ""} arrived`,
+          duration: 4000,
+        });
+      }, 250);
     }, [qc, addToast]),
 
     AI_EXTRACTION_DONE: useCallback((e: SSEEvent) => {
@@ -97,7 +118,23 @@ export function useMemberShell() {
         duration: 4000,
       });
     }, [qc, addToast]),
+  }, {
+    // Whatever was announced while the stream was down was never received:
+    // read the mailbox again rather than wait for the next message.
+    onReconnect: () => {
+      void qc.invalidateQueries({ queryKey: ["mail"] });
+      void qc.invalidateQueries({ queryKey: ["ai", "actions"] });
+      void qc.invalidateQueries({ queryKey: ["notifications"] });
+    },
   });
+
+  // When the stream goes down, refetch once: that re-reads the mailbox and
+  // moves the mail queries onto their faster fallback polling straight away
+  // (React Query only re-reads refetchInterval after a fetch).
+  const sseStatus = useSSEStatus();
+  useEffect(() => {
+    if (sseStatus === "down") void qc.invalidateQueries({ queryKey: ["mail"] });
+  }, [sseStatus, qc]);
 
   // Auth guard for every page that uses either shell.
   useEffect(() => {

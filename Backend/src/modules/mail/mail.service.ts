@@ -172,6 +172,40 @@ function escapeHtml(value: string) {
   })[character]!);
 }
 
+/**
+ * The original as a reply quotes it: "On <date>, <sender> wrote:" and its
+ * text. Mail that arrived as HTML only has its markup stripped, so the quote
+ * is never empty just because there was no text part.
+ */
+function quotedOriginal(source: {
+  textBody: string | null;
+  htmlBody: string | null;
+  fromAddress: string | null;
+  fromName?: string | null;
+  sentAt: Date | null;
+  createdAt: Date;
+  author: { email: string };
+}) {
+  const text = (source.textBody?.trim()
+    ? source.textBody
+    : (source.htmlBody ?? "")
+        .replace(/<(script|style)[\s\S]*?<\/\1>/gi, "")
+        .replace(/<br\s*\/?>|<\/(p|div|li|tr|h[1-6])>/gi, "\n")
+        .replace(/<[^>]+>/g, "")
+        .replace(/&nbsp;/g, " ")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&amp;/g, "&")
+        .replace(/\n{3,}/g, "\n\n")
+  ).trim();
+  const address = source.fromAddress ?? source.author.email;
+  const sender = source.fromName ? `${source.fromName} <${address}>` : address;
+  const when = (source.sentAt ?? source.createdAt).toUTCString();
+  return { attribution: `On ${when}, ${sender} wrote:`, text };
+}
+
 export class MailService {
   private async mailbox(context: MailContext, tx: Prisma.TransactionClient = prisma) {
     return tx.mailbox.upsert({
@@ -472,7 +506,7 @@ export class MailService {
 
   async createReply(
     messageId: string,
-    input: { textBody?: string | null; htmlBody?: string | null; sendAsMailboxId?: string },
+    input: { textBody?: string | null; htmlBody?: string | null; sendAsMailboxId?: string; includesQuote?: boolean },
     replyAll: boolean,
     context: MailContext
   ) {
@@ -501,24 +535,38 @@ export class MailService {
     // is the wrong target: for a colleague it is their personal login, and
     // for imported mail it is not the sender at all.
     const author = (source.fromAddress ?? source.author.email).toLowerCase();
+    // Replying to a message we sent ourselves (from Sent, or our own message
+    // in a thread) continues the conversation with the people it went to, as
+    // every mail client does: its To recipients, plus Cc on reply-all.
+    // Replying to the sender instead meant replying to ourselves — which was
+    // then removed, leaving "Reply has no eligible recipient".
+    const fromUs = ours.has(author);
     const to = new Set<string>();
     const cc = new Set<string>();
-    if (!ours.has(author)) to.add(author);
-    if (replyAll) {
+    if (!fromUs) to.add(author);
+    if (replyAll || fromUs) {
       for (const recipient of source.recipients) {
         const email = recipient.email.toLowerCase();
         if (ours.has(email) || recipient.type === "BCC") continue;
-        if (recipient.type === "CC") cc.add(email);
-        else to.add(email);
+        if (recipient.type === "CC") {
+          if (replyAll) cc.add(email);
+        } else {
+          to.add(email);
+        }
       }
     }
     for (const email of to) cc.delete(email);
     if (to.size === 0) throw new AppError("Reply has no eligible recipient", 400, ErrorCodes.VALIDATION_ERROR);
     const subject = /^re:/i.test(source.subject) ? source.subject : `Re: ${source.subject}`;
-    const textBody = `${input.textBody ?? ""}\n\n--- Original message ---\n${source.textBody ?? ""}`.trim();
-    const htmlBody = input.htmlBody
-      ? `${input.htmlBody}<hr><blockquote>${escapeHtml(source.textBody ?? "")}</blockquote>`
-      : null;
+    const quote = input.includesQuote ? null : quotedOriginal(source);
+    const textBody = quote
+      ? `${input.textBody ?? ""}\n\n${quote.attribution}\n${quote.text.split("\n").map((line) => `> ${line}`).join("\n")}`.trim()
+      : input.textBody ?? "";
+    const htmlBody = !input.htmlBody
+      ? null
+      : quote
+        ? `${input.htmlBody}<p>${escapeHtml(quote.attribution)}</p><blockquote>${escapeHtml(quote.text).replace(/\n/g, "<br>")}</blockquote>`
+        : input.htmlBody;
 
     return prisma.$transaction(async (tx) => {
       const draft = await tx.emailMessage.create({
@@ -581,7 +629,7 @@ export class MailService {
 
   async createForward(
     messageId: string,
-    input: Omit<CreateDraftInput, "subject">,
+    { includesQuote, ...input }: Omit<CreateDraftInput, "subject"> & { includesQuote?: boolean },
     context: MailContext
   ) {
     // createDraft below does the canSend check and the §10 recording; here the
@@ -592,7 +640,9 @@ export class MailService {
       input.sendAsMailboxId
     );
     const subject = /^fwd:/i.test(source.subject) ? source.subject : `Fwd: ${source.subject}`;
-    const textBody = `${input.textBody ?? ""}\n\n--- Forwarded message ---\nFrom: ${source.author.email}\nSubject: ${source.subject}\n\n${source.textBody ?? ""}`.trim();
+    const textBody = includesQuote
+      ? input.textBody ?? ""
+      : `${input.textBody ?? ""}\n\n--- Forwarded message ---\nFrom: ${source.fromAddress ?? source.author.email}\nSubject: ${source.subject}\n\n${quotedOriginal(source).text}`.trim();
     const draft = await this.createDraft({ ...input, subject, textBody, htmlBody: input.htmlBody ?? null }, context);
     await auditService.record({
       tenantId: context.tenantId,
