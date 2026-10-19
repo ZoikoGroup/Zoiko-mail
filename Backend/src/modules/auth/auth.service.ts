@@ -1265,49 +1265,6 @@ export class AuthService {
   }
 
   /**
-   * What a mailbox's Member sign-in link prefills: the workspace it belongs
-   * to and, for a personal mailbox, the owner's sign-in email.
-   *
-   * Public, because the person opening the link is not signed in yet. It
-   * proves nothing and opens nothing — the password (or Google) is still
-   * required — and the key is 122 random bits, so links cannot be guessed or
-   * enumerated. An admin who regenerates a link makes the old one answer 404.
-   */
-  async resolveMemberLoginLink(key: string): Promise<{
-    tenantId: string;
-    workspaceName: string;
-    mailboxAddress: string;
-    shared: boolean;
-    email: string | null;
-  }> {
-    const mailbox = await prisma.mailbox.findUnique({
-      where: { memberLoginKey: key },
-      select: {
-        tenantId: true,
-        address: true,
-        membershipId: true,
-        tenant: { select: { name: true } },
-        membership: { select: { status: true, user: { select: { email: true } } } },
-      },
-    });
-    if (!mailbox) {
-      throw new AppError(
-        "This sign-in link is not valid. It may have been replaced; ask your administrator for the current one.",
-        404,
-        ErrorCodes.MEMBER_LOGIN_LINK_INVALID
-      );
-    }
-    const ownerSignsIn = mailbox.membership && mailbox.membership.status !== "REMOVED";
-    return {
-      tenantId: mailbox.tenantId,
-      workspaceName: mailbox.tenant.name,
-      mailboxAddress: mailbox.address,
-      shared: mailbox.membershipId === null,
-      email: ownerSignsIn ? mailbox.membership!.user.email : null,
-    };
-  }
-
-  /**
  * Google sign-in. Verifies the ID token, resolves it to an AppUser, then
  * hands off to the same resolveAuthState() the password path uses — so
  * workspace selection, staff console, suspended accounts and pending

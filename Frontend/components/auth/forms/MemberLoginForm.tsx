@@ -4,18 +4,10 @@ import Link from "next/link";
 import { FaArrowLeft, FaEnvelope, FaInbox } from "react-icons/fa";
 
 import { ApiError } from "@/lib/api-client";
-import type { MemberLoginLink } from "@/lib/auth-api";
 import { clearSignOutNotice, peekSignOutNotice } from "@/lib/auth-storage";
 import { useLogin } from "@/lib/auth-hooks";
 
 import { FormInput, PasswordInput } from "@/components/auth";
-
-interface MemberLoginFormProps {
-  /** What a mailbox's sign-in link filled in; absent on the plain /login/member. */
-  link?: MemberLoginLink | null;
-  /** Why the link could not be read, shown above an otherwise usable form. */
-  linkError?: string | null;
-}
 
 type FormErrors = {
   email?: string;
@@ -35,19 +27,16 @@ type FormErrors = {
  * Email (or mailbox address) and password only, by decision: no Google
  * sign-in here, and the API refuses a Google sign-in that asks for the Member
  * workspace. Google remains on the standard sign-in.
+ *
+ * One plain /login/member for everyone, with nothing prefilled. A mailbox
+ * address picks its own workspace on the server.
  */
-export default function MemberLoginForm({ link, linkError }: MemberLoginFormProps) {
+export default function MemberLoginForm() {
   const loginMutation = useLogin();
 
-  const [email, setEmail] = useState(link?.email ?? "");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
-
-  // The link resolves after the first render, so adopt its email when it
-  // arrives — unless the person has already typed one.
-  useEffect(() => {
-    if (link?.email) setEmail((current) => current || link.email!);
-  }, [link?.email]);
 
   const [signOutNotice, setSignOutNotice] = useState<string | null>(null);
   useEffect(() => {
@@ -56,18 +45,6 @@ export default function MemberLoginForm({ link, linkError }: MemberLoginFormProp
   const dismissSignOutNotice = () => {
     clearSignOutNotice();
     setSignOutNotice(null);
-  };
-
-  /**
-   * The link's workspace, when it applies to the account signing in: always
-   * for a shared mailbox's link, and for a personal one only when the email
-   * is still the owner's. Someone else typing their own email here is simply
-   * signing in, not into the link's workspace.
-   */
-  const tenantFor = (signingInAs: string): string | undefined => {
-    if (!link) return undefined;
-    if (link.shared || !link.email) return link.tenantId;
-    return signingInAs.trim().toLowerCase() === link.email.toLowerCase() ? link.tenantId : undefined;
   };
 
   const validate = () => {
@@ -86,7 +63,6 @@ export default function MemberLoginForm({ link, linkError }: MemberLoginFormProp
     loginMutation.mutate({
       email: email.trim(),
       password,
-      tenantId: tenantFor(email),
       workspace: "MEMBER",
     });
   };
@@ -107,25 +83,6 @@ export default function MemberLoginForm({ link, linkError }: MemberLoginFormProp
           Sign in to your mailbox. You&apos;ll go straight to your Member workspace.
         </p>
       </div>
-
-      {link && (
-        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-800/60">
-          <div className="flex justify-between gap-3">
-            <span className="text-slate-500 dark:text-slate-400">Workspace</span>
-            <span className="truncate font-semibold text-slate-800 dark:text-slate-100">{link.workspaceName}</span>
-          </div>
-          <div className="mt-1 flex justify-between gap-3">
-            <span className="text-slate-500 dark:text-slate-400">Mailbox</span>
-            <span className="truncate font-semibold text-slate-800 dark:text-slate-100">{link.mailboxAddress}</span>
-          </div>
-        </div>
-      )}
-
-      {linkError && (
-        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-          {linkError}
-        </div>
-      )}
 
       <form onSubmit={onSubmit} className="space-y-3" aria-label="Member sign in">
         <FormInput

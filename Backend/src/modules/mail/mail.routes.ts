@@ -208,15 +208,6 @@ mailRouter.put(
   validate(updateMailboxWorkspacesSchema),
   controller.updateMailboxWorkspaces
 );
-// ─── Member sign-in link ─────────────────────────────────────────────────
-// Every mailbox carries one (listed with the mailbox). Replacing it retires
-// the old link; it is not a credential, so mailbox management suffices.
-mailRouter.post(
-  "/admin/mailboxes/:mailboxId/member-login-link/regenerate",
-  requireCapability("workspace.mailboxes.manage"),
-  validate(mailboxIdParamsSchema, "params"),
-  controller.regenerateMemberLoginLink
-);
 // ─── Owner credentials ───────────────────────────────────────────────────
 // Reading what the dialog may offer is routine. Setting a password is its
 // own step-up capability, and the service adds the member-management role

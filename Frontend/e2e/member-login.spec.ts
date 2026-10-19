@@ -5,10 +5,10 @@ import { API, json, signInAsAdmin } from "./admin-harness";
  * The Member sign-in, end to end in the browser.
  *
  * The API is stubbed: the server's side — that a MEMBER request opens the
- * Member workspace for any role, the console gate, the link's resolution —
- * is covered by Backend/tests/member-login.test.ts. What only a browser shows
- * is the client's half: the button on /login, the dedicated page, what it
- * sends, where it lands, the prefilled link, and the admin's copy of it.
+ * Member workspace for any role, the console gate — is covered by
+ * Backend/tests/member-login.test.ts. What only a browser shows is the
+ * client's half: the button on /login, the dedicated page, what it sends,
+ * where it lands, retired per-mailbox links, and the admin's copy of the link.
  */
 
 const LINK_KEY = "0123456789abcdef0123456789abcdef";
@@ -105,42 +105,18 @@ test("checks the form before sending anything", async ({ page }) => {
   expect(bodies).toHaveLength(0);
 });
 
-test("a mailbox's link prefills the email and workspace, and still needs the password", async ({ page }) => {
-  await stubMemberShell(page);
-  const bodies = await captureLogin(page);
-  await page.route(`${API}/auth/member-login/${LINK_KEY}`, (route) =>
-    route.fulfill(
-      json({ tenantId: "t-acme", workspaceName: "Acme", mailboxAddress: "sam@acme.test", shared: false, email: "sam@acme.test" })
-    )
-  );
+test("a retired per-mailbox link lands on the plain Member login, without the key", async ({ page }) => {
+  let resolved = 0;
+  await page.route(`${API}/auth/member-login/**`, (route) => {
+    resolved += 1;
+    return route.abort();
+  });
 
   await page.goto(`/login/member/${LINK_KEY}`);
-  await expect(page.getByPlaceholder("john@example.com")).toHaveValue("sam@acme.test", { timeout: 60_000 });
-  await expect(page.getByText("Acme", { exact: true })).toBeVisible();
-
-  // Nothing is sent until the password is given.
-  await page.getByRole("button", { name: "Sign In to Member Workspace" }).click();
-  await expect(page.getByText("Password is required.")).toBeVisible();
-  expect(bodies).toHaveLength(0);
-
-  await page.getByPlaceholder("Enter your password").fill("Password123!");
-  await page.getByRole("button", { name: "Sign In to Member Workspace" }).click();
-  await expect(page).toHaveURL(/\/mail$/, { timeout: 60_000 });
-  expect(bodies[0]).toMatchObject({ email: "sam@acme.test", tenantId: "t-acme", workspace: "MEMBER" });
-});
-
-test("a replaced link says so and leaves a working form", async ({ page }) => {
-  await page.route(`${API}/auth/member-login/${LINK_KEY}`, (route) =>
-    route.fulfill({
-      status: 404,
-      contentType: "application/json",
-      body: JSON.stringify({ success: false, error: { code: "MEMBER_LOGIN_LINK_INVALID", message: "not valid" } }),
-    })
-  );
-  await page.goto(`/login/member/${LINK_KEY}`);
-  await expect(page.getByText(/This sign-in link is no longer valid/)).toBeVisible({ timeout: 60_000 });
+  await expect(page).toHaveURL(/\/login\/member$/, { timeout: 60_000 });
+  await expect(page.getByRole("heading", { name: "Member Sign In" })).toBeVisible();
   await expect(page.getByPlaceholder("john@example.com")).toHaveValue("");
-  await expect(page.getByRole("button", { name: "Sign In to Member Workspace" })).toBeEnabled();
+  expect(resolved).toBe(0);
 });
 
 test("a console removed by an admin signs the session out with the reason", async ({ page }) => {
@@ -186,39 +162,19 @@ test.describe("admin Mailboxes page", () => {
       sendSuspensionReason: null,
       aiEnabled: true,
       workspaces: ["MEMBER"],
-      memberLoginUrl: `http://localhost:3000/login/member/${LINK_KEY}`,
     },
   ];
 
-  test("shows each mailbox's Member login link and can replace it", async ({ page }) => {
+  test("shows the one plain Member login link, with nothing to replace", async ({ page }) => {
     await signInAsAdmin(page, { capabilities: ["workspace.mailboxes.manage", "people.invite.member"] });
-    let regenerated = 0;
     await page.route(`${API}/mail/admin/mailboxes`, (route) => route.fulfill(json(mailboxes)));
-    await page.route(`${API}/mail/admin/mailboxes/mb-sam/member-login-link/regenerate`, (route) => {
-      regenerated += 1;
-      return route.fulfill(
-        json({
-          mailboxId: "mb-sam",
-          memberLoginKey: "fedcba9876543210fedcba9876543210",
-          memberLoginUrl: "http://localhost:3000/login/member/fedcba9876543210fedcba9876543210",
-        })
-      );
-    });
 
     await page.goto("/admin/mailboxes");
     await page.getByRole("row", { name: /sam@acme\.test/ }).getByRole("button", { name: "Member login" }).click();
     const dialog = page.getByRole("dialog", { name: "Member login link" });
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByLabel("Member login link for sam@acme.test")).toHaveValue(
-      `http://localhost:3000/login/member/${LINK_KEY}`
-    );
-
-    await dialog.getByRole("button", { name: "Generate a new link" }).click();
-    await dialog.getByRole("button", { name: "Replace link" }).click();
-    await expect(dialog.getByLabel("Member login link for sam@acme.test")).toHaveValue(
-      "http://localhost:3000/login/member/fedcba9876543210fedcba9876543210"
-    );
-    await expect(dialog.getByText("New link created. The previous link no longer works.")).toBeVisible();
-    expect(regenerated).toBe(1);
+    await expect(dialog.getByLabel("Member login link")).toHaveValue(/^https?:\/\/[^/]+\/login\/member$/);
+    await expect(dialog.getByText("sam@acme.test")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Generate a new link" })).toHaveCount(0);
   });
 });

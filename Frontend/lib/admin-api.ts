@@ -64,12 +64,6 @@ export interface MailboxDto extends MailboxStatusRow {
    * Member workspace alone; the server refuses it from any console not listed.
    */
   workspaces: MailboxWorkspace[];
-  /**
-   * The mailbox's Member sign-in link. It opens the Member login with the
-   * owner's email and workspace filled in; the password is still required.
-   * Null only from an API build that predates the link.
-   */
-  memberLoginUrl: string | null;
 }
 
 /** The four workspace consoles a mailbox can be assigned to, in display order. */

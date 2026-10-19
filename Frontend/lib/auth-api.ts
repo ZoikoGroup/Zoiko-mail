@@ -12,20 +12,6 @@ export interface LoginInput {
   workspace?: "MEMBER";
 }
 
-/** What a mailbox's Member sign-in link fills in. */
-export interface MemberLoginLink {
-  tenantId: string;
-  workspaceName: string;
-  mailboxAddress: string;
-  shared: boolean;
-  /** The owner's sign-in email; null for a shared mailbox. */
-  email: string | null;
-}
-
-export async function fetchMemberLoginLink(key: string): Promise<MemberLoginLink> {
-  return apiRequest<MemberLoginLink>(`/auth/member-login/${encodeURIComponent(key)}`, { auth: false });
-}
-
 export interface RegisterInput {
   email: string;
   password: string;

@@ -23,7 +23,6 @@ import {
   resetPasswordSchema,
   selectWorkspaceSchema,
   googleLoginSchema,
-  memberLoginKeyParamsSchema,
 } from "./auth.schema.js";
 import * as authController from "./auth.controller.js";
 import { verifyOtpSchema } from "./otp.schema.js";
@@ -89,16 +88,6 @@ authRouter.post(
 );
 
 authRouter.post("/login", loginRateLimit, validate(loginSchema), authController.login);
-
-// A mailbox's Member sign-in link, resolved to what the form prefills. Public
-// (the visitor is not signed in) and rate-limited like a sign-in, though it
-// opens nothing: the password is still required.
-authRouter.get(
-  "/member-login/:key",
-  loginRateLimit,
-  validate(memberLoginKeyParamsSchema, "params"),
-  authController.memberLoginLink
-);
 
 // Google sign-in, in one step: selecting an account lands the user in their
 // own workspace. Google has already verified the address and asserts it in a

@@ -422,9 +422,6 @@ export const getMailboxCredentialStatus = asyncHandler(async (req: Request, res:
 export const resetMailboxCredentials = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await mailboxAccessService.resetPassword(String(req.params.mailboxId), req.body.newPassword, context(req)), req.requestId);
 });
-export const regenerateMemberLoginLink = asyncHandler(async (req: Request, res: Response) => {
-  sendSuccess(res, 200, await mailboxAccessService.regenerateMemberLoginLink(String(req.params.mailboxId), context(req)), req.requestId);
-});
 export const sendMailboxCredentialResetEmail = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await mailboxAccessService.sendResetEmail(String(req.params.mailboxId), context(req)), req.requestId);
 });
