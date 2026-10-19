@@ -72,7 +72,6 @@ import {
   updateMember,
   updateWorkspaceSettings,
   updateMailboxWorkspaces,
-  regenerateMemberLoginLink,
   fetchMailboxCredentialStatus,
   resetMailboxCredentials,
   sendMailboxCredentialResetEmail,
@@ -209,15 +208,6 @@ export function useUpdateMailboxWorkspaces() {
       if (context?.previous) qc.setQueryData(["mailboxes"], context.previous);
     },
     onSettled: () => qc.invalidateQueries({ queryKey: ["mailboxes"] }),
-  });
-}
-
-/** Replace a mailbox's Member sign-in link, then re-read the list so the row shows the new one. */
-export function useRegenerateMemberLoginLink() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (mailboxId: string) => regenerateMemberLoginLink(mailboxId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["mailboxes"] }),
   });
 }
 

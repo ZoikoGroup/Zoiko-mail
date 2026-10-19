@@ -43,11 +43,6 @@ export const googleLoginSchema = z.object({
     .optional(),
 });
 
-/** GET /auth/member-login/:key — the key behind a mailbox's Member sign-in link. */
-export const memberLoginKeyParamsSchema = z.object({
-  key: z.string().regex(/^[0-9a-f]{32}$/, "Invalid sign-in link"),
-});
-
 export const refreshSchema = z.object({
   refreshToken: z.string().min(1),
 });

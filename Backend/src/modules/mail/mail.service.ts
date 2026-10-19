@@ -22,7 +22,7 @@ import { sseManager } from "../../common/sse/sse.manager.js";
 import { outboundAvailable } from "../mail-transport/outbound.js";
 import { membershipService } from "../membership/membership.service.js";
 import { mailboxCleanupService } from "./mailbox-cleanup.service.js";
-import { memberLoginUrl, resolveWorkspaces } from "./mailbox-access.service.js";
+import { resolveWorkspaces } from "./mailbox-access.service.js";
 import { reachableWorkspaces } from "../../common/utils/workspaceScope.js";
 import type { BulkMailboxActionInput, CreateDraftInput, CreateLabelInput, ListMailInput, UpdateDraftInput, UpdateLabelInput, UpdateMailboxItemInput } from "./mail.schema.js";
 
@@ -1968,12 +1968,13 @@ export class MailService {
       },
       orderBy: { createdAt: "desc" },
     });
-    return mailboxes.map((mb) => ({
+    // memberLoginKey is retired (the Member sign-in is one plain /login/member
+    // for everyone); the column stays until a later migration drops it.
+    return mailboxes.map(({ memberLoginKey: _retired, ...mb }) => ({
       ...mb,
       storageUsed: Number(mb.storageUsed),
       storageLimit: Number(mb.storageLimit),
       providerQuotaBytes: mb.providerQuotaBytes === null ? null : Number(mb.providerQuotaBytes),
-      memberLoginUrl: memberLoginUrl(mb.memberLoginKey),
     }));
   }
 
