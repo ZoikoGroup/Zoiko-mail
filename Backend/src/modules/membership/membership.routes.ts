@@ -27,6 +27,12 @@ membershipRouter.get(
   controller.lookupInvitation
 );
 membershipRouter.post(
+  "/invitations/lookup",
+  invitationRateLimit,
+  validate(lookupInvitationSchema),
+  controller.lookupInvitationByBody
+);
+membershipRouter.post(
   "/invitations/claim",
   invitationRateLimit,
   validate(claimInvitationSchema),

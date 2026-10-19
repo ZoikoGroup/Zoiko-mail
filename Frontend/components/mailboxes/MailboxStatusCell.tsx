@@ -21,9 +21,9 @@ import {
  * A mailbox's status, with the one action that moves it forward.
  *
  * Shared by the Owner and Admin lists. Retry appears only for a hosted
- * mailbox whose provisioning did not finish; resend only for a provisioned
- * one whose invitation has not been accepted. Neither ever creates a second
- * mailbox — the server reconciles first and resends never touch the host.
+ * mailbox whose provisioning did not finish; a new setup link only for one
+ * whose owner has not chosen a password yet. Neither ever creates a second
+ * mailbox — the server reconciles first, and a new link never touches the host.
  */
 export function MailboxStatusCell({ row, canManage }: { row: MailboxStatusRow; canManage: boolean }) {
   const retry = useRetryMailboxProvisioning();
@@ -35,14 +35,14 @@ export function MailboxStatusCell({ row, canManage }: { row: MailboxStatusRow; c
     row.status === "FAILED"
       ? describeProvisioningError(row.provisioningError)
       : row.status === "INVITATION_PENDING"
-        ? describeInvitation(row.invitationStatus, row.invitationError, row.invitationRecipient)
+        ? describeInvitation(row.invitationStatus, row.invitationRecipient)
         : undefined;
 
   const canRetry = canManage && row.provisioningStatus !== null && row.provisioningStatus !== "PROVISIONED";
-  const canResend =
+  const canRegenerate =
     canManage &&
     (row.provisioningStatus === "PROVISIONED" || row.provisioningStatus === null) &&
-    row.membershipStatus === "INVITED" &&
+    row.status === "INVITATION_PENDING" &&
     row.invitationStatus !== null &&
     row.invitationStatus !== "NOT_REQUIRED";
   const error = (retry.error ?? resend.error) as Error | null;
@@ -54,10 +54,7 @@ export function MailboxStatusCell({ row, canManage }: { row: MailboxStatusRow; c
           {STATUS_LABEL[row.status]}
         </StatusBadge>
       </span>
-      {row.status === "INVITATION_PENDING" && row.invitationStatus === "FAILED" && (
-        <span className="text-[10.5px] text-[var(--crit)]">Invitation not delivered</span>
-      )}
-      {(canRetry || canResend) && (
+      {(canRetry || canRegenerate) && (
         <button
           type="button"
           className="text-[11px] font-semibold text-[var(--accent)] hover:underline disabled:opacity-60"
@@ -66,20 +63,20 @@ export function MailboxStatusCell({ row, canManage }: { row: MailboxStatusRow; c
             // Rows open a details drawer on click in the Owner list.
             event.stopPropagation();
             if (canRetry) retry.mutate(row.id);
-            else resend.mutate(row.id, { onSuccess: (sent) => setShownLink(sent.invitationLink ?? null) });
+            else resend.mutate(row.id, { onSuccess: (issued) => setShownLink(issued.invitationLink ?? null) });
           }}
-          aria-label={`${canRetry ? "Retry provisioning" : "Resend invitation"} for ${row.address}`}
+          aria-label={`${canRetry ? "Retry provisioning" : "Generate new setup link"} for ${row.address}`}
         >
           {canRetry
             ? retry.isPending ? "Retrying…" : "Retry"
-            : resend.isPending ? "Sending…" : "Resend invitation"}
+            : resend.isPending ? "Generating…" : "Generate new link"}
         </button>
       )}
       {error && <span className="max-w-[220px] text-[10.5px] text-[var(--crit)]">{error.message}</span>}
       <Modal
         open={shownLink !== null}
         onClose={() => setShownLink(null)}
-        title={`Invitation link for ${row.address}`}
+        title={`Setup link for ${row.address}`}
         size="sm"
         footer={
           <button type="button" className="zoiko-btn pri" onClick={() => setShownLink(null)}>

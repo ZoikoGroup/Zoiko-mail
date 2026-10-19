@@ -158,7 +158,6 @@ const body = (domainId: string, over: Record<string, unknown> = {}) => ({
   displayName: "Support Team",
   quotaBytes: 5 * GIB,
   initialAccess: "INVITE",
-  recoveryEmail: "john.personal@elsewhere.test",
   ...over,
 });
 
@@ -174,10 +173,12 @@ describe("Create Email — authorization and validation", () => {
       provisioningStatus: "PROVISIONED",
       quotaBytes: 5 * GIB,
       appliedQuotaBytes: 5 * GIB,
-      invitationRecipient: "john.personal@elsewhere.test",
+      // The mailbox address is who signs in with it.
+      invitationRecipient: `john@${w.domainName}`,
       membershipStatus: "INVITED",
       status: "INVITATION_PENDING",
     });
+    expect(res.body.data.invitationLink).toMatch(/\/invitation\/accept\?token=[A-Za-z0-9_-]{22}$/);
     const row = await prisma.mailbox.findUniqueOrThrow({ where: { id: res.body.data.id } });
     expect(row.providerAccountId).toBe("acc-1");
     expect(host.createCalls).toHaveLength(1);
@@ -218,7 +219,7 @@ describe("Create Email — authorization and validation", () => {
   it("refuses an address already in use, in this workspace or another", async () => {
     const w = await workspace("dupe");
     await provision(w.owner.accessToken, body(w.domainId)).expect(201);
-    const again = await provision(w.owner.accessToken, body(w.domainId, { recoveryEmail: "other@elsewhere.test" })).expect(409);
+    const again = await provision(w.owner.accessToken, body(w.domainId, { displayName: "Someone Else" })).expect(409);
     expect(again.body.error.details.reason).toBe("ADDRESS_TAKEN");
     expect(host.createCalls).toHaveLength(1);
   });
@@ -229,7 +230,8 @@ describe("Create Email — authorization and validation", () => {
     await provision(w.owner.accessToken, body(w.domainId, { localPart: "-john" })).expect(422);
     await provision(w.owner.accessToken, body(w.domainId, { localPart: "postmaster" })).expect(422);
     await provision(w.owner.accessToken, body(w.domainId, { quotaBytes: 3 * GIB })).expect(422);
-    await provision(w.owner.accessToken, body(w.domainId, { recoveryEmail: `john@${w.domainName}` })).expect(422);
+    // The separate invitation address is gone from the contract.
+    await provision(w.owner.accessToken, { ...body(w.domainId), recoveryEmail: "john.personal@elsewhere.test" }).expect(400);
     // Fields the server derives are not accepted from the browser (schema
     // validation, which this API answers with 400).
     await provision(w.owner.accessToken, { ...body(w.domainId), tenantId: w.owner.tenantId }).expect(400);
@@ -260,11 +262,13 @@ describe("Create Email — authorization and validation", () => {
     expect(await prisma.mailbox.count({ where: { tenantId: w.owner.tenantId } })).toBe(0);
   });
 
-  it("attaches the mailbox to an existing active member without inviting them", async () => {
+  it("attaches the mailbox to an active member who already signs in with that address", async () => {
     const w = await workspace("existing");
-    const member = await joinAs(w.owner.accessToken, w.owner.tenantId, "MEMBER", "prov-existing@zoiko.test");
-    const res = await provision(w.owner.accessToken, body(w.domainId, { recoveryEmail: member.email })).expect(201);
+    await joinAs(w.owner.accessToken, w.owner.tenantId, "MEMBER", `john@${w.domainName}`);
+    const res = await provision(w.owner.accessToken, body(w.domainId)).expect(201);
     expect(res.body.data).toMatchObject({ invitationStatus: "NOT_REQUIRED", status: "ACTIVE", membershipStatus: "ACTIVE" });
+    // Nobody to set up, so no link.
+    expect(res.body.data.invitationLink).toBeNull();
   });
 });
 
@@ -325,109 +329,41 @@ describe("Create Email — failures and recovery", () => {
   it("lets only one of two concurrent requests for the same address through", async () => {
     const w = await workspace("race");
     const [a, b] = await Promise.all([
-      provision(w.owner.accessToken, body(w.domainId, { recoveryEmail: "one@elsewhere.test" })),
-      provision(w.owner.accessToken, body(w.domainId, { recoveryEmail: "two@elsewhere.test" })),
+      provision(w.owner.accessToken, body(w.domainId, { displayName: "One" })),
+      provision(w.owner.accessToken, body(w.domainId, { displayName: "Two" })),
     ]);
     expect([a.status, b.status].sort()).toEqual([201, 409]);
     expect(host.accounts.size).toBe(1);
   });
 });
 
-describe("Create Email — invitation", () => {
-  it("does not send (or log) the invitation when system mail is off, and says so", async () => {
-    const w = await workspace("nomail");
-    const send = vi.spyOn(systemMailer, "sendInvitationEmail");
+describe("Create Email — setup link", () => {
+  // The full lifecycle (both SYSTEM_MAIL_ENABLED values, expiry, regeneration,
+  // permissions) is in mailbox.invitation-link.test.ts; these pin the parts
+  // that touch the mail host.
+  it("sends no email and touches the host once, however often a new link is generated", async () => {
+    const w = await workspace("setup-link");
+    mutableEnv.SYSTEM_MAIL_ENABLED = true;
+    const send = vi.spyOn(systemMailer, "sendInvitationEmail").mockResolvedValue(undefined);
+
     const res = await provision(w.owner.accessToken, body(w.domainId)).expect(201);
-    expect(res.body.data).toMatchObject({ invitationStatus: "PENDING", invitationError: "SYSTEM_MAIL_DISABLED" });
+    expect(res.body.data).toMatchObject({ provisioningStatus: "PROVISIONED", invitationStatus: "PENDING", invitationError: null });
+    for (let i = 0; i < 2; i++) {
+      await request(app)
+        .post(`/api/v1/mail/admin/mailboxes/${res.body.data.id}/invitation/resend`)
+        .set(authHeader(w.owner.accessToken))
+        .expect(200);
+    }
     expect(send).not.toHaveBeenCalled();
-  });
-
-  it("records a failed invitation, and a resend fixes it without touching the host", async () => {
-    const w = await workspace("invfail");
-    mutableEnv.SYSTEM_MAIL_ENABLED = true;
-    const send = vi.spyOn(systemMailer, "sendInvitationEmail").mockRejectedValueOnce(new Error("smtp down"));
-
-    const res = await provision(w.owner.accessToken, body(w.domainId)).expect(201);
-    expect(res.body.data).toMatchObject({ provisioningStatus: "PROVISIONED", invitationStatus: "FAILED" });
-
-    send.mockResolvedValue(undefined);
-    const resent = await request(app)
-      .post(`/api/v1/mail/admin/mailboxes/${res.body.data.id}/invitation/resend`)
-      .set(authHeader(w.owner.accessToken))
-      .expect(200);
-    expect(resent.body.data.invitationStatus).toBe("SENT");
     expect(host.createCalls).toHaveLength(1);
-
-    // And not again straight away.
-    await request(app)
-      .post(`/api/v1/mail/admin/mailboxes/${res.body.data.id}/invitation/resend`)
-      .set(authHeader(w.owner.accessToken))
-      .expect(429);
   });
 
-  it("sends to the existing address, rotates the token on resend, and the token is single-use and expiring", async () => {
-    const w = await workspace("token");
-    mutableEnv.SYSTEM_MAIL_ENABLED = true;
-    const send = vi.spyOn(systemMailer, "sendInvitationEmail").mockResolvedValue(undefined);
-
-    const res = await provision(w.owner.accessToken, body(w.domainId)).expect(201);
-    expect(res.body.data.invitationStatus).toBe("SENT");
-    expect(send.mock.calls[0]![0]).toBe("john.personal@elsewhere.test");
-    const firstToken = new URL(send.mock.calls[0]![2]).searchParams.get("token")!;
-
-    await prisma.mailbox.update({ where: { id: res.body.data.id }, data: { invitationSentAt: new Date(Date.now() - 120_000) } });
-    await request(app)
-      .post(`/api/v1/mail/admin/mailboxes/${res.body.data.id}/invitation/resend`)
-      .set(authHeader(w.owner.accessToken))
-      .expect(200);
-    const secondToken = new URL(send.mock.calls[1]![2]).searchParams.get("token")!;
-    expect(secondToken).not.toBe(firstToken);
-
-    // The old link stopped working the moment a new one was sent.
-    await request(app).get(`/api/v1/membership/invitations/lookup?token=${firstToken}`).expect(401);
-
-    await request(app)
-      .post("/api/v1/membership/invitations/claim")
-      .send({ invitationToken: secondToken, password: "A-strong-Passw0rd!" })
-      .expect(200);
-    // Single use. A second claim is told the invitation was already accepted
-    // (409), which is how a reopened link is shown as joined rather than failed.
-    await request(app)
-      .post("/api/v1/membership/invitations/claim")
-      .send({ invitationToken: secondToken, password: "A-strong-Passw0rd!" })
-      .expect(409);
-
-    const after = await request(app)
-      .get(`/api/v1/mail/admin/mailboxes/${res.body.data.id}/provisioning`)
-      .set(authHeader(w.owner.accessToken))
-      .expect(200);
-    expect(after.body.data).toMatchObject({ status: "ACTIVE", membershipStatus: "ACTIVE" });
-  });
-
-  it("refuses an expired invitation token", async () => {
-    const w = await workspace("expired");
-    mutableEnv.SYSTEM_MAIL_ENABLED = true;
-    const send = vi.spyOn(systemMailer, "sendInvitationEmail").mockResolvedValue(undefined);
-    await provision(w.owner.accessToken, body(w.domainId)).expect(201);
-    const token = new URL(send.mock.calls[0]![2]).searchParams.get("token")!;
-    await prisma.tenantMembership.updateMany({
-      where: { tenantId: w.owner.tenantId, status: "INVITED" },
-      data: { inviteExpiresAt: new Date(Date.now() - 1000) },
-    });
-    await request(app)
-      .post("/api/v1/membership/invitations/claim")
-      .send({ invitationToken: token, password: "A-strong-Passw0rd!" })
-      .expect(410);
-  });
-
-  it("keeps the mailbox credential and invitation token out of responses, audit and the database", async () => {
+  it("keeps the mailbox credential and the setup token out of the list, the audit log and the database", async () => {
     const w = await workspace("secrets");
-    mutableEnv.SYSTEM_MAIL_ENABLED = true;
-    const send = vi.spyOn(systemMailer, "sendInvitationEmail").mockResolvedValue(undefined);
     const res = await provision(w.owner.accessToken, body(w.domainId)).expect(201);
 
     const secret = host.createCalls[0]!.secret;
-    const token = new URL(send.mock.calls[0]![2]).searchParams.get("token")!;
+    const token = new URL(res.body.data.invitationLink).searchParams.get("token")!;
     expect(secret.length).toBeGreaterThanOrEqual(32);
 
     const list = await request(app).get("/api/v1/mail/admin/mailboxes").set(authHeader(w.owner.accessToken)).expect(200);
@@ -435,14 +371,16 @@ describe("Create Email — invitation", () => {
     const row = await prisma.mailbox.findUniqueOrThrow({ where: { id: res.body.data.id } });
     const membership = await prisma.tenantMembership.findFirstOrThrow({ where: { id: row.membershipId! } });
 
-    for (const haystack of [JSON.stringify(res.body), JSON.stringify(list.body), JSON.stringify(audits), JSON.stringify(row, (_k, v) => (typeof v === "bigint" ? String(v) : v))]) {
+    // The creating response carries the link (that is its job) but never the host credential.
+    expect(JSON.stringify(res.body)).not.toContain(secret);
+    for (const haystack of [JSON.stringify(list.body), JSON.stringify(audits), JSON.stringify(row, (_k, v) => (typeof v === "bigint" ? String(v) : v))]) {
       expect(haystack).not.toContain(secret);
       expect(haystack).not.toContain(token);
     }
-    // Only the hash of the invitation token is stored.
+    // Only the hash of the setup token is stored.
     expect(membership.inviteToken).not.toBe(token);
     expect(audits.map((a) => a.eventType)).toEqual(
-      expect.arrayContaining(["MAILBOX_PROVISIONING_REQUESTED", "MAILBOX_PROVISIONED", "MAILBOX_INVITATION_SENT"])
+      expect.arrayContaining(["MAILBOX_PROVISIONING_REQUESTED", "MAILBOX_PROVISIONED", "MAILBOX_SETUP_LINK_ISSUED"])
     );
   });
 });

@@ -7,9 +7,7 @@ import { InvitationLinkBox } from "@/components/mailboxes/InvitationLinkBox";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ApiError, newIdempotencyKey } from "@/lib/api-client";
 import {
-  describeInvitation,
   describeProvisioningError,
-  emailProblem,
   formatQuota,
   localPartProblem,
   STATUS_LABEL,
@@ -43,12 +41,11 @@ interface Draft {
   localPart: string;
   displayName: string;
   quotaBytes: number | null;
-  recoveryEmail: string;
   workspaces: MailboxWorkspace[];
 }
 
 // A new mailbox opens in the Member workspace alone until the admin adds more.
-const EMPTY: Draft = { domainId: "", localPart: "", displayName: "", quotaBytes: null, recoveryEmail: "", workspaces: ["MEMBER"] };
+const EMPTY: Draft = { domainId: "", localPart: "", displayName: "", quotaBytes: null, workspaces: ["MEMBER"] };
 
 const label = "font-mono-num mb-1 block text-[9.5px] uppercase tracking-[0.1em] text-[var(--ink3)]";
 const field =
@@ -125,11 +122,6 @@ export function CreateEmailWizard({ onClose, domainsHref }: { onClose: () => voi
     localPart: localPartProblem(draft.localPart),
     displayName: draft.displayName.trim() ? (draft.displayName.trim().length > 120 ? "Keep it to 120 characters." : null) : "Enter the name shown beside the address.",
     quotaBytes: draft.quotaBytes ? null : "Choose a quota.",
-    recoveryEmail:
-      emailProblem(draft.recoveryEmail) ??
-      (address && draft.recoveryEmail.trim().toLowerCase() === address
-        ? "Send the invitation to an address they can already read, not the new mailbox."
-        : null),
   };
   const valid = Object.values(problems).every((p) => p === null);
 
@@ -156,7 +148,6 @@ export function CreateEmailWizard({ onClose, domainsHref }: { onClose: () => voi
       displayName: draft.displayName.trim(),
       quotaBytes: draft.quotaBytes,
       initialAccess: "INVITE",
-      recoveryEmail: draft.recoveryEmail.trim().toLowerCase(),
       workspaces: draft.workspaces,
     };
     setSubmitError(null);
@@ -212,7 +203,7 @@ export function CreateEmailWizard({ onClose, domainsHref }: { onClose: () => voi
     ) : (
       <>
         <button type="button" className="zoiko-btn" disabled={busy} onClick={reset}>Create another</button>
-        <button type="button" className="zoiko-btn pri" onClick={onClose}>Done</button>
+        <button type="button" className="zoiko-btn pri" disabled={busy} onClick={onClose}>Go to Mailboxes</button>
       </>
     );
 
@@ -374,32 +365,13 @@ export function CreateEmailWizard({ onClose, domainsHref }: { onClose: () => voi
             <span>
               Secure invitation
               <span className="block text-[11.5px] text-[var(--ink3)]">
-                The person sets their own password from a single-use, expiring link. No password is ever emailed.
+                You get a single-use, expiring setup link to share with the person who will use this address.
+                They open it, choose a password, and sign in with this address. Nothing is emailed.
               </span>
             </span>
           </label>
         </fieldset>
 
-        <div>
-          <label htmlFor="ce-recovery" className={label}>Send invitation to</label>
-          <input
-            id="ce-recovery"
-            type="email"
-            className={field}
-            placeholder="their existing address, e.g. john@gmail.com"
-            value={draft.recoveryEmail}
-            onChange={(e) => set("recoveryEmail", e.target.value)}
-            aria-invalid={Boolean(show("recoveryEmail"))}
-          />
-          {show("recoveryEmail") ? (
-            <p className={problemText}>{show("recoveryEmail")}</p>
-          ) : (
-            <p className={hint}>
-              An address they can read today. If it belongs to someone already in this workspace, the
-              mailbox is added to their account instead.
-            </p>
-          )}
-        </div>
         <div>
           <span className={label}>Workspace access</span>
           <WorkspaceMultiSelect
@@ -438,7 +410,7 @@ export function CreateEmailWizard({ onClose, domainsHref }: { onClose: () => voi
           <ReviewRow term="Quota">{formatQuota(draft.quotaBytes)}</ReviewRow>
           <ReviewRow term="Initial access">Secure invitation</ReviewRow>
           <ReviewRow term="Workspaces">{workspaceSummary(draft.workspaces)}</ReviewRow>
-          <ReviewRow term="Invitation to">{draft.recoveryEmail.trim().toLowerCase()}</ReviewRow>
+          <ReviewRow term="Signs in as">{address}</ReviewRow>
         </dl>
 
         <div>
@@ -455,11 +427,9 @@ export function CreateEmailWizard({ onClose, domainsHref }: { onClose: () => voi
           </ul>
         </div>
 
-        {data.invitationDelivery === "DISABLED" && (
-          <Callout tone="warn">
-            Email delivery is turned off on this deployment, so no invitation email will be sent. After the mailbox is created you will get a link to pass on to the new user yourself.
-          </Callout>
-        )}
+        <Callout tone="info">
+          After the mailbox is created you get a setup link to copy and share. No email is sent.
+        </Callout>
 
         {provision.isPending && (
           <Callout tone="info">Creating the mailbox on the mail server… This can take a few seconds.</Callout>
@@ -481,64 +451,88 @@ export function CreateEmailWizard({ onClose, domainsHref }: { onClose: () => voi
     // Zoiko-store mailbox: there is no mail-server half, so it is complete as created.
     const zoikoStore = result.provisioningStatus === null;
     const ready = provisioned || zoikoStore;
-    const mailDisabled = result.invitationError === "SYSTEM_MAIL_DISABLED";
-    const canResend =
-      ready &&
-      result.membershipStatus === "INVITED" &&
-      (result.invitationStatus === "FAILED" || result.invitationStatus === "PENDING" || result.invitationStatus === "SENT");
+    const setupPending = result.status === "INVITATION_PENDING" || result.passwordSetup === "PENDING";
+    const passwordSetup = result.passwordSetup ?? (result.membershipStatus === "INVITED" ? "PENDING" : result.membershipStatus ? "COMPLETED" : null);
+    const canRegenerate = ready && setupPending && result.invitationStatus !== "NOT_REQUIRED";
     return (
       <div className="flex flex-col gap-4" aria-live="polite">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-mono-num text-[13px] font-semibold text-[var(--ink)]">{result.address}</span>
-          <StatusBadge variant={STATUS_TONE[result.status]} dot>
-            {STATUS_LABEL[result.status]}
-          </StatusBadge>
+        <div>
+          <h3 className="text-[15px] font-semibold text-[var(--ink)]" data-testid="create-result-heading">
+            {ready
+              ? "Email account created"
+              : result.provisioningStatus === "FAILED"
+                ? "Email account not ready"
+                : "Email account is being set up"}
+          </h3>
+          {ready && (
+            <p className="mt-0.5 text-[12px] text-[var(--ink3)]">
+              {zoikoStore
+                ? `Mail for this address is stored by Zoiko Mail, with a ${formatQuota(result.quotaBytes)} quota.`
+                : `Created on the mail server with a ${formatQuota(result.appliedQuotaBytes ?? result.quotaBytes)} quota.`}
+            </p>
+          )}
         </div>
 
-        <section>
-          <p className={label}>Mailbox</p>
-          {zoikoStore ? (
-            <Callout tone="ok">
-              Mailbox created. Mail for this address is stored by Zoiko Mail, with a {formatQuota(result.quotaBytes)} quota.
-            </Callout>
-          ) : provisioned ? (
-            <Callout tone="ok">
-              Mailbox created on the mail server with a {formatQuota(result.appliedQuotaBytes ?? result.quotaBytes)} quota.
-            </Callout>
-          ) : result.provisioningStatus === "FAILED" ? (
-            <Callout tone="crit">
-              <b className="text-[var(--crit)]">Provisioning failed.</b> {describeProvisioningError(result.provisioningError)}
-            </Callout>
-          ) : (
-            <Callout tone="info">Provisioning is still in progress. Check the mailbox list shortly.</Callout>
+        <dl>
+          <ReviewRow term="Email">
+            <span className="font-mono-num font-semibold" data-testid="result-address">{result.address}</span>
+          </ReviewRow>
+          <ReviewRow term="Provisioning status">
+            <span data-testid="result-status">
+              <StatusBadge variant={STATUS_TONE[result.status]} dot>
+                {STATUS_LABEL[result.status]}
+              </StatusBadge>
+            </span>
+          </ReviewRow>
+          {passwordSetup && (
+            <ReviewRow term="Password setup">
+              <span data-testid="result-password-setup">
+                <StatusBadge variant={passwordSetup === "PENDING" ? "warn" : "ok"} dot>
+                  {passwordSetup === "PENDING" ? "Pending" : "Completed"}
+                </StatusBadge>
+              </span>
+            </ReviewRow>
           )}
-          {!ready && (
-            <button type="button" className="zoiko-btn sm mt-2" disabled={busy} onClick={() => void runAction("retry")}>
+        </dl>
+
+        {result.provisioningStatus === "FAILED" && (
+          <Callout tone="crit">
+            <b className="text-[var(--crit)]">Provisioning failed.</b> {describeProvisioningError(result.provisioningError)}
+          </Callout>
+        )}
+        {!ready && result.provisioningStatus !== "FAILED" && (
+          <Callout tone="info">Provisioning is still in progress. Check the mailbox list shortly.</Callout>
+        )}
+        {!ready && (
+          <div>
+            <button type="button" className="zoiko-btn sm" disabled={busy} onClick={() => void runAction("retry")}>
               {retry.isPending ? "Retrying…" : "Retry provisioning"}
             </button>
-          )}
-        </section>
+            <p className={hint}>The setup link is ready once the mailbox is.</p>
+          </div>
+        )}
 
-        <section>
-          <p className={label}>Invitation</p>
-          <p className="text-[12.4px] text-[var(--ink2)]" data-testid="invitation-status">
-            {describeInvitation(result.invitationStatus, result.invitationError, result.invitationRecipient)}
-          </p>
-          {result.invitationLink && (
-            <InvitationLinkBox link={result.invitationLink} recipient={result.invitationRecipient} />
-          )}
-          {canResend && (
+        {ready && result.invitationStatus === "NOT_REQUIRED" && (
+          <Callout tone="ok">
+            {result.invitationRecipient ?? "This person"} already signs in to this workspace — the mailbox appears for them directly. No setup link is needed.
+          </Callout>
+        )}
+
+        {canRegenerate && (
+          <section>
+            <p className={label}>Setup link</p>
+            {result.invitationLink ? (
+              <InvitationLinkBox link={result.invitationLink} recipient={result.address} />
+            ) : (
+              <p className="text-[12.4px] text-[var(--ink2)]" data-testid="invitation-status">
+                The setup link is shown only once. Generate a new link to share it (any earlier link stops working).
+              </p>
+            )}
             <button type="button" className="zoiko-btn sm mt-2" disabled={busy} onClick={() => void runAction("resend")}>
-              {resend.isPending
-                ? "Sending…"
-                : mailDisabled
-                  ? "Get a new invitation link"
-                  : result.invitationStatus === "SENT"
-                    ? "Resend invitation"
-                    : "Send invitation"}
+              {resend.isPending ? "Generating…" : "Generate New Link"}
             </button>
-          )}
-        </section>
+          </section>
+        )}
 
         {actionError && <Callout tone="crit">{actionError}</Callout>}
       </div>

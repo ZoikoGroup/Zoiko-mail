@@ -173,8 +173,6 @@ export const provisionMailboxSchema = z.object({
   quotaBytes: z.number().int().positive(),
   /** The only access method offered: a secure invitation. Explicit so a second one is a deliberate change. */
   initialAccess: z.literal("INVITE"),
-  /** The person's existing address, where the invitation goes. */
-  recoveryEmail: z.string().trim().toLowerCase().email().max(254),
   firstName: z.string().trim().min(1).max(80).optional(),
   lastName: z.string().trim().min(1).max(80).optional(),
   /** Defaults to the Member workspace only. */

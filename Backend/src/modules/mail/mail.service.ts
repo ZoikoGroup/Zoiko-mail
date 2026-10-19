@@ -1962,7 +1962,8 @@ export class MailService {
       include: {
         membership: {
           include: {
-            user: { select: { id: true, displayName: true, email: true } },
+            // status: whether the owner has set their password yet.
+            user: { select: { id: true, displayName: true, email: true, status: true } },
           },
         },
       },

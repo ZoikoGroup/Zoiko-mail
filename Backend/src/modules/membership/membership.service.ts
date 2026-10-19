@@ -7,7 +7,7 @@ import { billingService } from "../billing/billing.service.js";
 import { can } from "../../common/capabilities/resolver.js";
 import { cursorArgs, toPage } from "../../common/utils/pagination.js";
 import { env } from "../../config/env.js";
-import { generateOpaqueToken, hashToken } from "../../common/utils/tokenHash.js";
+import { generateLinkToken, generateOpaqueToken, hashToken } from "../../common/utils/tokenHash.js";
 import { hashPassword } from "../../common/utils/password.js";
 import { systemMailer } from "../../common/mailer/system-mailer.js";
 import {
@@ -268,7 +268,10 @@ export class MembershipService {
 
   /** The link an invitation email carries. The raw token appears nowhere else. */
   acceptUrl(invitationToken: string): string {
-    return `${env.APP_URL}/accept-invitation?token=${invitationToken}`;
+    // APP_URL is the configured site address (sso.zoikomail.com in production,
+    // localhost in development) — never a hard-coded host. The old
+    // /accept-invitation path keeps working for links already sent.
+    return `${env.APP_URL}/invitation/accept?token=${encodeURIComponent(invitationToken)}`;
   }
 
   /**
@@ -286,7 +289,7 @@ export class MembershipService {
     context: ActorContext
   ) {
     assertCanInviteRole(context.role, input.role);
-    const invitationToken = generateOpaqueToken();
+    const invitationToken = generateLinkToken();
     const inviteToken = hashToken(invitationToken);
     const inviteExpiresAt = new Date(
       Date.now() + env.INVITATION_EXPIRES_IN_HOURS * 60 * 60 * 1000
@@ -374,7 +377,7 @@ export class MembershipService {
     if (!invitation) throw new AppError("Pending invitation not found", 404, ErrorCodes.NOT_FOUND);
     assertCanInviteRole(context.role, invitation.role);
 
-    const invitationToken = generateOpaqueToken();
+    const invitationToken = generateLinkToken();
     const expiresAt = new Date(Date.now() + env.INVITATION_EXPIRES_IN_HOURS * 60 * 60 * 1000);
     await tx.tenantMembership.update({
       where: { id: invitation.id },
@@ -567,6 +570,22 @@ export class MembershipService {
 
       await billingService.assertUserWithinLimit(invitation.tenantId, 1);
 
+      // Take the invitation before touching the password. Two submissions of
+      // the same link both pass the checks above; the row lock makes the second
+      // wait here and then find nothing still INVITED, so it sets no password.
+      const taken = await tx.tenantMembership.updateMany({
+        where: { id: invitation.id, status: "INVITED", inviteToken: invitation.inviteToken },
+        data: { status: "ACTIVE", inviteExpiresAt: null },
+      });
+      if (taken.count === 0) {
+        throw new AppError(
+          "This invitation has already been accepted. Sign in to continue.",
+          409,
+          ErrorCodes.CONFLICT,
+          { reason: "ALREADY_ACCEPTED" }
+        );
+      }
+
       await tx.appUser.update({
         where: { id: invitation.userId },
         data: {
@@ -579,9 +598,8 @@ export class MembershipService {
         },
       });
 
-      const membership = await tx.tenantMembership.update({
+      const membership = await tx.tenantMembership.findUniqueOrThrow({
         where: { id: invitation.id },
-        data: { status: "ACTIVE", inviteExpiresAt: null },
         select: memberSelect,
       });
 

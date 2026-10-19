@@ -8,7 +8,6 @@ import { logger } from "../../config/logger.js";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { setSecret } from "../../common/secrets/secrets.js";
-import { systemMailer } from "../../common/mailer/system-mailer.js";
 import { auditService } from "../audit/audit.service.js";
 import { billingService } from "../billing/billing.service.js";
 import { membershipService } from "../membership/membership.service.js";
@@ -51,8 +50,6 @@ const LOCAL_PART = /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/;
 
 /** How long a PROVISIONING row may sit before it is treated as interrupted. */
 const STALE_PROVISIONING_MS = 2 * 60 * 1000;
-/** Minimum gap between two invitation emails for the same mailbox. */
-const INVITATION_RESEND_COOLDOWN_MS = 60 * 1000;
 
 const mailboxInclude = {
   domain: { select: { id: true, domainName: true } },
@@ -60,7 +57,7 @@ const mailboxInclude = {
     select: {
       id: true,
       status: true,
-      user: { select: { id: true, email: true, displayName: true } },
+      user: { select: { id: true, email: true, displayName: true, status: true } },
     },
   },
 } satisfies Prisma.MailboxInclude;
@@ -75,7 +72,7 @@ export function mailboxDisplayStatus(row: {
   deletionRequestedAt?: Date | null;
   provisioningStatus: string | null;
   sendSuspendedAt: Date | null;
-  membership: { status: string } | null;
+  membership: { status: string; user?: { status: string } } | null;
 }): "DELETING" | "PROVISIONING" | "FAILED" | "SUSPENDED" | "INVITATION_PENDING" | "ACTIVE" {
   // A requested deletion outranks everything: whatever else is true of the
   // mailbox, it is on its way out and nothing about it should be acted on.
@@ -83,8 +80,22 @@ export function mailboxDisplayStatus(row: {
   if (row.provisioningStatus === "FAILED") return "FAILED";
   if (row.provisioningStatus === "PENDING" || row.provisioningStatus === "PROVISIONING") return "PROVISIONING";
   if (row.sendSuspendedAt) return "SUSPENDED";
-  if (row.membership?.status === "INVITED") return "INVITATION_PENDING";
+  if (passwordSetup(row.membership) === "PENDING") return "INVITATION_PENDING";
   return "ACTIVE";
+}
+
+/**
+ * Whether the person behind the mailbox has chosen their password yet. An
+ * invitation whose expired link was presented is REMOVED, but if its account
+ * was never activated the mailbox is still waiting for setup, not ready.
+ */
+export function passwordSetup(
+  membership: { status: string; user?: { status: string } } | null
+): "PENDING" | "COMPLETED" | null {
+  if (!membership) return null;
+  if (membership.status === "INVITED") return "PENDING";
+  if (membership.status === "REMOVED" && membership.user?.status === "INVITED") return "PENDING";
+  return "COMPLETED";
 }
 
 function toView(row: MailboxRow) {
@@ -108,6 +119,7 @@ function toView(row: MailboxRow) {
     deletionError: row.deletionError,
     invitationRecipient: row.membership?.user.email ?? null,
     membershipStatus: row.membership?.status ?? null,
+    passwordSetup: passwordSetup(row.membership),
     status: mailboxDisplayStatus(row),
     createdAt: row.createdAt,
   };
@@ -233,7 +245,9 @@ export class MailboxProvisioningService {
       })),
       quota: { optionsBytes, defaultBytes, maxBytes: ceiling },
       mailboxes: { used: mailboxCount, limit: plan?.mailboxLimit ?? null },
-      invitationDelivery: env.SYSTEM_MAIL_ENABLED ? "EMAIL" : "DISABLED",
+      // Setting up a new mailbox never depends on email: the Owner or Admin is
+      // handed a setup link to share, whatever SYSTEM_MAIL_ENABLED says.
+      invitationDelivery: "LINK" as const,
     };
   }
 
@@ -314,21 +328,15 @@ export class MailboxProvisioningService {
       throw new AppError(`${address} is already in use`, 409, ErrorCodes.CONFLICT, { reason: "ADDRESS_TAKEN" });
     }
 
-    const recoveryEmail = input.recoveryEmail.trim().toLowerCase();
-    if (recoveryEmail === address) {
-      throw new AppError(
-        "The invitation has to go to an address the person can already read, not the new mailbox",
-        422,
-        ErrorCodes.VALIDATION_ERROR,
-        { parameter: "recoveryEmail" }
-      );
-    }
-
+    // The new address is also who signs in with it. There is no second,
+    // personal address to invite: the person is given a setup link by the
+    // Owner or Admin, opens it, and chooses the password for this address.
+    // That is what lets a mailbox be set up with no email service at all.
     let invitationToken: string | null = null;
     let mailboxId: string;
     try {
       mailboxId = await prisma.$transaction(async (tx) => {
-        const user = await tx.appUser.findUnique({ where: { email: recoveryEmail }, select: { id: true } });
+        const user = await tx.appUser.findUnique({ where: { email: address }, select: { id: true } });
         const existing = user
           ? await tx.tenantMembership.findFirst({
             where: { tenantId: context.tenantId, userId: user.id },
@@ -341,7 +349,7 @@ export class MailboxProvisioningService {
         if (existing && (existing.status === "ACTIVE" || existing.status === "INVITED")) {
           if (existing.mailbox) {
             throw new AppError(
-              `${recoveryEmail} already has a mailbox in this workspace`,
+              `${address} already has a mailbox in this workspace`,
               409,
               ErrorCodes.CONFLICT,
               { reason: "MEMBER_HAS_MAILBOX" }
@@ -356,13 +364,29 @@ export class MailboxProvisioningService {
             invitationStatus = "PENDING";
           }
         } else if (existing?.status === "SUSPENDED") {
-          throw new AppError(`${recoveryEmail} is suspended in this workspace`, 409, ErrorCodes.CONFLICT, {
+          throw new AppError(`${address} is suspended in this workspace`, 409, ErrorCodes.CONFLICT, {
             reason: "MEMBER_SUSPENDED",
           });
+        } else if (existing?.mailbox) {
+          // A removed membership that still owns a mailbox. Re-inviting it
+          // would try to give it a second mailbox, which the database refuses;
+          // say so rather than calling the address taken.
+          throw new AppError(
+            `${address} still has a mailbox from an earlier membership in this workspace. Delete that mailbox first.`,
+            409,
+            ErrorCodes.CONFLICT,
+            { reason: "MEMBER_HAS_MAILBOX" }
+          );
         } else {
           const issued = await membershipService.issueInvitation(
             tx,
-            { email: recoveryEmail, role: "MEMBER", firstName: input.firstName, lastName: input.lastName },
+            {
+              email: address,
+              role: "MEMBER",
+              // Named after the mailbox until the person says otherwise.
+              firstName: input.firstName ?? input.displayName.trim(),
+              lastName: input.lastName,
+            },
             context
           );
           membershipId = issued.membership.id;
@@ -400,7 +424,15 @@ export class MailboxProvisioningService {
       });
     } catch (error) {
       // Two requests for one address in the same instant: the index decides.
+      // Which index matters — a membership that already owns a mailbox is a
+      // different problem from an address somebody else holds.
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const target = JSON.stringify(error.meta?.target ?? "");
+        if (/membership_id|membershipId/.test(target)) {
+          throw new AppError(`${address} already has a mailbox in this workspace`, 409, ErrorCodes.CONFLICT, {
+            reason: "MEMBER_HAS_MAILBOX",
+          });
+        }
         throw new AppError(`${address} is already in use`, 409, ErrorCodes.CONFLICT, { reason: "ADDRESS_TAKEN" });
       }
       throw error;
@@ -412,7 +444,7 @@ export class MailboxProvisioningService {
       const row = await this.load(context.tenantId, mailboxId);
       const invitationLink =
         row.invitationStatus === "PENDING" && invitationToken
-          ? await this.deliverInvitation(row, invitationToken, context)
+          ? await this.issueSetupLink(row, invitationToken, context)
           : null;
       return { ...toView(await this.load(context.tenantId, mailboxId)), invitationLink };
     }
@@ -421,7 +453,7 @@ export class MailboxProvisioningService {
     const row = await this.load(context.tenantId, mailboxId);
     let invitationLink: string | null = null;
     if (row.provisioningStatus === "PROVISIONED" && row.invitationStatus === "PENDING" && invitationToken) {
-      invitationLink = await this.deliverInvitation(row, invitationToken, context);
+      invitationLink = await this.issueSetupLink(row, invitationToken, context);
     }
     return { ...toView(await this.load(context.tenantId, mailboxId)), invitationLink };
   }
@@ -560,76 +592,61 @@ export class MailboxProvisioningService {
   // ─── Invitation ───────────────────────────────────────────────────────────
 
   /**
-   * Send the access invitation and record what happened.
+   * Hand the Owner or Admin the link that sets this mailbox up.
    *
-   * Goes to the person's existing address, never the new mailbox, which they
-   * cannot read yet. With system mail turned off nothing is sent — and the
-   * mailer is not called either, because its log-only mode would print the
-   * accept link, and the link is a credential.
+   * Setting a mailbox up never depends on email. The address is new, so the
+   * person cannot read mail sent to it yet, and the deployment may have no
+   * mail service at all; either way the Owner or Admin passes the link on.
+   * SYSTEM_MAIL_ENABLED plays no part here — it governs sending email, and
+   * nothing here sends any.
    *
-   * With system mail off the link is instead returned, to the Owner or Admin
-   * who asked, so they can pass it on themselves. It is a credential: it goes
-   * back in the response and nowhere else — not the database, the audit log or
-   * a log line, and the route keeps it out of the stored replay copy too.
-   * Returns null whenever the invitation went out by email, or there is none.
+   * The link is a credential: it goes back in this response and nowhere else.
+   * Only the token's hash is stored (on the membership), the audit records that
+   * a link was issued and not the link, and the route keeps it out of the
+   * 24-hour replay copy. Returns null when there is nobody to set up.
    */
-  private async deliverInvitation(
+  private async issueSetupLink(
     row: MailboxRow,
     invitationToken: string,
     context: ProvisioningContext
   ): Promise<string | null> {
-    const recipient = row.membership?.user.email;
-    if (!recipient) return null;
-
-    if (!env.SYSTEM_MAIL_ENABLED) {
-      await prisma.mailbox.update({
-        where: { id: row.id },
-        data: { invitationStatus: "PENDING", invitationError: "SYSTEM_MAIL_DISABLED" },
-      });
-      await this.audit(context, "MAILBOX_INVITATION_NOT_SENT", row.id, {
-        recipient,
-        reason: "SYSTEM_MAIL_DISABLED",
-        // That the link was handed to the admin is evidence; the link is not.
-        linkShownToAdmin: true,
-      });
-      return membershipService.acceptUrl(invitationToken);
-    }
-
-    try {
-      const letter = await membershipService.invitationLetter({ email: recipient, role: "MEMBER" }, context);
-      letter.paragraphs = [
-        ...letter.paragraphs,
-        `Your new email address is ${row.address}. Once you accept, you can read and send mail from it in Zoiko Mail.`,
-      ];
-      await systemMailer.sendInvitationEmail(recipient, letter, membershipService.acceptUrl(invitationToken));
-      await prisma.mailbox.update({
-        where: { id: row.id },
-        data: { invitationStatus: "SENT", invitationSentAt: new Date(), invitationError: null },
-      });
-      await this.audit(context, "MAILBOX_INVITATION_SENT", row.id, { recipient });
-    } catch (error) {
-      logger.warn({ err: error, mailboxId: row.id }, "Mailbox invitation delivery failed");
-      await prisma.mailbox.update({
-        where: { id: row.id },
-        data: { invitationStatus: "FAILED", invitationError: "DELIVERY_FAILED" },
-      });
-      await this.audit(context, "MAILBOX_INVITATION_FAILED", row.id, { recipient, code: "DELIVERY_FAILED" });
-    }
-    return null;
+    if (!row.membership) return null;
+    await prisma.mailbox.update({
+      where: { id: row.id },
+      data: { invitationStatus: "PENDING", invitationError: null },
+    });
+    await this.audit(context, "MAILBOX_SETUP_LINK_ISSUED", row.id, { address: row.address });
+    return membershipService.acceptUrl(invitationToken);
   }
 
-  /** New token, new email (or, with email off, the new link). Never touches the mail host. */
-  private async reissueAndDeliver(row: MailboxRow, context: ProvisioningContext): Promise<string | null> {
-    if (!row.membership || row.membership.status !== "INVITED") {
+  /**
+   * A replacement setup link. The old one stops working at once, because only
+   * the newest token's hash is kept. Never touches the mail host.
+   */
+  private async reissueSetupLink(row: MailboxRow, context: ProvisioningContext): Promise<string | null> {
+    const membership = row.membership;
+    // Presenting an expired link ends that invitation (claimInvitation marks
+    // it REMOVED). If the account behind it was never activated, the mailbox
+    // is still waiting for its first sign-in, and an Owner or Admin can open
+    // it again with a fresh link. An account that was ever activated is never
+    // reopened this way — that would turn "new link" into a password reset.
+    const reopen = membership?.status === "REMOVED" && membership.user.status === "INVITED";
+    if (!membership || (membership.status !== "INVITED" && !reopen)) {
       throw new AppError("This invitation has already been accepted", 409, ErrorCodes.CONFLICT, {
         reason: "INVITATION_NOT_PENDING",
       });
     }
-    const membershipId = row.membership.id;
-    const { invitationToken } = await prisma.$transaction((tx) =>
-      membershipService.rotateInvitationToken(tx, membershipId, context)
-    );
-    return this.deliverInvitation(row, invitationToken, context);
+    const membershipId = membership.id;
+    const { invitationToken } = await prisma.$transaction(async (tx) => {
+      if (reopen) {
+        await tx.tenantMembership.update({
+          where: { id: membershipId, tenantId: context.tenantId },
+          data: { status: "INVITED" },
+        });
+      }
+      return membershipService.rotateInvitationToken(tx, membershipId, context);
+    });
+    return this.issueSetupLink(row, invitationToken, context);
   }
 
   // ─── Retry and resend ─────────────────────────────────────────────────────
@@ -674,7 +691,7 @@ export class MailboxProvisioningService {
       const moved = await this.load(context.tenantId, mailboxId);
       let movedLink: string | null = null;
       if ((moved.invitationStatus === "PENDING" || moved.invitationStatus === "FAILED") && moved.membership?.status === "INVITED") {
-        movedLink = await this.reissueAndDeliver(moved, context);
+        movedLink = await this.reissueSetupLink(moved, context);
       }
       return { ...toView(await this.load(context.tenantId, mailboxId)), invitationLink: movedLink };
     }
@@ -699,28 +716,29 @@ export class MailboxProvisioningService {
       (after.invitationStatus === "PENDING" || after.invitationStatus === "FAILED") &&
       after.membership?.status === "INVITED"
     ) {
-      invitationLink = await this.reissueAndDeliver(after, context);
+      invitationLink = await this.reissueSetupLink(after, context);
     }
     return { ...toView(await this.load(context.tenantId, mailboxId)), invitationLink };
   }
 
+  /**
+   * Generate a new setup link — for one that expired, was lost, or went to the
+   * wrong person. Replaces the previous link rather than adding a second one.
+   */
   async resendInvitation(mailboxId: string, context: ProvisioningContext) {
     const row = await this.load(context.tenantId, mailboxId);
     this.refuseWhileDeleting(row);
     // A Zoiko-store mailbox (no provider) has no mail-server side to wait for.
     if (row.provider !== null && row.provisioningStatus !== "PROVISIONED") {
       throw new AppError(
-        "The mailbox has to exist on the mail server before an invitation is sent",
+        "The mailbox has to exist on the mail server before a setup link can be issued",
         409,
         ErrorCodes.CONFLICT,
         { reason: "NOT_PROVISIONED" }
       );
     }
-    if (row.invitationSentAt && Date.now() - row.invitationSentAt.getTime() < INVITATION_RESEND_COOLDOWN_MS) {
-      throw new AppError("An invitation was sent a moment ago. Wait a minute before sending another.", 429, ErrorCodes.RATE_LIMIT_EXCEEDED);
-    }
-    await this.audit(context, "MAILBOX_INVITATION_RESEND_REQUESTED", row.id, { recipient: row.membership?.user.email ?? null });
-    const invitationLink = await this.reissueAndDeliver(row, context);
+    await this.audit(context, "MAILBOX_SETUP_LINK_REGENERATED", row.id, { address: row.address });
+    const invitationLink = await this.reissueSetupLink(row, context);
     return { ...toView(await this.load(context.tenantId, mailboxId)), invitationLink };
   }
 

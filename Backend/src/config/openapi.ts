@@ -1382,14 +1382,13 @@ export const openApiDocument = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["domainId", "localPart", "displayName", "quotaBytes", "initialAccess", "recoveryEmail"],
+                required: ["domainId", "localPart", "displayName", "quotaBytes", "initialAccess"],
                 properties: {
                   domainId: { type: "string", format: "uuid" },
                   localPart: { type: "string", maxLength: 64 },
                   displayName: { type: "string", maxLength: 120 },
                   quotaBytes: { type: "integer" },
                   initialAccess: { type: "string", enum: ["INVITE"] },
-                  recoveryEmail: { type: "string", format: "email" },
                   firstName: { type: "string" },
                   lastName: { type: "string" },
                 },
@@ -1400,7 +1399,6 @@ export const openApiDocument = {
                 displayName: "Support Team",
                 quotaBytes: 5368709120,
                 initialAccess: "INVITE",
-                recoveryEmail: "john.personal@example.org",
               },
             },
           },
