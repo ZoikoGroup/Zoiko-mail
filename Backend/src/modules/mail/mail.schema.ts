@@ -318,6 +318,11 @@ export const replySchema = z.object({
   // takes: the message being answered sits in the team mailbox, and the answer
   // has to go out from it rather than from whoever happened to pick it up.
   sendAsMailboxId: z.string().uuid().optional(),
+  // The composer already put the quoted original into the body. It has to:
+  // every autosave replaces the body, so a quote added only here at creation
+  // would be gone by the time the reply is sent. Without it, the server adds
+  // the quote itself, as it always has for other callers.
+  includesQuote: z.boolean().optional(),
 });
 
 export const forwardSchema = replySchema.extend({

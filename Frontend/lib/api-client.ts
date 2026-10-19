@@ -129,6 +129,11 @@ interface RequestOptions {
 // Single-flight refresh: if many calls 401 at once, we refresh only once.
 let refreshPromise: Promise<boolean> | null = null;
 
+/** Renews the access token with the refresh token; true when it worked. */
+export function refreshAccessToken(): Promise<boolean> {
+    return tryRefresh();
+}
+
 async function tryRefresh(): Promise<boolean> {
     const refreshToken = getRefreshToken();
     if (!refreshToken) return false;

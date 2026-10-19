@@ -390,11 +390,12 @@ describe("Create Email — invitation", () => {
       .post("/api/v1/membership/invitations/claim")
       .send({ invitationToken: secondToken, password: "A-strong-Passw0rd!" })
       .expect(200);
-    // Single use.
+    // Single use. A second claim is told the invitation was already accepted
+    // (409), which is how a reopened link is shown as joined rather than failed.
     await request(app)
       .post("/api/v1/membership/invitations/claim")
       .send({ invitationToken: secondToken, password: "A-strong-Passw0rd!" })
-      .expect(401);
+      .expect(409);
 
     const after = await request(app)
       .get(`/api/v1/mail/admin/mailboxes/${res.body.data.id}/provisioning`)

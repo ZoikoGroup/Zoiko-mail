@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 
 import { getMe } from "./auth-api";
-import { ACCESS_KEY, PLATFORM_KEY, getAccessToken, getPlatformToken, isLoggedIn } from "./auth-storage";
+import { ACCESS_KEY, PLATFORM_KEY, TOKENS_CHANGED_EVENT, getAccessToken, getPlatformToken, isLoggedIn } from "./auth-storage";
 import { resolveWorkspaceHref } from "./workspace";
 
 /**
@@ -25,6 +25,12 @@ import { resolveWorkspaceHref } from "./workspace";
  *
  * Only tabs showing a workspace move; sign-in, MFA, invitation and other
  * account pages are left alone so a flow in progress is never interrupted.
+ *
+ * A tab already on the new session's workspace still reloads when the session
+ * is a different person or workspace. Two Members both land on /mail, so the
+ * path alone says nothing: without the reload the tab kept the previous
+ * person's inbox on screen, cached, while its requests and new mail belonged
+ * to someone else — the new account's mail only showed after signing in again.
  */
 
 /** Pages that are part of signing in or managing an account, not a workspace. */
@@ -53,9 +59,26 @@ function onAccountPage(pathname: string): boolean {
  */
 const SETTLE_MS = 400;
 
+/** The person and workspace a token is for, read from its claims. */
+function accountOf(token: string | null): string | null {
+  if (!token) return null;
+  try {
+    const claims = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))) as { sub?: string; tenantId?: string };
+    return claims.sub ? `${claims.sub}|${claims.tenantId ?? ""}` : null;
+  } catch {
+    return null;
+  }
+}
+
 export function useCrossTabSession(): void {
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // The account this tab is showing. A sign-in or refresh in this same tab
+    // updates it; only another tab's change can leave it out of date.
+    let shown = accountOf(getAccessToken());
+    const onOwnTokens = () => {
+      shown = accountOf(getAccessToken());
+    };
 
     const follow = async () => {
       if (onAccountPage(window.location.pathname)) return;
@@ -70,9 +93,10 @@ export function useCrossTabSession(): void {
       try {
         const me = await getMe();
         const target = resolveWorkspaceHref(me.workspace);
-        // Already on the right console (a token refresh in another tab):
-        // nothing to do.
-        if (window.location.pathname === target || window.location.pathname.startsWith(`${target}/`)) return;
+        // Already on the right console for the same account (a token refresh
+        // in another tab): nothing to do. Anyone else: start the page afresh.
+        const sameAccount = accountOf(getAccessToken()) === shown;
+        if (sameAccount && (window.location.pathname === target || window.location.pathname.startsWith(`${target}/`))) return;
         window.location.assign(target);
       } catch {
         window.location.assign("/login");
@@ -88,8 +112,10 @@ export function useCrossTabSession(): void {
     };
 
     window.addEventListener("storage", onStorage);
+    window.addEventListener(TOKENS_CHANGED_EVENT, onOwnTokens);
     return () => {
       window.removeEventListener("storage", onStorage);
+      window.removeEventListener(TOKENS_CHANGED_EVENT, onOwnTokens);
       clearTimeout(timer);
     };
   }, []);

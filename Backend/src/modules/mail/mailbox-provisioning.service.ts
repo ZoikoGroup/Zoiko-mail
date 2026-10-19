@@ -410,16 +410,20 @@ export class MailboxProvisioningService {
       // Nothing to provision: the mailbox is ready the moment its row
       // exists. The owner still has to accept their invitation.
       const row = await this.load(context.tenantId, mailboxId);
-      if (row.invitationStatus === "PENDING" && invitationToken) await this.deliverInvitation(row, invitationToken, context);
-      return toView(await this.load(context.tenantId, mailboxId));
+      const invitationLink =
+        row.invitationStatus === "PENDING" && invitationToken
+          ? await this.deliverInvitation(row, invitationToken, context)
+          : null;
+      return { ...toView(await this.load(context.tenantId, mailboxId)), invitationLink };
     }
 
     await this.provisionOnHost(mailboxId, context);
     const row = await this.load(context.tenantId, mailboxId);
+    let invitationLink: string | null = null;
     if (row.provisioningStatus === "PROVISIONED" && row.invitationStatus === "PENDING" && invitationToken) {
-      await this.deliverInvitation(row, invitationToken, context);
+      invitationLink = await this.deliverInvitation(row, invitationToken, context);
     }
-    return toView(await this.load(context.tenantId, mailboxId));
+    return { ...toView(await this.load(context.tenantId, mailboxId)), invitationLink };
   }
 
   // ─── The host half ────────────────────────────────────────────────────────
@@ -562,18 +566,33 @@ export class MailboxProvisioningService {
    * cannot read yet. With system mail turned off nothing is sent — and the
    * mailer is not called either, because its log-only mode would print the
    * accept link, and the link is a credential.
+   *
+   * With system mail off the link is instead returned, to the Owner or Admin
+   * who asked, so they can pass it on themselves. It is a credential: it goes
+   * back in the response and nowhere else — not the database, the audit log or
+   * a log line, and the route keeps it out of the stored replay copy too.
+   * Returns null whenever the invitation went out by email, or there is none.
    */
-  private async deliverInvitation(row: MailboxRow, invitationToken: string, context: ProvisioningContext) {
+  private async deliverInvitation(
+    row: MailboxRow,
+    invitationToken: string,
+    context: ProvisioningContext
+  ): Promise<string | null> {
     const recipient = row.membership?.user.email;
-    if (!recipient) return;
+    if (!recipient) return null;
 
     if (!env.SYSTEM_MAIL_ENABLED) {
       await prisma.mailbox.update({
         where: { id: row.id },
         data: { invitationStatus: "PENDING", invitationError: "SYSTEM_MAIL_DISABLED" },
       });
-      await this.audit(context, "MAILBOX_INVITATION_NOT_SENT", row.id, { recipient, reason: "SYSTEM_MAIL_DISABLED" });
-      return;
+      await this.audit(context, "MAILBOX_INVITATION_NOT_SENT", row.id, {
+        recipient,
+        reason: "SYSTEM_MAIL_DISABLED",
+        // That the link was handed to the admin is evidence; the link is not.
+        linkShownToAdmin: true,
+      });
+      return membershipService.acceptUrl(invitationToken);
     }
 
     try {
@@ -596,10 +615,11 @@ export class MailboxProvisioningService {
       });
       await this.audit(context, "MAILBOX_INVITATION_FAILED", row.id, { recipient, code: "DELIVERY_FAILED" });
     }
+    return null;
   }
 
-  /** New token, new email. Never touches the mail host. */
-  private async reissueAndDeliver(row: MailboxRow, context: ProvisioningContext) {
+  /** New token, new email (or, with email off, the new link). Never touches the mail host. */
+  private async reissueAndDeliver(row: MailboxRow, context: ProvisioningContext): Promise<string | null> {
     if (!row.membership || row.membership.status !== "INVITED") {
       throw new AppError("This invitation has already been accepted", 409, ErrorCodes.CONFLICT, {
         reason: "INVITATION_NOT_PENDING",
@@ -609,7 +629,7 @@ export class MailboxProvisioningService {
     const { invitationToken } = await prisma.$transaction((tx) =>
       membershipService.rotateInvitationToken(tx, membershipId, context)
     );
-    await this.deliverInvitation(row, invitationToken, context);
+    return this.deliverInvitation(row, invitationToken, context);
   }
 
   // ─── Retry and resend ─────────────────────────────────────────────────────
@@ -652,10 +672,11 @@ export class MailboxProvisioningService {
         previousError: row.provisioningError,
       });
       const moved = await this.load(context.tenantId, mailboxId);
+      let movedLink: string | null = null;
       if ((moved.invitationStatus === "PENDING" || moved.invitationStatus === "FAILED") && moved.membership?.status === "INVITED") {
-        await this.reissueAndDeliver(moved, context);
+        movedLink = await this.reissueAndDeliver(moved, context);
       }
-      return toView(await this.load(context.tenantId, mailboxId));
+      return { ...toView(await this.load(context.tenantId, mailboxId)), invitationLink: movedLink };
     }
 
     if (!this.provider.isConfigured()) {
@@ -672,14 +693,15 @@ export class MailboxProvisioningService {
     }
 
     const after = await this.load(context.tenantId, mailboxId);
+    let invitationLink: string | null = null;
     if (
       after.provisioningStatus === "PROVISIONED" &&
       (after.invitationStatus === "PENDING" || after.invitationStatus === "FAILED") &&
       after.membership?.status === "INVITED"
     ) {
-      await this.reissueAndDeliver(after, context);
+      invitationLink = await this.reissueAndDeliver(after, context);
     }
-    return toView(await this.load(context.tenantId, mailboxId));
+    return { ...toView(await this.load(context.tenantId, mailboxId)), invitationLink };
   }
 
   async resendInvitation(mailboxId: string, context: ProvisioningContext) {
@@ -698,8 +720,8 @@ export class MailboxProvisioningService {
       throw new AppError("An invitation was sent a moment ago. Wait a minute before sending another.", 429, ErrorCodes.RATE_LIMIT_EXCEEDED);
     }
     await this.audit(context, "MAILBOX_INVITATION_RESEND_REQUESTED", row.id, { recipient: row.membership?.user.email ?? null });
-    await this.reissueAndDeliver(row, context);
-    return toView(await this.load(context.tenantId, mailboxId));
+    const invitationLink = await this.reissueAndDeliver(row, context);
+    return { ...toView(await this.load(context.tenantId, mailboxId)), invitationLink };
   }
 
   async get(mailboxId: string, tenantId: string) {

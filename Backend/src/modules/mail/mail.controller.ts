@@ -348,7 +348,14 @@ export const mailboxProvisioningOptions = asyncHandler(async (req: Request, res:
  * but the host half did not finish (failed or interrupted). The body says
  * which, and a retry finishes it without creating a second mailbox.
  */
+/**
+ * The invitation link, when email is off, goes back to the admin who asked and
+ * is kept out of the 24-hour replay copy the idempotency layer stores.
+ */
+const INVITATION_LINK_FIELDS = ["invitationLink"];
+
 export const provisionMailbox = asyncHandler(async (req: Request, res: Response) => {
+  res.locals.redactFromReplay = INVITATION_LINK_FIELDS;
   const result = await mailboxProvisioningService.create(req.body, context(req));
   // A Zoiko-store mailbox (no provider) has no host half to finish: it is
   // complete the moment it is created.
@@ -361,10 +368,12 @@ export const getMailboxProvisioning = asyncHandler(async (req: Request, res: Res
 });
 
 export const retryMailboxProvisioning = asyncHandler(async (req: Request, res: Response) => {
+  res.locals.redactFromReplay = INVITATION_LINK_FIELDS;
   sendSuccess(res, 200, await mailboxProvisioningService.retry(String(req.params.mailboxId), context(req)), req.requestId);
 });
 
 export const resendMailboxInvitation = asyncHandler(async (req: Request, res: Response) => {
+  res.locals.redactFromReplay = INVITATION_LINK_FIELDS;
   sendSuccess(res, 200, await mailboxProvisioningService.resendInvitation(String(req.params.mailboxId), context(req)), req.requestId);
 });
 

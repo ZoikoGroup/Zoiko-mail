@@ -139,12 +139,23 @@ export class EnvWritableSecretStore implements WritableSecretStore {
  * the whole secret. The `parent` (GCP project) is resolved from
  * `SECRET_MANAGER_PROJECT` env or the ADC default project.
  */
+/** The slice of the Secret Manager client this store uses. Lets a test supply its own. */
+export type SecretManagerClientLike = Pick<
+  SecretManagerServiceClient,
+  "accessSecretVersion" | "createSecret" | "addSecretVersion" | "deleteSecret"
+>;
+
 export class GcpSecretManagerStore implements WritableSecretStore {
   readonly name = "gcp-secret-manager";
 
-  private client: SecretManagerServiceClient | null = null;
+  private client: SecretManagerClientLike | null;
 
-  private getClient(): SecretManagerServiceClient {
+  /** No argument in production: the real client is created on first use. */
+  constructor(client?: SecretManagerClientLike) {
+    this.client = client ?? null;
+  }
+
+  private getClient(): SecretManagerClientLike {
     this.client ??= new SecretManagerServiceClient();
     return this.client;
   }
@@ -193,18 +204,16 @@ export class GcpSecretManagerStore implements WritableSecretStore {
     const name = this.secretName(ref);
     // Create the secret if it does not exist (NOT_FOUND), then add a version.
     try {
-      // await client.createSecret({
-      //   parent: this.parent(),
-      //   secretId: name.split("/").pop()!,
-      //   secret: {},
-      // });
-
       await client.createSecret({
         parent: this.parent(),
         secretId: name.split("/").pop()!,
+        // Secret Manager refuses a secret with no replication policy
+        // (INVALID_ARGUMENT: "Secret.replication must be provided"), so every
+        // save of a new secret — DKIM keys, DNS tokens, connector tokens —
+        // failed with an unexplained 500. Automatic lets Google choose where
+        // the secret is stored.
         secret: { replication: { automatic: {} } },
       });
-
     } catch (error) {
       const code = (error as { code?: number })?.code;
       if (code !== 6 /* ALREADY_EXISTS */ && code !== 409) throw error;

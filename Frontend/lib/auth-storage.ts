@@ -14,6 +14,14 @@ export const PLATFORM_KEY = "zoiko.platform_token";
 
 const hasWindow = () => typeof window !== "undefined";
 
+/**
+ * Fired in this tab when its tokens change. The browser's `storage` event
+ * only reaches *other* tabs, and the live event stream (sse-client.ts) has to
+ * reopen when this tab signs in, refreshes or signs out too.
+ */
+export const TOKENS_CHANGED_EVENT = "zoiko:tokens-changed";
+const announce = () => window.dispatchEvent(new Event(TOKENS_CHANGED_EVENT));
+
 export function getAccessToken(): string | null {
   return hasWindow() ? window.localStorage.getItem(ACCESS_KEY) : null;
 }
@@ -43,6 +51,7 @@ export function setTokens(accessToken: string, refreshToken?: string): void {
   if (!accessToken) return;
   window.localStorage.setItem(ACCESS_KEY, accessToken);
   if (refreshToken) window.localStorage.setItem(REFRESH_KEY, refreshToken);
+  announce();
 }
 export function setPlatformToken(platformToken: string): void {
   if (!hasWindow()) return;
@@ -60,6 +69,7 @@ export function clearTokens(): void {
   window.localStorage.removeItem(ACCESS_KEY);
   window.localStorage.removeItem(REFRESH_KEY);
   window.localStorage.removeItem(PLATFORM_KEY);
+  announce();
 }
 export function isLoggedIn(): boolean {
   return !!(getAccessToken() || getPlatformToken());

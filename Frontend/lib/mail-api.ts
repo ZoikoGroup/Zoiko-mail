@@ -282,14 +282,14 @@ export async function listSendableMailboxes(): Promise<{ mailboxes: SendableMail
 
 export async function reply(
   messageId: string,
-  body: { textBody?: string; htmlBody?: string; sendAsMailboxId?: string }
+  body: { textBody?: string; htmlBody?: string; sendAsMailboxId?: string; includesQuote?: boolean }
 ) {
   return apiRequest<MailItem>(`/mail/${messageId}/reply`, { method: "POST", body });
 }
 
 export async function replyAll(
   messageId: string,
-  body: { textBody?: string; htmlBody?: string; sendAsMailboxId?: string }
+  body: { textBody?: string; htmlBody?: string; sendAsMailboxId?: string; includesQuote?: boolean }
 ) {
   return apiRequest<MailItem>(`/mail/${messageId}/reply-all`, { method: "POST", body });
 }
@@ -301,6 +301,7 @@ export async function forward(
     textBody?: string;
     htmlBody?: string;
     sendAsMailboxId?: string;
+    includesQuote?: boolean;
   }
 ) {
   return apiRequest<MailItem>(`/mail/${messageId}/forward`, { method: "POST", body });

@@ -24,7 +24,10 @@ eventsRouter.get(
 
     // ── SSE Headers ────────────────────────────────────────────────────────
     res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
+    // no-transform: a proxy or CDN in front of the API (Cloudflare in
+    // production) must pass the stream through as it is written, not
+    // compress or rewrite it, which can hold events back.
+    res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no"); // disable nginx buffering
     res.flushHeaders(); // flush immediately so browser gets 200 + headers

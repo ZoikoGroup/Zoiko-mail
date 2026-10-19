@@ -27,6 +27,8 @@ export interface Invitation {
   status: "PENDING" | "ACCEPTED" | "EXPIRED";
   createdAt: string;
   expiresAt: string;
+  /** Only when email is off: the link to pass on. A credential; show it once, never store it. */
+  invitationLink?: string | null;
 }
 
 export async function getMembers(): Promise<Member[]> {
