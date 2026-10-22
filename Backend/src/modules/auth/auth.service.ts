@@ -52,6 +52,7 @@ import type {
   JoinWorkspaceInput,
   RegisterResponse,
 } from "./auth.types.js";
+import { isMailboxAddress } from "../membership/address-claims.js";
 
 interface RequestContext {
   requestId?: string;
@@ -729,6 +730,18 @@ export class AuthService {
         "Email is already registered",
         409,
         ErrorCodes.CONFLICT
+      );
+    }
+    // A mailbox address is set up only from the setup link its administrator
+    // issues. Registering here would overwrite the waiting account's password
+    // and send its verification code to a mailbox nobody can open yet — so
+    // anyone could lock the real person out just by knowing the address.
+    if (isClaimingInvite && (await isMailboxAddress(input.email))) {
+      throw new AppError(
+        "This address is set up by its organisation's administrator. Use the setup link they gave you.",
+        409,
+        ErrorCodes.CONFLICT,
+        { reason: "SETUP_LINK_REQUIRED" }
       );
     }
 

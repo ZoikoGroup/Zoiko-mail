@@ -45,8 +45,8 @@ export interface ProvisioningOptions {
   domains: ProvisioningDomain[];
   quota: { optionsBytes: number[]; defaultBytes: number | null; maxBytes: number | null };
   mailboxes: { used: number; limit: number | null };
-  /** LINK: setup never depends on email; the admin is given a link to share. */
-  invitationDelivery: "LINK" | "EMAIL" | "DISABLED";
+  /** Setup never depends on email: the admin is given a link to share. */
+  invitationDelivery: "LINK";
 }
 
 export interface ProvisionMailboxInput {
@@ -142,17 +142,14 @@ export function mailboxDisplayStatus(row: {
   deletionRequestedAt?: string | null;
   provisioningStatus?: ProvisioningStatus | null;
   sendSuspendedAt?: string | null;
-  membership?: { status?: string; user?: { status?: string } | null } | null;
+  membership?: { status?: string } | null;
 }): MailboxDisplayStatus {
   // A requested deletion outranks everything, as on the server.
   if (row.deletionRequestedAt) return "DELETING";
   if (row.provisioningStatus === "FAILED") return "FAILED";
   if (row.provisioningStatus === "PENDING" || row.provisioningStatus === "PROVISIONING") return "PROVISIONING";
   if (row.sendSuspendedAt) return "SUSPENDED";
-  const m = row.membership;
-  // An expired link that was presented ends the invitation (REMOVED), but an
-  // account that never chose a password is still waiting for setup.
-  if (m?.status === "INVITED" || (m?.status === "REMOVED" && m.user?.status === "INVITED")) return "INVITATION_PENDING";
+  if (row.membership?.status === "INVITED") return "INVITATION_PENDING";
   return "ACTIVE";
 }
 

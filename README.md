@@ -53,7 +53,7 @@ interesting than yes or no:
 | `TWO_PERSON` | Granted once a second person approves |
 | `GRANT` | Granted only while a time-boxed, approved grant is live |
 
-There are **41 capabilities**. The full table lives in
+There are **42 capabilities**. The full table lives in
 [`Backend/src/common/capabilities/matrix.ts`](Backend/src/common/capabilities/matrix.ts),
 and it is worth reading early — it is the clearest single description of what
 the product allows.
@@ -76,9 +76,9 @@ shapes a lot of the code in `modules/support`.
 ## What you get
 
 ```
-232  API endpoints          50  database models        59  migrations
- 59  frontend pages         41  capabilities            4  workspaces
-655  backend tests         143  browser tests
+ 274  API endpoints          54  database models        69  migrations
+  63  frontend pages         42  capabilities            4  workspaces
+1015  backend tests         216  browser tests
 ```
 
 **Implemented and tested**
@@ -298,7 +298,7 @@ npx vitest run tests/auth.security.test.ts
 
 # Frontend — needs the dev server running
 cd Frontend
-npm run test:e2e              # 143 browser tests
+npm run test:e2e              # 216 browser tests
 npm run test:e2e:ui           # step through them visually
 ```
 

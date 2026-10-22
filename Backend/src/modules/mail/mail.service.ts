@@ -1962,8 +1962,7 @@ export class MailService {
       include: {
         membership: {
           include: {
-            // status: whether the owner has set their password yet.
-            user: { select: { id: true, displayName: true, email: true, status: true } },
+            user: { select: { id: true, displayName: true, email: true } },
           },
         },
       },
@@ -2338,7 +2337,11 @@ export class MailService {
       });
       const messageIds = [...new Set(copies.map((copy) => copy.messageId))];
 
-      await tx.mailbox.delete({ where: { id: mailboxId, tenantId } });
+      const deleted = await tx.mailbox.delete({ where: { id: mailboxId, tenantId }, select: { membershipId: true } });
+      // A setup link still waiting to be used goes with the mailbox it was
+      // for; otherwise it would make a member with no mailbox, or hand a
+      // recreated address to whoever held the old link.
+      if (deleted.membershipId) await membershipService.revokePendingInvitation(tx, tenantId, deleted.membershipId);
 
       const orphaned = messageIds.length
         ? await tx.emailMessage.findMany({

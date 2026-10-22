@@ -8,6 +8,7 @@ import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { deleteSecret } from "../../common/secrets/secrets.js";
 import { auditService } from "../audit/audit.service.js";
+import { membershipService } from "../membership/membership.service.js";
 import { stalwartClient } from "../stalwart/stalwart.client.js";
 import { StalwartError, type HostedAccount, type MailHostingProvider } from "../stalwart/stalwart.types.js";
 import { credentialRef, ownershipMarker } from "./mailbox-identity.js";
@@ -153,6 +154,7 @@ export class MailboxCleanupService {
         provisioningStatus: true,
         provisioningStartedAt: true,
         deletionRequestedAt: true,
+        membershipId: true,
       },
     });
     if (!mailbox) throw new AppError("Mailbox not found", 404, ErrorCodes.NOT_FOUND);
@@ -253,6 +255,11 @@ export class MailboxCleanupService {
       });
       // Two requests at once: the second changes nothing and reports the first.
       if (marked.count === 0) return;
+      // The setup link stops working as soon as deletion is asked for, not
+      // when the host finally confirms it.
+      if (mailbox.membershipId) {
+        await membershipService.revokePendingInvitation(tx, context.tenantId, mailbox.membershipId);
+      }
 
       const fresh = {
         providerAccountId: mailbox.providerAccountId,

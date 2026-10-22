@@ -100,7 +100,8 @@ test.describe("setting a password from a setup link", () => {
 
       await expect(page.getByRole("heading", { name: "Your password is set" })).toBeVisible();
       expect(seen.claims).toEqual([{ invitationToken: TOKEN, password: PASSWORD }]);
-      await expect(page).toHaveURL(/\/login$/);
+      // A Member signs in on the Member page.
+      await expect(page).toHaveURL(/\/login\/member$/);
 
       const stored = await page.evaluate(() => JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }));
       expect(stored).not.toContain(TOKEN);
@@ -125,6 +126,12 @@ test.describe("setting a password from a setup link", () => {
     await stub(page, (route) => route.fulfill(json(found({ alreadyAccepted: true }))));
     await page.goto(`/invitation/accept?token=${TOKEN}`);
     await expect(page.getByRole("heading", { name: "This link has already been used" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login/member");
+  });
+
+  test("someone invited as Admin is sent to the main sign-in page", async ({ page }) => {
+    await stub(page, (route) => route.fulfill(json(found({ role: "ADMIN", alreadyAccepted: true }))));
+    await page.goto(`/invitation/accept?token=${TOKEN}`);
     await expect(page.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
   });
 

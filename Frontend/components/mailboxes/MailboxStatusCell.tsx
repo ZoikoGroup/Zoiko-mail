@@ -30,6 +30,7 @@ export function MailboxStatusCell({ row, canManage }: { row: MailboxStatusRow; c
   const resend = useResendMailboxInvitation();
   // Held in memory only, and dropped when the dialog closes.
   const [shownLink, setShownLink] = useState<string | null>(null);
+  const [noLink, setNoLink] = useState(false);
 
   const detail =
     row.status === "FAILED"
@@ -62,8 +63,17 @@ export function MailboxStatusCell({ row, canManage }: { row: MailboxStatusRow; c
           onClick={(event) => {
             // Rows open a details drawer on click in the Owner list.
             event.stopPropagation();
+            setNoLink(false);
             if (canRetry) retry.mutate(row.id);
-            else resend.mutate(row.id, { onSuccess: (issued) => setShownLink(issued.invitationLink ?? null) });
+            else
+              resend.mutate(row.id, {
+                onSuccess: (issued) => {
+                  // A replayed or refused answer carries no link; say so
+                  // rather than doing nothing visible.
+                  if (issued.invitationLink) setShownLink(issued.invitationLink);
+                  else setNoLink(true);
+                },
+              });
           }}
           aria-label={`${canRetry ? "Retry provisioning" : "Generate new setup link"} for ${row.address}`}
         >
@@ -73,6 +83,11 @@ export function MailboxStatusCell({ row, canManage }: { row: MailboxStatusRow; c
         </button>
       )}
       {error && <span className="max-w-[220px] text-[10.5px] text-[var(--crit)]">{error.message}</span>}
+      {noLink && !error && (
+        <span className="max-w-[220px] text-[10.5px] text-[var(--ink3)]">
+          No new link was issued. Refresh the list and try again.
+        </span>
+      )}
       <Modal
         open={shownLink !== null}
         onClose={() => setShownLink(null)}

@@ -45,8 +45,21 @@ export const add = asyncHandler(async (req: Request, res: Response) => {
 export const createInvitation = asyncHandler(async (req: Request, res: Response) => {
   res.locals.redactFromReplay = ["invitationToken", "invitationLink"];
   const invitation = await membershipService.createInvitation(req.body, requestContext(req));
-  const invitationLink = env.SYSTEM_MAIL_ENABLED ? null : membershipService.acceptUrl(invitation.invitationToken);
-  sendSuccess(res, 201, { ...invitation, invitationLink }, req.requestId);
+  // The raw token and link go back only when nothing was emailed — then the
+  // admin is the one passing them on. When the email went out, the inviter
+  // has no reason to hold a credential meant for the invitee's mailbox.
+  const { invitationToken, ...rest } = invitation;
+  const handedOver = !env.SYSTEM_MAIL_ENABLED;
+  sendSuccess(
+    res,
+    201,
+    {
+      ...rest,
+      invitationToken: handedOver ? invitationToken : null,
+      invitationLink: handedOver ? membershipService.acceptUrl(invitationToken) : null,
+    },
+    req.requestId
+  );
 });
 
 // 200, not 201: nothing is created. Drafting a letter for review is a read of

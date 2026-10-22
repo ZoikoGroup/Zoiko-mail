@@ -36,11 +36,14 @@ export function InvitationLinkBox({ link, recipient }: { link: string; recipient
       className="mt-2 rounded-[10px] border border-[var(--accent)] bg-[var(--s2)] px-3 py-2.5"
       data-testid="invitation-link-box"
     >
-      <p className="text-[12px] font-semibold text-[var(--ink)]">Invitation link</p>
+      <p className="text-[12px] font-semibold text-[var(--ink)]">Invitation link · first-time setup only</p>
       <p className="mt-1 text-[11.5px] leading-relaxed text-[var(--ink2)]">
         Share this with {recipient ?? "the new user"} so they can choose their password. It works once and expires,
         and anyone who has it can use it, so send it only to them. It is shown once: if you close this, generate a new
         link (the old one stops working).
+      </p>
+      <p className="mt-1 text-[11.5px] leading-relaxed text-[var(--ink3)]">
+        After that they sign in every day from the Member login link, which never changes.
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <input

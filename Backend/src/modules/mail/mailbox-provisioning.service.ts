@@ -11,6 +11,7 @@ import { setSecret } from "../../common/secrets/secrets.js";
 import { auditService } from "../audit/audit.service.js";
 import { billingService } from "../billing/billing.service.js";
 import { membershipService } from "../membership/membership.service.js";
+import { addressManagedElsewhere, claimElsewhere } from "../membership/address-claims.js";
 import { stalwartClient } from "../stalwart/stalwart.client.js";
 import { StalwartError, type HostedAccount, type MailHostingProvider } from "../stalwart/stalwart.types.js";
 import type { ProvisionMailboxInput } from "./mail.schema.js";
@@ -72,7 +73,7 @@ export function mailboxDisplayStatus(row: {
   deletionRequestedAt?: Date | null;
   provisioningStatus: string | null;
   sendSuspendedAt: Date | null;
-  membership: { status: string; user?: { status: string } } | null;
+  membership: { status: string } | null;
 }): "DELETING" | "PROVISIONING" | "FAILED" | "SUSPENDED" | "INVITATION_PENDING" | "ACTIVE" {
   // A requested deletion outranks everything: whatever else is true of the
   // mailbox, it is on its way out and nothing about it should be acted on.
@@ -86,16 +87,12 @@ export function mailboxDisplayStatus(row: {
 
 /**
  * Whether the person behind the mailbox has chosen their password yet. An
- * invitation whose expired link was presented is REMOVED, but if its account
- * was never activated the mailbox is still waiting for setup, not ready.
+ * expired invitation is still INVITED, so it reads as pending. A REMOVED
+ * membership was ended by an Owner or Admin: nobody is being set up.
  */
-export function passwordSetup(
-  membership: { status: string; user?: { status: string } } | null
-): "PENDING" | "COMPLETED" | null {
-  if (!membership) return null;
-  if (membership.status === "INVITED") return "PENDING";
-  if (membership.status === "REMOVED" && membership.user?.status === "INVITED") return "PENDING";
-  return "COMPLETED";
+export function passwordSetup(membership: { status: string } | null): "PENDING" | "COMPLETED" | null {
+  if (!membership || membership.status === "REMOVED") return null;
+  return membership.status === "INVITED" ? "PENDING" : "COMPLETED";
 }
 
 function toView(row: MailboxRow) {
@@ -326,6 +323,13 @@ export class MailboxProvisioningService {
     );
     if (mailboxClash || aliasClash) {
       throw new AppError(`${address} is already in use`, 409, ErrorCodes.CONFLICT, { reason: "ADDRESS_TAKEN" });
+    }
+    // An account with this address that belongs to another workspace, and not
+    // this one, is somebody else's identity — possibly made before this
+    // workspace verified the domain. Giving it this mailbox would hand the
+    // mail to whoever controls that account, so it is refused instead.
+    if (await claimElsewhere(address, context.tenantId, { includeAccount: true })) {
+      throw addressManagedElsewhere(address);
     }
 
     // The new address is also who signs in with it. There is no second,
@@ -624,28 +628,19 @@ export class MailboxProvisioningService {
    * the newest token's hash is kept. Never touches the mail host.
    */
   private async reissueSetupLink(row: MailboxRow, context: ProvisioningContext): Promise<string | null> {
-    const membership = row.membership;
-    // Presenting an expired link ends that invitation (claimInvitation marks
-    // it REMOVED). If the account behind it was never activated, the mailbox
-    // is still waiting for its first sign-in, and an Owner or Admin can open
-    // it again with a fresh link. An account that was ever activated is never
-    // reopened this way — that would turn "new link" into a password reset.
-    const reopen = membership?.status === "REMOVED" && membership.user.status === "INVITED";
-    if (!membership || (membership.status !== "INVITED" && !reopen)) {
+    // Only a pending invitation gets a new link — an expired one included,
+    // since expiry leaves it INVITED. A cancelled or removed one (REMOVED) was
+    // an Owner's or Admin's decision and is not reopened from here, and an
+    // accepted one never is: that would turn "new link" into a password reset.
+    if (!row.membership || row.membership.status !== "INVITED") {
       throw new AppError("This invitation has already been accepted", 409, ErrorCodes.CONFLICT, {
         reason: "INVITATION_NOT_PENDING",
       });
     }
-    const membershipId = membership.id;
-    const { invitationToken } = await prisma.$transaction(async (tx) => {
-      if (reopen) {
-        await tx.tenantMembership.update({
-          where: { id: membershipId, tenantId: context.tenantId },
-          data: { status: "INVITED" },
-        });
-      }
-      return membershipService.rotateInvitationToken(tx, membershipId, context);
-    });
+    const membershipId = row.membership.id;
+    const { invitationToken } = await prisma.$transaction((tx) =>
+      membershipService.rotateInvitationToken(tx, membershipId, context)
+    );
     return this.issueSetupLink(row, invitationToken, context);
   }
 

@@ -12,7 +12,7 @@ Deploy the latest `main`, then in the server's `Backend/.env`:
 | Setting | Value | Why |
 |---|---|---|
 | `STALWART_ACCOUNT_PROVISIONING` | `false` | Create Email stores the mailbox in Zoiko and does not call Stalwart. Left at the default (`true`) it needs a Stalwart key with permission, and fails with 403 until it has one. |
-| `APP_URL` | `https://sso.zoikomail.com` | The address invitation links point at. Skip if the server's override file already sets it. |
+| `APP_URL` | `https://sso.zoikomail.com` | The address invitation links point at (`/invitation/accept`). Skip if the server's override file already sets it. |
 | `STALWART_ENABLED` | `false` | Leave off until the Stalwart key has permission (see section 5). |
 | `STALWART_DELETE_ENABLED` | `false` | Leave off. Deleting hosted Stalwart mailboxes is not verified yet. |
 | `MAIL_PROVIDER_ENABLED` | `false` | The old single-account IMAP pilot. Leaving it on with IDs that do not exist fills the logs with errors. |
@@ -24,11 +24,19 @@ Deploy with `zoikomail-deploy --approve-sensitive`. It pauses first because this
 release adds database migrations (they apply by themselves when the API starts)
 and changes the compose file. Review `Backend/prisma/migrations/` before approving.
 
-## 2. Invitation emails
+## 2. System email
 
-Until one of these is set up, nothing is emailed. Create Email still works: it
-shows the Owner or Admin the invitation link once, to pass on, and **Credentials**
-on a mailbox sets the person's password directly.
+Create Email never sends email, with or without these settings. The new
+mailbox address is the person's sign-in. Every new mailbox comes back with an
+invitation link (`APP_URL/invitation/accept?token=...`); the Owner or Admin
+presses **Copy Invitation Link** and passes it on. **Generate New Link** replaces
+it, and the old link stops working. **Credentials** cannot set a password while
+the mailbox is still "Setup Pending" (`INVITATION_PENDING`); the person sets it
+from the link.
+
+System email is still needed for sign-up verification codes, password reset,
+MFA-related emails, and invitations sent from **Users & Roles**. With it off,
+Users & Roles shows the admin the invitation link to pass on instead.
 
 Both options use the same settings:
 
@@ -82,6 +90,6 @@ Outlook and phone apps (IMAP) and for domains not on Cloudflare. See
 ## 7. Check it worked
 
 1. `curl -fsS https://api.zoikomail.com/api/ready` answers READY.
-2. Create one test mailbox on a verified domain. Expect success and status "Invitation pending".
-3. With email off, the result shows an invitation link to copy. With email on, the person receives an email.
-4. Open the link, set a password, and sign in at the member sign-in.
+2. Create one test mailbox on a verified domain. Expect success, status "Setup Pending", and an invitation link to copy. No email is sent.
+3. Press **Generate New Link** once. The first link should now be refused.
+4. Open the new link. It says "You're invited to Zoiko Mail". Choose a password, then sign in at `/login/member` with the new mailbox address. The status becomes "Ready".

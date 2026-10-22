@@ -16,6 +16,7 @@ import {
   type InvitationLetter,
 } from "./invitation-letter.js";
 import { logger } from "../../config/logger.js";
+import { addressManagedElsewhere, claimElsewhere } from "./address-claims.js";
 import type { AcceptInvitationInput, AddMemberInput, CreateInvitationInput, PreviewInvitationInput, UpdateMemberInput } from "./membership.schema.js";
 
 interface ActorContext {
@@ -289,6 +290,10 @@ export class MembershipService {
     context: ActorContext
   ) {
     assertCanInviteRole(context.role, input.role);
+    // The account behind an address is shared by every workspace. One whose
+    // domain or mailbox belongs to another workspace is not this one's to
+    // invite: the invitation would let this workspace set its password.
+    if (await claimElsewhere(input.email, context.tenantId)) throw addressManagedElsewhere(input.email);
     const invitationToken = generateLinkToken();
     const inviteToken = hashToken(invitationToken);
     const inviteExpiresAt = new Date(
@@ -379,10 +384,18 @@ export class MembershipService {
 
     const invitationToken = generateLinkToken();
     const expiresAt = new Date(Date.now() + env.INVITATION_EXPIRES_IN_HOURS * 60 * 60 * 1000);
-    await tx.tenantMembership.update({
-      where: { id: invitation.id },
+    // Conditional on still being INVITED: a claim that lands between the read
+    // above and this write must not have its accepted membership re-armed with
+    // a fresh token (the admin would be handed a link that is already spent).
+    const rotated = await tx.tenantMembership.updateMany({
+      where: { id: invitation.id, status: "INVITED" },
       data: { inviteToken: hashToken(invitationToken), inviteExpiresAt: expiresAt },
     });
+    if (rotated.count === 0) {
+      throw new AppError("This invitation has already been accepted", 409, ErrorCodes.CONFLICT, {
+        reason: "INVITATION_NOT_PENDING",
+      });
+    }
     await this.audit(tx, context, "MEMBERSHIP_INVITATION_REISSUED", invitation.id, {
       expiresAt: expiresAt.toISOString(),
     });
@@ -550,10 +563,9 @@ export class MembershipService {
         throw new AppError("Invitation is invalid", 401, ErrorCodes.INVITATION_INVALID);
       }
       if (!invitation.inviteExpiresAt || invitation.inviteExpiresAt <= new Date()) {
-        await tx.tenantMembership.update({
-          where: { id: invitation.id },
-          data: { status: "REMOVED", inviteToken: null, inviteExpiresAt: null },
-        });
+        // Refused, and left as it is: an admin can renew it with a new link.
+        // (Writing REMOVED here never took effect anyway — the throw rolls the
+        // transaction back — and REMOVED is kept for an admin's own decision.)
         throw new AppError("Invitation has expired", 410, ErrorCodes.INVITATION_EXPIRED);
       }
       if (invitation.tenant.status !== "ACTIVE") {
@@ -667,10 +679,9 @@ export class MembershipService {
       }
 
       if (!invitation.inviteExpiresAt || invitation.inviteExpiresAt <= new Date()) {
-        await tx.tenantMembership.update({
-          where: { id: invitation.id },
-          data: { status: "REMOVED", inviteToken: null, inviteExpiresAt: null },
-        });
+        // Refused, and left as it is: an admin can renew it with a new link.
+        // (Writing REMOVED here never took effect anyway — the throw rolls the
+        // transaction back — and REMOVED is kept for an admin's own decision.)
         throw new AppError("Invitation has expired", 410, ErrorCodes.INVITATION_EXPIRED);
       }
       if (invitation.tenant.status !== "ACTIVE") {
@@ -718,6 +729,24 @@ export class MembershipService {
       );
       return membership;
     });
+  }
+
+  /**
+   * End a pending invitation from inside the caller's transaction — used when
+   * the mailbox it was issued for is deleted, so its setup link stops working
+   * with it. An accepted membership is left alone: the person keeps their
+   * account, just not that mailbox. Returns whether anything was revoked.
+   */
+  async revokePendingInvitation(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    membershipId: string
+  ): Promise<boolean> {
+    const revoked = await tx.tenantMembership.updateMany({
+      where: { id: membershipId, tenantId, status: "INVITED" },
+      data: { status: "REMOVED", inviteToken: null, inviteExpiresAt: null },
+    });
+    return revoked.count > 0;
   }
 
   async cancelInvitation(id: string, context: ActorContext): Promise<void> {

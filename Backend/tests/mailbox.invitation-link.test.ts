@@ -8,7 +8,7 @@ import { hashToken } from "../src/common/utils/tokenHash.js";
 import { mailboxProvisioningService } from "../src/modules/mail/mailbox-provisioning.service.js";
 import { stalwartClient } from "../src/modules/stalwart/stalwart.client.js";
 import { StalwartError, type MailHostingProvider } from "../src/modules/stalwart/stalwart.types.js";
-import { authHeader, loginUser, registerUser } from "./helpers.js";
+import { authHeader, loginUser, registerUser, stepUpHeader } from "./helpers.js";
 
 const app = createApp();
 const GIB = 1024 ** 3;
@@ -391,5 +391,112 @@ describe("who may create and regenerate setup links", () => {
     const res = await provision(mine.owner.accessToken, mine).expect(201);
     const refused = await regenerate(theirs.owner.accessToken, res.body.data.id).expect(404);
     expect(JSON.stringify(refused.body)).not.toContain("invitation/accept");
+  });
+});
+
+describe("a setup link cannot be taken over from outside", () => {
+  it("refuses another workspace inviting an address on a domain this one verified", async () => {
+    const mine = await workspace();
+    await provision(mine.owner.accessToken, mine).expect(201);
+    const other = await workspace();
+
+    // The attack: invite the pending address elsewhere, then use that
+    // workspace's own link to set the password on the shared account.
+    const refused = await request(app)
+      .post("/api/v1/membership/invitations")
+      .set(authHeader(other.owner.accessToken))
+      .send({ email: `support@${mine.domainName}`, role: "MEMBER" })
+      .expect(409);
+    expect(refused.body.error.details.reason).toBe("ADDRESS_MANAGED_ELSEWHERE");
+    expect(JSON.stringify(refused.body)).not.toContain("invitation/accept");
+    // Before any mailbox exists, too: the domain alone is enough.
+    await request(app)
+      .post("/api/v1/membership/invitations")
+      .set(authHeader(other.owner.accessToken))
+      .send({ email: `nobody-yet@${mine.domainName}`, role: "MEMBER" })
+      .expect(409);
+  });
+
+  it("does not give a mailbox to an account that belongs to another workspace", async () => {
+    const w = await workspace();
+    // Somebody already signs in elsewhere with this address, and not here.
+    await registerUser(app, { email: `boss@${w.domainName}` });
+    const refused = await provision(w.owner.accessToken, w, { localPart: "boss" }).expect(409);
+    expect(refused.body.error.details.reason).toBe("ADDRESS_MANAGED_ELSEWHERE");
+    expect(await prisma.mailbox.count({ where: { tenantId: w.owner.tenantId } })).toBe(0);
+  });
+
+  it("does not let self-registration claim an account waiting for its setup link", async () => {
+    const w = await workspace();
+    const res = await provision(w.owner.accessToken, w).expect(201);
+    const refused = await request(app)
+      .post("/api/v1/auth/register")
+      .send({ email: `support@${w.domainName}`, password: "Squatter-Passw0rd!", displayName: "Squatter" })
+      .expect(409);
+    expect(refused.body.error.details.reason).toBe("SETUP_LINK_REQUIRED");
+    // The real person's link still works.
+    await claim(tokenOf(res.body.data.invitationLink)).expect(200);
+  });
+
+  it("does not reopen an invitation an admin cancelled", async () => {
+    const w = await workspace();
+    const res = await provision(w.owner.accessToken, w).expect(201);
+    const mailbox = await prisma.mailbox.findUniqueOrThrow({ where: { id: res.body.data.id } });
+    await request(app)
+      .delete(`/api/v1/membership/invitations/${mailbox.membershipId}`)
+      .set(authHeader(w.owner.accessToken))
+      .expect((r) => expect(r.status).toBeLessThan(300));
+
+    const refused = await regenerate(w.owner.accessToken, res.body.data.id).expect(409);
+    expect(refused.body.error.details.reason).toBe("INVITATION_NOT_PENDING");
+    const membership = await prisma.tenantMembership.findUniqueOrThrow({ where: { id: mailbox.membershipId! } });
+    expect(membership.status).toBe("REMOVED");
+  });
+
+  it("ends the setup link when its mailbox is deleted", async () => {
+    const w = await workspace();
+    const res = await provision(w.owner.accessToken, w).expect(201);
+    const token = tokenOf(res.body.data.invitationLink);
+    await request(app)
+      .delete(`/api/v1/mail/admin/mailboxes/${res.body.data.id}`)
+      .set(authHeader(w.owner.accessToken))
+      .set(await stepUpHeader(app, w.owner.accessToken))
+      .expect((r) => expect(r.status).toBeLessThan(300));
+
+    await lookup(token).expect(401);
+    await claim(token).expect(401);
+    // Recreating the address starts a fresh setup, not the old one.
+    const again = await provision(w.owner.accessToken, w).expect(201);
+    expect(again.body.data).toMatchObject({ status: "INVITATION_PENDING", passwordSetup: "PENDING" });
+    await claim(tokenOf(again.body.data.invitationLink)).expect(200);
+  });
+
+  it("leaves an expired invitation pending, so a new link renews it", async () => {
+    const w = await workspace();
+    const res = await provision(w.owner.accessToken, w).expect(201);
+    await prisma.tenantMembership.updateMany({
+      where: { tenantId: w.owner.tenantId, status: "INVITED" },
+      data: { inviteExpiresAt: new Date(Date.now() - 1000) },
+    });
+    await claim(tokenOf(res.body.data.invitationLink)).expect(410);
+    const membership = await prisma.tenantMembership.findFirstOrThrow({
+      where: { tenantId: w.owner.tenantId, user: { email: `support@${w.domainName}` } },
+    });
+    expect(membership.status).toBe("INVITED");
+  });
+});
+
+describe("workspace invitations hand over the raw token only when nothing was emailed", () => {
+  it("returns no token or link once the invitation went out by email", async () => {
+    const w = await workspace();
+    mutableEnv.SYSTEM_MAIL_ENABLED = true;
+    vi.spyOn(systemMailer, "sendInvitationEmail").mockResolvedValue(undefined);
+    const res = await request(app)
+      .post("/api/v1/membership/invitations")
+      .set(authHeader(w.owner.accessToken))
+      .send({ email: `emailed-${uid()}@elsewhere.test`, role: "MEMBER" })
+      .expect(201);
+    expect(res.body.data.invitationToken).toBeNull();
+    expect(res.body.data.invitationLink).toBeNull();
   });
 });

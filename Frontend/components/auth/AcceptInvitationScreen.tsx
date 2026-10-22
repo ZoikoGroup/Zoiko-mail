@@ -100,7 +100,9 @@ function Notice({ icon, tone, title, children, action }: {
 function AcceptInvitationInner() {
   const params = useSearchParams();
   const router = useRouter();
-  const token = params.get("token") ?? "";
+  // Read once and held in memory. The token is then taken out of the address
+  // bar (below), so it is not left in browser history or shown on screen.
+  const [token] = useState(() => params.get("token") ?? "");
 
   const [phase, setPhase] = useState<Phase>(!token ? "no-token" : "loading");
   const [invite, setInvite] = useState<InvitationLookup | null>(null);
@@ -115,6 +117,15 @@ function AcceptInvitationInner() {
   // One lookup per token. React StrictMode double-invokes effects in
   // development; a late setState after the second is a harmless no-op.
   const attempted = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!token) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("token")) {
+      url.searchParams.delete("token");
+      window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+    }
+  }, [token]);
 
   useEffect(() => {
     if (!token || attempted.current === token) return;
@@ -144,7 +155,7 @@ function AcceptInvitationInner() {
             await acceptInvitation(token);
             // Sign out so they return with the new membership on their token.
             await logout();
-            window.location.href = "/login";
+            window.location.href = found.role === "MEMBER" ? "/login/member" : "/login";
             return;
           } catch {
             // Expired, or belonging to someone else: the sign-in the
@@ -159,13 +170,17 @@ function AcceptInvitationInner() {
       });
   }, [token]);
 
+  // Members sign in on the Member page (/login/member); everyone else, and
+  // anyone whose invitation could not be read, on the main sign-in page.
+  const signInHref = invite?.role === "MEMBER" ? "/login/member" : "/login";
+
   useEffect(() => {
     if (phase !== "done") return;
     // To sign in, with the password they just chose: it proves the password
     // works before they depend on it, and MFA enrolment lives on that path.
-    const timer = window.setTimeout(() => router.push("/login"), REDIRECT_MS);
+    const timer = window.setTimeout(() => router.push(signInHref), REDIRECT_MS);
     return () => window.clearTimeout(timer);
-  }, [phase, router]);
+  }, [phase, router, signInHref]);
 
   const failing = RULES.filter((rule) => !rule.test(password));
   const mismatch = confirm.length > 0 && password !== confirm;
@@ -312,7 +327,7 @@ function AcceptInvitationInner() {
       )}
 
       {phase === "needs-signin" && (
-        <Notice icon="🔒" tone="info" title="Sign in to accept" action={<Link href="/login" className={primary}>Sign in</Link>}>
+        <Notice icon="🔒" tone="info" title="Sign in to accept" action={<Link href={signInHref} className={primary}>Sign in</Link>}>
           {invite?.email ? (
             <>
               <strong className="break-all">{invite.email}</strong> already has an account. Sign in and accept the invitation
@@ -325,7 +340,7 @@ function AcceptInvitationInner() {
       )}
 
       {phase === "already-accepted" && (
-        <Notice icon="✓" tone="ok" title="This link has already been used" action={<Link href="/login" className={primary}>Sign in</Link>}>
+        <Notice icon="✓" tone="ok" title="This link has already been used" action={<Link href={signInHref} className={primary}>Sign in</Link>}>
           {invite ? (
             <>
               The password for <strong className="break-all">{invite.email}</strong> is already set. Sign in to continue.
@@ -337,33 +352,34 @@ function AcceptInvitationInner() {
       )}
 
       {phase === "done" && (
-        <Notice icon="✓" tone="ok" title="Your password is set" action={<Link href="/login" className={primary}>Continue to sign in</Link>}>
+        <Notice icon="✓" tone="ok" title="Your password is set" action={<Link href={signInHref} className={primary}>Continue to sign in</Link>}>
           {invite ? <>Sign in as <strong className="break-all">{invite.email}</strong>. Taking you there now…</> : "Taking you to sign in…"}
         </Notice>
       )}
 
       {phase === "expired" && (
-        <Notice icon="⌛" tone="warn" title="This link has expired" action={<Link href="/login" className={secondary}>Back to sign in</Link>}>
+        <Notice icon="⌛" tone="warn" title="This link has expired" action={<Link href={signInHref} className={secondary}>Back to sign in</Link>}>
           Setup links stop working after a while, for your security. Ask the administrator who sent it to generate a new link.
         </Notice>
       )}
 
       {phase === "invalid" && (
-        <Notice icon="✗" tone="crit" title="This link is no longer valid" action={<Link href="/login" className={secondary}>Back to sign in</Link>}>
+        <Notice icon="✗" tone="crit" title="This link is no longer valid" action={<Link href={signInHref} className={secondary}>Back to sign in</Link>}>
           It may have been replaced by a newer link or withdrawn. Use the most recent link you were sent, or ask your
           administrator for a new one.
         </Notice>
       )}
 
       {phase === "error" && (
-        <Notice icon="!" tone="crit" title="Something went wrong" action={<Link href="/login" className={secondary}>Back to sign in</Link>}>
+        <Notice icon="!" tone="crit" title="Something went wrong" action={<Link href={signInHref} className={secondary}>Back to sign in</Link>}>
           {errorMsg || "We could not check this link. Try again in a moment."}
         </Notice>
       )}
 
       {phase === "no-token" && (
-        <Notice icon="✗" tone="crit" title="Invalid link" action={<Link href="/login" className={secondary}>Back to sign in</Link>}>
-          This link is incomplete. Copy the whole link you were sent and try again.
+        <Notice icon="✗" tone="crit" title="Invalid link" action={<Link href={signInHref} className={secondary}>Back to sign in</Link>}>
+          This link is incomplete. Open the whole link you were sent again — if you reloaded this page, that is
+          why: the link is only read once, for your security.
         </Notice>
       )}
     </div>

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ShieldQuestion } from "lucide-react";
 
-import { requestSupportAccess, type SupportScope } from "@/lib/support-api";
+import { requestSupportAccess, withdrawSupportAccessRequest, type SupportScope } from "@/lib/support-api";
 import { ApiError } from "@/lib/api-client";
 
 /**
@@ -45,6 +45,148 @@ const SCOPES: Array<{ value: SupportScope; label: string; hint: string }> = [
 
 const WINDOWS = [15, 30, 60, 120, 240];
 
+interface SentRequest {
+  id: string;
+  status: string;
+  reason: string;
+  scopes: SupportScope[];
+  minutes: number;
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  PENDING: "Pending",
+  APPROVED: "Approved",
+  DENIED: "Declined",
+  WITHDRAWN: "Withdrawn",
+};
+
+/**
+ * The request just sent, with the one thing its sender may still do to it.
+ *
+ * Withdrawing needs nobody's approval (the server checks it is this seat's
+ * own request and still PENDING), but it does take a second click: it
+ * removes the request from the owner's queue, and asking again means filling
+ * the form in again.
+ */
+function SentRequestCard({
+  request,
+  onWithdrawn,
+  onAskAgain,
+}: {
+  request: SentRequest;
+  onWithdrawn: (status: string) => void;
+  onAskAgain: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pending = request.status === "PENDING";
+  const withdrawn = request.status === "WITHDRAWN";
+
+  const withdraw = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await withdrawSupportAccessRequest(request.id);
+      onWithdrawn(updated.status || "WITHDRAWN");
+      setConfirming(false);
+    } catch (e) {
+      // A 404 here means the request is no longer pending — most often the
+      // owner decided it in the meantime — and the server's message says so.
+      setError(e instanceof ApiError ? e.readableMessage : "Could not withdraw that request.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mx-auto max-w-lg rounded-2xl border border-slate-200 bg-white p-8 dark:border-slate-800 dark:bg-slate-950">
+      <h2 className="text-center text-lg font-semibold text-slate-900 dark:text-white">
+        {withdrawn ? "Request withdrawn" : "Request sent"}
+      </h2>
+      <p className="mt-2 text-center text-sm text-slate-600 dark:text-slate-300">
+        {withdrawn
+          ? "The owner will no longer see it waiting. Nothing was opened."
+          : "The workspace owner has been notified. Access opens as soon as they approve it, and ends on its own when the window runs out — you will not need to close it."}
+      </p>
+
+      <div
+        data-testid="support-access-request-row"
+        className="mt-5 rounded-lg border border-slate-200 px-4 py-3 text-sm dark:border-slate-800"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <p className="min-w-0 break-words text-slate-800 dark:text-slate-200">{request.reason}</p>
+          <span
+            className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+              pending
+                ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+            }`}
+          >
+            {STATUS_LABEL[request.status] ?? request.status}
+          </span>
+        </div>
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+          {request.scopes.join(", ")} · {request.minutes} minutes
+        </p>
+      </div>
+
+      {error && (
+        <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+          {error}
+        </p>
+      )}
+
+      {pending && !confirming && (
+        <button
+          type="button"
+          onClick={() => setConfirming(true)}
+          className="mt-4 w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900"
+        >
+          Withdraw request
+        </button>
+      )}
+
+      {pending && confirming && (
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">
+          <p className="text-sm text-amber-900 dark:text-amber-200">
+            Withdraw this request? The owner will no longer be able to approve it, and you would
+            have to ask again.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={withdraw}
+              disabled={busy}
+              className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {busy ? "Withdrawing…" : "Yes, withdraw"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              disabled={busy}
+              className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900"
+            >
+              Keep it
+            </button>
+          </div>
+        </div>
+      )}
+
+      {withdrawn && (
+        <button
+          type="button"
+          onClick={onAskAgain}
+          className="mt-4 w-full rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-700"
+        >
+          Ask again
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function RequestAccessPanel({ onRequested }: { onRequested?: () => void }) {
   const [reason, setReason] = useState("");
   const [ticketId, setTicketId] = useState("");
@@ -52,7 +194,10 @@ export function RequestAccessPanel({ onRequested }: { onRequested?: () => void }
   const [minutes, setMinutes] = useState(60);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sent, setSent] = useState(false);
+  // The request this seat just sent. A Support seat cannot list access
+  // requests (that read is the approver's), so this is the one place the
+  // seat sees its own pending request — and so the one place to withdraw it.
+  const [sent, setSent] = useState<SentRequest | null>(null);
 
   const toggle = (s: SupportScope) =>
     setScopes((cur) => (cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s]));
@@ -61,13 +206,13 @@ export function RequestAccessPanel({ onRequested }: { onRequested?: () => void }
     setBusy(true);
     setError(null);
     try {
-      await requestSupportAccess({
+      const created = await requestSupportAccess({
         reason: reason.trim(),
         ticketId: ticketId.trim() || undefined,
         scopes,
         requestedMinutes: minutes,
       });
-      setSent(true);
+      setSent({ id: created.id, status: created.status, reason: reason.trim(), scopes, minutes });
       onRequested?.();
     } catch (e) {
       // readableMessage prefers the server's per-field reason over
@@ -80,13 +225,11 @@ export function RequestAccessPanel({ onRequested }: { onRequested?: () => void }
 
   if (sent) {
     return (
-      <div className="mx-auto max-w-lg rounded-2xl border border-slate-200 bg-white p-8 text-center dark:border-slate-800 dark:bg-slate-950">
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Request sent</h2>
-        <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-          The workspace owner has been notified. Access opens as soon as they approve it, and ends
-          on its own when the window runs out — you will not need to close it.
-        </p>
-      </div>
+      <SentRequestCard
+        request={sent}
+        onWithdrawn={(status) => setSent((cur) => (cur ? { ...cur, status } : cur))}
+        onAskAgain={() => setSent(null)}
+      />
     );
   }
 
