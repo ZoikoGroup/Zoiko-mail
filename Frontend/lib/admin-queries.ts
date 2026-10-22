@@ -193,7 +193,6 @@ interface ApiMailbox {
   invitationError?: string | null;
   membership?: { status?: string; user?: { email?: string; status?: string } } | null;
   workspaces?: MailboxWorkspace[];
-  memberLoginUrl?: string;
 }
 
 export async function fetchMailboxes(): Promise<MailboxDto[]> {
@@ -219,7 +218,6 @@ export async function fetchMailboxes(): Promise<MailboxDto[]> {
     displayName: m.displayName ?? null,
     // Older API builds sent no assignment; the server default is Member only.
     workspaces: m.workspaces?.length ? m.workspaces : ["MEMBER"],
-    memberLoginUrl: m.memberLoginUrl ?? null,
     storageUsedGb: gb(m.storageUsed),
     storageLimitGb: gb(m.storageLimit),
     // The real column now (AC-008). A mailbox with this off is what the
@@ -263,15 +261,6 @@ export async function updateMailboxWorkspaces(
     { method: "PUT", body: { workspaces } }
   );
   return res.workspaces;
-}
-
-/** Replace a mailbox's Member sign-in link; the old one stops working at once. */
-export async function regenerateMemberLoginLink(mailboxId: string): Promise<string> {
-  const res = await apiRequest<{ memberLoginUrl: string }>(
-    `/mail/admin/mailboxes/${encodeURIComponent(mailboxId)}/member-login-link/regenerate`,
-    { method: "POST" }
-  );
-  return res.memberLoginUrl;
 }
 
 /** Whether this mailbox's owner can be given a password here, or only a reset code. */

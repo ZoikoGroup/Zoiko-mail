@@ -301,7 +301,7 @@ export function MailboxesManager({ domainsHref }: { domainsHref: string }) {
                               type="button"
                               className="zoiko-btn sm"
                               onClick={() => setActing({ id: mailbox.id, kind: "memberLogin" })}
-                              title="Copy the Member sign-in link for this mailbox"
+                              title="Copy the Member sign-in link to send with this mailbox address"
                             >
                               Member login
                             </button>

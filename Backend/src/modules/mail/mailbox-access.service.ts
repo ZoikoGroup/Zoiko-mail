@@ -1,6 +1,4 @@
-import { randomUUID } from "node:crypto";
 import type { MembershipRole } from "@prisma/client";
-import { env } from "../../config/env.js";
 import { prisma } from "../../config/prisma.js";
 import { withCrossTenant } from "../../config/tenantScope.js";
 import { logger } from "../../config/logger.js";
@@ -66,15 +64,6 @@ export function resolveWorkspaces(requested: readonly MembershipRole[] | undefin
   }
   // Stored in the UI's order so the same choice always reads the same way.
   return WORKSPACE_SCOPES.filter((scope) => chosen.includes(scope));
-}
-
-/**
- * The Member sign-in link for a mailbox. Composed from the stored key rather
- * than stored whole, so a change of APP_URL (a new domain, staging) moves
- * every link with it instead of leaving stale URLs in the database.
- */
-export function memberLoginUrl(memberLoginKey: string): string {
-  return `${env.APP_URL.replace(/\/+$/, "")}/login/member/${memberLoginKey}`;
 }
 
 export type CredentialMode = "SET_PASSWORD" | "RESET_EMAIL" | "UNAVAILABLE";
@@ -445,35 +434,6 @@ export class MailboxAccessService {
       assignableWorkspaces: assignableWorkspaces(),
       changed: !unchanged,
     };
-  }
-
-  /**
-   * Replace a mailbox's Member sign-in link. The old link stops resolving at
-   * once; anyone holding it is told to ask for the current one. Sessions are
-   * untouched — the link was never a credential.
-   */
-  async regenerateMemberLoginLink(mailboxId: string, actor: MailboxActor) {
-    const mailbox = await this.target(actor.tenantId, mailboxId);
-    const memberLoginKey = randomUUID().replace(/-/g, "");
-    await prisma.$transaction(async (tx) => {
-      await tx.mailbox.update({ where: { id: mailbox.id }, data: { memberLoginKey } });
-      await auditService.record(
-        {
-          tenantId: actor.tenantId,
-          actorUserId: actor.userId,
-          eventType: "MAILBOX_MEMBER_LOGIN_LINK_REGENERATED",
-          targetType: "Mailbox",
-          targetId: mailbox.id,
-          requestId: actor.requestId,
-          ipAddress: actor.ipAddress,
-          userAgent: actor.userAgent,
-          // The address only; the link itself is not worth recording.
-          metadata: { address: mailbox.address },
-        },
-        tx
-      );
-    });
-    return { mailboxId: mailbox.id, memberLoginKey, memberLoginUrl: memberLoginUrl(memberLoginKey) };
   }
 }
 

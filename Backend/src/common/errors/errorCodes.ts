@@ -72,8 +72,6 @@ export const ErrorCodes = {
   INBOUND_NOT_CONFIGURED: "INBOUND_NOT_CONFIGURED",
   INBOUND_SIGNATURE_INVALID: "INBOUND_SIGNATURE_INVALID",
   INBOUND_RECIPIENT_UNKNOWN: "INBOUND_RECIPIENT_UNKNOWN",
-  // A Member sign-in link that matches no mailbox: mistyped, or regenerated.
-  MEMBER_LOGIN_LINK_INVALID: "MEMBER_LOGIN_LINK_INVALID",
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];

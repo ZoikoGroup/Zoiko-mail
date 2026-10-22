@@ -219,6 +219,8 @@ describe("receiving from outside addresses", () => {
     // The client replies from Gmail.
     const replyId = `<${unique("reply")}@gmail.test>`;
     await deliver(
+      // rawMessage({ from: "client@gmail.test", to: a.address, subject: "Re: Quote", body: "Looks good", messageId: replyId, inReplyTo: out.messageId }),
+      // rawMessage({ from: "client@gmail.test", to: a.address, subject: "Re: Quote", body: "Looks good", messageId: replyId, inReplyTo: (out as { internetMessageId: string }).internetMessageId }),
       rawMessage({ from: "client@gmail.test", to: a.address, subject: "Re: Quote", body: "Looks good", messageId: replyId, inReplyTo: (out as unknown as { internetMessageId: string }).internetMessageId }),
       a.address
     ).expect(200);
