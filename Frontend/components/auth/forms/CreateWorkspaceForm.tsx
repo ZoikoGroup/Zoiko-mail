@@ -116,8 +116,8 @@ export default function CreateWorkspaceForm({
       ============================================== */}
 
       <div className="mb-10 text-center">
-        <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-teal-100 dark:bg-teal-900/40">
-          <FaBuilding className="text-2xl text-teal-600 dark:text-teal-400" />
+        <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/40">
+          <FaBuilding className="text-2xl text-blue-600 dark:text-blue-400" />
         </div>
 
         <h2 className="text-3xl font-bold text-slate-900 dark:text-white">
@@ -169,7 +169,7 @@ export default function CreateWorkspaceForm({
                 e.target.value
               )
             }
-            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition-all duration-200 focus:border-teal-500 focus:ring-2 focus:ring-teal-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-teal-400 dark:focus:ring-teal-400"
+            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition-all duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-blue-400 dark:focus:ring-blue-400"
           >
             <option value="starter">
               Starter
@@ -211,7 +211,7 @@ export default function CreateWorkspaceForm({
         <button
           type="submit"
           disabled={workspaceMutation.isPending}
-          className="flex h-12 w-full items-center justify-center rounded-xl bg-teal-600 text-sm font-semibold text-white transition-all duration-300 hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
+          className="flex h-[52px] w-full items-center justify-center rounded-xl bg-blue-600 text-[15px] font-semibold text-white shadow-lg shadow-blue-600/25 transition-all duration-300 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {workspaceMutation.isPending
             ? "Creating Workspace..."
@@ -221,12 +221,12 @@ export default function CreateWorkspaceForm({
             Success Information
         ============================================== */}
 
-        <div className="rounded-xl border border-teal-200 bg-teal-50 p-4 dark:border-teal-900/40 dark:bg-teal-950/20">
-          <h3 className="mb-2 text-sm font-semibold text-teal-700 dark:text-teal-300">
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-900/40 dark:bg-blue-950/20">
+          <h3 className="mb-2 text-sm font-semibold text-blue-700 dark:text-blue-300">
             Almost there!
           </h3>
 
-          <p className="text-sm leading-6 text-teal-700 dark:text-teal-200">
+          <p className="text-sm leading-6 text-blue-700 dark:text-blue-200">
             Your email has already been verified successfully.
             Creating a workspace will complete your account
             setup and activate your organization.
@@ -271,14 +271,14 @@ export default function CreateWorkspaceForm({
             By continuing you agree to our{" "}
             <a
               href="/terms"
-              className="font-medium text-teal-600 hover:underline dark:text-teal-400"
+              className="font-medium text-blue-600 hover:underline dark:text-blue-400"
             >
               Terms of Service
             </a>{" "}
             and{" "}
             <a
               href="/privacy"
-              className="font-medium text-teal-600 hover:underline dark:text-teal-400"
+              className="font-medium text-blue-600 hover:underline dark:text-blue-400"
             >
               Privacy Policy
             </a>

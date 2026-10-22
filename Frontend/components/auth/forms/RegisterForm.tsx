@@ -225,7 +225,7 @@ export default function RegisterForm({
         <button
           type="submit"
           disabled={registerMutation.isPending || googleLoginMutation.isPending}
-          className="w-full rounded-lg bg-teal-600 px-4 py-2.5 font-medium text-white transition-all duration-200 hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
+          className="flex h-[52px] w-full items-center justify-center rounded-xl bg-blue-600 text-[15px] font-semibold text-white shadow-lg shadow-blue-600/25 transition-all duration-300 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {registerMutation.isPending ? "Creating Account..." : "Continue"}
         </button>
@@ -235,7 +235,7 @@ export default function RegisterForm({
             <button
               type="button"
               onClick={onBackToLogin}
-              className="font-semibold text-teal-600 transition hover:text-teal-700 dark:text-teal-400"
+              className="font-semibold text-blue-600 transition hover:text-blue-700 dark:text-blue-400"
             >
               Sign In
             </button>

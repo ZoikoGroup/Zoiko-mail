@@ -1,13 +1,14 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { FaEnvelope, FaUser } from "react-icons/fa";
+import { FaArrowRight, FaEnvelope, FaUser } from "react-icons/fa";
 
 import { ApiError } from "@/lib/api-client";
 import { clearSignOutNotice, peekSignOutNotice } from "@/lib/auth-storage";
 import { useLogin, useGoogleLogin } from "@/lib/auth-hooks";
 
 import {
+  AuthBrand,
   FormInput,
   PasswordInput,
   GoogleSignInButton,
@@ -135,11 +136,13 @@ export default function LoginForm({
       ================================================= */}
 
       <div className="mb-5 text-center">
-        <h2 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-white">
+        <AuthBrand compact />
+
+        <h2 className="mt-4 text-3xl font-bold tracking-tight text-slate-900 dark:text-white">
           Welcome Back
         </h2>
 
-        <p className="mt-3 text-sm leading-6 text-slate-500 dark:text-slate-400">
+        <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
           Sign in to continue to your
           Zoiko Mail workspace.
         </p>
@@ -161,7 +164,7 @@ export default function LoginForm({
             two that can disagree. */}
       </div>
 
-      <div className="relative m-2">
+      <div className="relative my-4">
         <div className="absolute inset-0 flex items-center">
           <div className="w-full border-t border-slate-200 dark:border-slate-700" />
         </div>
@@ -213,7 +216,7 @@ export default function LoginForm({
               onChange={(e) =>
                 setRememberMe(e.target.checked)
               }
-              className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
             />
 
             <span>Remember me</span>
@@ -222,7 +225,7 @@ export default function LoginForm({
           <button
             type="button"
             onClick={onForgotPassword}
-            className="text-sm font-medium text-teal-600 transition hover:text-teal-700 dark:text-teal-400 dark:hover:text-teal-300"
+            className="text-sm font-semibold text-blue-600 transition hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
           >
             Forgot password?
           </button>
@@ -250,21 +253,30 @@ export default function LoginForm({
         <button
           type="submit"
           disabled={loginMutation.isPending || googleLoginMutation.isPending}
-          className="flex h-12 w-full items-center justify-center rounded-xl bg-teal-600 text-sm font-semibold text-white transition-all duration-300 hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
+          className="flex h-[52px] w-full items-center justify-center gap-3 rounded-xl bg-blue-600 text-[15px] font-semibold text-white shadow-lg shadow-blue-600/25 transition-all duration-300 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {loginMutation.isPending
             ? "Signing In..."
             : "Sign In"}
+          {!loginMutation.isPending && <FaArrowRight className="h-3.5 w-3.5" aria-hidden />}
         </button>
 
         {/* The dedicated Member sign-in: same account and password, but it
             always opens the Member workspace (webmail) whatever the role. */}
         <Link
           href="/login/member"
-          className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-teal-600 bg-white text-sm font-semibold text-teal-700 transition-all duration-300 hover:bg-teal-50 dark:border-teal-500 dark:bg-slate-900 dark:text-teal-300 dark:hover:bg-slate-800"
+          className="group flex items-center gap-4 rounded-xl border border-slate-200 bg-white px-5 py-3.5 transition hover:border-blue-300 hover:bg-blue-50/50 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-700 dark:hover:bg-slate-800"
         >
-          <FaUser className="h-3.5 w-3.5" aria-hidden />
-          Login as Member/User
+          <FaUser className="h-5 w-5 shrink-0 text-blue-600 dark:text-blue-400" aria-hidden />
+          <span className="flex-1 text-left">
+            <span className="block text-sm font-semibold text-slate-900 dark:text-white">
+              Login as Member/User
+            </span>
+            <span className="block text-sm text-slate-500 dark:text-slate-400">
+              Go straight to your mailbox
+            </span>
+          </span>
+          <FaArrowRight className="h-3.5 w-3.5 text-slate-500 transition group-hover:translate-x-0.5 group-hover:text-blue-600" aria-hidden />
         </Link>
       </form>
 
@@ -277,7 +289,7 @@ export default function LoginForm({
           <button
             type="button"
             onClick={onRegister}
-            className="font-semibold text-teal-600 transition-colors hover:text-teal-700 dark:text-teal-400 dark:hover:text-teal-300"
+            className="font-semibold text-blue-600 transition-colors hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
           >
             Create one
           </button>
@@ -292,14 +304,14 @@ export default function LoginForm({
         By continuing you agree to our{" "}
         <Link
           href="/terms"
-          className="font-medium text-teal-600 hover:underline dark:text-teal-400"
+          className="font-medium text-blue-600 hover:underline dark:text-blue-400"
         >
           Terms of Service
         </Link>{" "}
         and{" "}
         <Link
           href="/privacy"
-          className="font-medium text-teal-600 hover:underline dark:text-teal-400"
+          className="font-medium text-blue-600 hover:underline dark:text-blue-400"
         >
           Privacy Policy
         </Link>

@@ -23,21 +23,22 @@ export default function FormInput({
       </label>
 
       <div
-        className={`flex items-center rounded-lg border bg-white  transition-all duration-200
+        // Focus colour comes from AuthLayout's --auth-focus; teal elsewhere.
+        className={`flex items-center overflow-hidden rounded-xl border bg-white  transition-all duration-200
         ${
           error
             ? "border-red-500 focus-within:ring-2 focus-within:ring-red-500"
-            : "border-slate-300 focus-within:border-teal-500 focus-within:ring-2 focus-within:ring-teal-500"
+            : "border-slate-200 focus-within:border-[color:var(--auth-focus,#14b8a6)] focus-within:ring-1 focus-within:ring-[color:var(--auth-focus,#14b8a6)]"
         }
         dark:border-slate-700 dark:bg-slate-900`}
       >
         {Icon && (
-          <Icon className="ml-3 shrink-0 text-slate-400 dark:text-slate-500" />
+          <Icon className="ml-4 shrink-0 text-slate-500 dark:text-slate-500" />
         )}
 
         <input
           {...props}
-          className={`w-full bg-transparent dark:bg-slate-900 px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:text-white ${className}`}
+          className={`min-w-0 flex-1 bg-transparent dark:bg-slate-900 px-3 py-3 focus-visible:outline-none autofill:shadow-[inset_0_0_0_1000px_#fff] dark:autofill:shadow-[inset_0_0_0_1000px_#0f172a] dark:autofill:[-webkit-text-fill-color:#fff] text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:text-white ${className}`}
         />
       </div>
 

@@ -72,7 +72,8 @@ test("the Member login is email and password only, while the standard login keep
   await expect(page.getByPlaceholder("john@example.com")).toBeVisible();
   await expect(page.getByPlaceholder("Enter your password")).toBeVisible();
   await expect(page.getByText("Continue with Google")).toHaveCount(0);
-  await expect(page.getByText("OR", { exact: true })).toHaveCount(0);
+  // The page's "OR" divider leads to the standard sign-in, not to Google.
+  await expect(page.getByRole("link", { name: /Admin, Owner or Support\?/ })).toHaveAttribute("href", "/login");
   // Google's sign-in client is not even loaded on this page.
   await expect(page.locator('script[src*="accounts.google.com/gsi/client"]')).toHaveCount(0);
 
