@@ -12,6 +12,7 @@ export { default as SetPasswordForm } from "./forms/SetPasswordForm";
 export { default as AuthLayout } from "./layout/AuthLayout";
 export { default as AuthContainer } from "./layout/AuthContainer";
 export { default as AuthShowcase } from "./layout/AuthShowcase";
+export { default as AuthBrand } from "./layout/AuthBrand";
 export { default as VerifyOtpForm } from "./forms/VerifyOtpForm";
 export { default as CreateWorkspaceForm } from "./forms/CreateWorkspaceForm";
 export { default as JoinWorkspaceForm } from "./forms/JoinWorkspaceForm";

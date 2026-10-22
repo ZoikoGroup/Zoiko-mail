@@ -133,9 +133,9 @@ export default function OtpInput({
             transition-all
             duration-200
 
-            focus:border-teal-500
+            focus:border-blue-500
             focus:ring-2
-            focus:ring-teal-500
+            focus:ring-blue-500
 
             disabled:cursor-not-allowed
             disabled:opacity-60
@@ -143,8 +143,8 @@ export default function OtpInput({
             dark:border-slate-700
             dark:bg-slate-900
             dark:text-white
-            dark:focus:border-teal-400
-            dark:focus:ring-teal-400
+            dark:focus:border-blue-400
+            dark:focus:ring-blue-400
           "
         />
       ))}

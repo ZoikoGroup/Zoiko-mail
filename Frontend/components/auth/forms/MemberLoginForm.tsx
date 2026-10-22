@@ -1,13 +1,13 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { FaArrowLeft, FaEnvelope, FaInbox } from "react-icons/fa";
+import { FaArrowRight, FaEnvelope, FaLock, FaUsers } from "react-icons/fa";
 
 import { ApiError } from "@/lib/api-client";
 import { clearSignOutNotice, peekSignOutNotice } from "@/lib/auth-storage";
 import { useLogin } from "@/lib/auth-hooks";
 
-import { FormInput, PasswordInput } from "@/components/auth";
+import { AuthBrand, FormInput, PasswordInput } from "@/components/auth";
 
 type FormErrors = {
   email?: string;
@@ -73,18 +73,19 @@ export default function MemberLoginForm() {
 
   return (
     <>
-      <div className="mb-5 text-center">
-        <span className="inline-flex items-center gap-2 rounded-full bg-teal-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-teal-700 dark:bg-teal-950/50 dark:text-teal-300">
-          <FaInbox className="h-3 w-3" aria-hidden />
+      <div className="mb-6 text-center">
+        <AuthBrand />
+        <span className="mt-4 inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
+          <FaLock className="h-3 w-3" aria-hidden />
           Member workspace
         </span>
         <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 dark:text-white">Member Sign In</h2>
-        <p className="mt-3 text-sm leading-6 text-slate-500 dark:text-slate-400">
+        <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
           Sign in to your mailbox. You&apos;ll go straight to your Member workspace.
         </p>
       </div>
 
-      <form onSubmit={onSubmit} className="space-y-3" aria-label="Member sign in">
+      <form onSubmit={onSubmit} className="space-y-4" aria-label="Member sign in">
         <FormInput
           // The account email or the mailbox address both sign in — an admin
           // usually hands over the mailbox address.
@@ -114,7 +115,7 @@ export default function MemberLoginForm() {
         <div className="flex justify-end">
           <Link
             href="/login?step=forgotPassword"
-            className="text-sm font-medium text-teal-600 transition hover:text-teal-700 dark:text-teal-400 dark:hover:text-teal-300"
+            className="text-sm font-semibold text-blue-600 transition hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
           >
             Forgot password?
           </Link>
@@ -134,21 +135,39 @@ export default function MemberLoginForm() {
         <button
           type="submit"
           disabled={busy}
-          className="flex h-12 w-full items-center justify-center rounded-xl bg-teal-600 text-sm font-semibold text-white transition-all duration-300 hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
+          className="flex h-[52px] w-full items-center justify-center gap-3 rounded-xl bg-blue-600 text-[15px] font-semibold text-white shadow-lg shadow-blue-600/25 transition-all duration-300 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {loginMutation.isPending ? "Signing In..." : "Sign In to Member Workspace"}
+          {!loginMutation.isPending && <FaArrowRight className="h-3.5 w-3.5" aria-hidden />}
         </button>
       </form>
 
-      <div className="mt-4 text-center">
-        <Link
-          href="/login"
-          className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 transition hover:text-teal-700 dark:text-slate-300 dark:hover:text-teal-300"
-        >
-          <FaArrowLeft className="h-3 w-3" aria-hidden />
-          Admin, Owner or Support? Use the standard sign-in
-        </Link>
+      <div className="relative my-5">
+        <div className="absolute inset-0 flex items-center">
+          <div className="w-full border-t border-slate-200 dark:border-slate-700" />
+        </div>
+        <div className="relative flex justify-center">
+          <span className="bg-white px-4 text-sm text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+            OR
+          </span>
+        </div>
       </div>
+
+      <Link
+        href="/login"
+        className="group flex items-center gap-4 rounded-xl border border-slate-200 bg-white px-5 py-4 transition hover:border-blue-300 hover:bg-blue-50/50 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-700 dark:hover:bg-slate-800"
+      >
+        <FaUsers className="h-6 w-6 shrink-0 text-blue-600 dark:text-blue-400" aria-hidden />
+        <span className="flex-1 text-left">
+          <span className="block text-sm font-semibold text-slate-900 dark:text-white">
+            Admin, Owner or Support?
+          </span>
+          <span className="block text-sm text-slate-500 dark:text-slate-400">
+            Use the standard sign-in
+          </span>
+        </span>
+        <FaArrowRight className="h-3.5 w-3.5 text-slate-500 transition group-hover:translate-x-0.5 group-hover:text-blue-600" aria-hidden />
+      </Link>
     </>
   );
 }

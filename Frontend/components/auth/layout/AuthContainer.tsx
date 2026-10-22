@@ -10,9 +10,9 @@ export default function AuthContainer({
   children,
 }: AuthContainerProps) {
   return (
-    <div className="w-full max-w-[520px]">
+    <div className="w-full max-w-[540px]">
       {/* Card */}
-      <div className="rounded-3xl border border-slate-200 bg-white p-2 shadow-xl transition-all duration-300 sm:p-3 lg:p-4 dark:border-slate-800 dark:bg-slate-900 max-h-[95vh] overflow-y-auto">
+      <div className="max-h-[95vh] overflow-y-auto rounded-[28px] border border-white bg-white/95 p-4 shadow-[0_24px_60px_-24px_rgba(30,64,175,0.35)] transition-all duration-300 sm:p-6 lg:p-8 dark:border-slate-800 dark:bg-slate-900">
         {children}
       </div>
     </div>

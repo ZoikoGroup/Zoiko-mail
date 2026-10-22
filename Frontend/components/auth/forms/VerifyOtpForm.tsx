@@ -206,7 +206,7 @@ export default function VerifyOtpForm({
 
       <button
         onClick={onBack}
-        className="mb-6 flex items-center gap-2 text-sm text-slate-500 transition hover:text-teal-600 dark:text-slate-400 dark:hover:text-teal-400"
+        className="mb-6 flex items-center gap-2 text-sm text-slate-500 transition hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400"
       >
         <HiArrowLeft />
 
@@ -214,8 +214,8 @@ export default function VerifyOtpForm({
       </button>
 
       <div className="mb-8 text-center">
-        <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-teal-100 dark:bg-teal-900/40">
-          <MdEmail className="text-3xl text-teal-600 dark:text-teal-400" />
+        <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/40">
+          <MdEmail className="text-3xl text-blue-600 dark:text-blue-400" />
         </div>
 
         <h2 className=" text-2xl md:text-3xl font-bold text-slate-900 dark:text-white">
@@ -262,7 +262,7 @@ export default function VerifyOtpForm({
             verifyMutation.isPending ||
             otp.length !== 6
           }
-          className="flex h-12 w-full items-center justify-center rounded-xl bg-teal-600 text-sm font-semibold text-white transition-all duration-300 hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
+          className="flex h-[52px] w-full items-center justify-center rounded-xl bg-blue-600 text-[15px] font-semibold text-white shadow-lg shadow-blue-600/25 transition-all duration-300 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {verifyMutation.isPending
             ? "Verifying..."
@@ -279,7 +279,7 @@ export default function VerifyOtpForm({
               Didn&apos;t receive the code?
               <br />
 
-              <span className="mt-1 inline-block font-semibold text-teal-600 dark:text-teal-400">
+              <span className="mt-1 inline-block font-semibold text-blue-600 dark:text-blue-400">
                 Resend available in {seconds}s
               </span>
             </p>
@@ -288,7 +288,7 @@ export default function VerifyOtpForm({
               type="button"
               onClick={resendOtp}
               disabled={resendMutation.isPending}
-              className="text-sm font-semibold text-teal-600 transition hover:text-teal-700 disabled:opacity-60 dark:text-teal-400 dark:hover:text-teal-300"
+              className="text-sm font-semibold text-blue-600 transition hover:text-blue-700 disabled:opacity-60 dark:text-blue-400 dark:hover:text-blue-300"
             >
               {resendMutation.isPending
                 ? "Sending..."
@@ -316,7 +316,7 @@ export default function VerifyOtpForm({
           <button
             type="button"
             onClick={onBack}
-            className="text-sm font-medium text-teal-600 transition hover:text-teal-700 dark:text-teal-400 dark:hover:text-teal-300"
+            className="text-sm font-medium text-blue-600 transition hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
           >
             ← Change email address
           </button>
@@ -348,14 +348,14 @@ export default function VerifyOtpForm({
             By continuing you agree to our{" "}
             <a
               href="/terms"
-              className="font-medium text-teal-600 hover:underline dark:text-teal-400"
+              className="font-medium text-blue-600 hover:underline dark:text-blue-400"
             >
               Terms of Service
             </a>{" "}
             and{" "}
             <a
               href="/privacy"
-              className="font-medium text-teal-600 hover:underline dark:text-teal-400"
+              className="font-medium text-blue-600 hover:underline dark:text-blue-400"
             >
               Privacy Policy
             </a>

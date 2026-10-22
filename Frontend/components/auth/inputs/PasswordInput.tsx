@@ -24,26 +24,28 @@ export default function PasswordInput({
       </label>
 
       <div
-        className={`flex items-center rounded-lg border bg-white transition-all duration-200
+        // Focus colour comes from AuthLayout's --auth-focus; teal elsewhere.
+        className={`flex items-center overflow-hidden rounded-xl border bg-white transition-all duration-200
         ${
           error
             ? "border-red-500 focus-within:ring-2 focus-within:ring-red-500"
-            : "border-slate-300 focus-within:border-teal-500 focus-within:ring-2 focus-within:ring-teal-500"
+            : "border-slate-200 focus-within:border-[color:var(--auth-focus,#14b8a6)] focus-within:ring-1 focus-within:ring-[color:var(--auth-focus,#14b8a6)]"
         }
         dark:border-slate-700 dark:bg-slate-900`}
       >
-        <FaLock className="ml-3 shrink-0 text-slate-400 dark:text-slate-500" />
+        <FaLock className="ml-4 shrink-0 text-slate-500 dark:text-slate-500" />
 
         <input
           {...props}
           type={showPassword ? "text" : "password"}
-          className={`w-full bg-transparent px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:text-white ${className}`}
+          className={`min-w-0 flex-1 bg-transparent px-3 py-3 focus-visible:outline-none autofill:shadow-[inset_0_0_0_1000px_#fff] dark:autofill:shadow-[inset_0_0_0_1000px_#0f172a] dark:autofill:[-webkit-text-fill-color:#fff] text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:text-white ${className}`}
         />
 
         <button
           type="button"
           onClick={() => setShowPassword((prev) => !prev)}
-          className="mr-3 text-slate-400 transition hover:text-teal-600 dark:hover:text-teal-400"
+          aria-label={showPassword ? "Hide password" : "Show password"}
+          className="mr-4 text-slate-500 transition hover:text-[color:var(--auth-focus,#0d9488)]"
         >
           {showPassword ? <FaEyeSlash /> : <FaEye />}
         </button>

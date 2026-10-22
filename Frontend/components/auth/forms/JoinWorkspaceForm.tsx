@@ -53,15 +53,15 @@ export default function JoinWorkspaceForm({
     <>
       <button
         onClick={onBack}
-        className="mb-6 flex items-center gap-2 text-sm text-slate-500 transition hover:text-teal-600 dark:text-slate-400 dark:hover:text-teal-400"
+        className="mb-6 flex items-center gap-2 text-sm text-slate-500 transition hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400"
       >
         <HiArrowLeft />
         Back
       </button>
 
       <div className="mb-8 text-center">
-        <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-teal-100 dark:bg-teal-900/40">
-          <MdGroups className="text-3xl text-teal-600 dark:text-teal-400" />
+        <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/40">
+          <MdGroups className="text-3xl text-blue-600 dark:text-blue-400" />
         </div>
 
         <h2 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white">
@@ -82,7 +82,7 @@ export default function JoinWorkspaceForm({
             key={invitation.membershipId}
             className={`flex cursor-pointer items-center justify-between rounded-xl border p-4 transition ${
               selectedId === invitation.membershipId
-                ? "border-teal-600 bg-teal-50 dark:border-teal-500 dark:bg-teal-900/20"
+                ? "border-blue-600 bg-blue-50 dark:border-blue-500 dark:bg-blue-900/20"
                 : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-700 dark:bg-slate-900"
             }`}
           >
@@ -99,7 +99,7 @@ export default function JoinWorkspaceForm({
               name="workspace-invitation"
               checked={selectedId === invitation.membershipId}
               onChange={() => setSelectedId(invitation.membershipId)}
-              className="h-4 w-4 accent-teal-600"
+              className="h-4 w-4 accent-blue-600"
             />
           </label>
         ))}
@@ -114,7 +114,7 @@ export default function JoinWorkspaceForm({
           type="button"
           onClick={join}
           disabled={joinMutation.isPending || !selected}
-          className="flex h-12 w-full items-center justify-center rounded-xl bg-teal-600 text-sm font-semibold text-white transition-all duration-300 hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
+          className="flex h-[52px] w-full items-center justify-center rounded-xl bg-blue-600 text-[15px] font-semibold text-white shadow-lg shadow-blue-600/25 transition-all duration-300 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {joinMutation.isPending
             ? "Joining…"
