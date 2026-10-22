@@ -40,7 +40,7 @@ async function open(page: Page, send: Record<string, unknown>) {
 
 test.describe("invitation link", () => {
   test("is shown once when email is off, and never reaches the address bar", async ({ page }) => {
-    const link = "https://app.test/accept-invitation?token=secret-token-1";
+    const link = "https://app.test/invitation/accept?token=secret-token-1";
     const { dialog, sent } = await open(page, { invitationLink: link, invitationToken: "secret-token-1" });
 
     await dialog.getByRole("button", { name: "Send invitation" }).click();

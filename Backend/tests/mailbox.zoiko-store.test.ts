@@ -3,7 +3,6 @@ import request from "supertest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
 import { env } from "../src/config/env.js";
-import { hashPassword } from "../src/common/utils/password.js";
 import { mailboxProvisioningService } from "../src/modules/mail/mailbox-provisioning.service.js";
 import { stalwartClient } from "../src/modules/stalwart/stalwart.client.js";
 import { ProviderMailService } from "../src/modules/provider-mail/provider-mail.service.js";
@@ -61,21 +60,18 @@ async function workspaceWithDomain() {
   return { owner, domainId: created.body.data.id as string, domainName };
 }
 
-/** An existing account that is an active member of the workspace. */
-async function activeMember(ownerToken: string) {
-  const login = `${unique("person")}@personal.test`;
-  await prisma.appUser.create({
-    data: { email: login, displayName: "Person", passwordHash: await hashPassword(PASSWORD), status: "ACTIVE", emailVerifiedAt: new Date() },
-  });
-  await request(app).post("/api/v1/membership/members").set(authHeader(ownerToken)).send({ email: login, role: "MEMBER" }).expect(201);
-  return login;
-}
-
-const createEmail = (token: string, domainId: string, localPart: string, recoveryEmail: string) =>
+const createEmail = (token: string, domainId: string, localPart: string) =>
   request(app)
     .post("/api/v1/mail/admin/mailboxes/provision")
     .set(authHeader(token))
-    .send({ domainId, localPart, displayName: localPart, quotaBytes: 5 * GIB, initialAccess: "INVITE", recoveryEmail });
+    .send({ domainId, localPart, displayName: localPart, quotaBytes: 5 * GIB, initialAccess: "INVITE" });
+
+/** What the person does with the setup link the admin hands them. */
+const claimLink = (link: string, password: string) =>
+  request(app)
+    .post("/api/v1/membership/invitations/claim")
+    .send({ invitationToken: new URL(link).searchParams.get("token"), password })
+    .expect(200);
 
 const memberLogin = (email: string, password: string) =>
   request(app).post("/api/v1/auth/login").send({ email, password, workspace: "MEMBER" });
@@ -92,13 +88,12 @@ describe("Create Email with Zoiko as the mail store", () => {
 
   it("creates a working mailbox that its owner signs into with the mailbox address, sends from and replies with", async () => {
     const w = await workspaceWithDomain();
-    const infoLogin = await activeMember(w.owner.accessToken);
-    const mgmtLogin = await activeMember(w.owner.accessToken);
-
-    // 1. The admin creates both mailboxes. No mail server is involved.
-    const info = await createEmail(w.owner.accessToken, w.domainId, "info", infoLogin).expect(201);
-    const mgmt = await createEmail(w.owner.accessToken, w.domainId, "management", mgmtLogin).expect(201);
-    expect(info.body.data).toMatchObject({ provider: null, provisioningStatus: null, status: "ACTIVE" });
+    // 1. The admin creates both mailboxes. No mail server is involved, and no
+    //    second address: each comes with a setup link for the admin to share.
+    const info = await createEmail(w.owner.accessToken, w.domainId, "info").expect(201);
+    const mgmt = await createEmail(w.owner.accessToken, w.domainId, "management").expect(201);
+    expect(info.body.data).toMatchObject({ provider: null, provisioningStatus: null, status: "INVITATION_PENDING" });
+    expect(info.body.data.invitationLink).toMatch(/\/invitation\/accept\?token=[A-Za-z0-9_-]{22}$/);
     const infoAddress = `info@${w.domainName}`;
     const mgmtAddress = `management@${w.domainName}`;
 
@@ -108,8 +103,12 @@ describe("Create Email with Zoiko as the mail store", () => {
       include: { membership: { include: { user: true } } },
     });
     expect(stored.address).toBe(infoAddress);
-    expect(stored.membership?.user.email).toBe(infoLogin);
+    expect(stored.membership?.user.email).toBe(infoAddress);
     expect(stored.workspaces).toEqual(["MEMBER"]);
+
+    // Each person opens their setup link and chooses a password.
+    await claimLink(info.body.data.invitationLink, PASSWORD);
+    await claimLink(mgmt.body.data.invitationLink, PASSWORD);
 
     // 3. The admin sets the owner's password (step-up), as on the Mailboxes page.
     await request(app)
@@ -161,8 +160,8 @@ describe("Create Email with Zoiko as the mail store", () => {
 
   it("still blocks mail to outside addresses from a domain whose SPF/DKIM/DMARC are not passing", async () => {
     const w = await workspaceWithDomain();
-    const login = await activeMember(w.owner.accessToken);
-    await createEmail(w.owner.accessToken, w.domainId, "info", login).expect(201);
+    const created = await createEmail(w.owner.accessToken, w.domainId, "info").expect(201);
+    await claimLink(created.body.data.invitationLink, PASSWORD);
     const token = (await memberLogin(`info@${w.domainName}`, PASSWORD).expect(200)).body.data.accessToken as string;
     const draft = await request(app)
       .post("/api/v1/mail/drafts")
@@ -175,21 +174,22 @@ describe("Create Email with Zoiko as the mail store", () => {
 
   it("invites a new person, and the invitation can be resent", async () => {
     const w = await workspaceWithDomain();
-    const created = await createEmail(w.owner.accessToken, w.domainId, "newhire", `${unique("new")}@personal.test`).expect(201);
+    const created = await createEmail(w.owner.accessToken, w.domainId, "newhire").expect(201);
     expect(created.body.data).toMatchObject({ provider: null, provisioningStatus: null, status: "INVITATION_PENDING" });
 
     // Used to be refused as NOT_PROVISIONED: there is no mail server side to wait for.
-    await request(app)
+    const resent = await request(app)
       .post(`/api/v1/mail/admin/mailboxes/${created.body.data.id}/invitation/resend`)
       .set(authHeader(w.owner.accessToken))
       .expect(200);
+    expect(resent.body.data.invitationLink).toMatch(/\/invitation\/accept\?token=[A-Za-z0-9_-]{22}$/);
+    expect(resent.body.data.invitationLink).not.toBe(created.body.data.invitationLink);
   });
 
   it("keeps refusing when the setting is left unset and no mail server is configured", async () => {
     mutableEnv.STALWART_ACCOUNT_PROVISIONING = true;
     const w = await workspaceWithDomain();
-    const login = await activeMember(w.owner.accessToken);
-    const refused = await createEmail(w.owner.accessToken, w.domainId, "info", login).expect(503);
+    const refused = await createEmail(w.owner.accessToken, w.domainId, "info").expect(503);
     expect(refused.body.error.code).toBe("MAIL_HOSTING_NOT_CONFIGURED");
   });
 });

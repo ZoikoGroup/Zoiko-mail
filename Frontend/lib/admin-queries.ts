@@ -191,7 +191,7 @@ interface ApiMailbox {
   provisioningError?: string | null;
   invitationStatus?: InvitationStatus | null;
   invitationError?: string | null;
-  membership?: { status?: string; user?: { email?: string } } | null;
+  membership?: { status?: string; user?: { email?: string; status?: string } } | null;
   workspaces?: MailboxWorkspace[];
 }
 

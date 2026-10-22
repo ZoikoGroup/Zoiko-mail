@@ -45,7 +45,8 @@ export interface ProvisioningOptions {
   domains: ProvisioningDomain[];
   quota: { optionsBytes: number[]; defaultBytes: number | null; maxBytes: number | null };
   mailboxes: { used: number; limit: number | null };
-  invitationDelivery: "EMAIL" | "DISABLED";
+  /** Setup never depends on email: the admin is given a link to share. */
+  invitationDelivery: "LINK";
 }
 
 export interface ProvisionMailboxInput {
@@ -54,7 +55,6 @@ export interface ProvisionMailboxInput {
   displayName: string;
   quotaBytes: number;
   initialAccess: "INVITE";
-  recoveryEmail: string;
   /** Workspace consoles the mailbox opens in. The server defaults to Member alone. */
   workspaces?: MailboxWorkspace[];
 }
@@ -72,11 +72,13 @@ export interface ProvisionedMailbox {
   invitationError: string | null;
   invitationRecipient: string | null;
   membershipStatus: string | null;
+  /** Whether the person has chosen their password yet; null when nobody is set up through it. */
+  passwordSetup?: "PENDING" | "COMPLETED" | null;
   status: MailboxDisplayStatus;
   /**
-   * Present only in the response to creating, retrying or resending, and only
-   * when this deployment cannot email the invitation. A credential: show it
-   * once, never store it.
+   * The setup link. Present only in the response to creating, retrying or
+   * generating a new link, and only while somebody still has to set a password.
+   * A credential: show it once, never store it.
    */
   invitationLink?: string | null;
 }
@@ -153,9 +155,9 @@ export function mailboxDisplayStatus(row: {
 
 export const STATUS_LABEL: Record<MailboxDisplayStatus, string> = {
   DELETING: "Deleting",
-  ACTIVE: "Active",
+  ACTIVE: "Ready",
   PROVISIONING: "Provisioning",
-  INVITATION_PENDING: "Invitation Pending",
+  INVITATION_PENDING: "Setup Pending",
   FAILED: "Failed",
   SUSPENDED: "Suspended",
 };
@@ -200,18 +202,17 @@ export function describeProvisioningError(code: string | null): string {
   }
 }
 
-export function describeInvitation(status: InvitationStatus | null, error: string | null, recipient: string | null): string {
+export function describeInvitation(status: InvitationStatus | null, recipient: string | null): string {
   switch (status) {
+    // SENT and FAILED only appear on rows from when setup went out by email.
     case "SENT":
       return `Invitation sent to ${recipient ?? "the recipient"}.`;
     case "FAILED":
-      return `The invitation to ${recipient ?? "the recipient"} could not be delivered. Resending does not create another mailbox.`;
+      return `The invitation to ${recipient ?? "the recipient"} could not be delivered. Generate a new link to share instead.`;
     case "NOT_REQUIRED":
       return `${recipient ?? "The member"} already belongs to this workspace — the mailbox appears for them directly.`;
     case "PENDING":
-      return error === "SYSTEM_MAIL_DISABLED"
-        ? "Email delivery is turned off on this deployment, so the invitation was not emailed. Use Send invitation to get a link you can pass on yourself."
-        : "The invitation will be sent once the mailbox is provisioned.";
+      return `Waiting for ${recipient ?? "the new user"} to choose a password from their setup link. Generate a new link if they no longer have it.`;
     default:
       return "";
   }
@@ -238,12 +239,5 @@ export function localPartProblem(value: string): string | null {
     return "Use letters, numbers, dots, hyphens or underscores, starting and ending with a letter or number.";
   }
   if (RESERVED.has(v)) return `${v}@ is reserved for the mail system.`;
-  return null;
-}
-
-export function emailProblem(value: string): string | null {
-  const v = value.trim();
-  if (!v) return "Enter the address the invitation should go to.";
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return "Enter a valid email address.";
   return null;
 }

@@ -64,7 +64,7 @@ export const claimInvitationSchema = z.object({
 
 export const acceptInvitationSchema = z
   .object({
-    invitationToken: z.string().min(32).max(512).optional(),
+    invitationToken: z.string().min(16).max(512).optional(),
     membershipId: z.string().uuid().optional(),
   })
   .refine((v) => v.invitationToken || v.membershipId, {

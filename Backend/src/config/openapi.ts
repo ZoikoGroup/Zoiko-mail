@@ -272,6 +272,50 @@ export const openApiDocument = {
         responses: { "201": ok("Invitation created; raw token is returned once"), "409": { $ref: "#/components/responses/Conflict" } },
       },
     },
+    "/api/v1/membership/invitations/lookup": {
+      post: {
+        tags: ["Memberships"], summary: "Look up an invitation by its token (public, rate limited)",
+        description: "Sent with `Cache-Control: no-store` and `Referrer-Policy: no-referrer`. The token travels in the body so it stays out of URLs and logs.",
+        requestBody: jsonBody({ type: "object", required: ["token"], properties: { token: { type: "string", minLength: 16, maxLength: 512 } } }),
+        responses: {
+          "200": {
+            description: "Invitation found",
+            content: { "application/json": { schema: { type: "object", properties: { email: { type: "string", format: "email" }, tenantName: { type: "string" }, role: { $ref: "#/components/schemas/MembershipRole" }, needsPassword: { type: "boolean" }, alreadyAccepted: { type: "boolean" } } } } },
+          },
+          "401": ok("Invalid invitation"),
+          "410": ok("Invitation expired"),
+          "429": ok("Too many requests"),
+        },
+      },
+      get: {
+        tags: ["Memberships"], summary: "Look up an invitation by its token in the query (kept for old clients; prefer POST)",
+        parameters: [{ name: "token", in: "query", required: true, schema: { type: "string", minLength: 16, maxLength: 512 } }],
+        responses: { "200": ok("Invitation found"), "401": ok("Invalid invitation"), "410": ok("Invitation expired"), "429": ok("Too many requests") },
+      },
+    },
+    "/api/v1/membership/invitations/claim": {
+      post: {
+        tags: ["Memberships"], summary: "Set the password for an invited account and accept the invitation (public, rate limited)",
+        requestBody: jsonBody({
+          type: "object", required: ["invitationToken", "password"],
+          properties: {
+            invitationToken: { type: "string", minLength: 16, maxLength: 512 },
+            password: { type: "string", minLength: 12, maxLength: 200, description: "At least 12 characters, with an uppercase letter, a lowercase letter and a number" },
+          },
+        }),
+        responses: {
+          "200": {
+            description: "Password set and membership activated",
+            content: { "application/json": { schema: { type: "object", properties: { email: { type: "string", format: "email" }, membership: { type: "object" } } } } },
+          },
+          "400": { $ref: "#/components/responses/ValidationError" },
+          "401": ok("Invalid invitation"),
+          "409": ok("Already accepted (ALREADY_ACCEPTED) or the email already has an account, which must sign in and accept instead (ACCOUNT_ALREADY_EXISTS)"),
+          "410": ok("Invitation expired"),
+          "429": ok("Too many requests"),
+        },
+      },
+    },
     "/api/v1/membership/invitations/accept": {
       post: {
         tags: ["Memberships"], summary: "Accept an invitation as its intended authenticated user", security: bearer,
@@ -1373,8 +1417,8 @@ export const openApiDocument = {
     "/api/v1/mail/admin/mailboxes/provision": {
       post: {
         tags: ["Mail"],
-        summary: "Create a hosted mailbox on the mail server and invite its owner (OWNER/ADMIN)",
-        description: "Requires an Idempotency-Key header. 201 when the mail server confirmed the account; 202 when the record exists but provisioning failed or was interrupted — retry it with the retry endpoint, which never creates a second account.",
+        summary: "Create a hosted mailbox on the mail server and issue its setup link (OWNER/ADMIN)",
+        description: "Requires an Idempotency-Key header. 201 when the mail server confirmed the account; 202 when the record exists but provisioning failed or was interrupted — retry it with the retry endpoint, which never creates a second account. The new address is the person's sign-in. The response always carries `invitationLink` for the admin to copy and share; nothing is emailed.",
         operationId: "provisionMailbox", security: bearer,
         requestBody: {
           required: true,
@@ -1382,14 +1426,13 @@ export const openApiDocument = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["domainId", "localPart", "displayName", "quotaBytes", "initialAccess", "recoveryEmail"],
+                required: ["domainId", "localPart", "displayName", "quotaBytes", "initialAccess"],
                 properties: {
                   domainId: { type: "string", format: "uuid" },
                   localPart: { type: "string", maxLength: 64 },
                   displayName: { type: "string", maxLength: 120 },
                   quotaBytes: { type: "integer" },
                   initialAccess: { type: "string", enum: ["INVITE"] },
-                  recoveryEmail: { type: "string", format: "email" },
                   firstName: { type: "string" },
                   lastName: { type: "string" },
                 },
@@ -1400,7 +1443,6 @@ export const openApiDocument = {
                 displayName: "Support Team",
                 quotaBytes: 5368709120,
                 initialAccess: "INVITE",
-                recoveryEmail: "john.personal@example.org",
               },
             },
           },
@@ -1439,15 +1481,15 @@ export const openApiDocument = {
     },
     "/api/v1/mail/admin/mailboxes/{mailboxId}/invitation/resend": {
       post: {
-        tags: ["Mail"], summary: "Send a fresh access invitation for a provisioned mailbox (OWNER/ADMIN)",
+        tags: ["Mail"], summary: "Generate a new setup link for a mailbox whose setup is pending (OWNER/ADMIN)",
+        description: "Returns a new `invitationLink` for the admin to copy and share. The previous link stops working. Nothing is emailed.",
         operationId: "resendMailboxInvitation", security: bearer,
         parameters: [{ name: "mailboxId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
         responses: {
-          "200": ok("Invitation re-issued; see invitationStatus"),
+          "200": ok("New setup link issued; returned as invitationLink"),
           "403": { $ref: "#/components/responses/Forbidden" },
           "404": { $ref: "#/components/responses/NotFound" },
-          "409": ok("Not provisioned yet, or the invitation was already accepted"),
-          "429": ok("Sent too recently"),
+          "409": ok("Not provisioned yet, or setup was already completed"),
         },
       },
     },

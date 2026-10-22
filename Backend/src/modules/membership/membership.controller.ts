@@ -45,8 +45,21 @@ export const add = asyncHandler(async (req: Request, res: Response) => {
 export const createInvitation = asyncHandler(async (req: Request, res: Response) => {
   res.locals.redactFromReplay = ["invitationToken", "invitationLink"];
   const invitation = await membershipService.createInvitation(req.body, requestContext(req));
-  const invitationLink = env.SYSTEM_MAIL_ENABLED ? null : membershipService.acceptUrl(invitation.invitationToken);
-  sendSuccess(res, 201, { ...invitation, invitationLink }, req.requestId);
+  // The raw token and link go back only when nothing was emailed — then the
+  // admin is the one passing them on. When the email went out, the inviter
+  // has no reason to hold a credential meant for the invitee's mailbox.
+  const { invitationToken, ...rest } = invitation;
+  const handedOver = !env.SYSTEM_MAIL_ENABLED;
+  sendSuccess(
+    res,
+    201,
+    {
+      ...rest,
+      invitationToken: handedOver ? invitationToken : null,
+      invitationLink: handedOver ? membershipService.acceptUrl(invitationToken) : null,
+    },
+    req.requestId
+  );
 });
 
 // 200, not 201: nothing is created. Drafting a letter for review is a read of
@@ -56,12 +69,34 @@ export const previewInvitation = asyncHandler(async (req: Request, res: Response
   sendSuccess(res, 200, { letter }, req.requestId);
 });
 
+/**
+ * Responses that answer for an invitation token are never cached, and the
+ * page that made the request is not passed on in a Referer header.
+ */
+function noStore(res: Response) {
+  res.set("Cache-Control", "no-store");
+  res.set("Pragma", "no-cache");
+  res.set("Referrer-Policy", "no-referrer");
+}
+
+/** Kept for links and clients that still send the token in the query string. */
 export const lookupInvitation = asyncHandler(async (req: Request, res: Response) => {
+  noStore(res);
   const token = String((req.query as { token?: string }).token ?? "");
   sendSuccess(res, 200, await membershipService.lookupInvitation(token), req.requestId);
 });
 
+/**
+ * The same lookup with the token in the body. Preferred: a query string is
+ * written to proxy and load-balancer access logs, a request body is not.
+ */
+export const lookupInvitationByBody = asyncHandler(async (req: Request, res: Response) => {
+  noStore(res);
+  sendSuccess(res, 200, await membershipService.lookupInvitation(String(req.body.token)), req.requestId);
+});
+
 export const claimInvitation = asyncHandler(async (req: Request, res: Response) => {
+  noStore(res);
   const result = await membershipService.claimInvitation(req.body, {
     userId: "",
     requestId: req.requestId,

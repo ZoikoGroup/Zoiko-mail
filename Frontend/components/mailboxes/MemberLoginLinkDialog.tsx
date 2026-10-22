@@ -90,6 +90,12 @@ export function MemberLoginLinkDialog({
             Your browser blocked copying. Select the link above and copy it with Ctrl+C.
           </p>
         )}
+        {!shared && (
+          <p className="text-[11.5px] text-[var(--ink3)]">
+            This is for everyday sign-in. Someone who has not set a password yet needs their invitation link
+            instead — use Generate new link on the mailbox.
+          </p>
+        )}
       </div>
     </Modal>
   );

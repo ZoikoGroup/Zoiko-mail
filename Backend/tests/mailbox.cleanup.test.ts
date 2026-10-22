@@ -150,7 +150,6 @@ async function hostedMailbox(local = "john") {
   const res = await provision(w.owner.accessToken, {
     domainId: w.domainId,
     localPart: local,
-    recoveryEmail: `${local}.${w.suffix}@elsewhere.test`,
   }).expect(201);
   const mailboxId = res.body.data.id as string;
   const row = await prisma.mailbox.findUniqueOrThrow({ where: { id: mailboxId } });
@@ -426,7 +425,6 @@ describe("the cleanup worker", () => {
     const again = await provision(m.w.owner.accessToken, {
       domainId: m.w.domainId,
       localPart: "recreate",
-      recoveryEmail: `recreate.two.${m.w.suffix}@elsewhere.test`,
     }).expect(201);
     expect(again.body.data.id).not.toBe(m.mailboxId);
     expect(host.accounts.size).toBe(1);

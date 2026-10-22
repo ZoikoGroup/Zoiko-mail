@@ -1002,6 +1002,18 @@ export async function requestSupportAccess(input: RequestAccessInput): Promise<{
   });
 }
 
+/**
+ * The requester changing their mind. Only the seat that asked may withdraw,
+ * and only while the request is still PENDING — the server answers 404 for
+ * anything else, including a request the owner has already decided.
+ */
+export async function withdrawSupportAccessRequest(requestId: string): Promise<{ id: string; status: string }> {
+  return apiRequest<{ id: string; status: string }>(
+    `/support/access-requests/${encodeURIComponent(requestId)}/withdraw`,
+    { method: "POST" }
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Tenant-scoped tickets (own workspace). These use the tenant access token.
 // ---------------------------------------------------------------------------

@@ -89,7 +89,10 @@ export interface InvitationLookup {
 
 /** What this link is for, asked before anyone has a session. */
 export async function lookupInvitation(token: string): Promise<InvitationLookup> {
-  return apiRequest(`/membership/invitations/lookup?token=${encodeURIComponent(token)}`);
+  // In the body, not the query string: URLs end up in proxy access logs.
+  // No session either way — the token is the credential, and a stale session
+  // left in this browser by somebody else must not turn a 401 into a sign-out.
+  return apiRequest("/membership/invitations/lookup", { method: "POST", body: { token }, auth: false });
 }
 
 /** Choose a password and join. No session is issued; the next step is signing in. */
@@ -100,6 +103,7 @@ export async function claimInvitation(
   return apiRequest("/membership/invitations/claim", {
     method: "POST",
     body: { invitationToken, password },
+    auth: false,
   });
 }
 
@@ -703,7 +707,7 @@ export async function getAdminMailboxes(): Promise<Mailbox[]> {
     provisioningError?: string | null;
     invitationStatus?: InvitationStatus | null;
     invitationError?: string | null;
-    membership: { user: { displayName: string; email?: string }; userId: string; status?: string } | null;
+    membership: { user: { displayName: string; email?: string; status?: string }; userId: string; status?: string } | null;
   }>>("/mail/admin/mailboxes");
   return res.map((m) => ({
     id: m.id,

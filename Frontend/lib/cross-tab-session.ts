@@ -42,6 +42,7 @@ const ACCOUNT_PAGES = [
   "/select-workspace",
   "/create-workspace",
   "/accept-invitation",
+  "/invitation",
   "/auth-status",
   "/forgot-password",
   "/reset-password",

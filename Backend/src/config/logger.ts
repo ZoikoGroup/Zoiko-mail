@@ -27,6 +27,11 @@ const REDACT_LEAVES = [
   "privateKey",
   "dkimPrivateKey",
   "inviteToken",
+  // Setup and invitation links carry their token in the URL.
+  "invitationToken",
+  "invitationLink",
+  "acceptUrl",
+  "token",
   "verificationToken",
   "signingSecret",
   "otp",

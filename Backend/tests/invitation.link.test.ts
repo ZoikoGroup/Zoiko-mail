@@ -43,7 +43,7 @@ describe("the invitation link, when email delivery is off", () => {
 
     const res = await invite(owner.accessToken, email).expect(201);
     const link = res.body.data.invitationLink as string;
-    expect(link.startsWith(`${env.APP_URL}/accept-invitation?token=`)).toBe(true);
+    expect(link).toMatch(new RegExp(`^${env.APP_URL}/invitation/accept\\?token=[A-Za-z0-9_-]{22}$`));
     expect(tokenOf(link)).toBe(res.body.data.invitationToken);
 
     // No email, no account yet: the link alone is enough to set a password and join.
@@ -119,6 +119,6 @@ describe("the invitation link, when email delivery is off", () => {
 
     const refused = await invite(login.accessToken as string, `il-x-${uid()}@zoiko.test`);
     expect(refused.status).toBe(403);
-    expect(JSON.stringify(refused.body)).not.toContain("accept-invitation");
+    expect(JSON.stringify(refused.body)).not.toContain("invitation/accept");
   });
 });

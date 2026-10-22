@@ -118,6 +118,43 @@ services:
       DNS_RECHECK_VERIFIED_MS: ${DNS_RECHECK_VERIFIED_MS:-21600000}
       DNS_FAILURE_THRESHOLD: ${DNS_FAILURE_THRESHOLD:-3}
       DNS_VERIFICATION_WINDOW_HOURS: ${DNS_VERIFICATION_WINDOW_HOURS:-72}
+      # Everything below is optional. Each `${VAR:-}` is read by env.ts through
+      # blankAsUndefined, so an empty value means "not configured" exactly as
+      # an unset one does. Variables env.ts validates as an enum, a boolean or
+      # a non-empty string with a default get that default here instead, so
+      # they are never passed as "".
+      #
+      # Gmail connector (authorization-code flow) and the browser sign-in
+      # client id. The secret and redirect URI require GOOGLE_CLIENT_ID too.
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+      GOOGLE_SIGNIN_CLIENT_ID: ${GOOGLE_SIGNIN_CLIENT_ID:-}
+      # Unset, Gmail watch is skipped and sync runs on the catch-up interval.
+      GMAIL_PUBSUB_TOPIC: ${GMAIL_PUBSUB_TOPIC:-}
+      # Microsoft 365 connector. Optional until the app is provisioned.
+      MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
+      MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
+      MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI:-}
+      MICROSOFT_NOTIFICATION_URL: ${MICROSOFT_NOTIFICATION_URL:-}
+      MICROSOFT_TENANT_ID: ${MICROSOFT_TENANT_ID:-common}
+      # At least 8 characters; env.ts rejects an empty value.
+      MICROSOFT_NOTIFICATION_CLIENT_STATE: ${MICROSOFT_NOTIFICATION_CLIENT_STATE:-zoiko-connector-beta}
+      # Stripe billing (test mode). Checkout, portal and webhook fail closed
+      # until configured.
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      # AI extraction. "mock" makes no external calls; "openai" needs
+      # OPENAI_API_KEY.
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      # Connector tokens at rest (AES-256-GCM): 64 hex characters when set.
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      # Fallback project for SECRET_STORE=gcp when SECRET_MANAGER_PROJECT is
+      # unset. Read straight from process.env; empty is treated as missing.
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
+      FLAG_MFA_ENFORCEMENT_ENABLED: ${FLAG_MFA_ENFORCEMENT_ENABLED:-true}
     ports:
       - "${API_PORT:-5000}:5000"
     volumes:

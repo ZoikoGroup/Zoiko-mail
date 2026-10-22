@@ -73,7 +73,7 @@ STALWART_AUTO_CREATE_DOMAINS=true
    # expect: {"configured":true,"reachable":true,"authenticated":true,"managementCapability":true}
    ```
 
-5. **System mail.** Invitations go out through `SYSTEM_MAIL_ENABLED`/`SYSTEM_MAIL_FROM`. With system mail off, mailboxes are still created and the invitation is recorded as not sent (`SYSTEM_MAIL_DISABLED`); it can be resent once mail is on.
+5. **System mail.** Create Email does not use it. Every new mailbox returns an invitation link (`${APP_URL}/invitation/accept?token=...`) for the Owner or Admin to copy and pass on, whatever `SYSTEM_MAIL_ENABLED` says; nothing is emailed. `SYSTEM_MAIL_ENABLED`/`SYSTEM_MAIL_FROM` are still needed for sign-up verification codes, password reset, MFA-related emails and workspace invitations from Users & Roles (with system mail off, those invitations show the admin the link instead).
 
 Domains are registered in Stalwart on first use with DNS, certificate and DKIM management all set to *Manual*: Zoiko already tells customers what to publish and generates the domain's DKIM key itself. Set `STALWART_AUTO_CREATE_DOMAINS=false` to register domains in Stalwart by hand instead.
 
@@ -84,14 +84,14 @@ A mailbox being provisioned is not the same as mail flowing. Before telling a cu
 Run against a staging Stalwart, never against production mailboxes.
 
 - [ ] `GET /api/stalwart/health?probe=true` reports all four flags true.
-- [ ] Owner: Mailboxes → **+ Create Email** on a verified domain → Review → Confirm. Result says *Mailbox created on the mail server*, status *Invitation Pending*.
+- [ ] Owner: Mailboxes → **+ Create Email** on a verified domain → Review → Confirm. Result says *Mailbox created on the mail server*, status *Setup Pending*, with an invitation link to copy.
 - [ ] The account exists in the Stalwart WebUI with the requested quota, and its description contains `zoiko:mailbox:<id>`.
-- [ ] The invitation arrives at the recipient's existing address (not the new mailbox) and contains no password. Accepting it sets a password; the status becomes *Active*.
+- [ ] No email is sent. Opening the link shows *You're invited to Zoiko Mail*; choosing a password there leads to the member sign-in (`/login/member`), where the new address signs in. The status becomes *Ready*.
 - [ ] Admin can do the same; a Member does not see the button, and `POST /mail/admin/mailboxes/provision` as a Member returns 403.
 - [ ] Creating the same address again is refused (409) and no second Stalwart account appears.
 - [ ] Revoke the API key temporarily: creation returns 202 with *Provisioning failed* (`STALWART_AUTH_FAILED`). Restore the key and press **Retry**: it finishes and creates exactly one account.
-- [ ] **Resend invitation** issues a new link, and the previous link stops working.
-- [ ] `audit_events` shows `MAILBOX_PROVISIONING_REQUESTED`, `MAILBOX_PROVISIONED` and `MAILBOX_INVITATION_SENT`, with no password or token in metadata. API logs contain no API key, password or invitation token.
+- [ ] **Generate New Link** issues a new link, and the previous link stops working.
+- [ ] `audit_events` shows `MAILBOX_PROVISIONING_REQUESTED`, `MAILBOX_PROVISIONED` and `MAILBOX_SETUP_LINK_ISSUED` (and `MAILBOX_SETUP_LINK_REGENERATED` after a new link), with no password or token in metadata. API logs contain no API key, password or invitation token.
 - [ ] Send and receive a test message to and from the new address once the DNS readiness checks pass.
 
 Not handled yet: changing a mailbox's quota updates Zoiko only, not Stalwart; reading and sending mail for these mailboxes still goes through the existing single-account IMAP/SMTP pilot configuration.
