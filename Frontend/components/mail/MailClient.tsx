@@ -27,6 +27,7 @@ import {
   useThread,
   useSnoozeMessage,
   useSharedInboxes,
+  useScheduledMessageAction,
 } from "@/lib/mail-hooks";
 import { ComposeModal } from "@/components/mail/ComposeModal";
 import { Modal } from "@/components/ui/Modal";
@@ -44,7 +45,7 @@ import {
   ChevronLeft, ChevronRight, Paperclip, ArrowLeft, MailOpen,
   Pencil, Reply, ReplyAll, Forward, Search, ShieldAlert, Tag, X,
   SlidersHorizontal, MailCheck, Clock, ChevronDown, MoreHorizontal, FolderInput,
-  Sparkles, ListChecks, MailX, RotateCcw,
+  Sparkles, ListChecks, MailX, RotateCcw, CalendarDays, ArrowDown, Undo2,
 } from "lucide-react";
 import { AttachmentList } from "@/components/mail/AttachmentPreview";
 import { parseMailQuery } from "@/lib/mail-search";
@@ -52,6 +53,12 @@ import { MailRow, hashColor, avatarInitials, formatMailTime } from "@/components
 import { SnoozeMenu } from "@/components/mail/SnoozeMenu";
 import { folderLabel as railFolderLabel } from "@/components/mail/FolderRail";
 import { ApiError } from "@/lib/api-client";
+import {
+  type FolderView,
+  getFolderView, scheduleBucket, daysAgo,
+  CountPill, FolderBanner, Popover, MenuOption, chipClass,
+  StatusTag, StatusCard, RestrictedBody, BlockedAttachments, AletCard, ReschedulePicker,
+} from "@/components/mail/folder-views";
 
 /**
  * Why a folder failed, in words that point at the fix.
@@ -85,6 +92,14 @@ const FOLDERS: { key: MailFolder; label: string; icon: typeof Inbox }[] = [
   { key: "ARCHIVE", label: "Archive", icon: Archive },
   { key: "TRASH", label: "Trash", icon: Trash2 },
   { key: "QUARANTINE", label: "Quarantine", icon: ShieldAlert },
+];
+
+// The folder views' date chip.
+const DATE_PRESETS: { label: string; days: number | null }[] = [
+  { label: "Any date", days: null },
+  { label: "Last 7 days", days: 7 },
+  { label: "Last 30 days", days: 30 },
+  { label: "Last 12 months", days: 365 },
 ];
 
 // Fixed palette for user-created labels (hex required by the backend schema).
@@ -281,6 +296,18 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
   // The live copy (unread count, permissions), not the one captured on click.
   const liveShared = sharedInbox ? sharedInboxes.find((m) => m.id === sharedInbox.id) ?? sharedInbox : null;
 
+  // Scheduled, Archive, Spam and Trash have their own layout (folder-views);
+  // every other folder, and any shared inbox, keeps the plain one.
+  const view = liveShared ? null : getFolderView(folder);
+  const [viewTab, setViewTab] = useState("");
+  const [datePreset, setDatePreset] = useState<number | null>(null);
+  useEffect(() => {
+    setViewTab("");
+    setDatePreset(null);
+  }, [folder, mailboxId]);
+  const activeTab = view ? view.tabs.find((tab) => tab.key === viewTab) ?? view.tabs[0] : null;
+  const tabFilter = activeTab?.filter ?? {};
+
   const advancedActive = fromFilter || toFilter || hasAttachment || dateAfter || dateBefore;
   const clearAdvanced = () => {
     setFromFilter("");
@@ -318,7 +345,7 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
     setPage(1);
     setSelectedId(null);
     setCheckedIds(new Set());
-  }, [starredOnly, unreadOnly, labelFilter, fromFilter, toFilter, hasAttachment, dateAfter, dateBefore, mailboxId, folder]);
+  }, [starredOnly, unreadOnly, labelFilter, fromFilter, toFilter, hasAttachment, dateAfter, dateBefore, mailboxId, folder, viewTab, datePreset]);
 
   const toggleChecked = (messageId: string) =>
     setCheckedIds((prev) => {
@@ -343,22 +370,43 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
   const [confirmEmpty, setConfirmEmpty] = useState(false);
   const emptyTrashMut = useEmptyTrash();
 
+  // A folder view's tab and date chip narrow the list on top of the filter
+  // panel; for dates the latest "after" wins.
+  const effectiveStarred = starredOnly || Boolean(tabFilter.starredOnly);
+  const effectiveUnread = unreadOnly || Boolean(tabFilter.unreadOnly);
+  const effectiveHasAttachment = hasAttachment || Boolean(tabFilter.hasAttachment);
+  const effectiveDateAfter =
+    [dateAfter, datePreset ? daysAgo(datePreset) : "", tabFilter.recentDays ? daysAgo(tabFilter.recentDays) : ""]
+      .filter(Boolean)
+      .sort()
+      .pop() ?? "";
+  const pageSize = view?.pageSize ?? 25;
+
   const { data, isLoading, error, refetch, isFetching } = useMailList({
     folder,
     page,
-    limit: 25,
+    limit: pageSize,
     ...(mailboxId ? { mailboxId } : {}),
     ...(q ? { q } : {}),
-    ...(starredOnly ? { starredOnly: true } : {}),
-    ...(unreadOnly ? { unreadOnly: true } : {}),
+    ...(effectiveStarred ? { starredOnly: true } : {}),
+    ...(effectiveUnread ? { unreadOnly: true } : {}),
     ...(labelFilter && !mailboxId ? { labelId: labelFilter } : {}),
     ...(fromFilter ? { from: fromFilter } : {}),
     ...(toFilter ? { to: toFilter } : {}),
-    ...(hasAttachment ? { hasAttachment: true } : {}),
-    ...(dateAfter ? { dateAfter } : {}),
+    ...(effectiveHasAttachment ? { hasAttachment: true } : {}),
+    ...(effectiveDateAfter ? { dateAfter: effectiveDateAfter } : {}),
     ...(dateBefore ? { dateBefore } : {}),
   });
-  const items = data?.items ?? [];
+  const listed = data?.items ?? [];
+  // The send queue reads soonest first, and its tabs split it by due date.
+  const queue =
+    view?.folder === "SCHEDULED"
+      ? [...listed].sort((a, b) => (a.message.scheduledAt ?? "").localeCompare(b.message.scheduledAt ?? ""))
+      : null;
+  const items = queue
+    ? queue.filter((it) => !tabFilter.bucket || scheduleBucket(it.message.scheduledAt) === tabFilter.bucket)
+    : listed;
+  const nextSendAt = queue?.find((it) => it.message.scheduledAt)?.message.scheduledAt ?? null;
   const pagination = data?.pagination;
   // Bulk actions, labels and drafts act on one's own mailbox only.
   const ownMailbox = !mailboxId;
@@ -382,7 +430,9 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
   };
 
   const activeLabel = labels.find((l) => l.id === labelFilter);
-  const title = liveShared
+  const title = view
+    ? view.title
+    : liveShared
     ? liveShared.address
     : activeLabel
       ? activeLabel.name
@@ -408,6 +458,68 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
     { key: "unread", label: "Unread", active: unreadOnly, count: unreadHere },
     { key: "starred", label: "Starred", active: starredOnly, count: 0 },
   ] as const;
+
+  const listMenu = (
+    <DropdownMenu
+      trigger={
+        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[var(--ink2)] hover:bg-[var(--s2)]">
+          <MoreHorizontal className="h-5 w-5" aria-hidden />
+          <span className="sr-only">More list options</span>
+        </span>
+      }
+    >
+      {ownMailbox && (
+        <DropdownItem onClick={() => setLabelManagerOpen(true)}>
+          <Tag className="h-3.5 w-3.5" /> Manage labels
+        </DropdownItem>
+      )}
+      <DropdownItem onClick={() => void refetch()}>
+        <RotateCcw className="h-3.5 w-3.5" /> Refresh
+      </DropdownItem>
+      {ownMailbox && folder === "TRASH" && (
+        <DropdownItem danger onClick={() => setConfirmEmpty(true)} disabled={emptyTrashMut.isPending}>
+          <Trash2 className="h-3.5 w-3.5" /> Empty trash
+        </DropdownItem>
+      )}
+    </DropdownMenu>
+  );
+
+  const filterButton = (
+    <button
+      onClick={() => setShowAdvanced((s) => !s)}
+      aria-expanded={showAdvanced}
+      aria-label="Filters"
+      title="Filters"
+      className={`inline-flex ${view ? "h-9 w-9" : "h-8 w-8"} shrink-0 items-center justify-center rounded-lg border transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${
+        advancedActive
+          ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent-ink)]"
+          : "border-[var(--border)] text-[var(--ink2)] hover:bg-[var(--s2)]"
+      }`}
+    >
+      <SlidersHorizontal className="h-4 w-4" aria-hidden />
+    </button>
+  );
+
+  const pager = pagination ? (
+    <div className="flex gap-1">
+      <button
+        onClick={() => setPage((p) => Math.max(1, p - 1))}
+        disabled={pagination.page <= 1}
+        aria-label="Previous page"
+        className="zoiko-btn sm disabled:opacity-40"
+      >
+        <ChevronLeft className="h-3.5 w-3.5" />
+      </button>
+      <button
+        onClick={() => setPage((p) => p + 1)}
+        disabled={pagination.page >= pagination.totalPages}
+        aria-label="Next page"
+        className="zoiko-btn sm disabled:opacity-40"
+      >
+        <ChevronRight className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  ) : null;
 
   return (
     <>
@@ -474,6 +586,20 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
           )}
 
           {/* Header: which mailbox, which folder, how much is unread */}
+          {view ? (
+            <>
+              <div className="flex items-start gap-3 px-5 pb-3 pt-4">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[var(--ink3)]">{view.eyebrow}</p>
+                  <h2 className="mt-1 truncate text-[22px] font-semibold leading-tight text-[var(--ink)]">{view.title}</h2>
+                  <p className="mt-1 text-[12.5px] text-[var(--ink3)]">{view.subtitle}</p>
+                </div>
+                {pagination && <div className="pt-6"><CountPill view={view} total={pagination.total} /></div>}
+                <div className="pt-5">{listMenu}</div>
+              </div>
+              <FolderBanner view={view} nextSendAt={nextSendAt} />
+            </>
+          ) : (
           <div className="flex items-start gap-3 px-5 pb-3 pt-4">
             <div className="min-w-0 flex-1">
               <p className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[var(--ink3)]">{eyebrow}</p>
@@ -490,31 +616,33 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
                 ) : null}
               </div>
             </div>
-            <DropdownMenu
-              trigger={
-                <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[var(--ink2)] hover:bg-[var(--s2)]">
-                  <MoreHorizontal className="h-5 w-5" aria-hidden />
-                  <span className="sr-only">More list options</span>
-                </span>
-              }
-            >
-              {ownMailbox && (
-                <DropdownItem onClick={() => setLabelManagerOpen(true)}>
-                  <Tag className="h-3.5 w-3.5" /> Manage labels
-                </DropdownItem>
-              )}
-              <DropdownItem onClick={() => void refetch()}>
-                <RotateCcw className="h-3.5 w-3.5" /> Refresh
-              </DropdownItem>
-              {ownMailbox && folder === "TRASH" && (
-                <DropdownItem danger onClick={() => setConfirmEmpty(true)} disabled={emptyTrashMut.isPending}>
-                  <Trash2 className="h-3.5 w-3.5" /> Empty trash
-                </DropdownItem>
-              )}
-            </DropdownMenu>
+            {listMenu}
           </div>
+          )}
 
           {/* Tabs */}
+          {view ? (
+            <div role="tablist" aria-label="Show" className="flex items-end gap-5 overflow-x-auto border-b border-[var(--border)] px-5 pt-2">
+              {view.tabs.map((tab) => {
+                const active = activeTab?.key === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setViewTab(tab.key)}
+                    className={`-mb-px shrink-0 border-b-2 pb-2.5 pt-1 text-[13px] transition focus:outline-none focus-visible:text-[var(--ink)] ${
+                      active
+                        ? "border-[var(--accent)] font-semibold text-[var(--ink)]"
+                        : "border-transparent text-[var(--ink3)] hover:text-[var(--ink2)]"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
           <div role="tablist" aria-label="Show" className="flex items-end gap-5 border-b border-[var(--border)] px-5">
             {tabs.map((tab) => (
               <button
@@ -541,8 +669,110 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
               </button>
             ))}
           </div>
+          )}
 
           {/* Toolbar: select all, order, filters */}
+          {view ? (
+            <div className="space-y-2.5 border-b border-[var(--border)] px-4 py-3">
+              <div className="flex items-center gap-2">
+                <div className="relative min-w-0 flex-1">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ink3)]" aria-hidden />
+                  <input
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    placeholder={view.searchPlaceholder}
+                    aria-label={view.searchPlaceholder}
+                    className="h-9 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] pl-9 pr-8 text-[13px] text-[var(--ink)] placeholder:text-[var(--ink3)] focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+                  />
+                  {searchInput && (
+                    <button
+                      onClick={() => setSearchInput("")}
+                      aria-label="Clear search"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--ink3)] hover:text-[var(--ink2)]"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+                {filterButton}
+              </div>
+
+              {(view.showDateFilter || (ownMailbox && labels.length > 0)) && (
+                <div className="flex flex-wrap items-center gap-2">
+                  {view.showDateFilter && (
+                    <Popover
+                      label="Date range"
+                      triggerClassName={`${chipClass} ${datePreset ? "border-[var(--accent)] text-[var(--accent-ink)]" : ""}`}
+                      trigger={
+                        <>
+                          <CalendarDays className="h-3.5 w-3.5" aria-hidden />
+                          {DATE_PRESETS.find((preset) => preset.days === datePreset)?.label ?? "Any date"}
+                          <ChevronDown className="h-3 w-3" aria-hidden />
+                        </>
+                      }
+                    >
+                      {(close) =>
+                        DATE_PRESETS.map((preset) => (
+                          <MenuOption
+                            key={preset.label}
+                            active={datePreset === preset.days}
+                            onClick={() => { setDatePreset(preset.days); close(); }}
+                          >
+                            {preset.label}
+                          </MenuOption>
+                        ))
+                      }
+                    </Popover>
+                  )}
+                  {ownMailbox && labels.length > 0 && (
+                    <Popover
+                      label="Label"
+                      triggerClassName={`${chipClass} ${activeLabel ? "border-[var(--accent)] text-[var(--accent-ink)]" : ""}`}
+                      trigger={
+                        <>
+                          {activeLabel ? (
+                            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: activeLabel.color }} aria-hidden />
+                          ) : (
+                            <Tag className="h-3.5 w-3.5" aria-hidden />
+                          )}
+                          {activeLabel?.name ?? "Labels"}
+                          <ChevronDown className="h-3 w-3" aria-hidden />
+                        </>
+                      }
+                    >
+                      {(close) => (
+                        <>
+                          <MenuOption active={!labelFilter} onClick={() => { setLabelFilter(""); close(); }}>All labels</MenuOption>
+                          {labels.map((l) => (
+                            <MenuOption key={l.id} active={labelFilter === l.id} onClick={() => { setLabelFilter(l.id); close(); }}>
+                              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: l.color }} aria-hidden />
+                              {l.name}
+                            </MenuOption>
+                          ))}
+                        </>
+                      )}
+                    </Popover>
+                  )}
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 text-[11.5px] text-[var(--ink3)]">
+                {ownMailbox && (
+                  <input
+                    type="checkbox"
+                    checked={allChecked}
+                    onChange={toggleAllChecked}
+                    aria-label="Select all"
+                    className="h-3.5 w-3.5 rounded accent-[var(--accent)]"
+                  />
+                )}
+                <span className="min-w-0 flex-1 truncate">{view.listCaption}</span>
+                <span className="inline-flex shrink-0 items-center gap-1">
+                  {view.sortLabel} <ArrowDown className="h-3 w-3" aria-hidden />
+                </span>
+              </div>
+            </div>
+          ) : (
           <div className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-2">
             {ownMailbox ? (
               <label className="flex shrink-0 cursor-pointer items-center gap-2 pl-1 text-[12.5px] text-[var(--ink2)]">
@@ -582,20 +812,9 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
             )}
             {hideSearchBox && <div className="min-w-0 flex-1" />}
             <span className="hidden shrink-0 text-[12px] text-[var(--ink3)] sm:inline">Newest first</span>
-            <button
-              onClick={() => setShowAdvanced((s) => !s)}
-              aria-expanded={showAdvanced}
-              aria-label="Filters"
-              title="Filters"
-              className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${
-                advancedActive
-                  ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent-ink)]"
-                  : "border-[var(--border)] text-[var(--ink2)] hover:bg-[var(--s2)]"
-              }`}
-            >
-              <SlidersHorizontal className="h-4 w-4" aria-hidden />
-            </button>
+            {filterButton}
           </div>
+          )}
 
           {/* Filter panel */}
           {showAdvanced && (
@@ -731,7 +950,9 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
                 <MailOpen className="h-10 w-10" aria-hidden />
                 <p className="mt-3 text-sm font-medium text-[var(--ink2)]">Nothing here</p>
                 <p className="text-xs">
-                  {q || advancedActive || unreadOnly || starredOnly ? "No messages match these filters." : "This folder is empty."}
+                  {q || advancedActive || effectiveUnread || effectiveStarred || effectiveDateAfter || effectiveHasAttachment || tabFilter.bucket
+                    ? "No messages match these filters."
+                    : "This folder is empty."}
                 </p>
               </div>
             )}
@@ -755,27 +976,22 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
           </div>
 
           {/* Pagination */}
-          {pagination && pagination.totalPages > 1 && (
+          {view && pagination ? (
+            <div className="flex items-center gap-3 border-t border-[var(--border)] px-4 py-2 text-[11.5px] text-[var(--ink3)]">
+              <span className="min-w-0 flex-1 truncate">{view.footerNote}</span>
+              <span className="shrink-0">
+                {tabFilter.bucket
+                  ? `${items.length} of ${pagination.total}`
+                  : pagination.total === 0
+                    ? "0 of 0"
+                    : `${(pagination.page - 1) * pagination.limit + 1}–${(pagination.page - 1) * pagination.limit + items.length} of ${pagination.total}`}
+              </span>
+              {pagination.totalPages > 1 && pager}
+            </div>
+          ) : pagination && pagination.totalPages > 1 && (
             <div className="flex items-center justify-between border-t border-[var(--border)] px-4 py-2 text-xs text-[var(--ink3)]">
               <span>Page {pagination.page} of {pagination.totalPages}</span>
-              <div className="flex gap-1">
-                <button
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={pagination.page <= 1}
-                  aria-label="Previous page"
-                  className="zoiko-btn sm disabled:opacity-40"
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  onClick={() => setPage((p) => p + 1)}
-                  disabled={pagination.page >= pagination.totalPages}
-                  aria-label="Next page"
-                  className="zoiko-btn sm disabled:opacity-40"
-                >
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </button>
-              </div>
+              {pager}
             </div>
           )}
         </section>
@@ -789,6 +1005,7 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
             <ReadingPane
               messageId={selectedId}
               folder={folder}
+              view={view}
               sharedInbox={liveShared}
               onClose={() => setSelectedId(null)}
               onCompose={openCompose}
@@ -860,12 +1077,15 @@ function ComingSoonButton({ icon: Icon, label, hint }: { icon: typeof Sparkles; 
 function ReadingPane({
   messageId,
   folder,
+  view,
   sharedInbox,
   onClose,
   onCompose,
 }: {
   messageId: string;
   folder: MailListFolder;
+  /** Scheduled, Archive, Spam or Trash layout; null for every other folder. */
+  view: FolderView | null;
   sharedInbox: SharedInbox | null;
   onClose: () => void;
   onCompose: (mode: ComposerMode, source: MailItem | null) => void;
@@ -879,6 +1099,7 @@ function ReadingPane({
   const assignLabel = useAssignLabel();
   const removeLabel = useRemoveLabel();
   const snooze = useSnoozeMessage();
+  const queued = useScheduledMessageAction();
   const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
   const themeRev = useThemeRevision();
   // Called unconditionally, before the early returns below — item is
@@ -928,6 +1149,57 @@ function ReadingPane({
   // A thread with several messages reads as a conversation: older ones
   // collapsed to a line, the latest (or the one clicked) in full.
   const threadMessages = thread && thread.messages.length > 1 ? thread.messages : null;
+  // Spam is read as plain text, with attachments listed but not opened.
+  const restricted = view?.folder === "SPAM";
+  const recipientCount = m.recipients.length;
+  const attachmentCount = m.attachments.length;
+
+  const primaryButton =
+    "inline-flex h-10 items-center gap-2 rounded-lg bg-[var(--accent)] px-4 text-[13px] font-semibold text-white transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)] disabled:opacity-50";
+  const secondaryButton =
+    "inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--border)] px-4 text-[13px] font-medium text-[var(--ink)] transition hover:bg-[var(--s2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-50";
+  const dangerButton =
+    "inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--crit)]/50 px-4 text-[13px] font-medium text-[var(--crit)] transition hover:bg-[var(--crit-soft)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--crit)] disabled:opacity-50";
+
+  const reschedule = (when: Date) =>
+    queued.mutate({ messageId, action: "reschedule", scheduledAt: when.toISOString() });
+
+  const viewTags = view && (
+    <>
+      {view.folder === "SCHEDULED" && (
+        <>
+          <StatusTag><Clock className="h-3 w-3" aria-hidden /> Scheduled</StatusTag>
+          <StatusTag tone="muted">{recipientCount} recipient{recipientCount === 1 ? "" : "s"}</StatusTag>
+        </>
+      )}
+      {view.folder === "ARCHIVE" && <StatusTag><Archive className="h-3 w-3" aria-hidden /> Archived</StatusTag>}
+      {view.folder === "SPAM" && (
+        <>
+          <StatusTag tone="crit"><ShieldAlert className="h-3 w-3" aria-hidden /> Suspected spam</StatusTag>
+          <StatusTag tone="muted">Restricted preview</StatusTag>
+        </>
+      )}
+      {view.folder === "TRASH" && <StatusTag tone="crit"><Trash2 className="h-3 w-3" aria-hidden /> In Trash</StatusTag>}
+      {attachmentCount > 0 && (
+        <StatusTag tone="muted">{attachmentCount} attachment{attachmentCount === 1 ? "" : "s"}</StatusTag>
+      )}
+    </>
+  );
+
+  const statusCard = view && (
+    <StatusCard
+      folder={view.folder}
+      scheduledAt={m.scheduledAt}
+      action={
+        view.folder === "SCHEDULED" && own ? (
+          <ReschedulePicker onPick={reschedule} disabled={queued.isPending} className={`${secondaryButton} h-9 bg-[var(--surface)]`}>
+            Reschedule
+          </ReschedulePicker>
+        ) : undefined
+      }
+    />
+  );
+
   const iconButton =
     "inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] text-[var(--ink2)] transition hover:bg-[var(--s2)] hover:text-[var(--ink)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-50";
 
@@ -1046,19 +1318,29 @@ function ReadingPane({
           )}
         </DropdownMenu>
         <div className="flex-1" />
-        <div className="hidden md:block">
-          <ComingSoonButton icon={Sparkles} label="Summarize with Alet" hint="Alet summaries are coming soon" />
-        </div>
+        {!view && (
+          <div className="hidden md:block">
+            <ComingSoonButton icon={Sparkles} label="Summarize with Alet" hint="Alet summaries are coming soon" />
+          </div>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         {/* Subject and where the message sits */}
         <div className="px-6 pb-2 pt-5 lg:px-8">
+          {view && (
+            <p className="mb-1 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[var(--ink3)]">{view.paneEyebrow}</p>
+          )}
           <div className="flex flex-wrap items-center gap-2.5">
             <h1 className="text-[22px] font-semibold leading-snug text-[var(--ink)]">{m.subject || "(no subject)"}</h1>
-            <span className="rounded-md border border-[var(--border)] bg-[var(--s2)] px-2 py-0.5 text-[11px] font-medium text-[var(--ink2)]">
-              {sharedInbox ? sharedInbox.address.split("@")[0] : folderTitle(folder)}
-            </span>
+            {!view && (
+              <span className="rounded-md border border-[var(--border)] bg-[var(--s2)] px-2 py-0.5 text-[11px] font-medium text-[var(--ink2)]">
+                {sharedInbox ? sharedInbox.address.split("@")[0] : folderTitle(folder)}
+              </span>
+            )}
+          </div>
+          <div className={`flex flex-wrap items-center gap-1.5 ${view || item.labels.length > 0 ? "mt-2" : ""}`}>
+            {viewTags}
             {item.labels.map((l) => (
               <span
                 key={l.id}
@@ -1070,6 +1352,7 @@ function ReadingPane({
             ))}
           </div>
           {threadMessages && <p className="mt-1 text-xs text-[var(--ink3)]">{threadMessages.length} messages in this conversation</p>}
+          {threadMessages && statusCard && <div className="mt-4">{statusCard}</div>}
         </div>
 
         {threadMessages ? (
@@ -1100,14 +1383,23 @@ function ReadingPane({
                       To: {tmTo.join(", ") || "—"}
                       {tmCc.length > 0 && <> · Cc: {tmCc.join(", ")}</>}
                     </div>
-                    {tm.htmlBody ? (
-                      <EmailBody html={tm.htmlBody} revision={themeRev} />
+                    {restricted ? (
+                      <>
+                        <RestrictedBody html={tm.htmlBody} text={tm.textBody} />
+                        <BlockedAttachments attachments={tm.attachments} />
+                      </>
                     ) : (
-                      <div className="whitespace-pre-wrap break-words text-[14px] leading-relaxed text-[var(--ink)]">
-                        {tm.textBody || "(no content)"}
-                      </div>
+                      <>
+                        {tm.htmlBody ? (
+                          <EmailBody html={tm.htmlBody} revision={themeRev} />
+                        ) : (
+                          <div className="whitespace-pre-wrap break-words text-[14px] leading-relaxed text-[var(--ink)]">
+                            {tm.textBody || "(no content)"}
+                          </div>
+                        )}
+                        <AttachmentList messageId={tm.id} attachments={tm.attachments} mailboxId={mailboxId} />
+                      </>
                     )}
-                    <AttachmentList messageId={tm.id} attachments={tm.attachments} mailboxId={mailboxId} />
                   </div>
                 )}
               </div>
@@ -1137,25 +1429,118 @@ function ReadingPane({
               </time>
             </div>
 
-            {/* Body */}
-            <div className="pt-5">
-              {m.htmlBody ? (
-                <EmailBody html={m.htmlBody} revision={themeRev} />
-              ) : (
-                <div className="whitespace-pre-wrap break-words text-[14px] leading-relaxed text-[var(--ink)]">
-                  {m.textBody || "(no content)"}
-                </div>
-              )}
-            </div>
+            {statusCard && <div className="pt-4">{statusCard}</div>}
 
-            <AttachmentList messageId={messageId} attachments={m.attachments} mailboxId={mailboxId} />
+            {/* Body */}
+            {restricted ? (
+              <div className="pt-5">
+                <RestrictedBody html={m.htmlBody} text={m.textBody} />
+                <BlockedAttachments attachments={m.attachments} />
+              </div>
+            ) : (
+              <>
+                <div className="pt-5">
+                  {m.htmlBody ? (
+                    <EmailBody html={m.htmlBody} revision={themeRev} />
+                  ) : (
+                    <div className="whitespace-pre-wrap break-words text-[14px] leading-relaxed text-[var(--ink)]">
+                      {m.textBody || "(no content)"}
+                    </div>
+                  )}
+                </div>
+
+                <AttachmentList messageId={messageId} attachments={m.attachments} mailboxId={mailboxId} />
+              </>
+            )}
+          </div>
+        )}
+
+        {view && (
+          <div className="px-6 pb-8 lg:px-8">
+            <AletCard hint={view.aletHint} />
           </div>
         )}
       </div>
 
       {/* Actions, always in reach */}
       <div className="flex flex-wrap items-center gap-2 border-t border-[var(--border)] bg-[var(--surface)] px-5 py-3">
-        {isDraft && own ? (
+        {view?.folder === "SCHEDULED" && own ? (
+          <>
+            <button
+              onClick={() =>
+                queued.mutate(
+                  { messageId, action: "cancel" },
+                  { onSuccess: () => { onCompose("edit", item); onClose(); } }
+                )
+              }
+              disabled={queued.isPending}
+              className={primaryButton}
+              title="Moves it back to Drafts while you edit. Send or schedule it again from the composer."
+            >
+              <Pencil className="h-4 w-4" aria-hidden /> Edit message
+            </button>
+            <ReschedulePicker onPick={reschedule} disabled={queued.isPending} placement="above" align="left" className={secondaryButton}>
+              <Clock className="h-4 w-4" aria-hidden /> Reschedule
+            </ReschedulePicker>
+            <button
+              onClick={() => queued.mutate({ messageId, action: "sendNow" }, { onSuccess: onClose })}
+              disabled={queued.isPending}
+              className={secondaryButton}
+            >
+              <Send className="h-4 w-4" aria-hidden /> Send now
+            </button>
+            <button
+              onClick={() => queued.mutate({ messageId, action: "cancel" }, { onSuccess: onClose })}
+              disabled={queued.isPending}
+              className={dangerButton}
+              title="Stop the scheduled send. The message stays in Drafts."
+            >
+              <X className="h-4 w-4" aria-hidden /> Cancel send
+            </button>
+            {queued.isPending && <Loader2 className="h-4 w-4 animate-spin text-[var(--ink3)]" aria-label="Working" />}
+            {queued.error && (
+              <p className="w-full text-[12px] text-[var(--crit)]" role="alert">
+                {queued.error instanceof ApiError ? queued.error.message : "That didn't work. Please try again."}
+              </p>
+            )}
+          </>
+        ) : view?.folder === "ARCHIVE" || view?.folder === "TRASH" ? (
+          <>
+            {canMove && (
+              <button onClick={() => move("INBOX")} disabled={update.isPending} className={primaryButton}>
+                <Undo2 className="h-4 w-4" aria-hidden /> Restore to Inbox
+              </button>
+            )}
+            {view.folder === "ARCHIVE" && canReply && (
+              <>
+                <button onClick={() => onCompose("reply", item)} className={secondaryButton}>
+                  <Reply className="h-4 w-4" aria-hidden /> Reply
+                </button>
+                <button onClick={() => onCompose("forward", item)} className={secondaryButton}>
+                  <Forward className="h-4 w-4" aria-hidden /> Forward
+                </button>
+              </>
+            )}
+            {view.folder === "TRASH" && own && (
+              <button onClick={() => setConfirmDelete(true)} disabled={permanentlyDelete.isPending} className={dangerButton}>
+                <X className="h-4 w-4" aria-hidden /> Delete forever
+              </button>
+            )}
+          </>
+        ) : view?.folder === "SPAM" ? (
+          canMove ? (
+            <>
+              <button onClick={() => move("INBOX")} disabled={update.isPending} className={primaryButton} title="Move to Inbox">
+                <Inbox className="h-4 w-4" aria-hidden /> Not spam
+              </button>
+              <button onClick={() => move("TRASH")} disabled={update.isPending} className={secondaryButton}>
+                <Trash2 className="h-4 w-4" aria-hidden /> Delete
+              </button>
+            </>
+          ) : (
+            <p className="text-[12.5px] text-[var(--ink3)]">You can review this message but not move it.</p>
+          )
+        ) : isDraft && own ? (
           <>
             <button
               onClick={() => onCompose("edit", item)}
@@ -1207,8 +1592,12 @@ function ReadingPane({
             You can read this inbox but not send from it. Ask an admin for send access to reply.
           </p>
         )}
-        <div className="flex-1" />
-        <ComingSoonButton icon={ListChecks} label="Create task" hint="Tasks are coming soon" />
+        {!view && (
+          <>
+            <div className="flex-1" />
+            <ComingSoonButton icon={ListChecks} label="Create task" hint="Tasks are coming soon" />
+          </>
+        )}
       </div>
 
       <ConfirmDialog

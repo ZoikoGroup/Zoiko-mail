@@ -291,6 +291,11 @@ export async function scheduleDraft(messageId: string, scheduledAt: string) {
   });
 }
 
+/** Takes a scheduled message off the send queue; it becomes a draft again. */
+export async function cancelSchedule(messageId: string) {
+  return apiRequest(`/mail/drafts/${messageId}/schedule`, { method: "DELETE" });
+}
+
 /**
  * Addresses the caller may send from.
  *
