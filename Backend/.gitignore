@@ -24,3 +24,6 @@ venv/
 # not incremental — but `tsc --build` or turning that flag on would produce it,
 # and the frontend already had one committed by accident. Same rule there.
 *.tsbuildinfo
+
+# Local API log written by scripts/dev-api.mjs (and its rotated copy)
+.dev-api.log*

@@ -37,7 +37,10 @@ export const envSchema = z.object({
   STEP_UP_EXPIRES_IN: z.string().default("5m"),
   JWT_REFRESH_EXPIRES_IN: z.string().regex(/^\d+[smhd]$/).default("7d"),
   APP_URL: z.string().url().default("http://localhost:3000"),
-  CORS_ORIGIN: z.string().default("http://localhost:3000"),
+  // Both spellings of the local frontend: the browser treats localhost and
+  // 127.0.0.1 as different origins, and a page opened at the one the API did
+  // not allow failed every request as "Unable to reach Zoiko Mail".
+  CORS_ORIGIN: z.string().default("http://localhost:3000,http://127.0.0.1:3000"),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900_000),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
   AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900_000),

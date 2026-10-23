@@ -113,6 +113,12 @@ export function createApp() {
   });
 
   app.get("/api/health", (_req, res) => {
+    // Readable from any origin, unlike the rest of the API (helmet sends
+    // same-origin). It says only that the process is up, and the web app's
+    // unreachable-API check depends on it: a browser that cannot reach the API
+    // and one the API refuses (CORS) report the same error, and only a probe
+    // that is allowed to succeed tells the two apart.
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
     res.status(200).json({
       success: true,
       data: {

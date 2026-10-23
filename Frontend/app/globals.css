@@ -72,6 +72,50 @@ body {
   --crit-soft: #31150F;
 }
 
+/* ============================================================
+   Member webmail palette (/mail and its Coming Soon sections).
+   The same token names, re-valued under .zm-webmail, so every component
+   inside the mail shell — and only there — takes the navy-and-blue mail
+   look while the Admin, Owner and Support consoles keep the platform's.
+   Light and dark both, following the same `.dark` toggle.
+   ============================================================ */
+.zm-webmail {
+  --ground: #F2F5FA;
+  --surface: #FFFFFF;
+  --s2: #F5F8FC;
+  --s3: #E8EEF7;
+  --border: #DCE4EF;
+  --ink: #0E1B2E;
+  --ink2: #3A4B63;
+  --ink3: #66788F;
+  --accent: #2563EB;
+  --accent-ink: #1D4ED8;
+  --accent-soft: #E3ECFD;
+  --zm-rail: #EAF0F8;
+  --zm-selected: #E3ECFD;
+  --zm-compose-from: #2F6FED;
+  --zm-compose-to: #3B82F6;
+}
+
+:root[data-theme="dark"] .zm-webmail,
+.dark .zm-webmail {
+  --ground: #0A1322;
+  --surface: #0D1828;
+  --s2: #111F33;
+  --s3: #172A44;
+  --border: #1D2D45;
+  --ink: #E8EEF7;
+  --ink2: #AFBCCE;
+  --ink3: #7689A2;
+  --accent: #3B7BF6;
+  --accent-ink: #9DBEFF;
+  --accent-soft: #15315C;
+  --zm-rail: #08101D;
+  --zm-selected: #14305A;
+  --zm-compose-from: #2F6FED;
+  --zm-compose-to: #3E8BFF;
+}
+
 :root {
   /* Motion tokens. Curves and timings shared by every animation below so the
      whole UI moves the same way instead of each component picking its own. */

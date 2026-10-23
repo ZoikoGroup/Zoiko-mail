@@ -17,6 +17,24 @@ describe("Production runtime foundation", () => {
     expect(response.headers["x-powered-by"]).toBeUndefined();
   });
 
+  it("lets any origin see that the API is up, and only through /api/health", async () => {
+    // The web app tells "API down" from "API refusing this page" with a
+    // no-cors probe of /api/health, which only works if this one endpoint
+    // is readable cross-origin. Everything else keeps helmet's same-origin.
+    const health = await request(app).get("/api/health").expect(200);
+    expect(health.headers["cross-origin-resource-policy"]).toBe("cross-origin");
+    expect(Object.keys(health.body.data).sort()).toEqual(["status", "timestamp"]);
+    const ready = await request(app).get("/api/ready").expect(200);
+    expect(ready.headers["cross-origin-resource-policy"]).toBe("same-origin");
+  });
+
+  it("allows both spellings of the local frontend by default", () => {
+    // localhost and 127.0.0.1 are different origins to a browser; allowing
+    // one only made the other fail every request as "Unable to reach".
+    const defaults = "http://localhost:3000,http://127.0.0.1:3000".split(",");
+    if (!process.env.CORS_ORIGIN) expect(env.CORS_ORIGIN.split(",")).toEqual(defaults);
+  });
+
   it("reports database readiness", async () => {
     const response = await request(app).get("/api/ready").expect(200);
     expect(response.body.data).toMatchObject({

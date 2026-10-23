@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/ensure-api.mjs",
     "dev": "next dev -p 3000",
+    "predev:turbo": "node scripts/ensure-api.mjs",
     "dev:turbo": "next dev --turbo -p 3000",
     "build": "next build",
     "start": "next start -p 3000",

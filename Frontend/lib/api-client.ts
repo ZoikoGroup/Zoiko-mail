@@ -126,6 +126,49 @@ interface RequestOptions {
     stepUpToken?: string | null;
 }
 
+/** The API is on this machine: a developer's stack, not the hosted service. */
+const LOCAL_API = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/.test(API_BASE);
+
+/**
+ * The error for a request that never got an HTTP answer.
+ *
+ * A browser reports two different failures identically: the API is not
+ * running, and the API is running but refuses this page's origin (CORS — the
+ * app opened at 127.0.0.1 when the API allows localhost). A no-cors request to
+ * the health endpoint tells them apart, because it succeeds whenever the
+ * server answers at all.
+ * Locally, each gets the fix that applies to it; for the hosted service the
+ * reader is a user, so it is the connection advice that fits them.
+ */
+async function unreachable(): Promise<ApiError> {
+    let answered = false;
+    try {
+        // /api/health is the one endpoint readable cross-origin (the rest send
+        // Cross-Origin-Resource-Policy: same-origin, which fails this probe).
+        await fetch(`${new URL(API_BASE).origin}/api/health`, { mode: "no-cors", cache: "no-store", signal: AbortSignal.timeout(4000) });
+        answered = true;
+    } catch {
+        answered = false;
+    }
+    const origin = typeof window !== "undefined" ? window.location.origin : "this page";
+    if (answered) {
+        return new ApiError(
+            0,
+            LOCAL_API
+                ? `The Zoiko Mail API is running but refused requests from ${origin}. Open the app at http://localhost:3000, or add ${origin} to CORS_ORIGIN in Backend/.env and restart the API.`
+                : "Zoiko Mail refused this request from your browser. Reload the page and try again; if it keeps happening, contact your administrator.",
+            "NETWORK_ERROR"
+        );
+    }
+    return new ApiError(
+        0,
+        LOCAL_API
+            ? `The Zoiko Mail API isn't running at ${API_BASE.replace(/\/api\/v1\/?$/, "")}. Start it with Backend/scripts/dev-up.ps1 — or restart the frontend with npm run dev, which starts it for you.`
+            : "Unable to reach Zoiko Mail. Check your internet connection and try again.",
+        "NETWORK_ERROR"
+    );
+}
+
 // Single-flight refresh: if many calls 401 at once, we refresh only once.
 let refreshPromise: Promise<boolean> | null = null;
 
@@ -211,11 +254,7 @@ export async function apiRequest<T = unknown>(
             body: body !== undefined ? JSON.stringify(body) : undefined,
         });
     } catch {
-        throw new ApiError(
-            0,
-            "Unable to reach Zoiko Mail. Please make sure the backend server is running and try again.",
-            "NETWORK_ERROR"
-        );
+        throw await unreachable();
     }
 
     // Read the body before deciding what to do with a 401: the error code is
@@ -309,11 +348,7 @@ export async function apiDownload(
     try {
         res = await fetch(`${API_BASE}${path}`, { method: "GET", headers });
     } catch {
-        throw new ApiError(
-            0,
-            "Unable to reach Zoiko Mail. Please make sure the backend server is running and try again.",
-            "NETWORK_ERROR"
-        );
+        throw await unreachable();
     }
 
     if (!res.ok) {

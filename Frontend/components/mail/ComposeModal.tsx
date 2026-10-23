@@ -56,11 +56,14 @@ export function ComposeModal({
   mode,
   source,
   onClose,
+  defaultSendAsMailboxId,
 }: {
   open: boolean;
   mode: ComposerMode;
   source: MailItem | null;
   onClose: () => void;
+  /** Reply from a shared inbox as that inbox, rather than as oneself. */
+  defaultSendAsMailboxId?: string | null;
 }) {
   const submit = useComposerSubmit();
   const qc = useQueryClient();
@@ -141,7 +144,9 @@ export function ComposeModal({
     // Defaults to one's own address every time the composer opens, rather than
     // remembering the last shared mailbox used: sending as the team by
     // accident is the mistake worth designing against.
-    setSendAsMailboxId("");
+    // A reply to a shared inbox's message goes out as that inbox — the
+    // message was read from it, and the server reads the source there.
+    setSendAsMailboxId(defaultSendAsMailboxId ?? "");
 
     if (mode === "edit" && source?.message) {
       // Reopening an existing draft: load what was already saved instead of

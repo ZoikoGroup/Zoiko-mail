@@ -3,15 +3,14 @@
 import { Star, Paperclip, Trash2 } from "lucide-react";
 import type { MailItem, MailListItem, MailListFolder } from "@/lib/mail-api";
 
-// A fixed, readable-on-dark palette — hashed by sender so the same person
-// always gets the same color across the whole inbox, without needing to
-// store a color anywhere.
+// A fixed, readable palette — hashed by sender so the same person always
+// gets the same colour across the inbox, without storing a colour anywhere.
 const AVATAR_COLORS = [
-  "#0f766e", "#2563eb", "#7c3aed", "#be123c",
-  "#b45309", "#15803d", "#dc2626", "#334155", "#0369a1", "#a21caf",
+  "#2F6FED", "#0EA5A4", "#C2410C", "#7C3AED", "#BE185D",
+  "#15803D", "#B45309", "#0369A1", "#9333EA", "#DC2626",
 ];
 
-function hashColor(input: string): string {
+export function hashColor(input: string): string {
   let hash = 0;
   for (let i = 0; i < input.length; i++) {
     hash = (hash << 5) - hash + input.charCodeAt(i);
@@ -20,9 +19,12 @@ function hashColor(input: string): string {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  return (parts.length >= 2 ? parts[0][0] + parts[1][0] : name.slice(0, 2)).toUpperCase();
+export function avatarInitials(name: string): string {
+  const clean = name.replace(/<.*?>/g, "").trim();
+  const base = clean.includes("@") && !clean.includes(" ") ? clean.split("@")[0].replace(/[._-]+/g, " ") : clean;
+  const parts = base.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  return (parts.length >= 2 ? parts[0][0] + parts[1][0] : parts[0].slice(0, 2)).toUpperCase();
 }
 
 /** Works for a list row or a detail read — both carry the sender fields. */
@@ -32,11 +34,8 @@ function senderName(item: MailListItem | MailItem): string {
 }
 
 /**
- * In Sent and Drafts, the "sender" is always the account's own name on
- * every row — showing it is redundant. What's actually useful there is
- * who the message is going TO. Falls back to the sender name if, for
- * whatever reason, a list item carries no recipients (e.g. an older API
- * response shape) so the row still shows something rather than going blank.
+ * In Sent and Drafts the sender is always oneself; who it went to is what
+ * matters. Falls back to the sender if a row carries no recipients.
  */
 function recipientSummary(item: MailListItem | MailItem): string {
   const recipients = (item.message as { recipients?: { type: string; email: string }[] }).recipients;
@@ -45,16 +44,15 @@ function recipientSummary(item: MailListItem | MailItem): string {
   return to.join(", ");
 }
 
-function fmt(iso: string | null): string {
+export function formatMailTime(iso: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
   const now = new Date();
-  const sameDay = d.toDateString() === now.toDateString();
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
-  if (sameDay) return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", ...(d.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}) });
 }
 
 export function MailRow({
@@ -66,11 +64,10 @@ export function MailRow({
   onSelect,
   showDeleteDraft = false,
   onDeleteDraft,
+  selectable = true,
 }: {
   item: MailListItem;
-  /** Sent and Drafts show the recipient instead of the (always-you) sender.
-   * Optional so any caller that hasn't been updated yet still compiles and
-   * falls back to the old sender-name behavior. */
+  /** Sent and Drafts show the recipient instead of the (always-you) sender. */
   folder?: MailListFolder;
   selected: boolean;
   checked: boolean;
@@ -78,68 +75,93 @@ export function MailRow({
   onSelect: () => void;
   showDeleteDraft?: boolean;
   onDeleteDraft?: () => void;
+  /** Bulk selection is offered for one's own mailbox only. */
+  selectable?: boolean;
 }) {
-  const showRecipient = folder === "SENT" || folder === "DRAFTS";
+  const showRecipient = folder === "SENT" || folder === "DRAFTS" || folder === "SCHEDULED";
   const name = showRecipient ? recipientSummary(item) : senderName(item);
   const label = showRecipient ? `To: ${name}` : name;
+  const unread = !item.isRead;
+  const attachments = item.message.attachmentCount ?? (item.message.hasAttachments ? 1 : 0);
 
   return (
-    <li className="flex items-start">
-      <label
-        className="flex shrink-0 cursor-pointer items-center self-stretch px-3 py-3"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <input
-          type="checkbox"
-          checked={checked}
-          onChange={onToggleChecked}
-          className="h-3.5 w-3.5 accent-[var(--accent)]"
-        />
-      </label>
+    <li
+      className={`relative flex items-start border-b border-[var(--border)] transition ${
+        selected
+          ? "bg-[var(--zm-selected,var(--accent-soft))] before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:bg-[var(--accent)]"
+          : "hover:bg-[var(--s2)]"
+      }`}
+    >
+      {/* Unread marker, then the checkbox — in the reference's order. */}
+      <span className="flex w-4 shrink-0 justify-end self-stretch pt-[26px]" aria-hidden>
+        {unread && <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />}
+      </span>
+      {selectable ? (
+        <label
+          className="flex shrink-0 cursor-pointer items-start self-stretch px-2.5 pt-[21px]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span className="sr-only">Select message from {label}</span>
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={onToggleChecked}
+            className="h-4 w-4 rounded accent-[var(--accent)]"
+          />
+        </label>
+      ) : (
+        <span className="w-2" aria-hidden />
+      )}
 
       <button
         onClick={onSelect}
-        className={`flex min-w-0 flex-1 items-start gap-3 px-2 py-3 pr-4 text-left transition hover:bg-[var(--s2)] ${
-          selected ? "bg-[var(--s2)]" : ""
-        }`}
+        aria-current={selected ? "true" : undefined}
+        className="flex min-w-0 flex-1 items-start gap-3 py-4 pr-4 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)]"
       >
         <span
-          className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white"
+          className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold text-white"
           style={{ backgroundColor: hashColor(name) }}
+          aria-hidden
         >
-          {initials(name)}
+          {avatarInitials(name)}
         </span>
 
-        <div className="min-w-0 flex-1 flex-col gap-1">
-          <div className="flex items-center gap-2">
-            {!item.isRead && <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--accent)]" />}
-            <span className={`truncate text-sm ${item.isRead ? "text-[var(--ink2)]" : "font-semibold text-[var(--ink)]"}`}>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-baseline gap-2">
+            <span className={`truncate text-[13.5px] ${unread ? "font-semibold text-[var(--ink)]" : "font-medium text-[var(--ink2)]"}`}>
               {label}
             </span>
-            {item.isStarred && <Star className="h-3.5 w-3.5 shrink-0 fill-[var(--warn)] text-[var(--warn)]" />}
-            <span className="ml-auto shrink-0 text-[11px] text-[var(--ink3)]">
-              {fmt(item.message.sentAt || item.createdAt)}
+            {item.isStarred && <Star className="h-3.5 w-3.5 shrink-0 fill-[var(--warn)] text-[var(--warn)]" aria-label="Starred" />}
+            <span className={`ml-auto shrink-0 text-[11.5px] ${unread ? "text-[var(--ink2)]" : "text-[var(--ink3)]"}`}>
+              {formatMailTime(item.message.sentAt || item.createdAt)}
             </span>
-          </div>
-          <span className={`block truncate text-sm ${item.isRead ? "text-[var(--ink3)]" : "text-[var(--ink)]"}`}>
+          </span>
+          <span className={`mt-0.5 block truncate text-[13px] ${unread ? "font-semibold text-[var(--ink)]" : "text-[var(--ink2)]"}`}>
             {item.message.subject || "(no subject)"}
           </span>
-          <div className="flex items-center gap-1.5">
-            {/* A flag, not the attachment list — the list endpoint returns
-                has_attachments per API §9 and names the files only on the
-                detail read. */}
-            {item.message.hasAttachments && <Paperclip className="h-3 w-3 text-[var(--ink3)]" />}
-            {item.labels.slice(0, 2).map((l) => (
-              <span
-                key={l.id}
-                className="rounded px-1.5 py-0.5 text-[10px] font-medium"
-                style={{ backgroundColor: `${l.color}22`, color: l.color }}
-              >
-                {l.name}
-              </span>
-            ))}
-          </div>
-        </div>
+          {item.message.snippet && (
+            <span className="mt-0.5 block truncate text-[12.5px] text-[var(--ink3)]">{item.message.snippet}</span>
+          )}
+          {(attachments > 0 || item.labels.length > 0) && (
+            <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              {attachments > 0 && (
+                <span className="inline-flex items-center gap-1 text-[11.5px] text-[var(--accent)]">
+                  <Paperclip className="h-3 w-3" aria-hidden />
+                  {attachments} attachment{attachments > 1 ? "s" : ""}
+                </span>
+              )}
+              {item.labels.slice(0, 3).map((l) => (
+                <span
+                  key={l.id}
+                  className="rounded px-1.5 py-0.5 text-[10.5px] font-medium"
+                  style={{ backgroundColor: `${l.color}26`, color: l.color }}
+                >
+                  {l.name}
+                </span>
+              ))}
+            </span>
+          )}
+        </span>
       </button>
 
       {showDeleteDraft && (
@@ -149,6 +171,7 @@ export function MailRow({
             onDeleteDraft?.();
           }}
           title="Delete draft"
+          aria-label="Delete draft"
           className="mr-3 self-center rounded-md p-1.5 text-[var(--ink3)] hover:bg-[var(--crit-soft)] hover:text-[var(--crit)]"
         >
           <Trash2 className="h-3.5 w-3.5" />
@@ -158,8 +181,7 @@ export function MailRow({
   );
 }
 
-/** Groups a day-sorted (newest-first) list into Today / Yesterday / date
- * buckets, in the order they should render. */
+/** Groups a newest-first list into Today / Yesterday / date buckets. */
 export function groupByDay<T extends { message: { sentAt: string | null }; createdAt: string }>(
   items: T[]
 ): { label: string; items: T[] }[] {

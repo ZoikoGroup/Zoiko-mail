@@ -39,6 +39,9 @@ mailRouter.get(
 // parsed as a message id.
 mailRouter.get("/send-as", controller.listSendableMailboxes);
 mailRouter.get("/unread-counts", controller.unreadCounts);
+// The shared and delegated mailboxes this person can read, with unread
+// counts. Literal path, above "/:messageId" like the two above.
+mailRouter.get("/shared-inboxes", controller.listSharedInboxes);
 // The caller's own mailbox: account menu + storage meter. Literal path, so
 // it must sit above "/:messageId" for the same reason "/send-as" does.
 mailRouter.get("/mailbox", controller.getMyMailbox);
@@ -51,7 +54,7 @@ mailRouter.patch("/labels/:labelId", validate(labelIdParamsSchema, "params"), va
 mailRouter.delete("/labels/:labelId", validate(labelIdParamsSchema, "params"), controller.deleteLabel);
 mailRouter.delete("/trash", controller.emptyTrash);
 mailRouter.post("/drafts/:messageId/attachments", validate(messageIdParamsSchema, "params"), attachmentUpload, controller.addAttachment);
-mailRouter.get("/:messageId/attachments/:attachmentId", validate(attachmentParamsSchema, "params"), controller.downloadAttachment);
+mailRouter.get("/:messageId/attachments/:attachmentId", validate(attachmentParamsSchema, "params"), validate(mailboxScopeSchema, "query"), controller.downloadAttachment);
 mailRouter.delete("/drafts/:messageId/attachments/:attachmentId", validate(attachmentParamsSchema, "params"), controller.deleteAttachment);
 
 mailRouter.get("/signature", controller.getSignature);
@@ -288,7 +291,7 @@ mailRouter.get(
   validate(mailboxScopeSchema, "query"),
   controller.get
 );
-mailRouter.patch("/:messageId", validate(messageIdParamsSchema, "params"), validate(updateMailboxItemSchema), controller.updateMailboxItem);
+mailRouter.patch("/:messageId", validate(messageIdParamsSchema, "params"), validate(mailboxScopeSchema, "query"), validate(updateMailboxItemSchema), controller.updateMailboxItem);
 mailRouter.delete("/:messageId", validate(messageIdParamsSchema, "params"), controller.permanentlyDelete);
 mailRouter.patch("/drafts/:messageId", validate(messageIdParamsSchema, "params"), validate(updateDraftSchema), controller.updateDraft);
 mailRouter.delete("/drafts/:messageId", validate(messageIdParamsSchema, "params"), controller.deleteDraft);

@@ -38,6 +38,7 @@ import {
   updateSignature,
   getMyMailbox,
   snoozeMessage,
+  listSharedInboxes,
 } from "./mail-api";
 
 /**
@@ -51,8 +52,16 @@ import {
  */
 export const mailRefetchInterval = () => (getSSEStatus() === "open" ? 120_000 : 15_000);
 
+// Every parameter that changes the result is in the key. It used to leave out
+// the search text and the from/to/date/attachment filters, so a search could
+// be answered from the cache of the unfiltered list; and a shared inbox
+// (mailboxId) must never share a cache entry with one's own.
 const listKey = (params: ListMailParams) =>
-  ["mail", "list", params.folder ?? "INBOX", params.starredOnly ?? false, params.unreadOnly ?? false, params.labelId ?? null, params.page ?? 1] as const;
+  [
+    "mail", "list", params.folder ?? "INBOX", params.starredOnly ?? false, params.unreadOnly ?? false,
+    params.labelId ?? null, params.page ?? 1, params.mailboxId ?? null, params.q ?? "", params.from ?? "",
+    params.to ?? "", params.hasAttachment ?? false, params.dateAfter ?? "", params.dateBefore ?? "",
+  ] as const;
 
 export function useMailList(params: ListMailParams) {
   return useQuery({
@@ -75,10 +84,10 @@ export function useUnreadCounts() {
   });
 }
 
-export function useMessage(messageId: string | null) {
+export function useMessage(messageId: string | null, mailboxId?: string | null) {
   return useQuery({
-    queryKey: ["mail", "message", messageId],
-    queryFn: () => getMessage(messageId as string),
+    queryKey: ["mail", "message", messageId, mailboxId ?? null],
+    queryFn: () => getMessage(messageId as string, mailboxId ?? undefined),
     enabled: Boolean(messageId),
     staleTime: 15_000,
   });
@@ -139,7 +148,9 @@ export function useUpdateMailItem() {
       isRead?: boolean;
       isStarred?: boolean;
       folder?: "INBOX" | "ARCHIVE" | "TRASH" | "SPAM";
-    }) => updateMailItem(v.messageId, { isRead: v.isRead, isStarred: v.isStarred, folder: v.folder }),
+      /** A shared inbox the message is in; omitted for one's own mailbox. */
+      mailboxId?: string;
+    }) => updateMailItem(v.messageId, { isRead: v.isRead, isStarred: v.isStarred, folder: v.folder }, v.mailboxId),
     onMutate: async (v) => {
       await qc.cancelQueries({ queryKey: ["mail", "list"] });
       const snapshots = qc.getQueriesData<ListMailResponse>({ queryKey: ["mail", "list"] });
@@ -163,7 +174,26 @@ export function useUpdateMailItem() {
     onError: (_e, _v, ctx) => {
       ctx?.snapshots.forEach(([key, data]) => qc.setQueryData(key, data));
     },
-    onSettled: () => qc.invalidateQueries({ queryKey: ["mail", "list"] }),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ["mail", "list"] });
+      // Reading or moving a message changes the rail's unread badges too.
+      void qc.invalidateQueries({ queryKey: ["mail", "unread-counts"] });
+      void qc.invalidateQueries({ queryKey: ["mail", "shared-inboxes"] });
+    },
+  });
+}
+
+/**
+ * The shared and delegated mailboxes this person can read, with unread
+ * counts, for the rail's "Shared inboxes" section. Under ["mail"], so the
+ * live NEW_MAIL refresh and the fallback polling cover it like the rest.
+ */
+export function useSharedInboxes() {
+  return useQuery({
+    queryKey: ["mail", "shared-inboxes"],
+    queryFn: listSharedInboxes,
+    staleTime: 15_000,
+    refetchInterval: mailRefetchInterval,
   });
 }
 

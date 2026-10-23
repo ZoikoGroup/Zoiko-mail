@@ -143,6 +143,8 @@ export interface ListMailParams {
   dateBefore?: string;
   page?: number;
   limit?: number;
+  /** A shared or delegated mailbox to read instead of one's own. */
+  mailboxId?: string;
 }
 
 export interface Recipients {
@@ -187,6 +189,7 @@ export async function listMail(params: ListMailParams = {}): Promise<ListMailRes
   if (params.hasAttachment) q.set("hasAttachment", "true");
   if (params.dateAfter) q.set("dateAfter", params.dateAfter);
   if (params.dateBefore) q.set("dateBefore", params.dateBefore);
+  if (params.mailboxId) q.set("mailboxId", params.mailboxId);
   q.set("page", String(params.page ?? 1));
   q.set("limit", String(params.limit ?? 25));
   return apiRequest<ListMailResponse>(`/mail?${q.toString()}`);
@@ -197,8 +200,25 @@ export async function fetchUnreadCounts(): Promise<Record<string, number>> {
   return data.counts ?? {};
 }
 
-export async function getMessage(messageId: string): Promise<MailItem> {
-  return apiRequest<MailItem>(`/mail/${messageId}`);
+export async function getMessage(messageId: string, mailboxId?: string): Promise<MailItem> {
+  return apiRequest<MailItem>(`/mail/${messageId}${mailboxId ? `?mailboxId=${mailboxId}` : ""}`);
+}
+
+/** A mailbox besides one's own that this person can read. */
+export interface SharedInbox {
+  id: string;
+  address: string;
+  type: "USER" | "SHARED" | "DISTRIBUTION" | "SYSTEM" | "NO_REPLY";
+  /** A colleague's personal mailbox delegated to this person. */
+  delegated: boolean;
+  canSend: boolean;
+  canManage: boolean;
+  unread: number;
+}
+
+export async function listSharedInboxes(): Promise<SharedInbox[]> {
+  const data = await apiRequest<{ mailboxes: SharedInbox[] }>("/mail/shared-inboxes");
+  return data.mailboxes ?? [];
 }
 
 export async function listLabels(): Promise<MailLabel[]> {
@@ -225,9 +245,10 @@ export async function removeLabel(messageId: string, labelId: string): Promise<v
 // ---- Triage ----------------------------------------------------------------
 export async function updateMailItem(
   messageId: string,
-  input: { isRead?: boolean; isStarred?: boolean; folder?: "INBOX" | "ARCHIVE" | "TRASH" | "SPAM" }
+  input: { isRead?: boolean; isStarred?: boolean; folder?: "INBOX" | "ARCHIVE" | "TRASH" | "SPAM" },
+  mailboxId?: string
 ): Promise<MailItem> {
-  return apiRequest<MailItem>(`/mail/${messageId}`, { method: "PATCH", body: input });
+  return apiRequest<MailItem>(`/mail/${messageId}${mailboxId ? `?mailboxId=${mailboxId}` : ""}`, { method: "PATCH", body: input });
 }
 
 export async function bulkMailAction(messageIds: string[], action: BulkAction) {
@@ -310,12 +331,18 @@ export async function forward(
 // ---- Attachments -----------------------------------------------------------
 // The download endpoint returns binary with an auth header, so we fetch it as a
 // blob and trigger a browser download rather than using a plain <a href>.
+/** Where an attachment is fetched from; a shared inbox's need its mailbox. */
+export function attachmentUrl(messageId: string, attachmentId: string, mailboxId?: string | null): string {
+  return `${API_BASE}/mail/${messageId}/attachments/${attachmentId}${mailboxId ? `?mailboxId=${mailboxId}` : ""}`;
+}
+
 export async function downloadAttachment(
   messageId: string,
-  attachment: MailAttachment
+  attachment: MailAttachment,
+  mailboxId?: string | null
 ): Promise<void> {
   const token = getAccessToken();
-  const res = await fetch(`${API_BASE}/mail/${messageId}/attachments/${attachment.id}`, {
+  const res = await fetch(attachmentUrl(messageId, attachment.id, mailboxId), {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (!res.ok) throw new ApiError(res.status, "Couldn't download attachment");
