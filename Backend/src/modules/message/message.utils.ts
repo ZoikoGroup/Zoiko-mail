@@ -95,8 +95,11 @@ function textFromHtml(html: string): string {
   return html
     // Script and style hold no readable text and plenty of noise.
     .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<br\s*\/?>/gi, " ")
-    .replace(/<\/(p|div|tr|li|h[1-6])>/gi, " ")
+    // Lines kept as lines, so quoted history can be found where it starts;
+    // a blockquote is quoted history, marked the way plain text marks it.
+    .replace(/<blockquote\b[^>]*>/gi, "\n> ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|tr|li|h[1-6])>/gi, "\n")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
@@ -112,12 +115,33 @@ function textFromHtml(html: string): string {
  * Whitespace is collapsed so a body that opens with blank lines or an
  * indented quote does not produce an empty-looking snippet.
  */
+/** Where quoted history begins in a reply or forward. */
+const QUOTE_START = [
+  /^On .{4,240}wrote:\s*$/i, // "On Oct 14, 2026, 6:36 PM, info@x.com wrote:"
+  /^-{2,}\s*(Original|Forwarded) message\s*-*$/i,
+  /^>/,
+];
+
+/**
+ * A message's own words: the text above the history it quotes.
+ *
+ * A reply carries every earlier message below it, so a snippet of the whole
+ * body was mostly "On … wrote: > … > On … wrote:" — the same quoted history
+ * on every row of a conversation. A reply that only quotes (nothing typed)
+ * has no words of its own, and gets no snippet rather than someone else's.
+ */
+export function withoutQuotedHistory(text: string): string {
+  const lines = text.split(/\r?\n/);
+  const cut = lines.findIndex((line) => QUOTE_START.some((pattern) => pattern.test(line.trim())));
+  return (cut === -1 ? lines : lines.slice(0, cut)).join("\n").trim();
+}
+
 export function snippetFrom(
   textBody: string | null,
   htmlBody: string | null
 ): string | null {
   const source = textBody?.trim() ? textBody : htmlBody ? textFromHtml(htmlBody) : "";
-  const collapsed = source.replace(/\s+/g, " ").trim();
+  const collapsed = withoutQuotedHistory(source).replace(/\s+/g, " ").trim();
   if (!collapsed) return null;
   return collapsed.length > SNIPPET_LENGTH
     ? `${collapsed.slice(0, SNIPPET_LENGTH).trimEnd()}…`

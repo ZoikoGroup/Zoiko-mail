@@ -294,3 +294,124 @@ describe("receiving from outside addresses", () => {
     expect(res.body.error.code).toBe("INBOUND_NOT_CONFIGURED");
   });
 });
+
+describe("attachments, sender to recipient", () => {
+  const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  const PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+  const attach = (token: string, draftId: string, file: { name: string; type: string; body: Buffer }, key?: string) => {
+    const req = request(app).post(`/api/v1/mail/drafts/${draftId}/attachments`).set(authHeader(token));
+    if (key) req.set("Idempotency-Key", key);
+    return req.attach("file", file.body, { filename: file.name, contentType: file.type });
+  };
+
+  it("accepts real documents whatever the browser calls them, stored as what they are", async () => {
+    const w = await workspace();
+    const a = await mailboxOwner(w, "sender");
+    const id = await compose(a.token, "friend@gmail.test", "Files");
+    // Windows without Office reports a .docx as octet-stream; some browsers send no type at all.
+    const docx = await attach(a.token, id, { name: "Proposal.docx", type: "application/octet-stream", body: Buffer.from("PK docx") }).expect(201);
+    expect(docx.body.data).toMatchObject({ fileName: "Proposal.docx", contentType: DOCX });
+    const pptx = await attach(a.token, id, { name: "Deck.pptx", type: "application/zip", body: Buffer.from("PK pptx") }).expect(201);
+    expect(pptx.body.data.contentType).toBe(PPTX);
+    // A name that isn't ASCII arrives intact.
+    const named = await attach(a.token, id, { name: "Résumé – 2026.pdf", type: "application/pdf", body: Buffer.from("%PDF-1.4") }).expect(201);
+    expect(named.body.data.fileName).toBe("Résumé – 2026.pdf");
+    const csv = await attach(a.token, id, { name: "data.csv", type: "application/vnd.ms-excel", body: Buffer.from("a,b\n1,2\n") }).expect(201);
+    expect(csv.body.data.contentType).toBe("text/csv");
+  });
+
+  it("refuses programs, scripts and web pages, however they are named", async () => {
+    const w = await workspace();
+    const a = await mailboxOwner(w, "sender");
+    const id = await compose(a.token, "friend@gmail.test", "Bad files");
+    const disguised = await attach(a.token, id, { name: "invoice.pdf", type: "application/x-msdownload", body: Buffer.from("MZ") }).expect(415);
+    expect(disguised.body.error.message).toMatch(/can run code/);
+    await attach(a.token, id, { name: "page.html", type: "text/html", body: Buffer.from("<script>") }).expect(415);
+    await attach(a.token, id, { name: "logo.svg", type: "image/svg+xml", body: Buffer.from("<svg/>") }).expect(415);
+    const unknown = await attach(a.token, id, { name: "tool.exe", type: "application/octet-stream", body: Buffer.from("MZ") }).expect(415);
+    expect(unknown.body.error.message).toMatch(/\.exe files can't be attached/);
+    expect(await prisma.messageAttachment.count({ where: { messageId: id } })).toBe(0);
+  });
+
+  it("needs an Idempotency-Key to upload, and a retried upload is stored once", async () => {
+    const w = await workspace();
+    const a = await mailboxOwner(w, "sender");
+    const id = await compose(a.token, "friend@gmail.test", "Retry");
+    // The header the web app was not sending — the reported error.
+    const missing = await request(app)
+      .post(`/api/v1/mail/drafts/${id}/attachments`)
+      .set(authHeader(a.token))
+      .set("x-test-omit-idempotency-key", "1")
+      .attach("file", Buffer.from("x"), { filename: "a.txt", contentType: "text/plain" })
+      .expect(400);
+    expect(missing.body.error.code).toBe("IDEMPOTENCY_KEY_REQUIRED");
+
+    const file = { name: "notes.txt", type: "text/plain", body: Buffer.from("notes") };
+    const first = await attach(a.token, id, file, "upload-notes-0001").expect(201);
+    // The response was lost and the browser tries again with the same key.
+    const again = await attach(a.token, id, file, "upload-notes-0001").expect(201);
+    expect(again.headers["idempotent-replay"]).toBe("true");
+    expect(again.body.data.id).toBe(first.body.data.id);
+    // A different file has its own key, and is its own attachment.
+    await attach(a.token, id, { ...file, name: "more.txt" }, "upload-more-0002").expect(201);
+    expect(await prisma.messageAttachment.count({ where: { messageId: id } })).toBe(2);
+  });
+
+  it("delivers every attachment to a colleague and to the outside, and a retried send sends once", async () => {
+    const w = await workspace();
+    const a = await mailboxOwner(w, "sender");
+    const b = await mailboxOwner(w, "colleague");
+    const draft = await request(app)
+      .post("/api/v1/mail/drafts")
+      .set(authHeader(a.token))
+      .send({ subject: "Q4 pack", textBody: "Attached.", recipients: { to: [b.address, "client@gmail.test"] } })
+      .expect(201);
+    const id = draft.body.data.id as string;
+    const files = [
+      { name: "Q4 Roadmap.pptx", type: "", body: Buffer.from("roadmap-bytes") },
+      { name: "Budget v2.xlsx", type: "application/octet-stream", body: Buffer.from("budget-bytes") },
+      { name: "Milestones.pdf", type: "application/pdf", body: Buffer.from("%PDF-milestones") },
+      { name: "photo.png", type: "image/png", body: Buffer.from([0x89, 0x50, 0x4e, 0x47]) },
+    ];
+    for (const [i, file] of files.entries()) await attach(a.token, id, file, `upload-${id}-${i}`).expect(201);
+
+    // Sent, then sent again with the same key after a lost response: one send.
+    const sendKey = `send-${id}`;
+    const first = await request(app).post(`/api/v1/mail/drafts/${id}/send`).set(authHeader(a.token)).set("Idempotency-Key", sendKey).expect(200);
+    const retry = await request(app).post(`/api/v1/mail/drafts/${id}/send`).set(authHeader(a.token)).set("Idempotency-Key", sendKey).expect(200);
+    expect(retry.headers["idempotent-replay"]).toBe("true");
+    expect(retry.body.data.id).toBe(first.body.data.id);
+    expect(await prisma.backgroundJob.count({ where: { tenantId: w.owner.tenantId, type: "SMTP_SEND" } })).toBe(1);
+
+    // The colleague has it, and every file opens with its exact bytes.
+    const received = await request(app).get(`/api/v1/mail/${id}`).set(authHeader(b.token)).expect(200);
+    const attachments = received.body.data.message.attachments as Array<{ id: string; fileName: string; contentType: string }>;
+    expect(attachments.map((x) => x.fileName).sort()).toEqual(files.map((f) => f.name).sort());
+    for (const file of files) {
+      const meta = attachments.find((x) => x.fileName === file.name)!;
+      const download = await request(app)
+        .get(`/api/v1/mail/${id}/attachments/${meta.id}`)
+        .set(authHeader(b.token))
+        .buffer(true)
+        .parse((res, done) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (c: Buffer) => chunks.push(c));
+          res.on("end", () => done(null, Buffer.concat(chunks)));
+        })
+        .expect(200);
+      expect(Buffer.compare(download.body as Buffer, file.body)).toBe(0);
+      expect(download.headers["content-disposition"]).toContain(encodeURIComponent(file.name));
+    }
+
+    // The outside recipient gets them through the relay, once.
+    await sendOutbound(id, w.owner.tenantId);
+    expect(sent).toHaveLength(1);
+    for (const file of files) {
+      expect(sent[0]).toContain(file.name);
+      expect(sent[0]).toContain(file.body.toString("base64").slice(0, 12));
+    }
+    // The stored type travels with it (nodemailer folds the long header onto the next line).
+    expect(sent[0]!.replace(/\n\s+/g, " ")).toContain(`Content-Type: ${PPTX};`);
+  });
+});

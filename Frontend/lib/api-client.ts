@@ -104,8 +104,17 @@ export function newRequestId(): string {
     return `req_${Math.random().toString(16).slice(2, 10)}`;
 }
 
+/**
+ * A key no other request will share. crypto.randomUUID where the browser has
+ * it (every current one, on https or localhost); otherwise enough randomness
+ * that two keys made in the same millisecond still differ.
+ */
 export function newIdempotencyKey(): string {
-    return `idem_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 8)}`;
+    const random =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+            ? crypto.randomUUID()
+            : `${Math.random().toString(16).slice(2)}${Math.random().toString(16).slice(2)}`;
+    return `idem_${Date.now().toString(36)}_${random}`;
 }
 
 // interface RequestOptions {

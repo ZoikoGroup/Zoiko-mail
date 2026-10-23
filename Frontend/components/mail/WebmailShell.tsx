@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from "react";
 import { useMemberShell } from "@/lib/useMemberShell";
 import { useMyMailbox, useUnreadCounts } from "@/lib/mail-hooks";
 import type { MailListFolder, SharedInbox } from "@/lib/mail-api";
@@ -13,6 +13,8 @@ import { BottomNav } from "@/components/mail/BottomNav";
 import { ToastContainer } from "@/components/ui/Toast";
 import { NetworkBanner } from "@/components/ui/NetworkBanner";
 import { AccessDenied } from "@/components/ui/AccessDenied";
+import { PaneDivider } from "@/components/mail/PaneDivider";
+import { FOLDER_PANE, PaneLayoutProvider, usePaneLayout } from "@/lib/pane-layout";
 
 /**
  * The Member workspace's full-screen shell: top bar, the section rail
@@ -30,7 +32,17 @@ import { AccessDenied } from "@/components/ui/AccessDenied";
  * Wrapped in .zm-webmail, which re-values the design tokens for the mail
  * look (globals.css) without touching the other consoles.
  */
-export function WebmailShell({
+export function WebmailShell(props: ComponentProps<typeof WebmailShellInner>) {
+  // The pane sizes are shared by the top bar's Layout menu, the folder
+  // column here and the list inside MailClient, so they live above all three.
+  return (
+    <PaneLayoutProvider>
+      <WebmailShellInner {...props} />
+    </PaneLayoutProvider>
+  );
+}
+
+function WebmailShellInner({
   section = "mail",
   folder = "INBOX",
   onFolderChange,
@@ -63,6 +75,8 @@ export function WebmailShell({
   const { data: unreadCounts } = useUnreadCounts();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const inMail = section === "mail";
+  const layout = usePaneLayout();
+  const folderPane = useRef<HTMLDivElement>(null);
 
   if (status === "loading") {
     return (
@@ -137,9 +151,32 @@ export function WebmailShell({
           <AppRail active={section} />
         </div>
         {inMail && (
-          <div className="hidden lg:block">
-            <FolderRail {...railProps} onFolderChange={onFolderChange ?? noop} onCompose={onCompose ?? noop} />
-          </div>
+          <>
+            <div
+              ref={folderPane}
+              data-testid="folder-pane"
+              className="hidden w-[var(--zm-folder-w,240px)] shrink-0 lg:block"
+              style={
+                layout?.effectiveFolderWidth
+                  ? ({ "--zm-folder-w": `${layout.effectiveFolderWidth}px` } as CSSProperties)
+                  : undefined
+              }
+            >
+              <FolderRail {...railProps} fill onFolderChange={onFolderChange ?? noop} onCompose={onCompose ?? noop} />
+            </div>
+            {layout && (
+              <PaneDivider
+                label="Resize folder pane"
+                testId="folder-divider"
+                paneRef={folderPane}
+                cssVar="--zm-folder-w"
+                min={FOLDER_PANE.min}
+                max={() => FOLDER_PANE.max}
+                onCommit={layout.setFolderWidth}
+                onReset={layout.reset}
+              />
+            )}
+          </>
         )}
 
         {/* Folder drawer (phone) — the same FolderRail as a slide-out panel.

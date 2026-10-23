@@ -9,7 +9,7 @@
  * never a per-role copy.
  */
 
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   useMailList,
   useMessage,
@@ -37,6 +37,7 @@ import {
   type MailListFolder,
   type MailItem,
   type SharedInbox,
+  type EmailMessage,
 } from "@/lib/mail-api";
 import { DropdownMenu, DropdownItem } from "@/components/ui/DropdownMenu";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -59,6 +60,9 @@ import {
   CountPill, FolderBanner, Popover, MenuOption, chipClass,
   StatusTag, StatusCard, RestrictedBody, BlockedAttachments, AletCard, ReschedulePicker,
 } from "@/components/mail/folder-views";
+import { ownPreview, senderAddress, senderLabel, splitHtmlQuote, splitTextQuote } from "@/lib/mail-quote";
+import { PaneDivider } from "@/components/mail/PaneDivider";
+import { LIST_PANE, READING_PANE_MIN, usePaneLayout } from "@/lib/pane-layout";
 
 /**
  * Why a folder failed, in words that point at the fix.
@@ -177,6 +181,10 @@ function readableEmailHtml(html: string, element: HTMLElement | null): string {
       line-height: 1.6;
       word-wrap: break-word;
     }
+    /* No stray margin above the first line or below the last: the frame is
+       sized to its content, so a paragraph's default margin showed as a gap. */
+    body > :first-child { margin-top: 0; }
+    body > :last-child { margin-bottom: 0; }
     a { color: ${linkColor}; }
     img { max-width: 100%; height: auto; }
     blockquote { border-left: 2px solid ${quoteBorder}; margin: 0 0 0 8px; padding-left: 10px; color: ${quoteColor}; }
@@ -208,7 +216,7 @@ function EmailBody({ html, revision, fallbackHeight = 320 }: { html: string; rev
         srcDoc={srcDoc}
         onLoad={(event) => {
           const doc = event.currentTarget.contentDocument;
-          if (doc?.body) setHeight(Math.min(Math.max(doc.documentElement.scrollHeight, 80), 4000));
+          if (doc?.body) setHeight(Math.min(Math.max(doc.documentElement.scrollHeight, 20), 4000));
         }}
         style={{ height }}
         className="w-full border-0 bg-transparent"
@@ -263,6 +271,10 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
 ) {
   const [internalFolder, setInternalFolder] = useState<MailListFolder>("INBOX");
   const folder = controlledFolder ?? internalFolder;
+  // Resizable panes in the Member inbox (WebmailShell provides the layout);
+  // the Admin and Owner inboxes have no provider and keep fixed panes.
+  const layout = usePaneLayout();
+  const listPane = useRef<HTMLElement>(null);
   const mailboxId = sharedInbox?.id;
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -560,9 +572,23 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
 
         {/* List column */}
         <section
+          ref={listPane}
+          data-testid="message-list-pane"
           aria-label={`${title} messages`}
-          className={`flex min-w-0 flex-col border-r border-[var(--border)] bg-[var(--surface)] ${selectedId ? "hidden lg:flex lg:w-[360px] xl:w-[410px]" : "flex flex-1 lg:max-w-none"
-            }`}
+          className={`flex min-w-0 flex-col border-r border-[var(--border)] bg-[var(--surface)] ${
+            layout
+              ? // A fixed desktop width — Standard (360, or 410 on xl) or the
+                // custom one — that always leaves the reading pane its minimum.
+                `${selectedId ? "hidden lg:flex" : "flex flex-1"} lg:flex-none lg:min-w-[300px] lg:w-[min(var(--zm-list-w,360px),calc(100%_-_420px))] xl:w-[min(var(--zm-list-w,410px),calc(100%_-_420px))]`
+              : selectedId
+                ? "hidden lg:flex lg:w-[360px] xl:w-[410px]"
+                : "flex flex-1 lg:max-w-none"
+          }`}
+          style={
+            layout?.effectiveListWidth
+              ? ({ "--zm-list-w": `${layout.effectiveListWidth}px` } as CSSProperties)
+              : undefined
+          }
         >
           {/* The Admin and Owner inboxes' phone strip (Compose + folders). */}
           {!hideRail && (
@@ -996,6 +1022,23 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
           )}
         </section>
 
+        {layout && (
+          <PaneDivider
+            label="Resize message list"
+            testId="list-divider"
+            paneRef={listPane}
+            cssVar="--zm-list-w"
+            min={LIST_PANE.min}
+            // Never wider than leaves the reading pane its minimum.
+            max={() => {
+              const container = listPane.current?.parentElement?.getBoundingClientRect().width ?? 0;
+              return Math.max(LIST_PANE.min, Math.min(LIST_PANE.max, container - READING_PANE_MIN));
+            }}
+            onCommit={layout.setListWidth}
+            onReset={layout.reset}
+          />
+        )}
+
         {/* Reading pane */}
         <section
           aria-label="Message"
@@ -1074,6 +1117,238 @@ function ComingSoonButton({ icon: Icon, label, hint }: { icon: typeof Sparkles; 
   );
 }
 
+/** Toolbar icon buttons: one size, one look, a tooltip and a name. */
+const TOOL =
+  "inline-flex h-9 w-9 items-center justify-center rounded-lg text-[var(--ink2)] transition hover:bg-[var(--s2)] hover:text-[var(--ink)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-50";
+
+function ToolDivider() {
+  return <span className="mx-1 h-5 w-px shrink-0 bg-[var(--border)]" aria-hidden />;
+}
+
+function recipientsLine(message: EmailMessage) {
+  const to = message.recipients.filter((r) => r.type === "TO").map((r) => r.email);
+  const cc = message.recipients.filter((r) => r.type === "CC").map((r) => r.email);
+  return { to, cc };
+}
+
+function fullDate(iso: string) {
+  return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+/**
+ * A message's body: its own words first, the history it quotes folded behind
+ * a "•••" toggle the way mail clients do. A reply that only quotes says so
+ * rather than looking empty.
+ */
+function MessageBody({ message, revision }: { message: EmailMessage; revision: number }) {
+  const [showQuoted, setShowQuoted] = useState(false);
+  const html = message.htmlBody;
+  const split = useMemo(
+    () => (html ? splitHtmlQuote(html) : splitTextQuote(message.textBody ?? "")),
+    [html, message.textBody]
+  );
+  const hasOwn = html
+    ? Boolean(split.own.replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim())
+    : Boolean(split.own);
+
+  return (
+    <div data-testid="message-body">
+      {hasOwn ? (
+        html ? (
+          <EmailBody html={split.own} revision={revision} fallbackHeight={24} />
+        ) : (
+          <div className="whitespace-pre-wrap break-words text-[14px] leading-relaxed text-[var(--ink)]">{split.own}</div>
+        )
+      ) : !split.quoted ? (
+        <p className="text-[13px] italic text-[var(--ink3)]">(no content)</p>
+      ) : (
+        <p className="text-[13px] italic text-[var(--ink3)]">No new text — this reply only quotes the earlier messages.</p>
+      )}
+
+      {split.quoted && (
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={() => setShowQuoted((v) => !v)}
+            aria-expanded={showQuoted}
+            title={showQuoted ? "Hide quoted text" : "Show quoted text"}
+            className="inline-flex h-6 items-center rounded-md border border-[var(--border)] bg-[var(--s2)] px-2 text-[13px] leading-none tracking-widest text-[var(--ink2)] transition hover:bg-[var(--s3)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+          >
+            •••
+            <span className="sr-only">{showQuoted ? "Hide quoted text" : "Show quoted text"}</span>
+          </button>
+          {showQuoted && (
+            <div className="mt-3 border-l-2 border-[var(--border)] pl-4" data-testid="quoted-text">
+              {html ? (
+                <EmailBody html={split.quoted} revision={revision} fallbackHeight={24} />
+              ) : (
+                <div className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-[var(--ink3)]">{split.quoted}</div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Who sent it, to whom, when — the head of an open message. */
+function MessageHeader({
+  message,
+  actions,
+}: {
+  message: EmailMessage;
+  actions?: ReactNode;
+}) {
+  const name = senderLabel(message);
+  const address = senderAddress(message);
+  const { to, cc } = recipientsLine(message);
+  const when = message.sentAt || message.createdAt;
+  return (
+    <div className="flex items-start gap-3.5">
+      <Avatar name={name} className="h-10 w-10 text-[13px]" />
+      <div className="min-w-0 flex-1 text-[13px]">
+        <div className="flex flex-wrap items-baseline gap-x-1.5">
+          <span className="font-semibold text-[var(--ink)]">{name}</span>
+          {address && address !== name && <span className="truncate text-[var(--ink3)]">&lt;{address}&gt;</span>}
+        </div>
+        <div className="mt-0.5 truncate text-[12px] text-[var(--ink3)]">To: {to.join(", ") || "—"}</div>
+        {cc.length > 0 && <div className="mt-0.5 truncate text-[12px] text-[var(--ink3)]">Cc: {cc.join(", ")}</div>}
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        <time className="mr-1 text-[12px] text-[var(--ink3)]" dateTime={when} title={fullDate(when)}>
+          {formatMailTime(when)}
+        </time>
+        {actions}
+      </div>
+    </div>
+  );
+}
+
+/** One message of a conversation: a line when folded, a card when open. */
+function ConversationMessage({
+  message,
+  open,
+  onToggle,
+  revision,
+  onReply,
+  onForward,
+  anchorRef,
+  restricted = false,
+}: {
+  message: EmailMessage;
+  open: boolean;
+  onToggle: () => void;
+  revision: number;
+  onReply?: () => void;
+  onForward?: () => void;
+  anchorRef?: React.Ref<HTMLDivElement>;
+  /** Spam: plain text only, attachments listed but not opened. */
+  restricted?: boolean;
+}) {
+  const name = senderLabel(message);
+  const when = message.sentAt || message.createdAt;
+  if (!open) {
+    const preview = ownPreview(message);
+    return (
+      <div ref={anchorRef}>
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={false}
+          data-testid="thread-message"
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-[var(--s2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)]"
+        >
+          <Avatar name={name} className="h-8 w-8 text-[11px]" />
+          <span className="w-40 shrink-0 truncate text-[13px] font-semibold text-[var(--ink)]">{name}</span>
+          <span className={`min-w-0 flex-1 truncate text-[13px] ${preview ? "text-[var(--ink3)]" : "italic text-[var(--ink3)]/80"}`}>
+            {preview || "Quoted the earlier messages"}
+          </span>
+          {message.attachments.length > 0 && <Paperclip className="h-3.5 w-3.5 shrink-0 text-[var(--ink3)]" aria-label="Has attachments" />}
+          <time className="shrink-0 text-[12px] text-[var(--ink3)]" dateTime={when} title={fullDate(when)}>
+            {formatMailTime(when)}
+          </time>
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div
+      ref={anchorRef}
+      data-testid="thread-message"
+      data-open="true"
+      className="scroll-mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[0_1px_2px_rgba(0,0,0,0.06)]"
+    >
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded
+        onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onToggle();
+          }
+        }}
+        className="cursor-pointer focus:outline-none focus-visible:rounded-lg focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+        title="Collapse"
+      >
+        <MessageHeader
+          message={message}
+          actions={
+            <>
+              {onReply && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onReply();
+                  }}
+                  className={TOOL}
+                  aria-label="Reply to this message"
+                  title="Reply to this message"
+                >
+                  <Reply className="h-4 w-4" />
+                </button>
+              )}
+              {onForward && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onForward();
+                  }}
+                  className={TOOL}
+                  aria-label="Forward this message"
+                  title="Forward this message"
+                >
+                  <Forward className="h-4 w-4" />
+                </button>
+              )}
+            </>
+          }
+        />
+      </div>
+      <div className="mt-4 pl-[54px]">
+        {restricted ? (
+          <>
+            <RestrictedBody html={message.htmlBody} text={message.textBody} />
+            <BlockedAttachments attachments={message.attachments} />
+          </>
+        ) : (
+          <>
+            <MessageBody message={message} revision={revision} />
+            <AttachmentList messageId={message.id} attachments={message.attachments} />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Threads longer than this fold their middle into "N earlier messages". */
+const FOLD_AFTER = 4;
+
 function ReadingPane({
   messageId,
   folder,
@@ -1100,11 +1375,15 @@ function ReadingPane({
   const removeLabel = useRemoveLabel();
   const snooze = useSnoozeMessage();
   const queued = useScheduledMessageAction();
-  const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
   const themeRev = useThemeRevision();
   // Called unconditionally, before the early returns below — item is
   // undefined on the loading render, so this passes null until it loads.
   const { data: thread } = useThread(mailboxId ? null : item?.message.threadId ?? null);
+  // Which conversation messages are open; the newest starts open.
+  const [opened, setOpened] = useState<Set<string>>(new Set());
+  const [unfolded, setUnfolded] = useState(false);
+  const latestRef = useRef<HTMLDivElement>(null);
+  const scrolledFor = useRef<string | null>(null);
 
   // Mark read on open (once we have the item and it's unread).
   const isUnread = item && !item.isRead;
@@ -1112,6 +1391,21 @@ function ReadingPane({
     if (isUnread) update.mutate({ messageId, isRead: true, mailboxId });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messageId, isUnread]);
+
+  const threadMessages = thread && thread.messages.length > 1 ? thread.messages : null;
+  const latestId = threadMessages?.[threadMessages.length - 1]?.id ?? null;
+
+  // A new conversation opens on its newest message, scrolled into view —
+  // not on its oldest, with the newest under the reply bar.
+  useEffect(() => {
+    setOpened(new Set(latestId ? [latestId] : []));
+    setUnfolded(false);
+  }, [messageId, latestId]);
+  useEffect(() => {
+    if (!latestId || scrolledFor.current === latestId) return;
+    scrolledFor.current = latestId;
+    requestAnimationFrame(() => latestRef.current?.scrollIntoView({ block: "start" }));
+  }, [latestId]);
 
   if (isLoading) {
     return (
@@ -1130,8 +1424,6 @@ function ReadingPane({
 
   const m = item.message;
   const own = !mailboxId;
-  const to = m.recipients.filter((r) => r.type === "TO").map((r) => r.email);
-  const cc = m.recipients.filter((r) => r.type === "CC").map((r) => r.email);
   const isDraft = folder === "DRAFTS" || folder === "SCHEDULED";
   // Moving mail: one's own mailbox, or a shared one held with manage.
   const canMove = own || Boolean(sharedInbox?.canManage);
@@ -1139,16 +1431,20 @@ function ReadingPane({
   // Replying from a shared inbox goes out as it, which needs send there.
   const canReply = own || Boolean(sharedInbox?.canSend);
   const isSnoozed = folder === "SNOOZED";
-  const senderLabel = m.fromName || m.author?.displayName || m.fromAddress || m.author?.email;
-  const senderAddress = m.fromAddress || m.author?.email;
   const move = (target: "INBOX" | "ARCHIVE" | "TRASH" | "SPAM") => {
     update.mutate({ messageId, folder: target, mailboxId });
     onClose();
   };
+  // A reply or forward of one particular message of the conversation.
+  const asItem = (message: EmailMessage): MailItem => ({ ...item, messageId: message.id, message });
+  const toggle = (id: string) =>
+    setOpened((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
-  // A thread with several messages reads as a conversation: older ones
-  // collapsed to a line, the latest (or the one clicked) in full.
-  const threadMessages = thread && thread.messages.length > 1 ? thread.messages : null;
   // Spam is read as plain text, with attachments listed but not opened.
   const restricted = view?.folder === "SPAM";
   const recipientCount = m.recipients.length;
@@ -1200,38 +1496,49 @@ function ReadingPane({
     />
   );
 
-  const iconButton =
-    "inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] text-[var(--ink2)] transition hover:bg-[var(--s2)] hover:text-[var(--ink)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-50";
+  // Long conversations: first, "N earlier messages", then the last two.
+  let shown: Array<EmailMessage | { folded: number }> = threadMessages ?? [];
+  if (threadMessages && threadMessages.length > FOLD_AFTER && !unfolded) {
+    const hidden = threadMessages.slice(1, -2).filter((message) => !opened.has(message.id));
+    if (hidden.length >= 2) {
+      const hiddenIds = new Set(hidden.map((message) => message.id));
+      shown = [];
+      let foldPlaced = false;
+      for (const message of threadMessages) {
+        if (hiddenIds.has(message.id)) {
+          if (!foldPlaced) {
+            shown.push({ folded: hidden.length });
+            foldPlaced = true;
+          }
+          continue;
+        }
+        shown.push(message);
+      }
+    }
+  }
 
   return (
     <article className="flex min-h-0 w-full flex-1 flex-col" aria-label={m.subject || "(no subject)"}>
-      {/* Toolbar */}
-      <div className="flex items-center gap-2 border-b border-[var(--border)] px-5 py-3">
-        <button onClick={onClose} className={`${iconButton} lg:hidden`} aria-label="Back to list" title="Back to list">
+      {/* Toolbar: move it, organise it, more — then Alet and close */}
+      <div className="flex items-center gap-0.5 border-b border-[var(--border)] px-4 py-2.5">
+        <button onClick={onClose} className={`${TOOL} lg:hidden`} aria-label="Back to list" title="Back to list">
           <ArrowLeft className="h-4 w-4" />
         </button>
-        <button onClick={onClose} className={`${iconButton} hidden lg:inline-flex`} aria-label="Close message" title="Close message">
-          <ChevronRight className="h-4 w-4" />
-        </button>
-        <button
-          onClick={() => update.mutate({ messageId, isStarred: !item.isStarred, mailboxId })}
-          className={iconButton}
-          title={item.isStarred ? "Unstar" : "Star"}
-          aria-label={item.isStarred ? "Unstar" : "Star"}
-          aria-pressed={item.isStarred}
-        >
-          <Star className={`h-4 w-4 ${item.isStarred ? "fill-[var(--warn)] text-[var(--warn)]" : ""}`} />
-        </button>
         {canTriage && folder !== "ARCHIVE" && folder !== "TRASH" && (
-          <button title="Archive" aria-label="Archive" onClick={() => move("ARCHIVE")} className={iconButton}>
+          <button title="Archive" aria-label="Archive" onClick={() => move("ARCHIVE")} className={TOOL}>
             <Archive className="h-4 w-4" />
+          </button>
+        )}
+        {canTriage && folder !== "TRASH" && (
+          <button title="Move to Trash" aria-label="Move to Trash" onClick={() => move("TRASH")} className={TOOL}>
+            <Trash2 className="h-4 w-4" />
           </button>
         )}
         {canTriage && (
           <DropdownMenu
             align="left"
             trigger={
-              <span className={iconButton} title="Move to">
+              <span className={TOOL} title="Move to">
                 <FolderInput className="h-4 w-4" aria-hidden />
                 <span className="sr-only">Move to</span>
               </span>
@@ -1247,11 +1554,21 @@ function ReadingPane({
             {folder !== "TRASH" && <DropdownItem danger onClick={() => move("TRASH")}><Trash2 className="h-3.5 w-3.5" /> Trash</DropdownItem>}
           </DropdownMenu>
         )}
+        {(canTriage || own) && <ToolDivider />}
+        <button
+          onClick={() => update.mutate({ messageId, isStarred: !item.isStarred, mailboxId })}
+          className={TOOL}
+          title={item.isStarred ? "Unstar" : "Star"}
+          aria-label={item.isStarred ? "Unstar" : "Star"}
+          aria-pressed={item.isStarred}
+        >
+          <Star className={`h-4 w-4 ${item.isStarred ? "fill-[var(--warn)] text-[var(--warn)]" : ""}`} />
+        </button>
         {own && isSnoozed && (
           <button
             onClick={() => { snooze.mutate({ messageId, until: null }); onClose(); }}
             disabled={snooze.isPending}
-            className={iconButton}
+            className={TOOL}
             title="Unsnooze — back to Inbox now"
             aria-label="Unsnooze"
           >
@@ -1260,6 +1577,7 @@ function ReadingPane({
         )}
         {own && folder === "INBOX" && (
           <SnoozeMenu
+            triggerClassName={TOOL}
             disabled={snooze.isPending}
             onSnooze={(until) => {
               snooze.mutate({ messageId, until: until.toISOString() });
@@ -1271,7 +1589,7 @@ function ReadingPane({
           <DropdownMenu
             align="left"
             trigger={
-              <span className={iconButton} title="Labels">
+              <span className={TOOL} title="Labels">
                 <Tag className="h-4 w-4" aria-hidden />
                 <span className="sr-only">Labels</span>
               </span>
@@ -1302,7 +1620,7 @@ function ReadingPane({
         <DropdownMenu
           align="left"
           trigger={
-            <span className={iconButton} title="More">
+            <span className={TOOL} title="More">
               <MoreHorizontal className="h-4 w-4" aria-hidden />
               <span className="sr-only">More actions</span>
             </span>
@@ -1319,147 +1637,106 @@ function ReadingPane({
         </DropdownMenu>
         <div className="flex-1" />
         {!view && (
-          <div className="hidden md:block">
+          <div className="mr-1 hidden md:block">
             <ComingSoonButton icon={Sparkles} label="Summarize with Alet" hint="Alet summaries are coming soon" />
           </div>
         )}
+        <button onClick={onClose} className={`${TOOL} hidden lg:inline-flex`} aria-label="Close message" title="Close message">
+          <X className="h-4 w-4" />
+        </button>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-        {/* Subject and where the message sits */}
-        <div className="px-6 pb-2 pt-5 lg:px-8">
-          {view && (
-            <p className="mb-1 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[var(--ink3)]">{view.paneEyebrow}</p>
-          )}
-          <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="text-[22px] font-semibold leading-snug text-[var(--ink)]">{m.subject || "(no subject)"}</h1>
-            {!view && (
-              <span className="rounded-md border border-[var(--border)] bg-[var(--s2)] px-2 py-0.5 text-[11px] font-medium text-[var(--ink2)]">
-                {sharedInbox ? sharedInbox.address.split("@")[0] : folderTitle(folder)}
-              </span>
+        <div className="mx-auto w-full max-w-[920px] px-5 pb-10 pt-5 lg:px-8">
+          {/* Subject, where it sits, how long the conversation is */}
+          <div className="mb-5">
+            {view && (
+              <p className="mb-1 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[var(--ink3)]">{view.paneEyebrow}</p>
             )}
-          </div>
-          <div className={`flex flex-wrap items-center gap-1.5 ${view || item.labels.length > 0 ? "mt-2" : ""}`}>
-            {viewTags}
-            {item.labels.map((l) => (
-              <span
-                key={l.id}
-                className="rounded-md px-2 py-0.5 text-[11px] font-medium"
-                style={{ backgroundColor: `${l.color}26`, color: l.color }}
-              >
-                {l.name}
-              </span>
-            ))}
-          </div>
-          {threadMessages && <p className="mt-1 text-xs text-[var(--ink3)]">{threadMessages.length} messages in this conversation</p>}
-          {threadMessages && statusCard && <div className="mt-4">{statusCard}</div>}
-        </div>
-
-        {threadMessages ? (
-          threadMessages.map((tm, idx) => {
-            const isLast = idx === threadMessages.length - 1;
-            const isOpen = expandedMessageId ? expandedMessageId === tm.id : isLast;
-            const tmTo = tm.recipients.filter((r) => r.type === "TO").map((r) => r.email);
-            const tmCc = tm.recipients.filter((r) => r.type === "CC").map((r) => r.email);
-            const tmSender = tm.fromName || tm.author?.displayName || tm.fromAddress || tm.author?.email;
-            return (
-              <div key={tm.id} className="mx-6 border-b border-[var(--border)] lg:mx-8">
-                <button
-                  onClick={() => setExpandedMessageId(isOpen ? null : tm.id)}
-                  aria-expanded={isOpen}
-                  className="flex w-full items-center gap-3 py-3 text-left"
+            <h1
+              className="line-clamp-3 break-words text-[22px] font-semibold leading-snug text-[var(--ink)] [overflow-wrap:anywhere]"
+              title={m.subject || "(no subject)"}
+            >
+              {m.subject || "(no subject)"}
+            </h1>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {!view && (
+                <span className="rounded-md border border-[var(--border)] bg-[var(--s2)] px-2 py-0.5 text-[11px] font-medium text-[var(--ink2)]">
+                  {sharedInbox ? sharedInbox.address.split("@")[0] : folderTitle(folder)}
+                </span>
+              )}
+              {viewTags}
+              {item.labels.map((l) => (
+                <span
+                  key={l.id}
+                  className="rounded-md px-2 py-0.5 text-[11px] font-medium"
+                  style={{ backgroundColor: `${l.color}26`, color: l.color }}
                 >
-                  <Avatar name={tmSender} className="h-9 w-9 text-[12px]" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold text-[var(--ink)]">{tmSender}</span>
-                    {!isOpen && <span className="block truncate text-xs text-[var(--ink3)]">{tm.textBody?.slice(0, 120) || ""}</span>}
-                  </span>
-                  <span className="shrink-0 text-xs text-[var(--ink3)]">{formatMailTime(tm.sentAt || tm.createdAt)}</span>
-                  <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-[var(--ink3)] transition-transform ${isOpen ? "rotate-180" : ""}`} aria-hidden />
-                </button>
-                {isOpen && (
-                  <div className="pb-6 pl-12">
-                    <div className="mb-3 text-xs text-[var(--ink3)]">
-                      To: {tmTo.join(", ") || "—"}
-                      {tmCc.length > 0 && <> · Cc: {tmCc.join(", ")}</>}
-                    </div>
-                    {restricted ? (
-                      <>
-                        <RestrictedBody html={tm.htmlBody} text={tm.textBody} />
-                        <BlockedAttachments attachments={tm.attachments} />
-                      </>
-                    ) : (
-                      <>
-                        {tm.htmlBody ? (
-                          <EmailBody html={tm.htmlBody} revision={themeRev} />
-                        ) : (
-                          <div className="whitespace-pre-wrap break-words text-[14px] leading-relaxed text-[var(--ink)]">
-                            {tm.textBody || "(no content)"}
-                          </div>
-                        )}
-                        <AttachmentList messageId={tm.id} attachments={tm.attachments} mailboxId={mailboxId} />
-                      </>
-                    )}
+                  {l.name}
+                </span>
+              ))}
+              {threadMessages && (
+                <span className="text-[12px] text-[var(--ink3)]">{threadMessages.length} messages in this conversation</span>
+              )}
+            </div>
+            {threadMessages && statusCard && <div className="mt-4">{statusCard}</div>}
+          </div>
+
+          {threadMessages ? (
+            <div className="space-y-1.5" data-testid="conversation">
+              {shown.map((entry) =>
+                "folded" in entry ? (
+                  <div key="fold" className="relative py-2">
+                    <div className="absolute inset-x-3 top-1/2 border-t border-dashed border-[var(--border)]" aria-hidden />
+                    <button
+                      type="button"
+                      onClick={() => setUnfolded(true)}
+                      className="relative mx-auto flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1 text-[12px] font-medium text-[var(--ink2)] transition hover:bg-[var(--s2)]"
+                    >
+                      {entry.folded} earlier messages
+                    </button>
                   </div>
+                ) : (
+                  <ConversationMessage
+                    key={entry.id}
+                    message={entry}
+                    open={opened.has(entry.id)}
+                    onToggle={() => toggle(entry.id)}
+                    revision={themeRev}
+                    anchorRef={entry.id === latestId ? latestRef : undefined}
+                    restricted={restricted}
+                    onReply={canReply ? () => onCompose("reply", asItem(entry)) : undefined}
+                    onForward={canReply ? () => onCompose("forward", asItem(entry)) : undefined}
+                  />
+                )
+              )}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
+              <MessageHeader message={m} />
+              {statusCard && <div className="mt-4">{statusCard}</div>}
+              <div className="mt-5 border-t border-[var(--border)] pt-5">
+                {restricted ? (
+                  <>
+                    <RestrictedBody html={m.htmlBody} text={m.textBody} />
+                    <BlockedAttachments attachments={m.attachments} />
+                  </>
+                ) : (
+                  <>
+                    <MessageBody message={m} revision={themeRev} />
+                    <AttachmentList messageId={messageId} attachments={m.attachments} mailboxId={mailboxId} />
+                  </>
                 )}
               </div>
-            );
-          })
-        ) : (
-          <div className="px-6 pb-8 lg:px-8">
-            {/* Sender, recipients and time */}
-            <div className="flex items-start gap-3.5 border-b border-[var(--border)] py-4">
-              <Avatar name={senderLabel} className="h-11 w-11 text-[14px]" />
-              <div className="min-w-0 flex-1 text-[13px]">
-                <div className="flex flex-wrap items-baseline gap-x-1.5">
-                  <span className="font-semibold text-[var(--ink)]">{senderLabel}</span>
-                  {senderAddress && senderAddress !== senderLabel && (
-                    <span className="truncate text-[var(--ink3)]">&lt;{senderAddress}&gt;</span>
-                  )}
-                </div>
-                <div className="mt-1 truncate text-[12px] text-[var(--ink3)]">To: {to.join(", ") || "—"}</div>
-                {cc.length > 0 && <div className="mt-0.5 truncate text-[12px] text-[var(--ink3)]">Cc: {cc.join(", ")}</div>}
-              </div>
-              <time
-                className="shrink-0 text-[12px] text-[var(--ink3)]"
-                dateTime={m.sentAt || m.createdAt}
-                title={new Date(m.sentAt || m.createdAt).toLocaleString()}
-              >
-                {formatMailTime(m.sentAt || m.createdAt)}
-              </time>
             </div>
+          )}
 
-            {statusCard && <div className="pt-4">{statusCard}</div>}
-
-            {/* Body */}
-            {restricted ? (
-              <div className="pt-5">
-                <RestrictedBody html={m.htmlBody} text={m.textBody} />
-                <BlockedAttachments attachments={m.attachments} />
-              </div>
-            ) : (
-              <>
-                <div className="pt-5">
-                  {m.htmlBody ? (
-                    <EmailBody html={m.htmlBody} revision={themeRev} />
-                  ) : (
-                    <div className="whitespace-pre-wrap break-words text-[14px] leading-relaxed text-[var(--ink)]">
-                      {m.textBody || "(no content)"}
-                    </div>
-                  )}
-                </div>
-
-                <AttachmentList messageId={messageId} attachments={m.attachments} mailboxId={mailboxId} />
-              </>
-            )}
-          </div>
-        )}
-
-        {view && (
-          <div className="px-6 pb-8 lg:px-8">
-            <AletCard hint={view.aletHint} />
-          </div>
-        )}
+          {view && (
+            <div className="mt-6">
+              <AletCard hint={view.aletHint} />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Actions, always in reach */}
@@ -1566,21 +1843,21 @@ function ReadingPane({
         ) : canReply ? (
           <>
             <button
-              onClick={() => onCompose("reply", item)}
+              onClick={() => onCompose("reply", threadMessages ? asItem(threadMessages[threadMessages.length - 1]) : item)}
               title="Reply"
               className="inline-flex h-10 items-center gap-2 rounded-lg bg-[var(--accent)] px-4 text-[13px] font-semibold text-white transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]"
             >
               <Reply className="h-4 w-4" aria-hidden /> Reply
             </button>
             <button
-              onClick={() => onCompose("replyAll", item)}
+              onClick={() => onCompose("replyAll", threadMessages ? asItem(threadMessages[threadMessages.length - 1]) : item)}
               title="Reply all"
               className="inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--border)] px-4 text-[13px] font-medium text-[var(--ink)] transition hover:bg-[var(--s2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
             >
               <ReplyAll className="h-4 w-4" aria-hidden /> Reply all
             </button>
             <button
-              onClick={() => onCompose("forward", item)}
+              onClick={() => onCompose("forward", threadMessages ? asItem(threadMessages[threadMessages.length - 1]) : item)}
               title="Forward"
               className="inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--border)] px-4 text-[13px] font-medium text-[var(--ink)] transition hover:bg-[var(--s2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
             >

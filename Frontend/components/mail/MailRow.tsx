@@ -3,6 +3,7 @@
 import { Star, Paperclip, Trash2, Clock, AlertTriangle } from "lucide-react";
 import type { MailItem, MailListItem, MailListFolder } from "@/lib/mail-api";
 import { shortSendTime, zoneAbbr } from "@/components/mail/folder-views";
+import { senderLabel } from "@/lib/mail-quote";
 
 // A fixed, readable palette — hashed by sender so the same person always
 // gets the same colour across the inbox, without storing a colour anywhere.
@@ -28,10 +29,9 @@ export function avatarInitials(name: string): string {
   return (parts.length >= 2 ? parts[0][0] + parts[1][0] : parts[0].slice(0, 2)).toUpperCase();
 }
 
-/** Works for a list row or a detail read — both carry the sender fields. */
+/** The same name the reading pane shows (lib/mail-quote.ts senderLabel). */
 function senderName(item: MailListItem | MailItem): string {
-  const m = item.message;
-  return m.fromName || m.fromAddress || m.author?.displayName || m.author?.email || "Unknown";
+  return senderLabel(item.message);
 }
 
 /**

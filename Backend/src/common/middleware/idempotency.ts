@@ -93,7 +93,14 @@ function payloadHash(req: Request): string {
     // there is nothing to hash faithfully. The declared length stands in: it
     // distinguishes two different files well enough to catch a reused key,
     // and a replay of the same upload still returns the stored answer.
-    hash.update(`${req.headers["content-type"] ?? ""}:${req.headers["content-length"] ?? ""}`);
+    //
+    // The media type without its parameters: a multipart Content-Type
+    // carries a boundary, a random string every request makes afresh, so
+    // hashing the whole header made each honest retry of an upload "a
+    // different payload" and refused it with 409. The boundary's length is
+    // fixed per client, so the content length still tells two files apart.
+    const mediaType = (req.headers["content-type"] ?? "").split(";")[0]!.trim().toLowerCase();
+    hash.update(`${mediaType}:${req.headers["content-length"] ?? ""}`);
   }
   return hash.digest("hex");
 }

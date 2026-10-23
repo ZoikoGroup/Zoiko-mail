@@ -83,6 +83,7 @@ export function FolderRail({
   onLabelChange,
   sharedMailboxId = null,
   onOpenShared,
+  fill = false,
 }: {
   folder: MailListFolder;
   onFolderChange: (folder: MailListFolder) => void;
@@ -97,6 +98,8 @@ export function FolderRail({
   /** The shared inbox being read, or null for one's own mailbox. */
   sharedMailboxId?: string | null;
   onOpenShared?: (inbox: SharedInbox | null) => void;
+  /** Fill a parent that sets the width (the resizable desktop column). */
+  fill?: boolean;
 }) {
   const inMore = MORE.some((row) => row.key === folder);
   const [moreOpen, setMoreOpen] = useState(inMore);
@@ -136,7 +139,7 @@ export function FolderRail({
   return (
     <aside
       aria-label="Mail folders"
-      className="flex h-full w-[240px] shrink-0 flex-col border-r border-[var(--border)] bg-[var(--surface)]"
+      className={`flex h-full shrink-0 flex-col border-r border-[var(--border)] bg-[var(--surface)] ${fill ? "w-full" : "w-[240px]"}`}
     >
       <div className="p-3 pb-1">
         <button

@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { X, Save, AlertCircle, CheckCircle2, Paperclip, Loader2, ChevronDown, ChevronRight } from "lucide-react";
+import { X, Save, AlertCircle, CheckCircle2, Paperclip, ChevronDown, ChevronRight } from "lucide-react";
 import { useComposerSubmit, type ComposerMode, useSignature, useSendableMailboxes } from "@/lib/mail-hooks";
 import { useMe } from "@/lib/auth-hooks";
-import { ApiError } from "@/lib/api-client";
+import { ApiError, newIdempotencyKey } from "@/lib/api-client";
+import { ATTACHMENT_ACCEPT, attachmentProblem, isRetryable, withRetry } from "@/lib/attachment-rules";
 import {
   deleteAttachment,
   getMessage,
@@ -16,27 +17,21 @@ import {
 } from "@/lib/mail-api";
 import type { MailAttachment, MailItem } from "@/lib/mail-api";
 import { forwardSubject, quotedOriginal, replyRecipients, replySubject } from "@/lib/mail-reply";
-import { fileKind, formatBytes } from "@/lib/file-kind";
+import { formatBytes } from "@/lib/file-kind";
 import { RecipientInput } from "@/components/mail/RecipientInput";
 import { RichTextEditor } from "@/components/mail/RichTextEditor";
 import { SendMenu } from "@/components/mail/SendMenu";
-import { FileTypeBadge } from "@/components/mail/AttachmentPreview";
+import {
+  AttachmentTile,
+  FilePreview,
+  attachmentPreviewItem,
+  localFilePreviewItem,
+  type PreviewItem,
+} from "@/components/mail/AttachmentPreview";
 
-const ALLOWED_TYPES = [
-  "application/pdf",
-  "application/zip",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "image/gif",
-  "image/jpeg",
-  "image/png",
-  "text/csv",
-  "text/plain",
-];
-
-const ACCEPT = ALLOWED_TYPES.join(",");
+// What the file picker offers and what is checked before an upload: the same
+// list the server enforces (lib/attachment-rules.ts).
+const ACCEPT = ATTACHMENT_ACCEPT;
 
 const MODE_TITLE: Record<ComposerMode, string> = {
   new: "New message",
@@ -89,6 +84,8 @@ export function ComposeModal({
   const [files, setFiles] = useState<File[]>([]);
   const [attached, setAttached] = useState<MailAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
+  // Which attachment the viewer is showing, if it is open.
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ kind: "gate" | "ok" | "err"; text: string } | null>(null);
   const { data: sigData } = useSignature();
@@ -111,6 +108,34 @@ export function ComposeModal({
   filesRef.current = files;
   const uploadedRef = useRef(new WeakSet<File>());
   const syncingRef = useRef<Promise<void>>(Promise.resolve());
+  // One Idempotency-Key per file, kept for every retry of that file, so an
+  // upload whose answer was lost is not stored twice (a different file gets
+  // a different key — reusing one would replay the first file's answer).
+  const fileKeysRef = useRef(new WeakMap<File, string>());
+  // One key per draft and action, kept until the action is known to have
+  // happened, so a retried send can never send twice.
+  const actionKeysRef = useRef(new Map<string, string>());
+  // A send whose outcome is unknown (the connection dropped, or the server
+  // failed): the next Send retries just the send, with the same key.
+  const sendUnconfirmedRef = useRef(false);
+  const keyFor = (file: File) => {
+    let key = fileKeysRef.current.get(file);
+    if (!key) {
+      key = newIdempotencyKey();
+      fileKeysRef.current.set(file, key);
+    }
+    return key;
+  };
+  // A schedule's key includes its time: rescheduling is a different request.
+  const actionKey = (draft: string, action: "send" | "schedule", variant = "") => {
+    const name = `${action}:${draft}:${variant}`;
+    let key = actionKeysRef.current.get(name);
+    if (!key) {
+      key = newIdempotencyKey();
+      actionKeysRef.current.set(name, key);
+    }
+    return key;
+  };
   // What the body was when the composer opened (the signature), so a reply
   // isn't autosaved before anything has been written.
   const initialTextRef = useRef("");
@@ -141,6 +166,9 @@ export function ComposeModal({
     setShowQuote(false);
     creatingRef.current = null;
     uploadedRef.current = new WeakSet();
+    fileKeysRef.current = new WeakMap();
+    actionKeysRef.current = new Map();
+    sendUnconfirmedRef.current = false;
     // Defaults to one's own address every time the composer opens, rather than
     // remembering the last shared mailbox used: sending as the team by
     // accident is the mistake worth designing against.
@@ -231,7 +259,7 @@ export function ComposeModal({
       setUploading(true);
       try {
         for (const file of pending) {
-          const attachment = await uploadAttachment(id, file);
+          const attachment = await withRetry(() => uploadAttachment(id, file, keyFor(file)));
           uploadedRef.current.add(file);
           setFiles((prev) => prev.filter((f) => f !== file));
           setAttached((prev) => [...prev, attachment]);
@@ -300,7 +328,12 @@ export function ComposeModal({
       ...attached.map((a) => `${a.fileName}:${a.sizeBytes}`),
     ]);
     const fresh = arr.filter((f) => !existing.has(`${f.name}:${f.size}`));
-    setFiles((prev) => [...prev, ...fresh]);
+    // Refused here, with the reason, rather than after an upload fails.
+    const problems = fresh.map(attachmentProblem).filter((problem): problem is string => problem !== null);
+    const accepted = fresh.filter((f) => attachmentProblem(f) === null);
+    if (problems.length > 0) setNotice({ kind: "err", text: problems.join(" ") });
+    else setNotice(null);
+    setFiles((prev) => [...prev, ...accepted]);
   };
 
   const removeFile = (file: File) => {
@@ -316,6 +349,13 @@ export function ComposeModal({
       setNotice({ kind: "err", text: err instanceof Error ? err.message : "Couldn't remove the attachment." });
     }
   };
+
+  // Everything attached, in the order listed: on the draft already, then
+  // waiting to upload. Previewed from the server or the browser respectively.
+  const previewItems: PreviewItem[] = [
+    ...attached.map((a) => attachmentPreviewItem(draftId ?? "", a)),
+    ...files.map((f) => localFilePreviewItem(f, keyFor(f))),
+  ];
 
   const totalSize = files.reduce((sum, f) => sum + f.size, 0) + attached.reduce((sum, a) => sum + a.sizeBytes, 0);
   const attachmentCount = files.length + attached.length;
@@ -339,12 +379,27 @@ export function ComposeModal({
     setBusy(true);
     try {
       const id = await ensureDraft();
-      await saveBody(id);
-      await syncAttachments(id);
+      // After a send whose outcome is unknown, the draft may already be
+      // gone; saving it again would fail. Retry just the send, same key.
+      const resumingSend = action === "send" && sendUnconfirmedRef.current;
+      if (!resumingSend) {
+        await saveBody(id);
+        await syncAttachments(id);
+      }
       if (action === "send") {
         try {
-          await sendDraft(id);
+          await withRetry(() => sendDraft(id, actionKey(id, "send")));
+          sendUnconfirmedRef.current = false;
         } catch (err) {
+          if (isRetryable(err)) {
+            // It may have gone. Say so, and make the next Send safe.
+            sendUnconfirmedRef.current = true;
+            setNotice({
+              kind: "err",
+              text: "We couldn't confirm the message was sent — the connection to Zoiko Mail dropped. Press Send again: it will not be sent twice.",
+            });
+            return;
+          }
           // A blocked send keeps the message as a draft rather than losing it.
           if (err instanceof ApiError && (err.status === 403 || err.status === 429)) {
             setNotice({
@@ -359,7 +414,7 @@ export function ComposeModal({
           throw err;
         }
       } else if (action === "schedule" && scheduledAt) {
-        await scheduleDraft(id, scheduledAt.toISOString());
+        await withRetry(() => scheduleDraft(id, scheduledAt.toISOString(), actionKey(id, "schedule", scheduledAt.toISOString())));
       }
       void qc.invalidateQueries({ queryKey: ["mail"] });
       onClose();
@@ -517,49 +572,34 @@ export function ComposeModal({
 
           {/* Attached files list */}
           {attachmentCount > 0 && (
-            <div className="space-y-1.5" data-testid="compose-attachments">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
+            <div data-testid="compose-attachments">
+              <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
                 {attachmentCount} file{attachmentCount > 1 ? "s" : ""} · {formatBytes(totalSize)}
                 {uploading ? " · uploading…" : ""}
               </div>
-              {attached.map((attachment) => (
-                <div
-                  key={attachment.id}
-                  className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--s2)] px-3 py-1.5"
-                >
-                  <FileTypeBadge kind={fileKind(attachment.fileName, attachment.contentType)} />
-                  <span className="min-w-0 flex-1 truncate text-sm text-[var(--ink)]">{attachment.fileName}</span>
-                  <span className="shrink-0 text-[11px] text-[var(--ink3)]">{formatBytes(attachment.sizeBytes)}</span>
-                  <button
-                    onClick={() => void removeAttached(attachment)}
-                    className="shrink-0 rounded p-0.5 text-[var(--ink3)] hover:bg-[var(--s2)] hover:text-[var(--crit)]"
-                    title="Remove"
-                    aria-label={`Remove ${attachment.fileName}`}
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))}
-              {files.map((file, i) => (
-                <div
-                  key={`${file.name}-${file.size}-${i}`}
-                  className="flex items-center gap-2 rounded-lg border border-dashed border-[var(--border)] bg-[var(--s2)] px-3 py-1.5"
-                >
-                  <FileTypeBadge kind={fileKind(file.name, file.type)} />
-                  <span className="min-w-0 flex-1 truncate text-sm text-[var(--ink)]">{file.name}</span>
-                  <span className="shrink-0 text-[11px] text-[var(--ink3)]">
-                    {uploading ? <Loader2 className="inline h-3 w-3 animate-spin" /> : null} {formatBytes(file.size)}
-                  </span>
-                  <button
-                    onClick={() => removeFile(file)}
-                    className="shrink-0 rounded p-0.5 text-[var(--ink3)] hover:bg-[var(--s2)] hover:text-[var(--crit)]"
-                    title="Remove"
-                    aria-label={`Remove ${file.name}`}
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))}
+              {/* A preview of each file the moment it is attached — before it
+                  uploads, from the browser's own copy; afterwards from the draft. */}
+              <div className="flex flex-wrap gap-3">
+                {attached.map((attachment, index) => (
+                  <AttachmentTile
+                    key={attachment.id}
+                    item={previewItems[index]}
+                    testId="compose-attachment"
+                    onOpen={() => setPreviewIndex(index)}
+                    onRemove={() => void removeAttached(attachment)}
+                  />
+                ))}
+                {files.map((file, i) => (
+                  <AttachmentTile
+                    key={`${file.name}-${file.size}-${i}`}
+                    item={previewItems[attached.length + i]}
+                    testId="compose-attachment"
+                    uploading={uploading}
+                    onOpen={() => setPreviewIndex(attached.length + i)}
+                    onRemove={() => removeFile(file)}
+                  />
+                ))}
+              </div>
             </div>
           )}
 
@@ -620,6 +660,11 @@ export function ComposeModal({
           </button>
         </div>
       </div>
+
+      {/* The attached files' viewer, over the composer. */}
+      {previewIndex !== null && previewItems.length > 0 && (
+        <FilePreview items={previewItems} startIndex={previewIndex} onClose={() => setPreviewIndex(null)} />
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
 import { mailService } from "./mail.service.js";
+import { previewDocument } from "./attachment-preview.service.js";
 import { sharedMailboxService } from "./shared-mailbox.service.js";
 import { aliasService } from "./alias.service.js";
 import { mailboxProvisioningService } from "./mailbox-provisioning.service.js";
@@ -122,6 +123,19 @@ export const downloadAttachment = asyncHandler(async (req: Request, res: Respons
   );
   res.setHeader("Content-Length", attachment.data.length);
   res.status(200).send(attachment.data);
+});
+export const previewAttachment = asyncHandler(async (req: Request, res: Response) => {
+  const attachment = await mailService.downloadAttachment(
+    String(req.params.messageId),
+    String(req.params.attachmentId),
+    context(req),
+    req.query.mailboxId ? String(req.query.mailboxId) : undefined
+  );
+  sendSuccess(res, 200, await previewDocument(attachment.fileName, attachment.data), req.requestId);
+});
+export const previewUpload = asyncHandler(async (req: Request, res: Response) => {
+  const file = req.file!;
+  sendSuccess(res, 200, await previewDocument(file.originalname, file.buffer), req.requestId);
 });
 export const deleteAttachment = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(
