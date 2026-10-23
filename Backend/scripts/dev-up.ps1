@@ -25,6 +25,11 @@
 .PARAMETER Down
   Stop what this script starts.
 
+.PARAMETER NoFrontend
+  Bring up everything the frontend needs — Docker, postgres, the schema and
+  the API — and stop there. The frontend's `npm run dev` calls this before it
+  starts (Frontend/scripts/ensure-api.mjs), so starting the frontend the usual
+  way also starts the API it cannot work without.
 .PARAMETER Docker
   Run the API from its container image instead of from source, rebuilding the
   image first. Use this when you want the containerised platform; the rebuild
@@ -35,6 +40,7 @@
 .EXAMPLE
   .\Backend\scripts\dev-up.ps1
   .\Backend\scripts\dev-up.ps1 -Docker
+  .\Backend\scripts\dev-up.ps1 -NoFrontend
   .\Backend\scripts\dev-up.ps1 -Check
   .\Backend\scripts\dev-up.ps1 -Down
 #>
@@ -42,7 +48,8 @@
 param(
   [switch]$Check,
   [switch]$Down,
-  [switch]$Docker
+  [switch]$Docker,
+  [switch]$NoFrontend
 )
 
 $ErrorActionPreference = 'Stop'
@@ -390,8 +397,8 @@ if (Test-Port 5000) {
 Set-Location '$BackendDir'
 `$env:DATABASE_URL = '$dbUrl'
 `$env:PORT = '5000'
-Write-Host 'Zoiko API (from source) — Ctrl+C to stop' -ForegroundColor Cyan
-npm run dev
+Write-Host 'Zoiko API (from source, supervised) — Ctrl+C to stop. Log: Backend\.dev-api.log' -ForegroundColor Cyan
+node scripts/dev-api.mjs
 "@
   Start-Process -FilePath 'pwsh' -ArgumentList '-NoExit', '-NoProfile', '-Command', $cmd | Out-Null
   $deadline = (Get-Date).AddMinutes(2)
@@ -399,6 +406,12 @@ npm run dev
   if (Test-Port 5000) { Write-Ok 'up on 5000 (own window)' } else { Write-Bad 'api did not come up — check its window' }
 }
 
+}
+
+if ($NoFrontend) {
+  # Called from the frontend's own `npm run dev`, which is about to start it.
+  if (Test-Port 5000) { Write-Ok 'api ready on 5000 — the frontend can start' }
+  return
 }
 
 # The frontend is not containerised — there is no Frontend/Dockerfile and no

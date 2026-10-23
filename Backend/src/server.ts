@@ -350,4 +350,30 @@ process.on("SIGTERM", () => {
 
 process.on("SIGINT", () => {
   void shutdown("SIGINT");
+});
+
+// A process that dies should say why. Without these, a crash left nothing but
+// a closed port: the API was simply gone, and the web app could only report
+// "isn't running".
+server.on("error", (error: NodeJS.ErrnoException) => {
+  logger.fatal(
+    { err: error, port: PORT },
+    error.code === "EADDRINUSE" ? `Port ${PORT} is already in use; another API is running` : "HTTP server failed"
+  );
+  process.exit(1);
+});
+
+// A promise rejected with nobody listening is a bug in one code path, not a
+// broken process: log it loudly and keep serving everyone else. (Node's
+// default would end the process — and every other request with it.)
+process.on("unhandledRejection", (reason) => {
+  logger.error({ err: reason }, "Unhandled promise rejection");
+});
+
+// An exception nothing caught leaves the process in an unknown state, so it
+// still exits — after saying why — and the supervisor (the container's
+// restart policy, or scripts/dev-api.mjs locally) starts a clean one.
+process.on("uncaughtException", (error) => {
+  logger.fatal({ err: error }, "Uncaught exception; exiting");
+  process.exit(1);
 });    
