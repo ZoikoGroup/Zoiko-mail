@@ -111,6 +111,9 @@ export function useMemberShell() {
 
     NOTIFICATION: useCallback((e: SSEEvent) => {
       qc.invalidateQueries({ queryKey: ["notifications"] });
+      // An invitation, an answer, a change or a cancellation: the calendar,
+      // its invitation lists and badges refresh without a reload.
+      if (e.payload?.kind === "calendar") qc.invalidateQueries({ queryKey: ["calendar"] });
       addToast({
         type: "notification",
         title: e.payload?.title ?? "New notification",

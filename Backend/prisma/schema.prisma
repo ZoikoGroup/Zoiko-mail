@@ -8,135 +8,146 @@ datasource db {
 }
 
 model Tenant {
-  id                  String                 @id @default(uuid()) @db.Uuid
-  name                String
-  status              TenantStatus           @default(ACTIVE)
-  planCode            String                 @map("plan_code")
-  timezone            String?                @default("UTC")
-  language            String?                @default("en")
-  logoUrl             String?                @map("logo_url")
-  allowedDomains      String[]               @default([]) @map("allowed_domains")
-  passwordPolicy      Json?                  @map("password_policy")
-  memberLimit         Int?                   @map("member_limit")
-  aiSettings          Json?                  @map("ai_settings")
-  settings            Json?
-  createdAt           DateTime               @default(now()) @map("created_at")
-  updatedAt           DateTime               @updatedAt @map("updated_at")
-  auditEvents         AuditEvent[]
-  refreshTokens       RefreshToken[]
-  memberships         TenantMembership[]
-  policies            TenantPolicy[]
-  mailboxes           Mailbox[]
-  emailMessages       EmailMessage[]
-  threads             MessageThread[]
-  domains             MailDomain[]
-  aiActions           AIAction[]
-  commitments         Commitment[]
-  notifications       Notification[]
-  integrationLinks    IntegrationLink[]
-  backgroundJobs      BackgroundJob[]
-  lifecycleRequests   DataLifecycleRequest[]
-  supportAccessGrants SupportAccessGrant[]
-  supportAccessRequests SupportAccessRequest[]
-  mailGroups            MailGroup[]
-  ownershipTransfersOut OwnershipTransfer[]
-  securityAlerts        SecurityAlert[]
-  mailLabels          MailLabel[]
-  messageLabels       MailboxMessageLabel[]
-  connectedAccounts   ConnectedAccount[]
-  providerEvents      ProviderEvent[]
-  suppressionEntries  SuppressionEntry[]
-  domainDnsChecks     DomainDnsCheck[]
-  domainDnsRecords    DomainDnsRecord[]
-  domainDkimKeys      DomainDkimKey[]
+  id                     String                  @id @default(uuid()) @db.Uuid
+  name                   String
+  status                 TenantStatus            @default(ACTIVE)
+  planCode               String                  @map("plan_code")
+  timezone               String?                 @default("UTC")
+  language               String?                 @default("en")
+  logoUrl                String?                 @map("logo_url")
+  allowedDomains         String[]                @default([]) @map("allowed_domains")
+  passwordPolicy         Json?                   @map("password_policy")
+  memberLimit            Int?                    @map("member_limit")
+  aiSettings             Json?                   @map("ai_settings")
+  settings               Json?
+  createdAt              DateTime                @default(now()) @map("created_at")
+  updatedAt              DateTime                @updatedAt @map("updated_at")
+  auditEvents            AuditEvent[]
+  refreshTokens          RefreshToken[]
+  memberships            TenantMembership[]
+  policies               TenantPolicy[]
+  mailboxes              Mailbox[]
+  emailMessages          EmailMessage[]
+  threads                MessageThread[]
+  domains                MailDomain[]
+  aiActions              AIAction[]
+  commitments            Commitment[]
+  notifications          Notification[]
+  integrationLinks       IntegrationLink[]
+  backgroundJobs         BackgroundJob[]
+  lifecycleRequests      DataLifecycleRequest[]
+  supportAccessGrants    SupportAccessGrant[]
+  supportAccessRequests  SupportAccessRequest[]
+  mailGroups             MailGroup[]
+  ownershipTransfersOut  OwnershipTransfer[]
+  securityAlerts         SecurityAlert[]
+  mailLabels             MailLabel[]
+  messageLabels          MailboxMessageLabel[]
+  connectedAccounts      ConnectedAccount[]
+  providerEvents         ProviderEvent[]
+  suppressionEntries     SuppressionEntry[]
+  domainDnsChecks        DomainDnsCheck[]
+  domainDnsRecords       DomainDnsRecord[]
+  domainDkimKeys         DomainDkimKey[]
   dnsProviderCredentials DnsProviderCredential[]
-  subscriptions       Subscription[]
-  invoices            Invoice[]
-  contacts            Contact[]
-  mailboxAccess       MailboxAccess[]
-  aliases             Alias[]
-  forwardingRules     ForwardingRule[]
-  idempotencyRecords  IdempotencyRecord[]
-  participants        Participant[]
-  threadParticipants  ThreadParticipant[]
-  tickets             SupportTicket[]
+  subscriptions          Subscription[]
+  invoices               Invoice[]
+  contacts               Contact[]
+  calendars              Calendar[]
+  calendarEvents         CalendarEvent[]
+  eventAttendees         EventAttendee[]
+  eventActivities        CalendarEventActivity[]
+  calendarShares         CalendarShare[]
+  calendarAccessRequests CalendarAccessRequest[]
+  calendarResources      CalendarResource[]
+  resourceBookings       ResourceBooking[]
+  bookingLinks           BookingLink[]
+  guestBookings          GuestBooking[]
+  meetingTemplates       MeetingTemplate[]
+  calendarPreferences    CalendarPreference[]
+  mailboxAccess          MailboxAccess[]
+  aliases                Alias[]
+  forwardingRules        ForwardingRule[]
+  idempotencyRecords     IdempotencyRecord[]
+  participants           Participant[]
+  threadParticipants     ThreadParticipant[]
+  tickets                SupportTicket[]
 
   @@map("tenants")
 }
 
 model AppUser {
-  id                      String                 @id @default(uuid()) @db.Uuid
-  email                   String                 @unique
-  googleId                String?                @unique @map("google_id")
-  passwordHash            String?                @map("password_hash")
+  id                          String                 @id @default(uuid()) @db.Uuid
+  email                       String                 @unique
+  googleId                    String?                @unique @map("google_id")
+  passwordHash                String?                @map("password_hash")
   /// AES-256-GCM ciphertext, not a hash: whoever can read a TOTP secret
   /// can mint valid codes forever, so it is closer to a plaintext password
   /// than to the hash beside it (AC-002).
-  mfaSecret               String?                @map("mfa_secret")
-  mfaEnrolledAt           DateTime?              @map("mfa_enrolled_at")
+  mfaSecret                   String?                @map("mfa_secret")
+  mfaEnrolledAt               DateTime?              @map("mfa_enrolled_at")
   /// The last time-step spent, so one code cannot be replayed inside its
   /// own window (RFC 6238 section 5.2).
-  mfaLastUsedStep         Int?                   @map("mfa_last_used_step")
-  displayName             String                 @map("display_name")
-  avatarUrl               String?                @map("avatar_url")
-  phoneNumber             String?                @map("phone_number")
-  timezone                String?                @default("UTC")
-  language                String?                @default("en")
-  status                  AppUserStatus          @default(ACTIVE)
-  platformRole            PlatformRole           @default(NONE) @map("platform_role")
-  emailVerifiedAt         DateTime?              @map("email_verified_at")
+  mfaLastUsedStep             Int?                   @map("mfa_last_used_step")
+  displayName                 String                 @map("display_name")
+  avatarUrl                   String?                @map("avatar_url")
+  phoneNumber                 String?                @map("phone_number")
+  timezone                    String?                @default("UTC")
+  language                    String?                @default("en")
+  status                      AppUserStatus          @default(ACTIVE)
+  platformRole                PlatformRole           @default(NONE) @map("platform_role")
+  emailVerifiedAt             DateTime?              @map("email_verified_at")
   // The one workspace this account may currently act in. Signing into a
   // workspace claims it here and ends every session for the previous one, so
   // a user with two memberships holds one live session, not two. Deliberately
   // not an FK: it is a pointer to whichever tenant won the last sign-in, and
   // a deleted tenant should leave it dangling rather than cascade a delete
   // onto the user row.
-  activeTenantId          String?                @map("active_tenant_id") @db.Uuid
-  lastLoginAt             DateTime?              @map("last_login_at")
-  failedLoginAttempts     Int                    @default(0) @map("failed_login_attempts")
-  lockedUntil             DateTime?              @map("locked_until")
-  createdAt               DateTime               @default(now()) @map("created_at")
-  updatedAt               DateTime               @updatedAt @map("updated_at")
-  auditEvents             AuditEvent[]           @relation("AuditActor")
-  refreshTokens           RefreshToken[]
-  emailOtps               EmailOtp[]
-  memberships             TenantMembership[]
-  createdPolicies         TenantPolicy[]         @relation("PolicyCreator")
-  authoredMessages        EmailMessage[]         @relation("MessageAuthor")
-  createdAiActions        AIAction[]             @relation("AICreator")
-  ownedCommitments        Commitment[]           @relation("CommitmentOwner")
-  createdCommitments      Commitment[]           @relation("CommitmentCreator")
-  notifications           Notification[]
-  createdIntegrationLinks IntegrationLink[]      @relation("IntegrationCreator")
-  createdJobs             BackgroundJob[]        @relation("JobCreator")
-  lifecycleRequests       DataLifecycleRequest[] @relation("LifecycleRequester")
-  approvedSupportGrants   SupportAccessGrant[]   @relation("SupportApprover")
-  decidedSupportRequests  SupportAccessRequest[] @relation("SupportRequestDecider")
-  initiatedOwnershipTransfers OwnershipTransfer[] @relation("OwnershipTransferInitiator")
-  approvedOwnershipTransfers  OwnershipTransfer[] @relation("OwnershipTransferApprover")
-  securityAlertsRaised        SecurityAlert[]     @relation("SecurityAlertActor")
-  securityAlertsResolved      SecurityAlert[]     @relation("SecurityAlertResolver")
-  connectedAccounts       ConnectedAccount[]
-  identities              UserIdentity[]
-  usedSelectionTokens     UsedSelectionToken[]
-  mailboxAccessGrants     MailboxAccess[]        @relation("MailboxAccessGrantor")
-  idempotencyRecords      IdempotencyRecord[]    @relation("IdempotencyActor")
-  mfaRecoveryCodes        MfaRecoveryCode[]
-  participantIdentities   Participant[]          @relation("ParticipantIdentity")
-  openedTickets           SupportTicket[]        @relation("TicketOpenedBy")
-  assignedTickets         SupportTicket[]        @relation("TicketAssignedStaff")
-  ticketComments          SupportTicketComment[]
+  activeTenantId              String?                @map("active_tenant_id") @db.Uuid
+  lastLoginAt                 DateTime?              @map("last_login_at")
+  failedLoginAttempts         Int                    @default(0) @map("failed_login_attempts")
+  lockedUntil                 DateTime?              @map("locked_until")
+  createdAt                   DateTime               @default(now()) @map("created_at")
+  updatedAt                   DateTime               @updatedAt @map("updated_at")
+  auditEvents                 AuditEvent[]           @relation("AuditActor")
+  refreshTokens               RefreshToken[]
+  emailOtps                   EmailOtp[]
+  memberships                 TenantMembership[]
+  createdPolicies             TenantPolicy[]         @relation("PolicyCreator")
+  authoredMessages            EmailMessage[]         @relation("MessageAuthor")
+  createdAiActions            AIAction[]             @relation("AICreator")
+  ownedCommitments            Commitment[]           @relation("CommitmentOwner")
+  createdCommitments          Commitment[]           @relation("CommitmentCreator")
+  notifications               Notification[]
+  createdIntegrationLinks     IntegrationLink[]      @relation("IntegrationCreator")
+  createdJobs                 BackgroundJob[]        @relation("JobCreator")
+  lifecycleRequests           DataLifecycleRequest[] @relation("LifecycleRequester")
+  approvedSupportGrants       SupportAccessGrant[]   @relation("SupportApprover")
+  decidedSupportRequests      SupportAccessRequest[] @relation("SupportRequestDecider")
+  initiatedOwnershipTransfers OwnershipTransfer[]    @relation("OwnershipTransferInitiator")
+  approvedOwnershipTransfers  OwnershipTransfer[]    @relation("OwnershipTransferApprover")
+  securityAlertsRaised        SecurityAlert[]        @relation("SecurityAlertActor")
+  securityAlertsResolved      SecurityAlert[]        @relation("SecurityAlertResolver")
+  connectedAccounts           ConnectedAccount[]
+  identities                  UserIdentity[]
+  usedSelectionTokens         UsedSelectionToken[]
+  mailboxAccessGrants         MailboxAccess[]        @relation("MailboxAccessGrantor")
+  idempotencyRecords          IdempotencyRecord[]    @relation("IdempotencyActor")
+  mfaRecoveryCodes            MfaRecoveryCode[]
+  participantIdentities       Participant[]          @relation("ParticipantIdentity")
+  openedTickets               SupportTicket[]        @relation("TicketOpenedBy")
+  assignedTickets             SupportTicket[]        @relation("TicketAssignedStaff")
+  ticketComments              SupportTicketComment[]
+
   @@map("app_users")
 }
 
 /**
  * Selection tokens that have already been exchanged for a session.
- *
  * The token itself is a stateless JWT, so nothing about it changes when it is
  * used. Without this record a single sign-in could be replayed for the whole
  * 15-minute window to open a session in each workspace the user belongs to,
  * which is exactly what "switching workspace needs a fresh login" forbids.
- *
  * Keyed by the token's jti so a replay collides on the primary key. Rows are
  * disposable once expiresAt has passed — the token cannot be verified after
  * that regardless.
@@ -183,26 +194,40 @@ model EmailOtp {
 }
 
 model TenantMembership {
-  id                  String               @id @default(uuid()) @db.Uuid
-  tenantId            String               @map("tenant_id") @db.Uuid
-  userId              String               @map("user_id") @db.Uuid
-  role                MembershipRole       @default(MEMBER)
-  status              MembershipStatus     @default(ACTIVE)
-  inviteToken         String?              @unique @map("invite_token")
-  inviteExpiresAt     DateTime?            @map("invite_expires_at")
-  createdAt           DateTime             @default(now()) @map("created_at")
-  updatedAt           DateTime             @updatedAt @map("updated_at")
-  tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user                AppUser              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  mailbox             Mailbox?
-  mailboxAccess       MailboxAccess[]
-  receivedMessages    MessageRecipient[]
-  supportAccessGrants SupportAccessGrant[]
-  supportAccessRequests SupportAccessRequest[]
-  mailGroupMembers    MailGroupMember[]
-  ownershipTransfers  OwnershipTransfer[]
-  connectedAccounts   ConnectedAccount[]
-  contacts            Contact[]
+  id                      String                  @id @default(uuid()) @db.Uuid
+  tenantId                String                  @map("tenant_id") @db.Uuid
+  userId                  String                  @map("user_id") @db.Uuid
+  role                    MembershipRole          @default(MEMBER)
+  status                  MembershipStatus        @default(ACTIVE)
+  inviteToken             String?                 @unique @map("invite_token")
+  inviteExpiresAt         DateTime?               @map("invite_expires_at")
+  createdAt               DateTime                @default(now()) @map("created_at")
+  updatedAt               DateTime                @updatedAt @map("updated_at")
+  tenant                  Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user                    AppUser                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mailbox                 Mailbox?
+  mailboxAccess           MailboxAccess[]
+  receivedMessages        MessageRecipient[]
+  supportAccessGrants     SupportAccessGrant[]
+  supportAccessRequests   SupportAccessRequest[]
+  mailGroupMembers        MailGroupMember[]
+  ownershipTransfers      OwnershipTransfer[]
+  connectedAccounts       ConnectedAccount[]
+  contacts                Contact[]
+  ownedCalendars          Calendar[]              @relation("CalendarOwner")
+  organizedEvents         CalendarEvent[]         @relation("CalendarEventOrganizer")
+  eventInvitations        EventAttendee[]
+  eventActivities         CalendarEventActivity[]
+  calendarShares          CalendarShare[]         @relation("CalendarShareGrantee")
+  calendarSharesGranted   CalendarShare[]         @relation("CalendarShareGrantor")
+  calendarAccessRequests  CalendarAccessRequest[] @relation("CalendarAccessRequester")
+  calendarAccessDecisions CalendarAccessRequest[] @relation("CalendarAccessDecider")
+  resourceBookings        ResourceBooking[]       @relation("ResourceBooker")
+  resourceDecisions       ResourceBooking[]       @relation("ResourceDecider")
+  bookingLinks            BookingLink[]
+  meetingTemplates        MeetingTemplate[]       @relation("TemplateOwner")
+  templateReviews         MeetingTemplate[]       @relation("TemplateReviewer")
+  calendarPreference      CalendarPreference?
 
   @@unique([tenantId, userId])
   @@index([userId])
@@ -211,12 +236,12 @@ model TenantMembership {
 }
 
 model RefreshToken {
-  id        String    @id @default(uuid()) @db.Uuid
-  userId    String    @map("user_id") @db.Uuid
-  tenantId  String    @map("tenant_id") @db.Uuid
-  tokenHash String    @unique @map("token_hash")
-  expiresAt DateTime  @map("expires_at")
-  revokedAt DateTime? @map("revoked_at")
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  tokenHash   String    @unique @map("token_hash")
+  expiresAt   DateTime  @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
   /**
    * Where this session was opened from — added by 20260917010000 for the
    * "active sessions" screen, which the same merge dropped. Kept because the
@@ -227,9 +252,9 @@ model RefreshToken {
   ipAddress   String?   @map("ip_address")
   userAgent   String?   @map("user_agent")
   lastUsedAt  DateTime? @map("last_used_at")
-  createdAt DateTime  @default(now()) @map("created_at")
-  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user      AppUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user        AppUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, tenantId])
   @@map("refresh_tokens")
@@ -251,9 +276,9 @@ enum AuditActorType {
 }
 
 model AuditEvent {
-  id          String   @id @default(uuid()) @db.Uuid
-  tenantId    String   @map("tenant_id") @db.Uuid
-  actorUserId String?  @map("actor_user_id") @db.Uuid
+  id          String          @id @default(uuid()) @db.Uuid
+  tenantId    String          @map("tenant_id") @db.Uuid
+  actorUserId String?         @map("actor_user_id") @db.Uuid
   /// Audit §6.2. Nullable only for rows written before the column existed.
   ///
   /// Not defaulted to SYSTEM and not backfilled: audit_events is append-only
@@ -262,22 +287,22 @@ model AuditEvent {
   /// one property that makes this table evidence. A historical row honestly
   /// records "not captured"; every new row carries a real actor type.
   actorType   AuditActorType? @map("actor_type")
-  eventType   String   @map("event_type")
-  targetType  String?  @map("target_type")
-  targetId    String?  @map("target_id")
-  requestId   String?  @map("request_id")
-  ipAddress   String?  @map("ip_address")
-  userAgent   String?  @map("user_agent")
+  eventType   String          @map("event_type")
+  targetType  String?         @map("target_type")
+  targetId    String?         @map("target_id")
+  requestId   String?         @map("request_id")
+  ipAddress   String?         @map("ip_address")
+  userAgent   String?         @map("user_agent")
   metadata    Json?
   /// Audit §6.2: "Required for material policy or permission changes."
   /// A hash rather than the values, so the trail proves a change happened and
   /// what it changed from, without copying policy content into a second place
   /// that then has to be governed and deleted on its own schedule.
-  beforeHash  String?  @map("before_hash")
-  afterHash   String?  @map("after_hash")
-  createdAt   DateTime @default(now()) @map("created_at")
-  actor       AppUser? @relation("AuditActor", fields: [actorUserId], references: [id])
-  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  beforeHash  String?         @map("before_hash")
+  afterHash   String?         @map("after_hash")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  actor       AppUser?        @relation("AuditActor", fields: [actorUserId], references: [id])
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, createdAt])
   @@index([eventType])
@@ -307,15 +332,15 @@ model TenantPolicy {
 }
 
 model Mailbox {
-  id                   String           @id @default(uuid()) @db.Uuid
-  tenantId             String           @map("tenant_id") @db.Uuid
+  id                    String                     @id @default(uuid()) @db.Uuid
+  tenantId              String                     @map("tenant_id") @db.Uuid
   /// Null for a shared or distribution mailbox, which belongs to the
   /// workspace rather than to one person. Still unique when present, so a
   /// member has at most one personal mailbox. Requiring it was what made
   /// shared mailboxes unrepresentable (Security §10).
-  membershipId         String?          @unique @map("membership_id") @db.Uuid
+  membershipId          String?                    @unique @map("membership_id") @db.Uuid
   /// Data Model §6.16 mailbox_type.
-  type                 MailboxType      @default(USER)
+  type                  MailboxType                @default(USER)
   /// The verified domain this address belongs to.
   ///
   /// Nullable because mailboxes created before this existed took their address
@@ -324,23 +349,23 @@ model Mailbox {
   /// working; new ones are created against a domain that has passed
   /// verification, which is the "Domain readiness check" the hosted mail flow
   /// puts between the entitlement check and provisioning.
-  domainId             String?          @map("domain_id") @db.Uuid
-  address              String
-  storageUsed          BigInt           @default(0) @map("storage_used")
-  storageLimit         BigInt           @default(10737418240) @map("storage_limit")
-  sendWindowStartedAt  DateTime         @default(now()) @map("send_window_started_at")
-  sendRecipientCount   Int              @default(0) @map("send_recipient_count")
-  sendSuspendedAt      DateTime?        @map("send_suspended_at")
-  sendSuspensionReason String?          @map("send_suspension_reason")
-  warmupStage          Int              @default(0) @map("warmup_stage")
-  warmupStageStartedAt DateTime         @default(now()) @map("warmup_stage_started_at")
-  warmupDailyCount     Int              @default(0) @map("warmup_daily_count")
-  warmupDailyStartedAt DateTime         @default(now()) @map("warmup_daily_started_at")
-  externalSentCount    Int              @default(0) @map("external_sent_count")
-  bounceCount          Int              @default(0) @map("bounce_count")
-  complaintCount       Int              @default(0) @map("complaint_count")
-  customWarmupCap      Int?             @map("custom_warmup_cap")
-  signature            String?          @map("signature")
+  domainId              String?                    @map("domain_id") @db.Uuid
+  address               String
+  storageUsed           BigInt                     @default(0) @map("storage_used")
+  storageLimit          BigInt                     @default(10737418240) @map("storage_limit")
+  sendWindowStartedAt   DateTime                   @default(now()) @map("send_window_started_at")
+  sendRecipientCount    Int                        @default(0) @map("send_recipient_count")
+  sendSuspendedAt       DateTime?                  @map("send_suspended_at")
+  sendSuspensionReason  String?                    @map("send_suspension_reason")
+  warmupStage           Int                        @default(0) @map("warmup_stage")
+  warmupStageStartedAt  DateTime                   @default(now()) @map("warmup_stage_started_at")
+  warmupDailyCount      Int                        @default(0) @map("warmup_daily_count")
+  warmupDailyStartedAt  DateTime                   @default(now()) @map("warmup_daily_started_at")
+  externalSentCount     Int                        @default(0) @map("external_sent_count")
+  bounceCount           Int                        @default(0) @map("bounce_count")
+  complaintCount        Int                        @default(0) @map("complaint_count")
+  customWarmupCap       Int?                       @map("custom_warmup_cap")
+  signature             String?                    @map("signature")
   /// Whether AI may process this mailbox's content — Data Model §6.16,
   /// Security §9 and AC-008. A mailbox with this off is what the security
   /// spec calls a restricted mailbox: AI is excluded from it until an
@@ -350,62 +375,62 @@ model Mailbox {
   /// every mailbox. Defaulting false would have silently switched AI off for
   /// every existing workspace on migration, which is a product change wearing
   /// a schema change's clothes.
-  aiEnabled            Boolean          @default(true) @map("ai_enabled")
+  aiEnabled             Boolean                    @default(true) @map("ai_enabled")
   /// The workspace consoles (session scopes) this mailbox can be opened in.
   /// A session for a workspace not listed here is refused by the mail routes.
   /// New mailboxes start as Member only; the backfill migration gave existing
   /// ones every console their owner could already reach, so nothing broke.
-  workspaces           MembershipRole[] @default([MEMBER])
+  workspaces            MembershipRole[]           @default([MEMBER])
   /// Retired: backed the old per-mailbox Member sign-in link
   /// (/login/member/<key>). The Member sign-in is now one plain /login/member
   /// for everyone, and nothing reads this column. Kept so a code rollback still
   /// finds every key; drop it in a later migration.
-  memberLoginKey       String           @unique @default(dbgenerated("replace((gen_random_uuid())::text, '-'::text, ''::text)")) @map("member_login_key")
+  memberLoginKey        String                     @unique @default(dbgenerated("replace((gen_random_uuid())::text, '-'::text, ''::text)")) @map("member_login_key")
   /// The name shown beside the address. Null for mailboxes created before
   /// hosted provisioning, which show the owner's own name instead.
-  displayName          String?          @map("display_name")
+  displayName           String?                    @map("display_name")
   // ── Hosted provisioning ────────────────────────────────────────────────
   // All null for a mailbox that only exists in this database (everything
   // created before hosted provisioning). Not backfilled: those rows have no
   // account on a mail host, and saying otherwise would be a fabrication.
   /// Which mail host holds the real account.
-  provider             MailHostProvider? @map("provider")
+  provider              MailHostProvider?          @map("provider")
   /// The host's own id for the account, set once the host confirms it.
-  providerAccountId    String?          @map("provider_account_id")
-  provisioningStatus   MailboxProvisioningStatus? @map("provisioning_status")
+  providerAccountId     String?                    @map("provider_account_id")
+  provisioningStatus    MailboxProvisioningStatus? @map("provisioning_status")
   /// A safe error code (never a provider response body).
-  provisioningError    String?          @map("provisioning_error")
-  provisioningAttempts Int              @default(0) @map("provisioning_attempts")
-  provisioningStartedAt DateTime?       @map("provisioning_started_at")
-  provisionedAt        DateTime?        @map("provisioned_at")
+  provisioningError     String?                    @map("provisioning_error")
+  provisioningAttempts  Int                        @default(0) @map("provisioning_attempts")
+  provisioningStartedAt DateTime?                  @map("provisioning_started_at")
+  provisionedAt         DateTime?                  @map("provisioned_at")
   /// The quota the host reports having applied, which can differ from
   /// storageLimit (what was requested) if the host rounds or caps it.
-  providerQuotaBytes   BigInt?          @map("provider_quota_bytes")
+  providerQuotaBytes    BigInt?                    @map("provider_quota_bytes")
   /// Delivery of the access invitation, tracked apart from provisioning so a
   /// failed email never leads to a second account being created.
-  invitationStatus     MailboxInvitationStatus? @map("invitation_status")
-  invitationSentAt     DateTime?        @map("invitation_sent_at")
-  invitationError      String?          @map("invitation_error")
+  invitationStatus      MailboxInvitationStatus?   @map("invitation_status")
+  invitationSentAt      DateTime?                  @map("invitation_sent_at")
+  invitationError       String?                    @map("invitation_error")
   /// Set when an admin asked for a hosted mailbox to be deleted. The row is
   /// kept until the mail host confirms the account is gone, so a failed
   /// deletion stays visible and retryable. Null for every other mailbox.
-  deletionRequestedAt  DateTime?        @map("deletion_requested_at")
+  deletionRequestedAt   DateTime?                  @map("deletion_requested_at")
   /// A safe code for why a requested deletion has not finished (never a
   /// provider response body).
-  deletionError        String?          @map("deletion_error")
-  createdAt            DateTime         @default(now()) @map("created_at")
-  updatedAt            DateTime         @updatedAt @map("updated_at")
-  tenant               Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  membership           TenantMembership? @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  deletionError         String?                    @map("deletion_error")
+  createdAt             DateTime                   @default(now()) @map("created_at")
+  updatedAt             DateTime                   @updatedAt @map("updated_at")
+  tenant                Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  membership            TenantMembership?          @relation(fields: [membershipId], references: [id], onDelete: Cascade)
   // Restrict rather than Cascade: removing a domain must not silently delete
   // the mailboxes on it, and their mail with them.
-  domain               MailDomain?      @relation(fields: [domainId], references: [id], onDelete: Restrict)
-  items                MailboxMessage[]
-  labels               MailLabel[]
-  access               MailboxAccess[]
-  aliases              Alias[]
-  forwardingRules      ForwardingRule[]
-  sentAsMessages       EmailMessage[]   @relation("SentAsMailbox")
+  domain                MailDomain?                @relation(fields: [domainId], references: [id], onDelete: Restrict)
+  items                 MailboxMessage[]
+  labels                MailLabel[]
+  access                MailboxAccess[]
+  aliases               Alias[]
+  forwardingRules       ForwardingRule[]
+  sentAsMessages        EmailMessage[]             @relation("SentAsMailbox")
 
   @@unique([tenantId, address])
   /// One Zoiko mailbox per host account, so two rows can never claim the same
@@ -460,24 +485,22 @@ model EmailMessage {
   sourceAiActionId  String?             @map("source_ai_action_id") @db.Uuid
   sourceAiAction    AIAction?           @relation(fields: [sourceAiActionId], references: [id], onDelete: SetNull)
 
+  @@unique([tenantId, providerType, providerMessageId])
+  @@unique([tenantId, sourceAiActionId])
   @@index([tenantId, authorUserId, createdAt])
   @@index([tenantId, threadId, createdAt])
   @@index([sentAsMailboxId])
-  @@unique([tenantId, providerType, providerMessageId])
-  @@unique([tenantId, sourceAiActionId])
   @@map("email_messages")
 }
 
 /**
  * A person or address, normalized once per workspace — Data Model §6.7.
- *
  * "Normalizes a person or email identity inside a tenant so commitments can
  * be owed by and owed to stable entities across messages and threads." Before
  * this, a participant was a string in a JSON array on the thread: you could
  * not ask what else an address had been involved in, and a commitment could
  * only be owned by an internal user, so an obligation owed *to* a customer
  * had nowhere to point.
- *
  * `canonicalEmail` is citext, so `Alex@example.com` and `alex@example.com`
  * are the same participant at the database rather than only when the
  * application remembers to lowercase. The uniqueness the specification asks
@@ -486,28 +509,28 @@ model EmailMessage {
  * here; declaring it would report as permanent drift.
  */
 model Participant {
-  id               String             @id @default(uuid()) @db.Uuid
-  tenantId         String             @map("tenant_id") @db.Uuid
-  canonicalEmail   String             @map("canonical_email") @db.Citext
-  displayName      String?            @map("display_name")
-  participantType  ParticipantType    @default(UNKNOWN) @map("participant_type")
+  id                 String              @id @default(uuid()) @db.Uuid
+  tenantId           String              @map("tenant_id") @db.Uuid
+  canonicalEmail     String              @map("canonical_email") @db.Citext
+  displayName        String?             @map("display_name")
+  participantType    ParticipantType     @default(UNKNOWN) @map("participant_type")
   /// Set when the address belongs to a member of this workspace.
-  linkedUserId     String?            @map("linked_user_id") @db.Uuid
-  organizationName String?            @map("organization_name")
-  firstSeenAt      DateTime           @default(now()) @map("first_seen_at")
-  lastSeenAt       DateTime           @default(now()) @map("last_seen_at")
+  linkedUserId       String?             @map("linked_user_id") @db.Uuid
+  organizationName   String?             @map("organization_name")
+  firstSeenAt        DateTime            @default(now()) @map("first_seen_at")
+  lastSeenAt         DateTime            @default(now()) @map("last_seen_at")
   /// The row this one was folded into, when two turned out to be one person.
-  mergeParentId    String?            @map("merge_parent_id") @db.Uuid
-  status           ParticipantStatus  @default(ACTIVE)
-  createdAt        DateTime           @default(now()) @map("created_at")
-  updatedAt        DateTime           @updatedAt @map("updated_at")
-  tenant           Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  linkedUser       AppUser?           @relation("ParticipantIdentity", fields: [linkedUserId], references: [id], onDelete: SetNull)
-  mergeParent      Participant?       @relation("ParticipantMerge", fields: [mergeParentId], references: [id], onDelete: SetNull)
-  mergedFrom       Participant[]      @relation("ParticipantMerge")
-  threadLinks      ThreadParticipant[]
-  owedCommitments  Commitment[]       @relation("CommitmentOwedBy")
-  awaitedCommitments Commitment[]     @relation("CommitmentOwedTo")
+  mergeParentId      String?             @map("merge_parent_id") @db.Uuid
+  status             ParticipantStatus   @default(ACTIVE)
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  linkedUser         AppUser?            @relation("ParticipantIdentity", fields: [linkedUserId], references: [id], onDelete: SetNull)
+  mergeParent        Participant?        @relation("ParticipantMerge", fields: [mergeParentId], references: [id], onDelete: SetNull)
+  mergedFrom         Participant[]       @relation("ParticipantMerge")
+  threadLinks        ThreadParticipant[]
+  owedCommitments    Commitment[]        @relation("CommitmentOwedBy")
+  awaitedCommitments Commitment[]        @relation("CommitmentOwedTo")
 
   @@index([tenantId, lastSeenAt(sort: Desc)])
   @@index([tenantId, linkedUserId])
@@ -516,7 +539,6 @@ model Participant {
 
 /**
  * What a participant did in a thread — Data Model §6.8.
- *
  * Roles accumulate rather than replace: somebody who sent the first message
  * and was copied on the third is both, and a timeline that forgot the first
  * would misattribute the conversation.
@@ -541,16 +563,16 @@ model ThreadParticipant {
 }
 
 model MessageThread {
-  id                String         @id @default(uuid()) @db.Uuid
-  tenantId          String         @map("tenant_id") @db.Uuid
-  subjectNormalized String         @map("subject_normalized")
+  id                String              @id @default(uuid()) @db.Uuid
+  tenantId          String              @map("tenant_id") @db.Uuid
+  subjectNormalized String              @map("subject_normalized")
   participants      Json
-  firstMessageAt    DateTime       @map("first_message_at")
-  lastMessageAt     DateTime       @map("last_message_at")
-  messageCount      Int            @default(1) @map("message_count")
-  createdAt         DateTime       @default(now()) @map("created_at")
-  updatedAt         DateTime       @updatedAt @map("updated_at")
-  tenant            Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  firstMessageAt    DateTime            @map("first_message_at")
+  lastMessageAt     DateTime            @map("last_message_at")
+  messageCount      Int                 @default(1) @map("message_count")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   messages          EmailMessage[]
   participantLinks  ThreadParticipant[]
 
@@ -577,7 +599,6 @@ model MessageRecipient {
 
 /**
  * Who may act in a shared mailbox, and how — Security §10 and §9.1.
- *
  * "Users must be assigned to a shared mailbox before access", and "read,
  * send, manage and assign permissions must be separable", so they are four
  * columns rather than one role. A personal mailbox needs no row here: its
@@ -607,7 +628,6 @@ model MailboxAccess {
 
 /**
  * An extra address that routes to a mailbox — Data Model §6.17.
- *
  * §6.17 specifies `unique(lower(alias_address)) where status = active`, a
  * partial unique index, which the Prisma schema language cannot express;
  * writing it in raw SQL alone would show up forever as schema drift and fail
@@ -616,7 +636,6 @@ model MailboxAccess {
  * routing guarantee §6.17 is after, and a suspended alias still holds its
  * address, which is the point of suspending it. The audit log keeps the
  * history the soft-delete row would have.
- *
  * Unique globally rather than per tenant, matching §6.17 and the domain rule
  * beside it: an address has to route somewhere unambiguous.
  */
@@ -637,11 +656,9 @@ model Alias {
 
 /**
  * Where a mailbox's incoming mail is copied or redirected — Data Model §6.18.
- *
  * Same reasoning as Alias on the missing `deleted` status. Uniqueness is per
  * mailbox and destination so the same address cannot be added twice, which is
  * §6.18's ux_forwarding_unique_active.
- *
  * Creating one is audited because Security §9 requires it: forwarding is how
  * mail quietly leaves an organisation, so the record of who set it up matters
  * more than for most settings.
@@ -664,22 +681,22 @@ model ForwardingRule {
 }
 
 model MailboxMessage {
-  id        String                @id @default(uuid()) @db.Uuid
-  tenantId  String                @map("tenant_id") @db.Uuid
-  mailboxId String                @map("mailbox_id") @db.Uuid
-  messageId String                @map("message_id") @db.Uuid
-  folder    MailFolder
-  isRead    Boolean               @default(false) @map("is_read")
-  isStarred Boolean               @default(false) @map("is_starred")
+  id           String                @id @default(uuid()) @db.Uuid
+  tenantId     String                @map("tenant_id") @db.Uuid
+  mailboxId    String                @map("mailbox_id") @db.Uuid
+  messageId    String                @map("message_id") @db.Uuid
+  folder       MailFolder
+  isRead       Boolean               @default(false) @map("is_read")
+  isStarred    Boolean               @default(false) @map("is_starred")
   /// Set when the member snoozes a message. The row's `folder` stays INBOX
   /// the whole time — snoozing is a view filter, not a move — so the
   /// snooze-wake worker only has to clear this column to bring it back.
-  snoozedUntil DateTime?          @map("snoozed_until")
-  createdAt DateTime              @default(now()) @map("created_at")
-  updatedAt DateTime              @updatedAt @map("updated_at")
-  mailbox   Mailbox               @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
-  message   EmailMessage          @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  labels    MailboxMessageLabel[]
+  snoozedUntil DateTime?             @map("snoozed_until")
+  createdAt    DateTime              @default(now()) @map("created_at")
+  updatedAt    DateTime              @updatedAt @map("updated_at")
+  mailbox      Mailbox               @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  message      EmailMessage          @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  labels       MailboxMessageLabel[]
 
   @@unique([mailboxId, messageId])
   @@index([tenantId, mailboxId, folder, createdAt])
@@ -771,60 +788,60 @@ model DeliveryEvent {
 }
 
 model MailDomain {
-  id                 String                   @id @default(uuid()) @db.Uuid
-  tenantId           String                   @map("tenant_id") @db.Uuid
-  domainName         String                   @map("domain_name")
-  type               DomainType               @default(CUSTOM)
-  verificationToken  String                   @map("verification_token")
-  verificationStatus DomainVerificationStatus @default(PENDING) @map("verification_status")
-  mxStatus           DnsRecordStatus          @default(PENDING) @map("mx_status")
-  spfStatus          DnsRecordStatus          @default(PENDING) @map("spf_status")
-  dkimStatus         DnsRecordStatus          @default(PENDING) @map("dkim_status")
-  dmarcStatus        DnsRecordStatus          @default(PENDING) @map("dmarc_status")
-  firstCheckedAt     DateTime?                @map("first_checked_at")
-  lastCheckedAt      DateTime?                @map("last_checked_at")
-  errorDetails       Json?                    @map("error_details")
-  sendingEnabled     Boolean                  @default(false) @map("sending_enabled")
-  activatedAt        DateTime?                @map("activated_at")
+  id                     String                   @id @default(uuid()) @db.Uuid
+  tenantId               String                   @map("tenant_id") @db.Uuid
+  domainName             String                   @map("domain_name")
+  type                   DomainType               @default(CUSTOM)
+  verificationToken      String                   @map("verification_token")
+  verificationStatus     DomainVerificationStatus @default(PENDING) @map("verification_status")
+  mxStatus               DnsRecordStatus          @default(PENDING) @map("mx_status")
+  spfStatus              DnsRecordStatus          @default(PENDING) @map("spf_status")
+  dkimStatus             DnsRecordStatus          @default(PENDING) @map("dkim_status")
+  dmarcStatus            DnsRecordStatus          @default(PENDING) @map("dmarc_status")
+  firstCheckedAt         DateTime?                @map("first_checked_at")
+  lastCheckedAt          DateTime?                @map("last_checked_at")
+  errorDetails           Json?                    @map("error_details")
+  sendingEnabled         Boolean                  @default(false) @map("sending_enabled")
+  activatedAt            DateTime?                @map("activated_at")
   /// Where the domain is in its lifecycle. The per-record statuses above are
   /// a projection of domain_dns_records, kept because mail sending, mailbox
   /// provisioning and the support console already read them.
-  status              DomainLifecycleStatus @default(PENDING_VERIFICATION)
+  status                 DomainLifecycleStatus    @default(PENDING_VERIFICATION)
   // ── configuration: what the generated records are derived from ──
-  dnsProvider         DnsProviderKind       @default(MANUAL) @map("dns_provider")
-  dnsCredentialId     String?               @map("dns_credential_id") @db.Uuid
+  dnsProvider            DnsProviderKind          @default(MANUAL) @map("dns_provider")
+  dnsCredentialId        String?                  @map("dns_credential_id") @db.Uuid
   /// Route inbound mail here. Off means the MX records are not generated and
   /// the domain keeps whatever mail host it already uses.
-  receivingEnabled    Boolean               @default(true) @map("receiving_enabled")
+  receivingEnabled       Boolean                  @default(true) @map("receiving_enabled")
   /// When publishing through a provider, replace the domain's existing MX
   /// set instead of adding beside it. Off by default: it redirects mail.
-  replaceExistingMx   Boolean               @default(false) @map("replace_existing_mx")
-  autoActivateSending Boolean               @default(true) @map("auto_activate_sending")
-  dmarcPolicy         DmarcPolicy           @default(NONE) @map("dmarc_policy")
-  dmarcReportEmail    String?               @map("dmarc_report_email")
+  replaceExistingMx      Boolean                  @default(false) @map("replace_existing_mx")
+  autoActivateSending    Boolean                  @default(true) @map("auto_activate_sending")
+  dmarcPolicy            DmarcPolicy              @default(NONE) @map("dmarc_policy")
+  dmarcReportEmail       String?                  @map("dmarc_report_email")
   /// Bumped whenever the expected record set changes.
-  configVersion       Int                   @default(1) @map("config_version")
+  configVersion          Int                      @default(1) @map("config_version")
   // ── synchronization ──
-  nextCheckAt         DateTime?             @map("next_check_at")
-  lastVerifiedAt      DateTime?             @map("last_verified_at")
-  lastPublishedAt     DateTime?             @map("last_published_at")
-  lastSyncError       String?               @map("last_sync_error")
+  nextCheckAt            DateTime?                @map("next_check_at")
+  lastVerifiedAt         DateTime?                @map("last_verified_at")
+  lastPublishedAt        DateTime?                @map("last_published_at")
+  lastSyncError          String?                  @map("last_sync_error")
   /// Consecutive checks in which a required record definitively failed.
-  consecutiveFailures Int                   @default(0) @map("consecutive_failures")
+  consecutiveFailures    Int                      @default(0) @map("consecutive_failures")
   /// Failures do not suspend sending before this instant. Set when the
   /// expected records change, so the owner has time to publish them.
-  graceUntil          DateTime?             @map("grace_until")
-  verificationDeadlineAt DateTime?          @map("verification_deadline_at")
-  sendingSuspendedAt  DateTime?             @map("sending_suspended_at")
-  suspensionReason    String?               @map("suspension_reason")
-  createdAt          DateTime                 @default(now()) @map("created_at")
-  updatedAt          DateTime                 @updatedAt @map("updated_at")
-  tenant             Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  dnsCredential      DnsProviderCredential?   @relation(fields: [dnsCredentialId], references: [id], onDelete: SetNull)
-  checks             DomainDnsCheck[]
-  records            DomainDnsRecord[]
-  dkimKeys           DomainDkimKey[]
-  mailboxes          Mailbox[]
+  graceUntil             DateTime?                @map("grace_until")
+  verificationDeadlineAt DateTime?                @map("verification_deadline_at")
+  sendingSuspendedAt     DateTime?                @map("sending_suspended_at")
+  suspensionReason       String?                  @map("suspension_reason")
+  createdAt              DateTime                 @default(now()) @map("created_at")
+  updatedAt              DateTime                 @updatedAt @map("updated_at")
+  tenant                 Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  dnsCredential          DnsProviderCredential?   @relation(fields: [dnsCredentialId], references: [id], onDelete: SetNull)
+  checks                 DomainDnsCheck[]
+  records                DomainDnsRecord[]
+  dkimKeys               DomainDkimKey[]
+  mailboxes              Mailbox[]
 
   @@unique([tenantId, domainName])
   @@index([tenantId, verificationStatus])
@@ -836,36 +853,36 @@ model MailDomain {
 /// One DNS record the platform requires (or recommends) for a domain, with
 /// its expected value and what the last lookup actually found.
 model DomainDnsRecord {
-  id                  String            @id @default(uuid()) @db.Uuid
-  tenantId            String            @map("tenant_id") @db.Uuid
-  domainId            String            @map("domain_id") @db.Uuid
+  id             String           @id @default(uuid()) @db.Uuid
+  tenantId       String           @map("tenant_id") @db.Uuid
+  domainId       String           @map("domain_id") @db.Uuid
   /// Stable identity within the domain: "SPF", "MX:mx1.example.net",
   /// "DKIM:zm202609". Regeneration matches on it.
-  recordKey           String            @map("record_key")
-  purpose             DnsRecordPurpose
-  type                DnsRecordType
+  recordKey      String           @map("record_key")
+  purpose        DnsRecordPurpose
+  type           DnsRecordType
   /// Host relative to the domain, as DNS dashboards want it: "@", "_dmarc".
-  name                String
-  fqdn                String
-  value               String
-  priority            Int?
-  ttl                 Int               @default(3600)
-  required            Boolean           @default(true)
-  dkimKeyId           String?           @map("dkim_key_id") @db.Uuid
-  state               DnsRecordState    @default(PENDING)
-  observed            Json?
-  diagnosis           String?
-  lastErrorCode       String?           @map("last_error_code")
-  lastCheckedAt       DateTime?         @map("last_checked_at")
-  lastVerifiedAt      DateTime?         @map("last_verified_at")
-  publishState        DnsPublishState   @default(NOT_APPLICABLE) @map("publish_state")
-  publishedAt         DateTime?         @map("published_at")
-  publishError        String?           @map("publish_error")
-  createdAt           DateTime          @default(now()) @map("created_at")
-  updatedAt           DateTime          @updatedAt @map("updated_at")
-  tenant              Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  domain              MailDomain        @relation(fields: [domainId], references: [id], onDelete: Cascade)
-  dkimKey             DomainDkimKey?    @relation(fields: [dkimKeyId], references: [id], onDelete: SetNull)
+  name           String
+  fqdn           String
+  value          String
+  priority       Int?
+  ttl            Int              @default(3600)
+  required       Boolean          @default(true)
+  dkimKeyId      String?          @map("dkim_key_id") @db.Uuid
+  state          DnsRecordState   @default(PENDING)
+  observed       Json?
+  diagnosis      String?
+  lastErrorCode  String?          @map("last_error_code")
+  lastCheckedAt  DateTime?        @map("last_checked_at")
+  lastVerifiedAt DateTime?        @map("last_verified_at")
+  publishState   DnsPublishState  @default(NOT_APPLICABLE) @map("publish_state")
+  publishedAt    DateTime?        @map("published_at")
+  publishError   String?          @map("publish_error")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+  tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  domain         MailDomain       @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  dkimKey        DomainDkimKey?   @relation(fields: [dkimKeyId], references: [id], onDelete: SetNull)
 
   @@unique([domainId, recordKey])
   @@index([tenantId, domainId])
@@ -875,20 +892,20 @@ model DomainDnsRecord {
 /// A DKIM signing key. The private half lives in the secret store under
 /// `privateKeySecretRef`; only the public half is in the database.
 model DomainDkimKey {
-  id                  String         @id @default(uuid()) @db.Uuid
-  tenantId            String         @map("tenant_id") @db.Uuid
-  domainId            String         @map("domain_id") @db.Uuid
+  id                  String            @id @default(uuid()) @db.Uuid
+  tenantId            String            @map("tenant_id") @db.Uuid
+  domainId            String            @map("domain_id") @db.Uuid
   selector            String
-  keyBits             Int            @map("key_bits")
-  publicKey           String         @map("public_key")
-  privateKeySecretRef String         @map("private_key_secret_ref")
-  status              DkimKeyStatus  @default(PENDING)
-  activatedAt         DateTime?      @map("activated_at")
-  retiringAt          DateTime?      @map("retiring_at")
-  retiredAt           DateTime?      @map("retired_at")
-  createdAt           DateTime       @default(now()) @map("created_at")
-  tenant              Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  domain              MailDomain     @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  keyBits             Int               @map("key_bits")
+  publicKey           String            @map("public_key")
+  privateKeySecretRef String            @map("private_key_secret_ref")
+  status              DkimKeyStatus     @default(PENDING)
+  activatedAt         DateTime?         @map("activated_at")
+  retiringAt          DateTime?         @map("retiring_at")
+  retiredAt           DateTime?         @map("retired_at")
+  createdAt           DateTime          @default(now()) @map("created_at")
+  tenant              Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  domain              MailDomain        @relation(fields: [domainId], references: [id], onDelete: Cascade)
   records             DomainDnsRecord[]
 
   @@unique([domainId, selector])
@@ -899,21 +916,21 @@ model DomainDkimKey {
 /// API access to a workspace's DNS host, so records can be published without
 /// anybody copying them by hand. The credential itself is in the secret store.
 model DnsProviderCredential {
-  id               String                @id @default(uuid()) @db.Uuid
-  tenantId         String                @map("tenant_id") @db.Uuid
-  provider         DnsProviderKind
-  label            String
-  secretRef        String                @map("secret_ref")
+  id              String              @id @default(uuid()) @db.Uuid
+  tenantId        String              @map("tenant_id") @db.Uuid
+  provider        DnsProviderKind
+  label           String
+  secretRef       String              @map("secret_ref")
   /// Non-secret provider options, such as GoDaddy's OTE environment.
-  settings         Json?
-  status           DnsCredentialStatus   @default(ACTIVE)
-  lastValidatedAt  DateTime?             @map("last_validated_at")
-  lastError        String?               @map("last_error")
-  createdByUserId  String?               @map("created_by_user_id") @db.Uuid
-  createdAt        DateTime              @default(now()) @map("created_at")
-  updatedAt        DateTime              @updatedAt @map("updated_at")
-  tenant           Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  domains          MailDomain[]
+  settings        Json?
+  status          DnsCredentialStatus @default(ACTIVE)
+  lastValidatedAt DateTime?           @map("last_validated_at")
+  lastError       String?             @map("last_error")
+  createdByUserId String?             @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+  tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  domains         MailDomain[]
 
   @@index([tenantId])
   @@map("dns_provider_credentials")
@@ -967,34 +984,34 @@ model AIAction {
 }
 
 model Commitment {
-  id              String           @id @default(uuid()) @db.Uuid
-  tenantId        String           @map("tenant_id") @db.Uuid
-  messageId       String?          @map("message_id") @db.Uuid
-  threadId        String?          @map("thread_id") @db.Uuid
-  ownerUserId     String           @map("owner_user_id") @db.Uuid
-  createdByUserId String           @map("created_by_user_id") @db.Uuid
+  id                  String           @id @default(uuid()) @db.Uuid
+  tenantId            String           @map("tenant_id") @db.Uuid
+  messageId           String?          @map("message_id") @db.Uuid
+  threadId            String?          @map("thread_id") @db.Uuid
+  ownerUserId         String           @map("owner_user_id") @db.Uuid
+  createdByUserId     String           @map("created_by_user_id") @db.Uuid
   /// Who owes the action, and who is waiting for it (§6.10). Either may be
   /// somebody outside the workspace, which is why they are participants
   /// rather than users — an obligation owed to a customer had nowhere to
   /// point before.
-  owedByParticipantId String?      @map("owed_by_participant_id") @db.Uuid
-  owedToParticipantId String?      @map("owed_to_participant_id") @db.Uuid
-  text            String
-  dueAt           DateTime?        @map("due_at")
-  priority        ActionPriority   @default(MEDIUM)
-  status          CommitmentStatus @default(OPEN)
-  snoozedUntil    DateTime?        @map("snoozed_until")
-  createdAt       DateTime         @default(now()) @map("created_at")
-  updatedAt       DateTime         @updatedAt @map("updated_at")
+  owedByParticipantId String?          @map("owed_by_participant_id") @db.Uuid
+  owedToParticipantId String?          @map("owed_to_participant_id") @db.Uuid
+  text                String
+  dueAt               DateTime?        @map("due_at")
+  priority            ActionPriority   @default(MEDIUM)
+  status              CommitmentStatus @default(OPEN)
+  snoozedUntil        DateTime?        @map("snoozed_until")
+  createdAt           DateTime         @default(now()) @map("created_at")
+  updatedAt           DateTime         @updatedAt @map("updated_at")
   /// Track the AIAction that produced this commitment so a confirmed extraction
   /// is never duplicated and can be traced back to its source action (ZM-BE-008).
-  sourceAiActionId    String?      @map("source_ai_action_id") @db.Uuid
-  tenant              Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  owner               AppUser      @relation("CommitmentOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
-  createdBy           AppUser      @relation("CommitmentCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  owedBy              Participant? @relation("CommitmentOwedBy", fields: [owedByParticipantId], references: [id], onDelete: SetNull)
-  owedTo              Participant? @relation("CommitmentOwedTo", fields: [owedToParticipantId], references: [id], onDelete: SetNull)
-  sourceAiAction      AIAction?    @relation(fields: [sourceAiActionId], references: [id], onDelete: SetNull)
+  sourceAiActionId    String?          @map("source_ai_action_id") @db.Uuid
+  tenant              Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner               AppUser          @relation("CommitmentOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  createdBy           AppUser          @relation("CommitmentCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  owedBy              Participant?     @relation("CommitmentOwedBy", fields: [owedByParticipantId], references: [id], onDelete: SetNull)
+  owedTo              Participant?     @relation("CommitmentOwedTo", fields: [owedToParticipantId], references: [id], onDelete: SetNull)
+  sourceAiAction      AIAction?        @relation(fields: [sourceAiActionId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, ownerUserId, status, dueAt])
   @@index([tenantId, owedByParticipantId])
@@ -1041,42 +1058,42 @@ model IntegrationLink {
 }
 
 model ConnectedAccount {
-  id                String                 @id @default(uuid()) @db.Uuid
-  tenantId          String                 @map("tenant_id") @db.Uuid
+  id                      String                 @id @default(uuid()) @db.Uuid
+  tenantId                String                 @map("tenant_id") @db.Uuid
   /**
    * Null for an org-level connection — one the workspace owns rather than a
    * person. The column was made nullable by 20260916114737 and the model
    * never followed, so Prisma believed it was still required.
    */
-  membershipId      String?                @map("membership_id") @db.Uuid
-  isOrgLevel        Boolean                @default(false) @map("is_org_level")
-  userId            String                 @map("user_id") @db.Uuid
-  provider          ConnectorProvider
-  providerAccountId String                 @map("provider_account_id")
-  email             String
-  scopes            String[]
-  status            ConnectedAccountStatus @default(PENDING)
+  membershipId            String?                @map("membership_id") @db.Uuid
+  isOrgLevel              Boolean                @default(false) @map("is_org_level")
+  userId                  String                 @map("user_id") @db.Uuid
+  provider                ConnectorProvider
+  providerAccountId       String                 @map("provider_account_id")
+  email                   String
+  scopes                  String[]
+  status                  ConnectedAccountStatus @default(PENDING)
   // Ref into the Secret Manager (or local-equivalent store) holding the
   // provider's OAuth access + refresh tokens. Tokens never live in this table
   // (Security §15): only the lookup key does. The ref is deterministic from
   // (provider, providerAccountId) so reconnect is idempotent without a lookup.
-  tokenSecretRef     String?                @map("token_secret_ref")
-  tokenExpiresAt     DateTime?              @map("token_expires_at")
-  watchExpiresAt     DateTime?              @map("watch_expires_at")
-  lastSyncedAt       DateTime?              @map("last_synced_at")
-  lastErrorCode      String?                @map("last_error_code")
-  disconnectedAt     DateTime?              @map("disconnected_at")
+  tokenSecretRef          String?                @map("token_secret_ref")
+  tokenExpiresAt          DateTime?              @map("token_expires_at")
+  watchExpiresAt          DateTime?              @map("watch_expires_at")
+  lastSyncedAt            DateTime?              @map("last_synced_at")
+  lastErrorCode           String?                @map("last_error_code")
+  disconnectedAt          DateTime?              @map("disconnected_at")
   // Microsoft 365 (ZM-BE-006): Graph change-notification subscription id and
   // the delta link used to resume incremental sync without refetching the whole
   // inbox. Delta links are opaque URLs — they are not secrets.
-  microsoftSubscriptionId String?           @map("microsoft_subscription_id")
-  microsoftDeltaLink      String?           @map("microsoft_delta_link")
-  createdAt          DateTime               @default(now()) @map("created_at")
-  updatedAt          DateTime               @updatedAt @map("updated_at")
-  tenant             Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  membership         TenantMembership?      @relation(fields: [membershipId], references: [id], onDelete: Cascade)
-  user               AppUser                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  providerEvents     ProviderEvent[]
+  microsoftSubscriptionId String?                @map("microsoft_subscription_id")
+  microsoftDeltaLink      String?                @map("microsoft_delta_link")
+  createdAt               DateTime               @default(now()) @map("created_at")
+  updatedAt               DateTime               @updatedAt @map("updated_at")
+  tenant                  Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  membership              TenantMembership?      @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  user                    AppUser                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  providerEvents          ProviderEvent[]
 
   @@unique([provider, providerAccountId])
   @@index([tenantId, membershipId, status])
@@ -1143,14 +1160,12 @@ model BackgroundJob {
 
 /**
  * Export and deletion workflows — Data Model §6.14, AC-012.
- *
  * The deletion half carries a service-level agreement: "customer data subject
  * to deletion must be hard-deleted or irreversibly anonymized within 30 days
  * unless legal/security retention exception applies". That makes three fields
  * load-bearing and none of them existed — the request had no verification
  * moment to count from, no deadline, and no way to record a legal hold. A
  * workflow that cannot say when a deletion is late does not have an SLA.
- *
  * `hardDeleteDeadline` is derived by the server from `verifiedAt` and never
  * accepted from a client, which is what §6.14's "scheduler enforces <= 30
  * days" means in practice.
@@ -1193,7 +1208,6 @@ model DataLifecycleRequest {
 
 /**
  * Single-use recovery codes for a lost authenticator — AC-002.
- *
  * Hashed the way a password is, because that is what they are: a bearer
  * secret that grants a session. Enforcing MFA without a recovery path would
  * turn a lost phone into a lost workspace, and the Security specification
@@ -1214,12 +1228,10 @@ model MfaRecoveryCode {
 
 /**
  * Replay protection for side-effecting requests — API §7.
- *
  * §7 requires an Idempotency-Key on every write, scoped to
  * tenant + actor + endpoint family + key, held for 24 hours, replaying the
  * original response for a repeat of the same payload and refusing a repeat
  * that carries a different one.
- *
  * The scope is a composite unique index rather than the key alone, which is
  * what makes §7's "idempotency records must never deduplicate across tenants"
  * true by construction instead of by remembering to filter.
@@ -1230,7 +1242,7 @@ model IdempotencyRecord {
   actorUserId    String            @map("actor_user_id") @db.Uuid
   endpointFamily String            @map("endpoint_family")
   key            String
-  /** SHA-256 of the canonical request body, to detect a reused key. */
+  /// SHA-256 of the canonical request body, to detect a reused key.
   requestHash    String            @map("request_hash")
   status         IdempotencyStatus @default(IN_PROGRESS)
   responseStatus Int?              @map("response_status")
@@ -1247,13 +1259,11 @@ model IdempotencyRecord {
 
 /**
  * Support asking for access, before anyone has decided.
- *
  * Deliberately not a state on SupportAccessGrant. The middleware that guards
  * every tenant read treats a grant as live when `revokedAt` is null and
  * `expiresAt` is in the future — a pending row would satisfy both, so merely
  * *asking* would have granted the access. Separate table, and the grant is
  * only written when someone approves.
- *
  * Runbook §7: access must be "linked to a ticket, incident, or approved
  * customer support request". This is that request.
  */
@@ -1294,27 +1304,26 @@ enum SupportAccessRequestStatus {
 }
 
 model SupportAccessGrant {
-  id                  String           @id @default(uuid()) @db.Uuid
-  tenantId            String           @map("tenant_id") @db.Uuid
-  supportMembershipId String           @map("support_membership_id") @db.Uuid
-  approvedByUserId    String           @map("approved_by_user_id") @db.Uuid
+  id                  String                @id @default(uuid()) @db.Uuid
+  tenantId            String                @map("tenant_id") @db.Uuid
+  supportMembershipId String                @map("support_membership_id") @db.Uuid
+  approvedByUserId    String                @map("approved_by_user_id") @db.Uuid
   reason              String
   /**
    * The case this access was opened for — Runbook §7 "purpose-bound".
-   *
    * Nullable because grants predate tickets and because a genuine incident
    * may not have one yet; the service requires either this or an explicit
    * incident reference in `reason`, so an access is never unattributable.
    */
-  ticketId            String?          @map("ticket_id") @db.Uuid
+  ticketId            String?               @map("ticket_id") @db.Uuid
   scopes              SupportScope[]
-  expiresAt           DateTime         @map("expires_at")
-  revokedAt           DateTime?        @map("revoked_at")
-  createdAt           DateTime         @default(now()) @map("created_at")
-  tenant              Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  supportMembership   TenantMembership @relation(fields: [supportMembershipId], references: [id], onDelete: Cascade)
-  approvedBy          AppUser          @relation("SupportApprover", fields: [approvedByUserId], references: [id], onDelete: Restrict)
-  ticket              SupportTicket?   @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  expiresAt           DateTime              @map("expires_at")
+  revokedAt           DateTime?             @map("revoked_at")
+  createdAt           DateTime              @default(now()) @map("created_at")
+  tenant              Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supportMembership   TenantMembership      @relation(fields: [supportMembershipId], references: [id], onDelete: Cascade)
+  approvedBy          AppUser               @relation("SupportApprover", fields: [approvedByUserId], references: [id], onDelete: Restrict)
+  ticket              SupportTicket?        @relation(fields: [ticketId], references: [id], onDelete: SetNull)
   request             SupportAccessRequest?
 
   @@index([tenantId, supportMembershipId, expiresAt])
@@ -1348,9 +1357,9 @@ model SupportTicket {
   createdAt       DateTime       @default(now()) @map("created_at")
   updatedAt       DateTime       @updatedAt @map("updated_at")
 
-  tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  openedBy      AppUser                @relation("TicketOpenedBy", fields: [openedByUserId], references: [id], onDelete: Cascade)
-  assignedStaff AppUser?               @relation("TicketAssignedStaff", fields: [assignedStaffId], references: [id], onDelete: SetNull)
+  tenant         Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  openedBy       AppUser                @relation("TicketOpenedBy", fields: [openedByUserId], references: [id], onDelete: Cascade)
+  assignedStaff  AppUser?               @relation("TicketAssignedStaff", fields: [assignedStaffId], references: [id], onDelete: SetNull)
   comments       SupportTicketComment[]
   accessGrants   SupportAccessGrant[]
   accessRequests SupportAccessRequest[]
@@ -1492,7 +1501,7 @@ enum DeliveryStatus {
  * the admin Groups screen distinguishes it, and PRD §11.3 lists basic group
  * addresses.
  */
-/** §6.17 and §6.18 name active, suspended and deleted; see the Alias note. */
+/// §6.17 and §6.18 name active, suspended and deleted; see the Alias note.
 enum AliasStatus {
   ACTIVE
   SUSPENDED
@@ -1895,9 +1904,9 @@ enum ThreadParticipantRole {
 }
 
 enum IdempotencyStatus {
-  /** Claimed by a request that has not answered yet. */
+  /// Claimed by a request that has not answered yet.
   IN_PROGRESS
-  /** Answered; the stored response is what a replay returns. */
+  /// Answered; the stored response is what a replay returns.
   COMPLETED
 }
 
@@ -1972,40 +1981,40 @@ enum ProviderEventStatus {
 }
 
 model Plan {
-  id            String         @id @default(uuid()) @db.Uuid
-  code          String         @unique
-  name          String
-  tagline       String?
-  priceMonthly  Int
-  userLimit     Int
-  mailboxLimit  Int
+  id             String         @id @default(uuid()) @db.Uuid
+  code           String         @unique
+  name           String
+  tagline        String?
+  priceMonthly   Int
+  userLimit      Int
+  mailboxLimit   Int
   storageLimitGb Int
-  features      String[]  @default([])
-  stripePriceId String?        @map("stripe_price_id")
-  active        Boolean        @default(true)
-  createdAt     DateTime       @default(now()) @map("created_at")
-  updatedAt     DateTime       @updatedAt @map("updated_at")
-  subscriptions Subscription[]
+  features       String[]       @default([])
+  stripePriceId  String?        @map("stripe_price_id")
+  active         Boolean        @default(true)
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  subscriptions  Subscription[]
 
   @@index([active])
   @@map("plans")
 }
 
 model Subscription {
-  id                    String       @id @default(uuid()) @db.Uuid
-  tenantId              String       @map("tenant_id") @db.Uuid
-  planId                String       @map("plan_id") @db.Uuid
-  stripeCustomerId      String?      @map("stripe_customer_id")
-  stripeSubscriptionId  String?      @unique @map("stripe_subscription_id")
-  status                String
-  currentPeriodEnd      DateTime?    @map("current_period_end")
-  trialEnd              DateTime?    @map("trial_end")
-  cancelAtPeriodEnd     Boolean      @default(false) @map("cancel_at_period_end")
-  createdAt             DateTime     @default(now()) @map("created_at")
-  updatedAt             DateTime     @updatedAt @map("updated_at")
-  tenant                Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  plan                  Plan         @relation(fields: [planId], references: [id])
-  invoices              Invoice[]
+  id                   String    @id @default(uuid()) @db.Uuid
+  tenantId             String    @map("tenant_id") @db.Uuid
+  planId               String    @map("plan_id") @db.Uuid
+  stripeCustomerId     String?   @map("stripe_customer_id")
+  stripeSubscriptionId String?   @unique @map("stripe_subscription_id")
+  status               String
+  currentPeriodEnd     DateTime? @map("current_period_end")
+  trialEnd             DateTime? @map("trial_end")
+  cancelAtPeriodEnd    Boolean   @default(false) @map("cancel_at_period_end")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+  tenant               Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan                 Plan      @relation(fields: [planId], references: [id])
+  invoices             Invoice[]
 
   @@index([tenantId])
   @@index([status])
@@ -2013,21 +2022,21 @@ model Subscription {
 }
 
 model Invoice {
-  id               String           @id @default(uuid()) @db.Uuid
-  tenantId         String           @map("tenant_id") @db.Uuid
-  subscriptionId   String?          @map("subscription_id") @db.Uuid
-  stripeInvoiceId  String?          @unique @map("stripe_invoice_id")
+  id               String        @id @default(uuid()) @db.Uuid
+  tenantId         String        @map("tenant_id") @db.Uuid
+  subscriptionId   String?       @map("subscription_id") @db.Uuid
+  stripeInvoiceId  String?       @unique @map("stripe_invoice_id")
   number           String?
-  amountDue        Int              @map("amount_due")
-  currency         String           @default("usd")
+  amountDue        Int           @map("amount_due")
+  currency         String        @default("usd")
   status           String
-  periodStart      DateTime?        @map("period_start")
-  periodEnd        DateTime?        @map("period_end")
-  hostedInvoiceUrl String?          @map("hosted_invoice_url")
-  invoicePdfUrl    String?          @map("invoice_pdf_url")
-  createdAt        DateTime         @default(now()) @map("created_at")
-  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  subscription     Subscription?    @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  periodStart      DateTime?     @map("period_start")
+  periodEnd        DateTime?     @map("period_end")
+  hostedInvoiceUrl String?       @map("hosted_invoice_url")
+  invoicePdfUrl    String?       @map("invoice_pdf_url")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  tenant           Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subscription     Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
 
   @@index([tenantId])
   @@index([status])
@@ -2058,29 +2067,27 @@ model Contact {
 }
 
 model StripeWebhookEvent {
-  id            String    @id @default(uuid()) @db.Uuid
-  stripeEventId String    @unique @map("stripe_event_id")
-  eventType     String    @map("event_type")
-  processedAt   DateTime  @default(now()) @map("processed_at")
-  createdAt     DateTime  @default(now()) @map("created_at")
+  id            String   @id @default(uuid()) @db.Uuid
+  stripeEventId String   @unique @map("stripe_event_id")
+  eventType     String   @map("event_type")
+  processedAt   DateTime @default(now()) @map("processed_at")
+  createdAt     DateTime @default(now()) @map("created_at")
 
   @@map("stripe_webhook_events")
 }
 
-/* ── tables PR #35 created and left unmodelled ───────────────────────────
- *
+/**
+ * ── tables PR #35 created and left unmodelled ───────────────────────────
  * Five migrations from the akarsh branch landed in that merge; the Prisma
  * models they belong to did not, and neither did the services. The tables
  * were therefore created on every deploy and known to nothing — and
  * `prisma migrate diff` confirms what that costs: the next `migrate dev`
  * generates DROP TABLE for all four of them plus six enums.
- *
  * Modelled here so the schema tells the truth about the database. That is
  * the safe direction: it destroys nothing, removes the latent DROP, and
  * leaves the features recoverable. Dropping the tables instead would make
  * the loss permanent, and that is a decision for whoever owns the roadmap,
  * not a side effect of a merge conflict.
- *
  * Nothing reads these yet. They are shaped exactly as the database has them,
  * recovered by introspection rather than retyped from the original branch,
  * so the model cannot drift from the table it describes.
@@ -2088,7 +2095,6 @@ model StripeWebhookEvent {
 
 /**
  * A distribution list or shared address.
- *
  * Unused, and deliberately so: `kind = SHARED` overlaps the shared mailboxes
  * main already implements as Mailbox(type=SHARED) + MailboxAccess. Wiring
  * this up would give the platform two models for one concept. The table is
@@ -2096,14 +2102,14 @@ model StripeWebhookEvent {
  * accident — see Backend/docs/operations/known-issues.md, KI-004.
  */
 model MailGroup {
-  id        String            @id @default(uuid()) @db.Uuid
-  tenantId  String            @map("tenant_id") @db.Uuid
+  id        String          @id @default(uuid()) @db.Uuid
+  tenantId  String          @map("tenant_id") @db.Uuid
   name      String
   address   String
-  kind      MailGroupKind     @default(DISTRIBUTION)
-  status    MailGroupStatus   @default(ACTIVE)
-  createdAt DateTime          @default(now()) @map("created_at")
-  updatedAt DateTime          @updatedAt @map("updated_at")
+  kind      MailGroupKind   @default(DISTRIBUTION)
+  status    MailGroupStatus @default(ACTIVE)
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
 
   tenant  Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   members MailGroupMember[]
@@ -2128,7 +2134,6 @@ model MailGroupMember {
 
 /**
  * Handing a workspace to a different owner.
- *
  * The mechanism `tenant.ownership.transfer` needs, which the matrix marks
  * TWO_PERSON. The approval gate that capability implies still does not
  * exist, so this stays unwired.
@@ -2156,7 +2161,6 @@ model OwnershipTransfer {
 
 /**
  * A security signal worth a human looking at.
- *
  * The Owner console had a screen for these that the same merge deleted, and
  * what main shows today under "security alerts" is derived from connectors
  * and audit events rather than from this table.
@@ -2224,4 +2228,474 @@ enum SecurityAlertType {
   REFRESH_TOKEN_REUSE
   PASSWORD_CHANGED
   PASSWORD_RESET
+}
+
+// ─── Calendar ────────────────────────────────────────────────────────────────
+// A member's calendars and the events in them. Times are stored as instants
+// (UTC); the time zone an event was planned in is kept beside it so a
+// recurring or all-day event can be shown the way it was meant. All-day events
+// run from midnight UTC of their first day to midnight UTC after their last.
+
+enum CalendarKind {
+  /// One member's own calendar (Work, Personal, Focus time…).
+  PERSONAL
+  /// A calendar a team shares; added with Team and Shared calendars.
+  TEAM
+}
+
+enum CalendarEventVisibility {
+  /// Others who can see the calendar see the details.
+  DEFAULT
+  /// Others see only that the time is taken (Busy).
+  PRIVATE
+}
+
+enum CalendarEventShowAs {
+  BUSY
+  FREE
+}
+
+model Calendar {
+  id                String                  @id @default(uuid()) @db.Uuid
+  tenantId          String                  @map("tenant_id") @db.Uuid
+  /// The member it belongs to. For a team calendar, whoever created it (they manage it).
+  ownerMembershipId String?                 @map("owner_membership_id") @db.Uuid
+  kind              CalendarKind            @default(PERSONAL)
+  name              String
+  /// A palette key (blue, green, purple, amber, teal, red, slate), not a hex
+  /// value, so the client can render it for light and dark themes.
+  color             String                  @default("blue")
+  description       String?
+  /// The member's first calendar: created for them, cannot be deleted.
+  isDefault         Boolean                 @default(false) @map("is_default")
+  /// Whether its events are shown in the owner's views (the checkbox).
+  isVisible         Boolean                 @default(true) @map("is_visible")
+  createdAt         DateTime                @default(now()) @map("created_at")
+  updatedAt         DateTime                @updatedAt @map("updated_at")
+  tenant            Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner             TenantMembership?       @relation("CalendarOwner", fields: [ownerMembershipId], references: [id], onDelete: Cascade)
+  events            CalendarEvent[]
+  shares            CalendarShare[]
+  accessRequests    CalendarAccessRequest[]
+  bookingLinks      BookingLink[]
+  meetingTemplates  MeetingTemplate[]
+
+  @@index([tenantId, ownerMembershipId])
+  @@map("calendars")
+}
+
+model CalendarEvent {
+  id                    String                  @id @default(uuid()) @db.Uuid
+  tenantId              String                  @map("tenant_id") @db.Uuid
+  calendarId            String                  @map("calendar_id") @db.Uuid
+  organizerMembershipId String                  @map("organizer_membership_id") @db.Uuid
+  title                 String
+  description           String?
+  location              String?
+  /// A meeting link to join (video call), shown as such.
+  videoLink             String?                 @map("video_link")
+  startsAt              DateTime                @map("starts_at")
+  endsAt                DateTime                @map("ends_at")
+  allDay                Boolean                 @default(false) @map("all_day")
+  /// IANA zone the event was planned in, e.g. Europe/London.
+  timeZone              String                  @default("UTC") @map("time_zone")
+  visibility            CalendarEventVisibility @default(DEFAULT)
+  showAs                CalendarEventShowAs     @default(BUSY) @map("show_as")
+  /// Bumped when the time, place or title changes, so attendees can be told
+  /// what changed since they last looked (the Updates tab).
+  sequence              Int                     @default(0)
+  createdAt             DateTime                @default(now()) @map("created_at")
+  updatedAt             DateTime                @updatedAt @map("updated_at")
+  tenant                Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  calendar              Calendar                @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  organizer             TenantMembership        @relation("CalendarEventOrganizer", fields: [organizerMembershipId], references: [id], onDelete: Cascade)
+  attendees             EventAttendee[]
+  activities            CalendarEventActivity[]
+  resourceBookings      ResourceBooking[]
+  guestBookings         GuestBooking[]
+
+  @@index([tenantId, calendarId, startsAt])
+  @@index([tenantId, startsAt, endsAt])
+  @@map("calendar_events")
+}
+
+enum EventResponse {
+  NEEDS_ACTION
+  ACCEPTED
+  TENTATIVE
+  DECLINED
+}
+
+enum CalendarActivityType {
+  INVITED
+  RESPONDED
+  PROPOSED_TIME
+  UPDATED
+  REMOVED
+}
+
+/// Someone invited to an event. A member of the workspace has a membership
+/// and answers in Zoiko; anyone else is a guest, listed by address.
+model EventAttendee {
+  id               String            @id @default(uuid()) @db.Uuid
+  tenantId         String            @map("tenant_id") @db.Uuid
+  eventId          String            @map("event_id") @db.Uuid
+  membershipId     String?           @map("membership_id") @db.Uuid
+  email            String
+  displayName      String?           @map("display_name")
+  response         EventResponse     @default(NEEDS_ACTION)
+  respondedAt      DateTime?         @map("responded_at")
+  comment          String?
+  proposedStartsAt DateTime?         @map("proposed_starts_at")
+  proposedEndsAt   DateTime?         @map("proposed_ends_at")
+  /// The event sequence this attendee last opened (null: never opened).
+  seenSequence     Int?              @map("seen_sequence")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  event            CalendarEvent     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  membership       TenantMembership? @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, email])
+  @@index([tenantId, membershipId, response])
+  @@map("event_attendees")
+}
+
+/// What happened to an event, for its invitation history.
+model CalendarEventActivity {
+  id                String               @id @default(uuid()) @db.Uuid
+  tenantId          String               @map("tenant_id") @db.Uuid
+  eventId           String               @map("event_id") @db.Uuid
+  actorMembershipId String?              @map("actor_membership_id") @db.Uuid
+  type              CalendarActivityType
+  /// Who it concerned and what changed, e.g. { response: "ACCEPTED" }.
+  detail            Json                 @default("{}")
+  createdAt         DateTime             @default(now()) @map("created_at")
+  tenant            Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  event             CalendarEvent        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  actor             TenantMembership?    @relation(fields: [actorMembershipId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, eventId, createdAt])
+  @@map("calendar_event_activities")
+}
+
+/// What someone a calendar is shared with may do.
+enum CalendarAccess {
+  /// Only that the time is taken (Busy), never titles or details.
+  FREE_BUSY
+  /// Events and their details. Private events still show only as Busy.
+  VIEW
+  /// Add and change events too.
+  EDIT
+  /// Also decide who else has access.
+  MANAGE
+}
+
+enum CalendarAccessRequestStatus {
+  PENDING
+  APPROVED
+  DECLINED
+}
+
+/// A calendar shared with one member (for a team calendar, each member).
+model CalendarShare {
+  id                    String            @id @default(uuid()) @db.Uuid
+  tenantId              String            @map("tenant_id") @db.Uuid
+  calendarId            String            @map("calendar_id") @db.Uuid
+  membershipId          String            @map("membership_id") @db.Uuid
+  access                CalendarAccess    @default(VIEW)
+  /// Whether its events show in this member's views (their own checkbox).
+  isVisible             Boolean           @default(true) @map("is_visible")
+  grantedByMembershipId String?           @map("granted_by_membership_id") @db.Uuid
+  createdAt             DateTime          @default(now()) @map("created_at")
+  updatedAt             DateTime          @updatedAt @map("updated_at")
+  tenant                Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  calendar              Calendar          @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  membership            TenantMembership  @relation("CalendarShareGrantee", fields: [membershipId], references: [id], onDelete: Cascade)
+  grantedBy             TenantMembership? @relation("CalendarShareGrantor", fields: [grantedByMembershipId], references: [id], onDelete: SetNull)
+
+  @@unique([calendarId, membershipId])
+  @@index([tenantId, membershipId])
+  @@map("calendar_shares")
+}
+
+/// Somebody asking for (more) access to a calendar; its owner or a manager decides.
+model CalendarAccessRequest {
+  id                    String                      @id @default(uuid()) @db.Uuid
+  tenantId              String                      @map("tenant_id") @db.Uuid
+  calendarId            String                      @map("calendar_id") @db.Uuid
+  requesterMembershipId String                      @map("requester_membership_id") @db.Uuid
+  access                CalendarAccess
+  message               String?
+  status                CalendarAccessRequestStatus @default(PENDING)
+  decidedByMembershipId String?                     @map("decided_by_membership_id") @db.Uuid
+  decidedAt             DateTime?                   @map("decided_at")
+  createdAt             DateTime                    @default(now()) @map("created_at")
+  tenant                Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  calendar              Calendar                    @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  requester             TenantMembership            @relation("CalendarAccessRequester", fields: [requesterMembershipId], references: [id], onDelete: Cascade)
+  decidedBy             TenantMembership?           @relation("CalendarAccessDecider", fields: [decidedByMembershipId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, calendarId, status])
+  @@index([tenantId, requesterMembershipId])
+  @@map("calendar_access_requests")
+}
+
+enum CalendarResourceKind {
+  ROOM
+  EQUIPMENT
+}
+
+enum ResourceBookingStatus {
+  /// Booked. The room is the meeting's.
+  CONFIRMED
+  /// Waiting for an Owner or Admin, for a resource that needs approval. Holds the slot.
+  PENDING
+  DECLINED
+  CANCELLED
+}
+
+/// A meeting room or a piece of bookable equipment. Owners and Admins manage
+/// them; any member can book.
+model CalendarResource {
+  id               String               @id @default(uuid()) @db.Uuid
+  tenantId         String               @map("tenant_id") @db.Uuid
+  kind             CalendarResourceKind @default(ROOM)
+  name             String
+  description      String?
+  /// Seats, for a room.
+  capacity         Int?
+  /// Where it is, e.g. "London HQ".
+  location         String?
+  floor            String?
+  /// e.g. "Video conferencing", "Large display", "Step-free access".
+  features         String[]             @default([])
+  /// Bookings wait for an Owner or Admin before they are confirmed.
+  requiresApproval Boolean              @default(false) @map("requires_approval")
+  /// Retired resources keep their history but cannot be booked.
+  isActive         Boolean              @default(true) @map("is_active")
+  createdAt        DateTime             @default(now()) @map("created_at")
+  updatedAt        DateTime             @updatedAt @map("updated_at")
+  tenant           Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  bookings         ResourceBooking[]
+
+  @@index([tenantId, isActive])
+  @@map("calendar_resources")
+}
+
+/// A resource held for an event. Times follow the event.
+model ResourceBooking {
+  id                    String                @id @default(uuid()) @db.Uuid
+  tenantId              String                @map("tenant_id") @db.Uuid
+  resourceId            String                @map("resource_id") @db.Uuid
+  eventId               String                @map("event_id") @db.Uuid
+  bookedByMembershipId  String                @map("booked_by_membership_id") @db.Uuid
+  startsAt              DateTime              @map("starts_at")
+  endsAt                DateTime              @map("ends_at")
+  status                ResourceBookingStatus @default(CONFIRMED)
+  attendeeCount         Int?                  @map("attendee_count")
+  note                  String?
+  decidedByMembershipId String?               @map("decided_by_membership_id") @db.Uuid
+  decidedAt             DateTime?             @map("decided_at")
+  createdAt             DateTime              @default(now()) @map("created_at")
+  updatedAt             DateTime              @updatedAt @map("updated_at")
+  tenant                Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  resource              CalendarResource      @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  event                 CalendarEvent         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  bookedBy              TenantMembership      @relation("ResourceBooker", fields: [bookedByMembershipId], references: [id], onDelete: Cascade)
+  decidedBy             TenantMembership?     @relation("ResourceDecider", fields: [decidedByMembershipId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, resourceId, startsAt])
+  @@index([tenantId, bookedByMembershipId])
+  @@index([tenantId, status])
+  @@map("resource_bookings")
+}
+
+enum BookingLinkStatus {
+  DRAFT
+  PUBLISHED
+  PAUSED
+}
+
+enum BookingLocationType {
+  VIDEO
+  PHONE
+  IN_PERSON
+}
+
+enum GuestBookingStatus {
+  /// Waiting for the host, on a link that needs approval. Holds the slot.
+  PENDING
+  CONFIRMED
+  DECLINED
+  CANCELLED
+}
+
+/// A booking page: people (inside or outside the workspace) pick a free time
+/// with its owner from the times the rules allow.
+model BookingLink {
+  id                String              @id @default(uuid()) @db.Uuid
+  tenantId          String              @map("tenant_id") @db.Uuid
+  ownerMembershipId String              @map("owner_membership_id") @db.Uuid
+  /// Where booked meetings go: the owner's calendar, or a team calendar they can edit.
+  calendarId        String              @map("calendar_id") @db.Uuid
+  /// The public address: /book/<slug>. Unguessable enough not to be found by trying.
+  slug              String              @unique
+  title             String
+  description       String?
+  durationMinutes   Int                 @default(30) @map("duration_minutes")
+  bufferMinutes     Int                 @default(0) @map("buffer_minutes")
+  minNoticeHours    Int                 @default(12) @map("min_notice_hours")
+  maxDaysAhead      Int                 @default(30) @map("max_days_ahead")
+  /// IANA zone the weekly hours are in.
+  timeZone          String              @map("time_zone")
+  /// ISO weekdays offered: 1 = Monday … 7 = Sunday.
+  weekdays          Int[]               @default([1, 2, 3, 4, 5])
+  /// "HH:MM" in timeZone.
+  dayStart          String              @default("09:00") @map("day_start")
+  dayEnd            String              @default("17:00") @map("day_end")
+  locationType      BookingLocationType @default(VIDEO) @map("location_type")
+  /// A meeting link, phone number or address, depending on locationType.
+  locationDetail    String?             @map("location_detail")
+  requiresApproval  Boolean             @default(false) @map("requires_approval")
+  status            BookingLinkStatus   @default(DRAFT)
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner             TenantMembership    @relation(fields: [ownerMembershipId], references: [id], onDelete: Cascade)
+  calendar          Calendar            @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  bookings          GuestBooking[]
+
+  @@index([tenantId, ownerMembershipId])
+  @@map("booking_links")
+}
+
+/// Someone's booking through a link.
+model GuestBooking {
+  id         String             @id @default(uuid()) @db.Uuid
+  tenantId   String             @map("tenant_id") @db.Uuid
+  linkId     String             @map("link_id") @db.Uuid
+  guestName  String             @map("guest_name")
+  guestEmail String             @map("guest_email")
+  notes      String?
+  startsAt   DateTime           @map("starts_at")
+  endsAt     DateTime           @map("ends_at")
+  /// The guest's own zone, for showing them their time.
+  timeZone   String             @map("time_zone")
+  status     GuestBookingStatus @default(PENDING)
+  /// The meeting in the host's calendar, once confirmed.
+  eventId    String?            @map("event_id") @db.Uuid
+  decidedAt  DateTime?          @map("decided_at")
+  createdAt  DateTime           @default(now()) @map("created_at")
+  updatedAt  DateTime           @updatedAt @map("updated_at")
+  tenant     Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  link       BookingLink        @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  event      CalendarEvent?     @relation(fields: [eventId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, linkId, status])
+  @@index([tenantId, startsAt])
+  @@map("guest_bookings")
+}
+
+enum MeetingTemplateScope {
+  /// Only its owner sees and uses it.
+  PERSONAL
+  /// Belongs to a team calendar; its members use it once it is approved.
+  TEAM
+}
+
+enum MeetingTemplateStatus {
+  DRAFT
+  /// Ready to use.
+  READY
+  /// A team template waiting for a team manager (or a workspace Owner or Admin).
+  PENDING_REVIEW
+}
+
+enum ExternalGuestPolicy {
+  /// Only members of the workspace may be invited.
+  NOT_ALLOWED
+  /// Outside guests need the organiser to confirm.
+  APPROVAL
+  ALLOWED
+}
+
+/// A reusable meeting format: the defaults a new meeting starts from.
+/// Changing a template never changes meetings already made from it.
+model MeetingTemplate {
+  id                     String                @id @default(uuid()) @db.Uuid
+  tenantId               String                @map("tenant_id") @db.Uuid
+  ownerMembershipId      String                @map("owner_membership_id") @db.Uuid
+  scope                  MeetingTemplateScope  @default(PERSONAL)
+  /// For a team template: the team calendar it belongs to (meetings go there).
+  teamCalendarId         String?               @map("team_calendar_id") @db.Uuid
+  title                  String
+  /// The default agenda / event description.
+  agenda                 String?
+  durationMinutes        Int                   @default(30) @map("duration_minutes")
+  locationType           BookingLocationType   @default(VIDEO) @map("location_type")
+  locationDetail         String?               @map("location_detail")
+  defaultAttendees       String[]              @default([]) @map("default_attendees")
+  bufferMinutes          Int                   @default(0) @map("buffer_minutes")
+  minNoticeHours         Int                   @default(0) @map("min_notice_hours")
+  externalGuests         ExternalGuestPolicy   @default(APPROVAL) @map("external_guests")
+  /// Recording or an AI recap of meetings from this template. Off unless chosen.
+  recordingAllowed       Boolean               @default(false) @map("recording_allowed")
+  status                 MeetingTemplateStatus @default(READY)
+  reviewNote             String?               @map("review_note")
+  reviewedByMembershipId String?               @map("reviewed_by_membership_id") @db.Uuid
+  reviewedAt             DateTime?             @map("reviewed_at")
+  createdAt              DateTime              @default(now()) @map("created_at")
+  updatedAt              DateTime              @updatedAt @map("updated_at")
+  tenant                 Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner                  TenantMembership      @relation("TemplateOwner", fields: [ownerMembershipId], references: [id], onDelete: Cascade)
+  reviewedBy             TenantMembership?     @relation("TemplateReviewer", fields: [reviewedByMembershipId], references: [id], onDelete: SetNull)
+  teamCalendar           Calendar?             @relation(fields: [teamCalendarId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, ownerMembershipId])
+  @@index([tenantId, teamCalendarId, status])
+  @@map("meeting_templates")
+}
+
+/// One member's calendar preferences. Missing means the defaults.
+model CalendarPreference {
+  id                     String                  @id @default(uuid()) @db.Uuid
+  tenantId               String                  @map("tenant_id") @db.Uuid
+  membershipId           String                  @unique @map("membership_id") @db.Uuid
+  /// day | week | month | agenda
+  defaultView            String                  @default("week") @map("default_view")
+  /// 1 = Monday, 0 = Sunday, 6 = Saturday
+  weekStart              Int                     @default(1) @map("week_start")
+  defaultDurationMinutes Int                     @default(30) @map("default_duration_minutes")
+  /// IANA zone for new events and links; null follows the device.
+  timeZone               String?                 @map("time_zone")
+  /// en-GB | en-US | ...
+  locale                 String                  @default("en-GB")
+  /// DMY | MDY | YMD
+  dateFormat             String                  @default("DMY") @map("date_format")
+  /// H24 | H12
+  timeFormat             String                  @default("H24") @map("time_format")
+  showWeekends           Boolean                 @default(false) @map("show_weekends")
+  showDescriptions       Boolean                 @default(true) @map("show_descriptions")
+  /// ISO weekdays, 1 = Monday … 7 = Sunday
+  workDays               Int[]                   @default([1, 2, 3, 4, 5]) @map("work_days")
+  workStart              String                  @default("09:00") @map("work_start")
+  workEnd                String                  @default("17:00") @map("work_end")
+  defaultVisibility      CalendarEventVisibility @default(DEFAULT) @map("default_visibility")
+  defaultShowAs          CalendarEventShowAs     @default(BUSY) @map("default_show_as")
+  allowAccessRequests    Boolean                 @default(true) @map("allow_access_requests")
+  showPendingInvitations Boolean                 @default(true) @map("show_pending_invitations")
+  notifyInvitations      Boolean                 @default(true) @map("notify_invitations")
+  notifyResponses        Boolean                 @default(true) @map("notify_responses")
+  notifyUpdates          Boolean                 @default(true) @map("notify_updates")
+  notifyBookings         Boolean                 @default(true) @map("notify_bookings")
+  notifySharing          Boolean                 @default(true) @map("notify_sharing")
+  notifyTemplates        Boolean                 @default(true) @map("notify_templates")
+  createdAt              DateTime                @default(now()) @map("created_at")
+  updatedAt              DateTime                @updatedAt @map("updated_at")
+  tenant                 Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  membership             TenantMembership        @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("calendar_preferences")
 }

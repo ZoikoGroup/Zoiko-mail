@@ -31,6 +31,9 @@ export interface SSEEvent {
     subject?: string;
     title?: string;
     body?: string;
+    /** What a NOTIFICATION is about, e.g. "calendar" for invitations and answers. */
+    kind?: string;
+    eventId?: string;
   };
   timestamp: string;
 }
