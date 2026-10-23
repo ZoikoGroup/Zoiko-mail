@@ -18,6 +18,7 @@ import {
   createDraft,
   sendDraft,
   scheduleDraft,
+  cancelSchedule,
   deleteDraft,
   reply as replyApi,
   replyAll as replyAllApi,
@@ -61,6 +62,7 @@ const listKey = (params: ListMailParams) =>
     "mail", "list", params.folder ?? "INBOX", params.starredOnly ?? false, params.unreadOnly ?? false,
     params.labelId ?? null, params.page ?? 1, params.mailboxId ?? null, params.q ?? "", params.from ?? "",
     params.to ?? "", params.hasAttachment ?? false, params.dateAfter ?? "", params.dateBefore ?? "",
+    params.limit ?? 25,
   ] as const;
 
 export function useMailList(params: ListMailParams) {
@@ -252,6 +254,26 @@ export function useDeleteDraft() {
   return useMutation({
     mutationFn: (messageId: string) => deleteDraft(messageId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["mail"] }),
+  });
+}
+
+/**
+ * Actions on a message waiting in the send queue.
+ *
+ * The API only edits, sends or schedules a DRAFT, so each of these takes the
+ * message off the queue first: reschedule is cancel + schedule, send now is
+ * cancel + send, and cancel alone leaves it in Drafts.
+ */
+export function useScheduledMessageAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: { messageId: string; action: "cancel" | "sendNow" | "reschedule"; scheduledAt?: string }) => {
+      await cancelSchedule(v.messageId);
+      if (v.action === "sendNow") await sendDraft(v.messageId);
+      if (v.action === "reschedule") await scheduleDraft(v.messageId, v.scheduledAt as string);
+    },
+    // Whatever happened, the message left (or moved within) the queue.
+    onSettled: () => qc.invalidateQueries({ queryKey: ["mail"] }),
   });
 }
 

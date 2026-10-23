@@ -1,7 +1,8 @@
 "use client";
 
-import { Star, Paperclip, Trash2 } from "lucide-react";
+import { Star, Paperclip, Trash2, Clock, AlertTriangle } from "lucide-react";
 import type { MailItem, MailListItem, MailListFolder } from "@/lib/mail-api";
+import { shortSendTime, zoneAbbr } from "@/components/mail/folder-views";
 
 // A fixed, readable palette — hashed by sender so the same person always
 // gets the same colour across the inbox, without storing a colour anywhere.
@@ -83,6 +84,18 @@ export function MailRow({
   const label = showRecipient ? `To: ${name}` : name;
   const unread = !item.isRead;
   const attachments = item.message.attachmentCount ?? (item.message.hasAttachments ? 1 : 0);
+  // A queued message is about when it goes, not when it was written.
+  const scheduledAt = folder === "SCHEDULED" ? item.message.scheduledAt : null;
+  const time = scheduledAt ? shortSendTime(scheduledAt) : formatMailTime(item.message.sentAt || item.createdAt);
+  const statusTag = scheduledAt ? (
+    <span className="inline-flex items-center gap-1 rounded border border-[var(--accent)]/30 bg-[var(--accent-soft)] px-1.5 py-0.5 text-[10.5px] font-medium text-[var(--accent-ink)]">
+      <Clock className="h-2.5 w-2.5" aria-hidden /> Scheduled · {zoneAbbr(new Date(scheduledAt))}
+    </span>
+  ) : folder === "SPAM" ? (
+    <span className="inline-flex items-center gap-1 rounded border border-[var(--crit)]/40 bg-[var(--crit-soft)] px-1.5 py-0.5 text-[10.5px] font-medium text-[var(--crit)]">
+      <AlertTriangle className="h-2.5 w-2.5" aria-hidden /> Suspected spam
+    </span>
+  ) : null;
 
   return (
     <li
@@ -133,7 +146,7 @@ export function MailRow({
             </span>
             {item.isStarred && <Star className="h-3.5 w-3.5 shrink-0 fill-[var(--warn)] text-[var(--warn)]" aria-label="Starred" />}
             <span className={`ml-auto shrink-0 text-[11.5px] ${unread ? "text-[var(--ink2)]" : "text-[var(--ink3)]"}`}>
-              {formatMailTime(item.message.sentAt || item.createdAt)}
+              {time}
             </span>
           </span>
           <span className={`mt-0.5 block truncate text-[13px] ${unread ? "font-semibold text-[var(--ink)]" : "text-[var(--ink2)]"}`}>
@@ -142,14 +155,9 @@ export function MailRow({
           {item.message.snippet && (
             <span className="mt-0.5 block truncate text-[12.5px] text-[var(--ink3)]">{item.message.snippet}</span>
           )}
-          {(attachments > 0 || item.labels.length > 0) && (
+          {(statusTag || attachments > 0 || item.labels.length > 0) && (
             <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
-              {attachments > 0 && (
-                <span className="inline-flex items-center gap-1 text-[11.5px] text-[var(--accent)]">
-                  <Paperclip className="h-3 w-3" aria-hidden />
-                  {attachments} attachment{attachments > 1 ? "s" : ""}
-                </span>
-              )}
+              {statusTag}
               {item.labels.slice(0, 3).map((l) => (
                 <span
                   key={l.id}
@@ -159,6 +167,12 @@ export function MailRow({
                   {l.name}
                 </span>
               ))}
+              {attachments > 0 && (
+                <span className="inline-flex items-center gap-1 text-[11px] text-[var(--ink3)]">
+                  <Paperclip className="h-3 w-3" aria-hidden />
+                  {attachments} attachment{attachments > 1 ? "s" : ""}
+                </span>
+              )}
             </span>
           )}
         </span>
