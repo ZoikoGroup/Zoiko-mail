@@ -67,7 +67,11 @@ export const get = asyncHandler(async (req: Request, res: Response) => {
   );
 });
 export const updateMailboxItem = asyncHandler(async (req: Request, res: Response) => {
-  sendSuccess(res, 200, await mailService.updateMailboxItem(String(req.params.messageId), req.body, context(req)), req.requestId);
+  const mailboxId = req.query.mailboxId ? String(req.query.mailboxId) : undefined;
+  sendSuccess(res, 200, await mailService.updateMailboxItem(String(req.params.messageId), req.body, context(req), mailboxId), req.requestId);
+});
+export const listSharedInboxes = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await mailService.listSharedInboxes(context(req)), req.requestId);
 });
 export const permanentlyDelete = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await mailService.permanentlyDelete(String(req.params.messageId), context(req)), req.requestId);
@@ -108,7 +112,8 @@ export const downloadAttachment = asyncHandler(async (req: Request, res: Respons
   const attachment = await mailService.downloadAttachment(
     String(req.params.messageId),
     String(req.params.attachmentId),
-    context(req)
+    context(req),
+    req.query.mailboxId ? String(req.query.mailboxId) : undefined
   );
   res.setHeader("Content-Type", attachment.contentType);
   res.setHeader(

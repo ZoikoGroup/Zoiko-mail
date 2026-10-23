@@ -1418,6 +1418,58 @@ export class MailService {
   }
 
   /**
+   * The other mailboxes this person can read — shared inboxes they are
+   * assigned to and personal mailboxes delegated to them — with each one's
+   * unread Inbox count, for the webmail's "Shared inboxes" section.
+   *
+   * Only mailboxes assigned to the workspace this session opened are listed,
+   * the same rule list() and get() enforce when one is opened, so nothing
+   * appears here that would then refuse to open.
+   */
+  async listSharedInboxes(context: MailContext) {
+    const access = await prisma.mailboxAccess.findMany({
+      where: {
+        tenantId: context.tenantId,
+        membershipId: context.membershipId,
+        canRead: true,
+        ...(context.workspace ? { mailbox: { workspaces: { has: context.workspace } } } : {}),
+      },
+      select: {
+        canSend: true,
+        canManage: true,
+        mailbox: { select: { id: true, address: true, type: true } },
+      },
+      orderBy: { mailbox: { address: "asc" } },
+    });
+    if (access.length === 0) return { mailboxes: [] };
+    const now = new Date();
+    const unread = await prisma.mailboxMessage.groupBy({
+      by: ["mailboxId"],
+      where: {
+        tenantId: context.tenantId,
+        mailboxId: { in: access.map((row) => row.mailbox.id) },
+        folder: "INBOX",
+        isRead: false,
+        OR: [{ snoozedUntil: null }, { snoozedUntil: { lte: now } }],
+      },
+      _count: { _all: true },
+    });
+    const unreadBy = new Map(unread.map((row) => [row.mailboxId, row._count._all]));
+    return {
+      mailboxes: access.map((row) => ({
+        id: row.mailbox.id,
+        address: row.mailbox.address,
+        type: row.mailbox.type,
+        // A personal mailbox here was delegated; a shared one is the team's.
+        delegated: row.mailbox.type === "USER",
+        canSend: row.canSend,
+        canManage: row.canManage,
+        unread: unreadBy.get(row.mailbox.id) ?? 0,
+      })),
+    };
+  }
+
+  /**
    * The caller's own mailbox, for the account menu and the storage meter.
    * Unlike admin reads elsewhere in this file, this never takes a mailboxId
    * — it is always "mine".
@@ -1497,8 +1549,13 @@ export class MailService {
     };
   }
 
-  async updateMailboxItem(messageId: string, input: UpdateMailboxItemInput, context: MailContext) {
-    const mailbox = await this.mailbox(context);
+  async updateMailboxItem(messageId: string, input: UpdateMailboxItemInput, context: MailContext, mailboxId?: string) {
+    // In a shared inbox, read and star are part of reading it; moving a
+    // message out of the team's inbox changes it for everyone, so that needs
+    // manage on the mailbox, not just read.
+    const mailbox = mailboxId
+      ? await sharedMailboxService.resolveAccessibleMailbox(context, mailboxId, input.folder ? "canManage" : "canRead")
+      : await this.mailbox(context);
     const item = await prisma.mailboxMessage.findFirst({
       where: { tenantId: context.tenantId, mailboxId: mailbox.id, messageId },
     });
@@ -1851,8 +1908,11 @@ export class MailService {
     }
   }
 
-  async downloadAttachment(messageId: string, attachmentId: string, context: MailContext) {
-    const mailbox = await this.mailbox(context);
+  async downloadAttachment(messageId: string, attachmentId: string, context: MailContext, mailboxId?: string) {
+    // A shared inbox's attachments need read on that mailbox, as its messages do.
+    const mailbox = mailboxId
+      ? await sharedMailboxService.resolveAccessibleMailbox(context, mailboxId, "canRead")
+      : await this.mailbox(context);
     const attachment = await prisma.messageAttachment.findFirst({
       where: {
         id: attachmentId,
