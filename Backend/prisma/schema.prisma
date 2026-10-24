@@ -32,6 +32,7 @@ model Tenant {
   domains                MailDomain[]
   aiActions              AIAction[]
   commitments            Commitment[]
+  taskChecklistItems     TaskChecklistItem[]
   notifications          Notification[]
   integrationLinks       IntegrationLink[]
   backgroundJobs         BackgroundJob[]
@@ -118,6 +119,7 @@ model AppUser {
   createdAiActions            AIAction[]             @relation("AICreator")
   ownedCommitments            Commitment[]           @relation("CommitmentOwner")
   createdCommitments          Commitment[]           @relation("CommitmentCreator")
+  completedCommitments        Commitment[]           @relation("CommitmentCompleter")
   notifications               Notification[]
   createdIntegrationLinks     IntegrationLink[]      @relation("IntegrationCreator")
   createdJobs                 BackgroundJob[]        @relation("JobCreator")
@@ -996,11 +998,19 @@ model Commitment {
   /// point before.
   owedByParticipantId String?          @map("owed_by_participant_id") @db.Uuid
   owedToParticipantId String?          @map("owed_to_participant_id") @db.Uuid
+  /// The task's title. Kept under its original name so the inbox, digest and
+  /// AI extraction that already write it carry on unchanged.
   text                String
+  description         String?
   dueAt               DateTime?        @map("due_at")
+  /// The first due date a rescheduled task had, so "days overdue" and the
+  /// original commitment survive a change of date. Null until rescheduled.
+  originalDueAt       DateTime?        @map("original_due_at")
   priority            ActionPriority   @default(MEDIUM)
   status              CommitmentStatus @default(OPEN)
   snoozedUntil        DateTime?        @map("snoozed_until")
+  completedAt         DateTime?        @map("completed_at")
+  completedByUserId   String?          @map("completed_by_user_id") @db.Uuid
   createdAt           DateTime         @default(now()) @map("created_at")
   updatedAt           DateTime         @updatedAt @map("updated_at")
   /// Track the AIAction that produced this commitment so a confirmed extraction
@@ -1009,14 +1019,36 @@ model Commitment {
   tenant              Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   owner               AppUser          @relation("CommitmentOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
   createdBy           AppUser          @relation("CommitmentCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  completedBy         AppUser?         @relation("CommitmentCompleter", fields: [completedByUserId], references: [id], onDelete: SetNull)
   owedBy              Participant?     @relation("CommitmentOwedBy", fields: [owedByParticipantId], references: [id], onDelete: SetNull)
   owedTo              Participant?     @relation("CommitmentOwedTo", fields: [owedToParticipantId], references: [id], onDelete: SetNull)
   sourceAiAction      AIAction?        @relation(fields: [sourceAiActionId], references: [id], onDelete: SetNull)
+  checklist           TaskChecklistItem[]
 
   @@index([tenantId, ownerUserId, status, dueAt])
+  @@index([tenantId, ownerUserId, completedAt])
+  @@index([tenantId, createdByUserId, status])
   @@index([tenantId, owedByParticipantId])
   @@index([tenantId, owedToParticipantId])
   @@map("commitments")
+}
+
+/// One step of a task's checklist ("2 of 3 complete").
+model TaskChecklistItem {
+  id           String     @id @default(uuid()) @db.Uuid
+  tenantId     String     @map("tenant_id") @db.Uuid
+  commitmentId String     @map("commitment_id") @db.Uuid
+  text         String
+  done         Boolean    @default(false)
+  position     Int        @default(0)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+  tenant       Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  commitment   Commitment @relation(fields: [commitmentId], references: [id], onDelete: Cascade)
+
+  @@index([commitmentId, position])
+  @@index([tenantId])
+  @@map("task_checklist_items")
 }
 
 model Notification {
@@ -1784,6 +1816,7 @@ enum ActionPriority {
 
 enum CommitmentStatus {
   OPEN
+  PLANNED
   IN_PROGRESS
   SNOOZED
   COMPLETED

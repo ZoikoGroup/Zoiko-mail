@@ -1,17 +1,31 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { Suspense, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { WebmailShell } from "@/components/mail/WebmailShell";
 import { MailClient, type MailClientHandle } from "@/components/mail/MailClient";
 import type { MailListFolder, SharedInbox } from "@/lib/mail-api";
+
+const FOLDERS: MailListFolder[] = ["INBOX", "SENT", "DRAFTS", "ARCHIVE", "TRASH", "QUARANTINE", "SPAM", "SNOOZED", "SCHEDULED", "STARRED"];
+
+/** /mail?message=<id>&folder=<FOLDER> opens that message — the link a task's "Open source email" follows. */
+export default function MailPage() {
+  return (
+    <Suspense>
+      <MailPageInner />
+    </Suspense>
+  );
+}
 
 // WebmailShell replaces AppShell here: the same guards (through the shared
 // useMemberShell hook) with the full-screen mail layout. MailClient itself is
 // the one the Admin and Owner inbox pages render inside their own shells, with
 // no folder prop and their own rail; this is the only route lifting folder,
 // search, label and shared-inbox state up to a shell.
-export default function MailPage() {
-  const [folder, setFolder] = useState<MailListFolder>("INBOX");
+function MailPageInner() {
+  const params = useSearchParams();
+  const linkedFolder = params.get("folder") as MailListFolder | null;
+  const [folder, setFolder] = useState<MailListFolder>(linkedFolder && FOLDERS.includes(linkedFolder) ? linkedFolder : "INBOX");
   // Lifted so the same text reaches both TopBar (what the person sees and
   // types into) and MailClient's operator parser (lib/mail-search.ts).
   const [searchQuery, setSearchQuery] = useState("");
@@ -43,6 +57,7 @@ export default function MailPage() {
         labelId={labelId}
         onLabelChange={setLabelId}
         sharedInbox={sharedInbox}
+        openMessageId={params.get("message")}
       />
     </WebmailShell>
   );
