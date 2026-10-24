@@ -28,9 +28,12 @@ function presets(): { label: string; date: Date }[] {
 export function SnoozeMenu({
   onSnooze,
   disabled = false,
+  triggerClassName = "zoiko-btn sm",
 }: {
   onSnooze: (until: Date) => void;
   disabled?: boolean;
+  /** Lets a toolbar draw the trigger like its other icon buttons. */
+  triggerClassName?: string;
 }) {
   const [customOpen, setCustomOpen] = useState(false);
   const [customValue, setCustomValue] = useState("");
@@ -39,8 +42,9 @@ export function SnoozeMenu({
     <>
       <DropdownMenu
         trigger={
-          <span className="zoiko-btn sm" title="Snooze">
-            <Clock className="h-4 w-4" /> <span className="hidden lg:inline"></span>
+          <span className={triggerClassName} title="Snooze">
+            <Clock className="h-4 w-4" aria-hidden />
+            <span className="sr-only">Snooze</span>
           </span>
         }
       >

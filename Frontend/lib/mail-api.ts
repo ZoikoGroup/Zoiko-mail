@@ -1,4 +1,4 @@
-import { apiRequest, ApiError } from "./api-client";
+import { apiRequest, ApiError, newIdempotencyKey, refreshAccessToken } from "./api-client";
 import { API_BASE } from "./config";
 import { getAccessToken } from "./auth-storage";
 
@@ -280,14 +280,23 @@ export async function deleteDraft(messageId: string) {
   return apiRequest(`/mail/drafts/${messageId}`, { method: "DELETE" });
 }
 
-export async function sendDraft(messageId: string) {
-  return apiRequest(`/mail/drafts/${messageId}/send`, { method: "POST" });
+/**
+ * Sends a draft. Pass the same `idempotencyKey` when retrying a send whose
+ * outcome is unknown: if the first one went through, the server replays its
+ * answer rather than sending the message twice.
+ */
+export async function sendDraft(messageId: string, idempotencyKey?: string) {
+  return apiRequest(`/mail/drafts/${messageId}/send`, {
+    method: "POST",
+    headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
+  });
 }
 
-export async function scheduleDraft(messageId: string, scheduledAt: string) {
+export async function scheduleDraft(messageId: string, scheduledAt: string, idempotencyKey?: string) {
   return apiRequest(`/mail/drafts/${messageId}/schedule`, {
     method: "POST",
     body: { scheduledAt },
+    headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
   });
 }
 
@@ -362,21 +371,44 @@ export async function downloadAttachment(
   URL.revokeObjectURL(url);
 }
 
+/**
+ * Puts one file on a draft.
+ *
+ * A raw fetch, because the body is multipart rather than JSON — which is why
+ * it once went out without the Idempotency-Key every mail write needs, and
+ * every upload was refused ("This operation requires an Idempotency-Key
+ * header"). The key is the caller's, one per file: retrying the same file
+ * with it returns the attachment already stored instead of a second copy.
+ * An expired session is renewed once and the same request replayed.
+ */
 export async function uploadAttachment(
   messageId: string,
-  file: File
+  file: File,
+  idempotencyKey: string = newIdempotencyKey()
 ): Promise<MailAttachment> {
-  const token = getAccessToken();
-  const form = new FormData();
-  form.append("file", file);
-  const res = await fetch(`${API_BASE}/mail/drafts/${messageId}/attachments`, {
-    method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: form,
-  });
+  const attempt = async () => {
+    const token = getAccessToken();
+    const form = new FormData();
+    form.append("file", file, file.name);
+    try {
+      return await fetch(`${API_BASE}/mail/drafts/${messageId}/attachments`, {
+        method: "POST",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          "Idempotency-Key": idempotencyKey,
+        },
+        body: form,
+      });
+    } catch {
+      throw new ApiError(0, `Couldn't upload ${file.name}: the connection dropped. Try again.`, "NETWORK_ERROR");
+    }
+  };
+  let res = await attempt();
+  if (res.status === 401 && (await refreshAccessToken())) res = await attempt();
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, body.error?.message || "Upload failed");
+    const reason = body.error?.message || `Upload failed (${res.status})`;
+    throw new ApiError(res.status, `Couldn't attach ${file.name}: ${reason}`, body.error?.code, body.error?.details);
   }
   const json = await res.json();
   return json.data;

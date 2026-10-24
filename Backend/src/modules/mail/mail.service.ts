@@ -173,6 +173,35 @@ function escapeHtml(value: string) {
 }
 
 /**
+ * Plain text with "> " quoting as HTML with nested blockquotes, so a reply to a
+ * reply shows each earlier message one level further in rather than a quote
+ * full of literal "&gt;" marks. The web app's composer does the same
+ * (Frontend/lib/mail-quote.ts quotedTextToHtml).
+ */
+function quotedTextToHtml(text: string): string {
+  let html = "";
+  let depth = 0;
+  for (const line of text.split(/\r?\n/)) {
+    const match = /^((?:>\s?)*)(.*)$/.exec(line)!;
+    const level = (match[1]!.match(/>/g) ?? []).length;
+    while (depth < level) {
+      html += "<blockquote>";
+      depth += 1;
+    }
+    while (depth > level) {
+      html += "</blockquote>";
+      depth -= 1;
+    }
+    html += `${escapeHtml(match[2]!)}<br>`;
+  }
+  while (depth > 0) {
+    html += "</blockquote>";
+    depth -= 1;
+  }
+  return html.replace(/(<br>)+(<\/blockquote>)/g, "$2");
+}
+
+/**
  * The original as a reply quotes it: "On <date>, <sender> wrote:" and its
  * text. Mail that arrived as HTML only has its markup stripped, so the quote
  * is never empty just because there was no text part.
@@ -565,7 +594,7 @@ export class MailService {
     const htmlBody = !input.htmlBody
       ? null
       : quote
-        ? `${input.htmlBody}<p>${escapeHtml(quote.attribution)}</p><blockquote>${escapeHtml(quote.text).replace(/\n/g, "<br>")}</blockquote>`
+        ? `${input.htmlBody}<p>${escapeHtml(quote.attribution)}</p><blockquote>${quotedTextToHtml(quote.text)}</blockquote>`
         : input.htmlBody;
 
     return prisma.$transaction(async (tx) => {

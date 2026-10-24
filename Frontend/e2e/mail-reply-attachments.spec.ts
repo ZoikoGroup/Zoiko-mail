@@ -230,8 +230,11 @@ test("received attachments show their type, preview what the browser can show, a
   await expect(cards.filter({ hasText: "policy.pdf" }).getByTestId("file-type-badge")).toHaveText("PDF");
   await expect(cards.filter({ hasText: "days.csv" }).getByTestId("file-type-badge")).toHaveText("CSV");
   await expect(cards.filter({ hasText: "form.docx" }).getByTestId("file-type-badge")).toHaveText("DOCX");
-  await expect(cards.filter({ hasText: "form.docx" })).toContainText("No preview, download to open");
-  await expect(cards.filter({ hasText: "form.docx" }).getByRole("button", { name: "Preview form.docx" })).toHaveCount(0);
+  // Word documents preview now (drawn in the page). This stub serves bytes
+  // that aren't a real .docx, so the tile says its preview is unavailable —
+  // real documents are covered by mail-preview-real.spec.ts.
+  await expect(cards.filter({ hasText: "form.docx" }).getByRole("button", { name: "Preview form.docx" })).toHaveCount(1);
+  await expect(cards.filter({ hasText: "form.docx" })).toContainText("Preview unavailable");
 
   // A CSV labelled application/octet-stream still previews, as a table.
   await page.getByRole("button", { name: "Preview days.csv" }).last().click();

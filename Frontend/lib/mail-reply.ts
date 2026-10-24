@@ -1,4 +1,5 @@
 import type { EmailMessage } from "./mail-api";
+import { quotedTextToHtml } from "./mail-quote";
 
 /**
  * Who a reply goes to, worked out the way the server does (mail.service
@@ -103,7 +104,8 @@ export function quotedOriginal(
   kind: "reply" | "forward"
 ): QuotedOriginal {
   const text = plainTextOf(message);
-  const htmlText = escapeHtml(text).replace(/\n/g, "<br>");
+  // Earlier quoting ("> ") becomes nested blockquotes, one level per reply.
+  const htmlText = quotedTextToHtml(text);
   if (kind === "forward") {
     const from = message.fromName
       ? `${message.fromName} <${message.fromAddress ?? message.author.email}>`

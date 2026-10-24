@@ -53,7 +53,13 @@ mailRouter.post("/labels", validate(createLabelSchema), controller.createLabel);
 mailRouter.patch("/labels/:labelId", validate(labelIdParamsSchema, "params"), validate(updateLabelSchema), controller.updateLabel);
 mailRouter.delete("/labels/:labelId", validate(labelIdParamsSchema, "params"), controller.deleteLabel);
 mailRouter.delete("/trash", controller.emptyTrash);
+// The same preview for a file still in the composer, before it is uploaded.
+// Read and answered; nothing is stored.
+mailRouter.post("/attachments/preview", attachmentUpload, controller.previewUpload);
 mailRouter.post("/drafts/:messageId/attachments", validate(messageIdParamsSchema, "params"), attachmentUpload, controller.addAttachment);
+// A readable preview of a stored attachment the browser cannot draw itself
+// (a legacy .doc). Same access as downloading it.
+mailRouter.get("/:messageId/attachments/:attachmentId/preview", validate(attachmentParamsSchema, "params"), validate(mailboxScopeSchema, "query"), controller.previewAttachment);
 mailRouter.get("/:messageId/attachments/:attachmentId", validate(attachmentParamsSchema, "params"), validate(mailboxScopeSchema, "query"), controller.downloadAttachment);
 mailRouter.delete("/drafts/:messageId/attachments/:attachmentId", validate(attachmentParamsSchema, "params"), controller.deleteAttachment);
 

@@ -9,11 +9,20 @@
  */
 export type FileCategory = "image" | "pdf" | "video" | "audio" | "text" | "document" | "spreadsheet" | "presentation" | "archive" | "other";
 
+/**
+ * How a file is previewed. Images, PDF, media and text the browser shows
+ * itself; a .docx is drawn in the page (docx-preview); a legacy .doc has its
+ * text read by the server. Everything else is described and downloaded.
+ */
+export type PreviewMode = "image" | "pdf" | "video" | "audio" | "text" | "docx" | "doc";
+
 export interface FileKind {
   /** Short label: PDF, DOCX, PNG… */
   label: string;
   category: FileCategory;
-  /** The browser can show it inline (image, PDF, video, audio, plain text). */
+  /** How it is previewed, or null when it can't be. */
+  preview: PreviewMode | null;
+  /** Whether it can be previewed at all. */
   previewable: boolean;
 }
 
@@ -76,10 +85,16 @@ export function fileKind(fileName: string, contentType: string): FileKind {
   const extension = dot > 0 ? fileName.slice(dot + 1).toLowerCase() : "";
   const match = BY_EXTENSION[extension] ?? fromContentType(contentType ?? "");
   const resolved = match ?? { label: extension ? extension.toUpperCase().slice(0, 5) : "FILE", category: "other" as const };
-  return {
-    ...resolved,
-    previewable: ["image", "pdf", "video", "audio", "text"].includes(resolved.category),
-  };
+  const preview: PreviewMode | null =
+    resolved.category === "image" || resolved.category === "pdf" || resolved.category === "video" ||
+    resolved.category === "audio" || resolved.category === "text"
+      ? resolved.category
+      : extension === "docx" || (extension === "" && resolved.label === "DOC" && /wordprocessingml/.test(contentType ?? ""))
+        ? "docx"
+        : extension === "doc"
+          ? "doc"
+          : null;
+  return { ...resolved, preview, previewable: preview !== null };
 }
 
 export function formatBytes(n: number): string {

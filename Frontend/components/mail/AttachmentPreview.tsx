@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Download,
   X,
@@ -16,13 +16,37 @@ import {
   FileArchive,
   Presentation,
   File as FileIcon,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  RotateCcw,
+  AlertCircle,
 } from "lucide-react";
 import { getAccessToken } from "@/lib/auth-storage";
 import type { MailAttachment } from "@/lib/mail-api";
 import { attachmentUrl, downloadAttachment } from "@/lib/mail-api";
-import { fileKind, formatBytes, type FileCategory, type FileKind } from "@/lib/file-kind";
+import { API_BASE } from "@/lib/config";
+import { ApiError, newIdempotencyKey } from "@/lib/api-client";
+import { fileKind, formatBytes, type FileCategory, type FileKind, type PreviewMode } from "@/lib/file-kind";
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+/*
+ * Attachment previews, the same for mail being written and mail received.
+ *
+ * Every attachment is a tile showing the file itself — the image, the PDF's
+ * first page, the Word document's first page, the opening lines of a text
+ * file — and opens a full-window viewer with zoom, fit and scrolling.
+ *
+ * How each format is drawn:
+ *   image, video, audio, PDF  the browser, from an object URL (PDF in its own
+ *                             viewer, which has zoom, fit and page controls)
+ *   text, CSV                 read as text, never handed to the browser
+ *   .docx                     drawn into the page by docx-preview
+ *   .doc                      its text, read by the server (word-extractor):
+ *                             no browser library renders the binary format
+ *   anything else             its details and a download
+ */
+
+// ── Badges ──────────────────────────────────────────────────────────────────
 
 const CATEGORY_ICON: Record<FileCategory, typeof FileIcon> = {
   image: ImageIcon,
@@ -64,12 +88,112 @@ export function FileTypeBadge({ kind }: { kind: FileKind }) {
   );
 }
 
-/** The MIME type to render a preview with. Mail often labels files
- * application/octet-stream, which a browser won't show inline. */
+// ── Preview items ────────────────────────────────────────────────────────────
+
+/** Anything the tiles and viewer can show: a stored attachment, or a file in the composer. */
+export interface PreviewItem {
+  key: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  load: () => Promise<Blob>;
+  /** A .doc's text, read by the server. */
+  loadDocText: () => Promise<{ text: string; truncated: boolean }>;
+  download: () => void;
+}
+
+async function readError(res: Response, fallback: string): Promise<never> {
+  const body = await res.json().catch(() => ({}));
+  throw new ApiError(res.status, body?.error?.message || fallback, body?.error?.code);
+}
+
+/** A stored attachment, on a received message or on one's own draft. */
+export function attachmentPreviewItem(messageId: string, attachment: MailAttachment, mailboxId?: string | null): PreviewItem {
+  const auth = (): Record<string, string> => {
+    const token = getAccessToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+  return {
+    key: `att:${attachment.id}`,
+    fileName: attachment.fileName,
+    contentType: attachment.contentType,
+    sizeBytes: attachment.sizeBytes,
+    load: async () => {
+      const res = await fetch(attachmentUrl(messageId, attachment.id, mailboxId), { headers: auth() });
+      if (!res.ok) return readError(res, "Couldn't load this attachment");
+      return res.blob();
+    },
+    loadDocText: async () => {
+      const url = `${API_BASE}/mail/${messageId}/attachments/${attachment.id}/preview${mailboxId ? `?mailboxId=${mailboxId}` : ""}`;
+      const res = await fetch(url, { headers: auth() });
+      if (!res.ok) return readError(res, "Couldn't preview this document");
+      return (await res.json()).data;
+    },
+    download: () => void downloadAttachment(messageId, attachment, mailboxId),
+  };
+}
+
+/** A file picked in the composer, previewed from the browser's own copy before it uploads. */
+export function localFilePreviewItem(file: File, key: string): PreviewItem {
+  return {
+    key: `local:${key}`,
+    fileName: file.name,
+    contentType: file.type,
+    sizeBytes: file.size,
+    load: async () => file,
+    loadDocText: async () => {
+      // Read by the server and answered; nothing is stored.
+      const token = getAccessToken();
+      const form = new FormData();
+      form.append("file", file, file.name);
+      const res = await fetch(`${API_BASE}/mail/attachments/preview`, {
+        method: "POST",
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), "Idempotency-Key": newIdempotencyKey() },
+        body: form,
+      });
+      if (!res.ok) return readError(res, "Couldn't preview this document");
+      return (await res.json()).data;
+    },
+    download: () => {
+      const url = URL.createObjectURL(file);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = file.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    },
+  };
+}
+
+// ── Loading, once per file ───────────────────────────────────────────────────
+
+/**
+ * Bytes and server text, fetched once per file and shared by its tile and the
+ * viewer, so opening a preview does not download the file again. Kept for the
+ * most recent files only.
+ */
+const CACHE_LIMIT = 40;
+const blobCache = new Map<string, Promise<Blob>>();
+const docTextCache = new Map<string, Promise<{ text: string; truncated: boolean }>>();
+
+function cached<T>(cache: Map<string, Promise<T>>, key: string, load: () => Promise<T>): Promise<T> {
+  let entry = cache.get(key);
+  if (!entry) {
+    entry = load();
+    cache.set(key, entry);
+    // A failure is not remembered, so Retry really retries.
+    entry.catch(() => cache.delete(key));
+    if (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value!);
+  }
+  return entry;
+}
+
+/** The MIME type to draw a blob with. Mail often labels files octet-stream, which a browser won't show. */
 function renderType(kind: FileKind, contentType: string): string {
   const declared = contentType.toLowerCase().split(";")[0].trim();
   if (kind.category === "pdf") return "application/pdf";
-  if (kind.category === "text") return "text/plain";
   if (["image", "video", "audio"].includes(kind.category) && declared.startsWith(`${kind.category}/`)) return declared;
   if (kind.category === "image") return `image/${kind.label === "JPG" ? "jpeg" : kind.label.toLowerCase()}`;
   if (kind.category === "video") return `video/${kind.label === "MOV" ? "quicktime" : kind.label.toLowerCase()}`;
@@ -80,61 +204,76 @@ function renderType(kind: FileKind, contentType: string): string {
 /** Text previews stop here; the rest is a download away. */
 const TEXT_PREVIEW_LIMIT = 200_000;
 
-// ── Blob hook ────────────────────────────────────────────────────────────────
+interface PreviewData {
+  status: "loading" | "ready" | "error";
+  error?: string;
+  url?: string;
+  blob?: Blob;
+  text?: string;
+  truncated?: boolean;
+}
 
-function useAttachmentBlob(messageId: string, attachment: MailAttachment, eager: boolean, mailboxId?: string | null) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [text, setText] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [failed, setFailed] = useState(false);
+/** Loads what an item's preview mode needs. `active` false loads nothing. */
+function usePreviewData(item: PreviewItem | null, mode: PreviewMode | null, active = true) {
+  const [data, setData] = useState<PreviewData>({ status: "loading" });
+  const [attempt, setAttempt] = useState(0);
+  const load = item?.load;
+  const loadDocText = item?.loadDocText;
 
   useEffect(() => {
-    if (!eager) return;
-    let revoke = "";
+    if (!item || !mode || !active || !load || !loadDocText) return;
     let cancelled = false;
-    const kind = fileKind(attachment.fileName, attachment.contentType);
-    setLoading(true);
-    setFailed(false);
-    setUrl(null);
-    setText(null);
-    const token = getAccessToken();
-    fetch(attachmentUrl(messageId, attachment.id, mailboxId), {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error("Download failed");
-        return res.blob();
-      })
-      .then(async (blob) => {
-        if (cancelled) return;
-        if (kind.category === "text") {
-          // Shown as text in the page, never handed to the browser to render.
-          setText(await blob.slice(0, TEXT_PREVIEW_LIMIT).text());
+    let revoke = "";
+    setData({ status: "loading" });
+    const kind = fileKind(item.fileName, item.contentType);
+    const run = async (): Promise<PreviewData> => {
+      if (mode === "doc") {
+        const result = await cached(docTextCache, item.key, loadDocText);
+        return { status: "ready", text: result.text, truncated: result.truncated };
+      }
+      const blob = await cached(blobCache, item.key, load);
+      if (mode === "text") {
+        return { status: "ready", text: await blob.slice(0, TEXT_PREVIEW_LIMIT).text(), truncated: blob.size > TEXT_PREVIEW_LIMIT };
+      }
+      if (mode === "docx") return { status: "ready", blob };
+      const url = URL.createObjectURL(new Blob([blob], { type: renderType(kind, item.contentType) }));
+      revoke = url;
+      return { status: "ready", url };
+    };
+    run()
+      .then((result) => {
+        if (cancelled) {
+          if (revoke) URL.revokeObjectURL(revoke);
           return;
         }
-        const typed = new Blob([blob], { type: renderType(kind, attachment.contentType) });
-        const objectUrl = URL.createObjectURL(typed);
-        revoke = objectUrl;
-        setUrl(objectUrl);
+        setData(result);
       })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+      .catch((error: unknown) => {
+        if (!cancelled) setData({ status: "error", error: error instanceof Error ? error.message : "Couldn't load this file" });
       });
-
     return () => {
       cancelled = true;
       if (revoke) URL.revokeObjectURL(revoke);
     };
-  }, [messageId, attachment.id, attachment.fileName, attachment.contentType, eager, mailboxId]);
+    // The key identifies the file; load functions are recreated with it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item?.key, mode, active, attempt]);
 
-  return { url, text, loading, failed };
+  const retry = useCallback(() => {
+    if (item) {
+      blobCache.delete(item.key);
+      docTextCache.delete(item.key);
+    }
+    setAttempt((n) => n + 1);
+  }, [item]);
+
+  return { ...data, retry };
 }
 
-/** A CSV as a table: simple quoted-field parsing, enough to read a file. */
-function parseCsv(source: string, maxRows = 200): string[][] {
+// ── Renderers ────────────────────────────────────────────────────────────────
+
+/** A CSV as rows: quoted fields handled, enough to read a file. */
+function parseCsv(source: string, maxRows = 500): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let cell = "";
@@ -169,215 +308,110 @@ function parseCsv(source: string, maxRows = 200): string[][] {
   return rows;
 }
 
-function TextPreview({ attachment, text }: { attachment: MailAttachment; text: string }) {
-  const truncated = attachment.sizeBytes > TEXT_PREVIEW_LIMIT;
-  const isCsv = fileKind(attachment.fileName, attachment.contentType).label === "CSV";
-  const rows = isCsv ? parseCsv(text) : null;
+/** Text or CSV on a white page; `scale` sizes the type. */
+function TextPage({ text, csv, scale = 1, truncated, compact = false }: { text: string; csv: boolean; scale?: number; truncated?: boolean; compact?: boolean }) {
+  const rows = csv ? parseCsv(text, compact ? 12 : 500) : null;
   return (
-    <div className="flex h-[80vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-white text-slate-900" data-testid="text-preview">
-      <div className="min-h-0 flex-1 overflow-auto p-4">
-        {rows ? (
-          <table className="border-collapse text-xs">
-            <tbody>
-              {rows.map((cells, r) => (
-                <tr key={r} className={r === 0 ? "bg-slate-100 font-semibold" : ""}>
-                  {cells.map((value, c) => (
-                    <td key={c} className="whitespace-nowrap border border-slate-200 px-2 py-1">
-                      {value}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <pre className="whitespace-pre-wrap break-words font-mono text-xs">{text}</pre>
-        )}
-      </div>
-      {(truncated || (rows && rows.length >= 200)) && (
-        <div className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500">
+    <div
+      className={`${compact ? "h-full overflow-hidden p-2" : "mx-auto min-h-full w-full max-w-[980px] rounded-md p-8 shadow-xl"} bg-white text-slate-900`}
+      style={{ fontSize: `${(compact ? 7 : 13) * scale}px` }}
+      data-testid={compact ? undefined : "text-preview"}
+    >
+      {rows ? (
+        <table className="border-collapse">
+          <tbody>
+            {rows.map((cells, r) => (
+              <tr key={r} className={r === 0 ? "bg-slate-100 font-semibold" : ""}>
+                {cells.map((value, c) => (
+                  <td key={c} className="whitespace-nowrap border border-slate-200 px-[0.6em] py-[0.25em]">
+                    {value}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <pre className="whitespace-pre-wrap break-words font-sans leading-relaxed">{compact ? text.slice(0, 900) : text}</pre>
+      )}
+      {!compact && (truncated || (rows && rows.length >= 500)) && (
+        <p className="mt-6 border-t border-slate-200 pt-3 text-[12px] text-slate-500">
           Showing the beginning of the file. Download it to see all of it.
-        </div>
+        </p>
       )}
     </div>
   );
 }
 
-// ── Lightbox ─────────────────────────────────────────────────────────────────
-
-function Lightbox({
-  messageId,
-  attachments,
-  startIndex,
-  onClose,
-  mailboxId,
+/**
+ * A .docx drawn into the page by docx-preview: real pages, fonts, tables and
+ * images. `zoom` scales it; `onPageWidth` reports the page width for "fit".
+ */
+function DocxPages({
+  blob,
+  zoom = 1,
+  thumbnail = false,
+  onPageWidth,
+  onFailed,
 }: {
-  messageId: string;
-  attachments: MailAttachment[];
-  startIndex: number;
-  onClose: () => void;
-  mailboxId?: string | null;
+  blob: Blob;
+  zoom?: number;
+  thumbnail?: boolean;
+  onPageWidth?: (width: number) => void;
+  onFailed?: (message: string) => void;
 }) {
-  const [index, setIndex] = useState(startIndex);
-  const att = attachments[index];
-  const kind = fileKind(att.fileName, att.contentType);
-  const { url, text, loading, failed } = useAttachmentBlob(messageId, att, true, mailboxId);
-
-  const prev = () => setIndex((i) => (i > 0 ? i - 1 : attachments.length - 1));
-  const next = () => setIndex((i) => (i < attachments.length - 1 ? i + 1 : 0));
-
-  const handleKey = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-      if (e.key === "ArrowLeft") prev();
-      if (e.key === "ArrowRight") next();
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [onClose]
-  );
+  const body = useRef<HTMLDivElement>(null);
+  const styles = useRef<HTMLDivElement>(null);
+  const [rendered, setRendered] = useState(false);
 
   useEffect(() => {
-    document.addEventListener("keydown", handleKey);
-    document.body.style.overflow = "hidden";
+    let cancelled = false;
+    setRendered(false);
+    (async () => {
+      try {
+        const { renderAsync } = await import("docx-preview");
+        if (cancelled || !body.current || !styles.current) return;
+        body.current.innerHTML = "";
+        await renderAsync(blob, body.current, styles.current, {
+          className: "docx",
+          inWrapper: true,
+          breakPages: true,
+          ignoreLastRenderedPageBreak: true,
+          renderHeaders: true,
+          renderFooters: true,
+          renderFootnotes: true,
+          useBase64URL: true,
+        });
+        if (cancelled) return;
+        setRendered(true);
+        const page = body.current.querySelector<HTMLElement>("section.docx");
+        if (page) onPageWidth?.(page.offsetWidth);
+      } catch {
+        if (!cancelled) onFailed?.("This Word document couldn't be drawn. Download it to open it.");
+      }
+    })();
     return () => {
-      document.removeEventListener("keydown", handleKey);
-      document.body.style.overflow = "";
+      cancelled = true;
     };
-  }, [handleKey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blob]);
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-black/90" role="dialog" aria-label={`Preview of ${att.fileName}`}>
-      {/* Top bar */}
-      <div className="flex items-center justify-between px-4 py-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <FileTypeBadge kind={kind} />
-            <div className="truncate text-sm font-medium text-white">{att.fileName}</div>
-          </div>
-          <div className="text-xs text-white/60">
-            {formatBytes(att.sizeBytes)} · {index + 1} of {attachments.length}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => downloadAttachment(messageId, att, mailboxId)}
-            className="rounded-lg p-2 text-white/70 hover:bg-white/10 hover:text-white"
-            title="Download"
-            aria-label={`Download ${att.fileName}`}
-          >
-            <Download className="h-5 w-5" />
-          </button>
-          <button
-            onClick={onClose}
-            className="rounded-lg p-2 text-white/70 hover:bg-white/10 hover:text-white"
-            title="Close (Esc)"
-            aria-label="Close preview"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-      </div>
-
-      {/* Content area */}
-      <div className="relative flex min-h-0 flex-1 items-center justify-center px-12">
-        {/* Nav arrows */}
-        {attachments.length > 1 && (
-          <>
-            <button
-              onClick={prev}
-              aria-label="Previous attachment"
-              className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-white/10 p-2 text-white/80 hover:bg-white/20"
-            >
-              <ChevronLeft className="h-6 w-6" />
-            </button>
-            <button
-              onClick={next}
-              aria-label="Next attachment"
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-white/10 p-2 text-white/80 hover:bg-white/20"
-            >
-              <ChevronRight className="h-6 w-6" />
-            </button>
-          </>
-        )}
-
-        {/* Preview content */}
-        {loading ? (
-          <Loader2 className="h-10 w-10 animate-spin text-white/50" />
-        ) : failed ? (
-          <div className="text-center text-sm text-white/60">
-            <FileIcon className="mx-auto mb-2 h-10 w-10" />
-            Couldn&apos;t load this attachment. Try downloading it.
-          </div>
-        ) : text !== null ? (
-          <TextPreview attachment={att} text={text} />
-        ) : !url ? null : kind.category === "image" ? (
-          <img src={url} alt={att.fileName} className="max-h-[80vh] max-w-full rounded-lg object-contain" />
-        ) : kind.category === "pdf" ? (
-          <iframe src={url} title={att.fileName} className="h-[80vh] w-full max-w-4xl rounded-lg bg-white" />
-        ) : kind.category === "video" ? (
-          <video src={url} controls className="max-h-[80vh] max-w-full rounded-lg" />
-        ) : kind.category === "audio" ? (
-          <audio src={url} controls className="w-full max-w-md" />
-        ) : null}
-      </div>
+    <div
+      className={thumbnail ? "pointer-events-none origin-top-left" : "mx-auto w-max"}
+      style={thumbnail ? { transform: "scale(0.24)", width: "420%" } : { zoom }}
+      data-testid={thumbnail ? undefined : "docx-preview"}
+      data-rendered={rendered || undefined}
+    >
+      <div ref={styles} />
+      <div ref={body} className={thumbnail ? "[&_.docx-wrapper]:!bg-transparent [&_.docx-wrapper]:!p-0 [&_section.docx]:!mb-0 [&_section.docx]:!shadow-none" : "[&_.docx-wrapper]:!bg-transparent [&_.docx-wrapper]:!p-0"} />
     </div>
   );
 }
 
-// ── Thumbnail ────────────────────────────────────────────────────────────────
+// ── Tiles ────────────────────────────────────────────────────────────────────
 
-function ImageThumbnail({
-  messageId,
-  attachment,
-  onClick,
-  mailboxId,
-}: {
-  messageId: string;
-  attachment: MailAttachment;
-  onClick: () => void;
-  mailboxId?: string | null;
-}) {
-  const { url, loading } = useAttachmentBlob(messageId, attachment, true, mailboxId);
-
-  return (
-    <div className="flex w-28 shrink-0 flex-col gap-1">
-      <button
-        onClick={onClick}
-        className="group relative h-20 w-28 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--s2)] transition hover:border-[var(--accent)]"
-        title={`Preview ${attachment.fileName}`}
-        aria-label={`Preview ${attachment.fileName}`}
-      >
-        {loading ? (
-          <Loader2 className="absolute inset-0 m-auto h-5 w-5 animate-spin text-[var(--ink3)]" />
-        ) : url ? (
-          <img src={url} alt={attachment.fileName} className="h-full w-full object-cover" />
-        ) : (
-          <ImageIcon className="absolute inset-0 m-auto h-6 w-6 text-[var(--ink3)]" />
-        )}
-        <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition group-hover:bg-black/30">
-          <Eye className="h-5 w-5 text-white opacity-0 transition group-hover:opacity-100" />
-        </div>
-      </button>
-      <div className="flex items-center gap-1">
-        <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--ink2)]" title={attachment.fileName}>
-          {attachment.fileName}
-        </span>
-        <button
-          onClick={() => downloadAttachment(messageId, attachment, mailboxId)}
-          className="shrink-0 rounded p-0.5 text-[var(--ink3)] hover:bg-[var(--s2)] hover:text-[var(--ink)]"
-          title="Download"
-          aria-label={`Download ${attachment.fileName}`}
-        >
-          <Download className="h-3 w-3" />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ── File tile ────────────────────────────────────────────────────────────────
-
-/** The coloured square that says what a file is before its name is read. */
+/** The coloured square that says what a file is, where there is no picture of it. */
 const TILE: Record<FileCategory, { bg: string; text: (kind: FileKind) => string }> = {
   pdf: { bg: "#E5484D", text: () => "PDF" },
   document: { bg: "#2F6FED", text: () => "W" },
@@ -391,13 +425,13 @@ const TILE: Record<FileCategory, { bg: string; text: (kind: FileKind) => string 
   other: { bg: "#64748B", text: (kind) => kind.label.slice(0, 3) },
 };
 
-function FileTile({ kind }: { kind: FileKind }) {
+function FileTile({ kind, large = false }: { kind: FileKind; large?: boolean }) {
   const tile = TILE[kind.category];
   const text = tile.text(kind);
   return (
     <span
       aria-hidden
-      className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md font-bold text-white ${text.length > 2 ? "text-[10px]" : "text-sm"}`}
+      className={`inline-flex shrink-0 items-center justify-center rounded-lg font-bold text-white ${large ? "h-14 w-14 text-base" : "h-9 w-9"} ${!large && text.length > 2 ? "text-[10px]" : !large ? "text-sm" : ""}`}
       style={{ backgroundColor: tile.bg }}
     >
       {text}
@@ -405,7 +439,449 @@ function FileTile({ kind }: { kind: FileKind }) {
   );
 }
 
-// ── Main Component ───────────────────────────────────────────────────────────
+/** What a tile shows: a small picture of the file itself. */
+function TilePicture({ item, kind }: { item: PreviewItem; kind: FileKind }) {
+  // Video and audio get an icon: loading them for a thumbnail costs too much.
+  const mode = kind.preview && kind.preview !== "video" && kind.preview !== "audio" ? kind.preview : null;
+  const data = usePreviewData(item, mode, mode !== null);
+  const [docxFailed, setDocxFailed] = useState(false);
+
+  if (!mode) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2">
+        <FileTile kind={kind} large />
+        {!kind.previewable && <span className="text-[11px] text-[var(--ink3)]">No preview</span>}
+      </div>
+    );
+  }
+  if (data.status === "loading") {
+    return (
+      <div className="flex h-full items-center justify-center" role="status" aria-label={`Loading preview of ${item.fileName}`}>
+        <Loader2 className="h-5 w-5 animate-spin text-[var(--ink3)]" />
+      </div>
+    );
+  }
+  if (data.status === "error" || docxFailed) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-1.5 px-2 text-center">
+        <FileTile kind={kind} />
+        <span className="text-[11px] text-[var(--ink3)]">Preview unavailable</span>
+      </div>
+    );
+  }
+  switch (mode) {
+    case "image":
+      return <img src={data.url} alt="" aria-hidden className="h-full w-full object-cover" />;
+    case "pdf":
+      // The browser's own PDF viewer, toolbar hidden: the first page at width.
+      return (
+        <iframe
+          src={`${data.url}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+          title=""
+          aria-hidden
+          tabIndex={-1}
+          className="pointer-events-none h-[calc(100%+40px)] w-[calc(100%+20px)] border-0 bg-white"
+        />
+      );
+    case "docx":
+      return (
+        <div className="h-full overflow-hidden bg-white">
+          <DocxPages blob={data.blob!} thumbnail onFailed={() => setDocxFailed(true)} />
+        </div>
+      );
+    default:
+      return <TextPage text={data.text ?? ""} csv={kind.label === "CSV"} compact />;
+  }
+}
+
+/**
+ * One attachment: a picture of it, its name, type and size, and what can be
+ * done with it. The same tile in the composer, in a reply, and on mail received.
+ */
+export function AttachmentTile({
+  item,
+  onOpen,
+  onRemove,
+  uploading = false,
+  testId,
+}: {
+  item: PreviewItem;
+  onOpen: () => void;
+  onRemove?: () => void;
+  uploading?: boolean;
+  testId: string;
+}) {
+  const kind = fileKind(item.fileName, item.contentType);
+  return (
+    <div
+      data-testid={testId}
+      className={`group flex w-[188px] shrink-0 flex-col overflow-hidden rounded-xl border bg-[var(--s2)] transition hover:border-[var(--accent)] hover:shadow-md ${uploading ? "border-dashed border-[var(--border)]" : "border-[var(--border)]"}`}
+    >
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label={`Open preview of ${item.fileName}`}
+        className="relative h-[136px] overflow-hidden border-b border-[var(--border)] bg-[var(--s3)] focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)]"
+      >
+        <TilePicture item={item} kind={kind} />
+        {uploading && (
+          <span className="absolute right-1.5 top-1.5 inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[10px] text-white">
+            <Loader2 className="h-3 w-3 animate-spin" /> Uploading
+          </span>
+        )}
+      </button>
+      <div className="flex min-w-0 items-center gap-1.5 px-2.5 py-2">
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[12.5px] font-medium text-[var(--ink)]" title={item.fileName}>
+            {item.fileName}
+          </div>
+          <div className="mt-0.5 flex items-center gap-1.5 whitespace-nowrap text-[11px] text-[var(--ink3)]">
+            <FileTypeBadge kind={kind} />
+            <span>{formatBytes(item.sizeBytes)}</span>
+            {!kind.previewable && <span className="sr-only">· No preview, download to open</span>}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onOpen}
+          className="shrink-0 rounded p-1 text-[var(--ink3)] hover:bg-[var(--s3)] hover:text-[var(--accent)]"
+          aria-label={`Preview ${item.fileName}`}
+          title="Preview"
+        >
+          <Eye className="h-3.5 w-3.5" />
+        </button>
+        {onRemove ? (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="shrink-0 rounded p-1 text-[var(--ink3)] hover:bg-[var(--crit-soft)] hover:text-[var(--crit)]"
+            aria-label={`Remove ${item.fileName}`}
+            title="Remove"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={item.download}
+            className="shrink-0 rounded p-1 text-[var(--ink3)] hover:bg-[var(--s3)] hover:text-[var(--ink)]"
+            aria-label={`Download ${item.fileName}`}
+            title="Download"
+          >
+            <Download className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Viewer ───────────────────────────────────────────────────────────────────
+
+const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4];
+
+/** Formats with this viewer's own zoom (PDF has the browser viewer's). */
+const ZOOMABLE: PreviewMode[] = ["image", "docx", "doc", "text"];
+
+function ViewerBody({
+  item,
+  kind,
+  zoom,
+  fit,
+  onFitScale,
+}: {
+  item: PreviewItem;
+  kind: FileKind;
+  zoom: number;
+  fit: boolean;
+  onFitScale: (scale: number) => void;
+}) {
+  const mode = kind.preview;
+  const data = usePreviewData(item, mode);
+  const area = useRef<HTMLDivElement>(null);
+  const [docxError, setDocxError] = useState<string | null>(null);
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+
+  if (!mode) {
+    return (
+      <div className="flex h-full items-center justify-center p-6">
+        <div className="max-w-sm rounded-xl bg-white/5 p-6 text-center text-sm text-white/80" data-testid="no-preview">
+          <div className="mx-auto mb-3 w-fit">
+            <FileTile kind={kind} large />
+          </div>
+          <p className="font-medium text-white">{item.fileName}</p>
+          <p className="mt-1 text-white/60">
+            {kind.label} · {formatBytes(item.sizeBytes)}
+          </p>
+          <p className="mt-3 text-white/60">Browsers can&apos;t show {kind.label} files here. Download it to open it.</p>
+          <button
+            onClick={item.download}
+            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-white/15 px-4 py-2 font-medium text-white hover:bg-white/25"
+          >
+            <Download className="h-4 w-4" /> Download
+          </button>
+        </div>
+      </div>
+    );
+  }
+  if (data.status === "loading") {
+    return (
+      <div className="flex h-full items-center justify-center" role="status" aria-label="Loading preview">
+        <Loader2 className="h-10 w-10 animate-spin text-white/50" />
+      </div>
+    );
+  }
+  if (data.status === "error" || docxError) {
+    return (
+      <div className="flex h-full items-center justify-center p-6" role="alert">
+        <div className="max-w-sm text-center text-sm text-white/70" data-testid="preview-error">
+          <AlertCircle className="mx-auto mb-3 h-10 w-10 text-white/50" />
+          <p className="font-medium text-white">Couldn&apos;t show this file</p>
+          <p className="mt-1">{docxError ?? data.error}</p>
+          <div className="mt-4 flex justify-center gap-2">
+            <button
+              onClick={() => {
+                setDocxError(null);
+                data.retry();
+              }}
+              className="inline-flex items-center gap-2 rounded-lg bg-white/15 px-4 py-2 font-medium text-white hover:bg-white/25"
+            >
+              <RotateCcw className="h-4 w-4" /> Retry
+            </button>
+            <button onClick={item.download} className="inline-flex items-center gap-2 rounded-lg bg-white/15 px-4 py-2 font-medium text-white hover:bg-white/25">
+              <Download className="h-4 w-4" /> Download
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  switch (mode) {
+    case "pdf":
+      // The browser's PDF viewer, filling the window: its own zoom, fit and pages.
+      return <iframe src={`${data.url}#view=FitH`} title={item.fileName} className="h-full w-full border-0 bg-white" />;
+    case "video":
+      return (
+        <div className="flex h-full items-center justify-center p-4">
+          <video src={data.url} controls className="max-h-full max-w-full rounded-lg" />
+        </div>
+      );
+    case "audio":
+      return (
+        <div className="flex h-full items-center justify-center p-4">
+          <audio src={data.url} controls className="w-full max-w-lg" />
+        </div>
+      );
+    case "image":
+      return (
+        <div ref={area} className={`h-full w-full overflow-auto ${fit ? "flex items-center justify-center p-4" : "p-6"}`}>
+          <img
+            src={data.url}
+            alt={item.fileName}
+            onLoad={(e) => {
+              const img = e.currentTarget;
+              setNatural({ w: img.naturalWidth, h: img.naturalHeight });
+              const box = area.current?.getBoundingClientRect();
+              if (box) onFitScale(Math.min(1, (box.width - 32) / img.naturalWidth, (box.height - 32) / img.naturalHeight));
+            }}
+            className={fit ? "max-h-full max-w-full rounded object-contain shadow-2xl" : "mx-auto max-w-none rounded shadow-2xl"}
+            style={!fit && natural ? { width: natural.w * zoom, height: natural.h * zoom } : undefined}
+          />
+        </div>
+      );
+    case "docx":
+      return (
+        <div ref={area} className="h-full w-full overflow-auto bg-[#e7ebf0] px-6 py-8">
+          <DocxPages
+            blob={data.blob!}
+            zoom={zoom}
+            onPageWidth={(width) => {
+              const box = area.current?.getBoundingClientRect();
+              if (box && width) onFitScale(Math.min(2, (box.width - 64) / width));
+            }}
+            onFailed={setDocxError}
+          />
+        </div>
+      );
+    default:
+      // text, CSV, and a .doc's text
+      return (
+        <div className="h-full w-full overflow-auto bg-[#e7ebf0] px-6 py-8">
+          {mode === "doc" && (
+            <p className="mx-auto mb-3 max-w-[980px] text-[12px] text-slate-600">
+              The text of this Word 97–2003 document. Download it to see its layout.
+            </p>
+          )}
+          <TextPage text={data.text ?? ""} csv={kind.label === "CSV"} scale={zoom} truncated={data.truncated} />
+        </div>
+      );
+  }
+}
+
+/**
+ * The full-window viewer. Zoom −/+ (and Ctrl/⌘ +/−, 0), Fit and 100% for
+ * images, Word documents and text; the PDF viewer brings its own. Arrow keys
+ * move between files; Escape closes.
+ */
+export function FilePreview({
+  items,
+  startIndex,
+  onClose,
+}: {
+  items: PreviewItem[];
+  startIndex: number;
+  onClose: () => void;
+}) {
+  const [index, setIndex] = useState(Math.min(startIndex, Math.max(items.length - 1, 0)));
+  const item = items[index] ?? null;
+  const kind = item ? fileKind(item.fileName, item.contentType) : null;
+  const zoomable = Boolean(kind?.preview && ZOOMABLE.includes(kind.preview));
+  // "Fit" follows the window; a set zoom is kept until changed.
+  const [fit, setFit] = useState(true);
+  const [zoom, setZoom] = useState(1);
+  const [fitScale, setFitScale] = useState(1);
+  const scale = fit ? (kind?.preview === "image" ? fitScale : kind?.preview === "docx" ? fitScale : 1) : zoom;
+
+  useEffect(() => {
+    setFit(true);
+    setZoom(1);
+    setFitScale(1);
+  }, [index]);
+
+  const step = useCallback(
+    (direction: 1 | -1) => {
+      const current = scale;
+      const next =
+        direction > 0
+          ? ZOOM_STEPS.find((z) => z > current + 0.001) ?? ZOOM_STEPS[ZOOM_STEPS.length - 1]
+          : [...ZOOM_STEPS].reverse().find((z) => z < current - 0.001) ?? ZOOM_STEPS[0];
+      setFit(false);
+      setZoom(next);
+    },
+    [scale]
+  );
+
+  const prev = () => setIndex((i) => (i > 0 ? i - 1 : items.length - 1));
+  const next = () => setIndex((i) => (i < items.length - 1 ? i + 1 : 0));
+
+  const handleKey = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowLeft" && !e.ctrlKey) prev();
+      else if (e.key === "ArrowRight" && !e.ctrlKey) next();
+      else if (zoomable && (e.key === "+" || e.key === "=")) {
+        e.preventDefault();
+        step(1);
+      } else if (zoomable && (e.key === "-" || e.key === "_")) {
+        e.preventDefault();
+        step(-1);
+      } else if (zoomable && e.key === "0") {
+        e.preventDefault();
+        setFit(true);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [onClose, items.length, zoomable, step]
+  );
+
+  useEffect(() => {
+    document.addEventListener("keydown", handleKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", handleKey);
+      document.body.style.overflow = "";
+    };
+  }, [handleKey]);
+
+  if (!item || !kind) return null;
+  const control =
+    "inline-flex h-9 min-w-9 items-center justify-center rounded-lg px-2 text-white/75 transition hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60 disabled:opacity-40";
+
+  return (
+    <div className="fixed inset-0 z-[70] flex flex-col bg-[#0b1120]/95 backdrop-blur-sm" role="dialog" aria-label={`Preview of ${item.fileName}`}>
+      {/* Top bar: what it is, zoom, download, close */}
+      <div className="flex h-14 shrink-0 items-center gap-3 border-b border-white/10 px-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <FileTypeBadge kind={kind} />
+            <div className="truncate text-sm font-medium text-white">{item.fileName}</div>
+          </div>
+          <div className="text-xs text-white/55">
+            {formatBytes(item.sizeBytes)} · {index + 1} of {items.length}
+          </div>
+        </div>
+
+        {zoomable && (
+          <div className="flex items-center gap-0.5 rounded-lg bg-white/5 p-0.5" role="group" aria-label="Zoom">
+            <button className={control} onClick={() => step(-1)} aria-label="Zoom out" title="Zoom out (−)">
+              <ZoomOut className="h-4 w-4" />
+            </button>
+            <button
+              className={`${control} w-16 text-xs tabular-nums`}
+              onClick={() => {
+                setFit(false);
+                setZoom(1);
+              }}
+              aria-label="Actual size"
+              title="Actual size (100%)"
+              data-testid="zoom-level"
+            >
+              {Math.round(scale * 100)}%
+            </button>
+            <button className={control} onClick={() => step(1)} aria-label="Zoom in" title="Zoom in (+)">
+              <ZoomIn className="h-4 w-4" />
+            </button>
+            <button
+              className={`${control} ${fit ? "bg-white/15 text-white" : ""}`}
+              onClick={() => setFit(true)}
+              aria-label="Fit to screen"
+              aria-pressed={fit}
+              title="Fit to screen (0)"
+            >
+              <Maximize2 className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+        {kind.preview === "pdf" && <span className="hidden text-xs text-white/50 md:inline">Zoom and fit with the PDF toolbar</span>}
+
+        <div className="flex items-center gap-1">
+          <button onClick={item.download} className={control} title="Download" aria-label={`Download ${item.fileName}`}>
+            <Download className="h-5 w-5" />
+          </button>
+          <button onClick={onClose} className={control} title="Close (Esc)" aria-label="Close preview">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+      </div>
+
+      {/* The file, as large as the window allows */}
+      <div className="relative min-h-0 flex-1">
+        <ViewerBody key={item.key} item={item} kind={kind} zoom={scale} fit={fit} onFitScale={setFitScale} />
+        {items.length > 1 && (
+          <>
+            <button
+              onClick={prev}
+              aria-label="Previous attachment"
+              className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white/85 shadow-lg hover:bg-black/70"
+            >
+              <ChevronLeft className="h-6 w-6" />
+            </button>
+            <button
+              onClick={next}
+              aria-label="Next attachment"
+              className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white/85 shadow-lg hover:bg-black/70"
+            >
+              <ChevronRight className="h-6 w-6" />
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Received attachments ─────────────────────────────────────────────────────
 
 export function AttachmentList({
   messageId,
@@ -417,34 +893,18 @@ export function AttachmentList({
   /** The shared inbox the message is in; omitted for one's own mailbox. */
   mailboxId?: string | null;
 }) {
-  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [openIndex, setOpenIndex] = useState<number | null>(null);
   const [downloadingAll, setDownloadingAll] = useState(false);
 
   if (attachments.length === 0) return null;
-
-  const kinds = new Map(attachments.map((a) => [a.id, fileKind(a.fileName, a.contentType)]));
-  const kindOf = (a: MailAttachment) => kinds.get(a.id)!;
-
-  // Images as thumbnails; everything else as a card.
-  const images = attachments.filter((a) => kindOf(a).category === "image");
-  const files = attachments.filter((a) => kindOf(a).category !== "image");
-
-  // For lightbox navigation, only include previewable attachments
-  const lightboxItems = attachments.filter((a) => kindOf(a).previewable);
+  const items = attachments.map((att) => attachmentPreviewItem(messageId, att, mailboxId));
   const totalSize = attachments.reduce((sum, a) => sum + a.sizeBytes, 0);
-
-  const openLightbox = (att: MailAttachment) => {
-    const idx = lightboxItems.findIndex((a) => a.id === att.id);
-    if (idx >= 0) setLightboxIndex(idx);
-  };
 
   // One after another: browsers block a burst of simultaneous downloads.
   const downloadAll = async () => {
     setDownloadingAll(true);
     try {
-      for (const att of attachments) {
-        await downloadAttachment(messageId, att, mailboxId);
-      }
+      for (const att of attachments) await downloadAttachment(messageId, att, mailboxId);
     } finally {
       setDownloadingAll(false);
     }
@@ -467,81 +927,12 @@ export function AttachmentList({
           </button>
         )}
       </div>
-
-      {/* Image thumbnails grid */}
-      {images.length > 0 && (
-        <div className="mb-3 flex flex-wrap gap-2">
-          {images.map((att) => (
-            <ImageThumbnail
-              key={att.id}
-              messageId={messageId}
-              attachment={att}
-              mailboxId={mailboxId}
-              onClick={() => openLightbox(att)}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Documents, media and other files */}
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-        {files.map((att) => {
-          const kind = kindOf(att);
-          return (
-            <div
-              key={att.id}
-              className="flex min-w-0 items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--s2)] p-3 transition hover:border-[var(--accent)]"
-              data-testid="attachment-card"
-            >
-              <FileTile kind={kind} />
-              <button
-                className="min-w-0 flex-1 text-left"
-                onClick={() => (kind.previewable ? openLightbox(att) : downloadAttachment(messageId, att, mailboxId))}
-                title={kind.previewable ? `Preview ${att.fileName}` : `Download ${att.fileName}`}
-              >
-                <div className="truncate text-[13px] font-medium text-[var(--ink)]">{att.fileName}</div>
-                <div className="mt-0.5 flex items-center gap-1.5 whitespace-nowrap text-[11px] text-[var(--ink3)]">
-                  <FileTypeBadge kind={kind} />
-                  <span>{formatBytes(att.sizeBytes)}</span>
-                  {/* Said to screen readers; sighted users see the missing eye. */}
-                  {!kind.previewable && <span className="sr-only">· No preview, download to open</span>}
-                </div>
-              </button>
-              <div className="flex shrink-0 items-center gap-0.5">
-                {kind.previewable && (
-                  <button
-                    onClick={() => openLightbox(att)}
-                    className="rounded p-1 text-[var(--ink3)] hover:bg-[var(--s3)] hover:text-[var(--accent)]"
-                    title="Preview"
-                    aria-label={`Preview ${att.fileName}`}
-                  >
-                    <Eye className="h-4 w-4" />
-                  </button>
-                )}
-                <button
-                  onClick={() => downloadAttachment(messageId, att, mailboxId)}
-                  className="rounded p-1 text-[var(--ink3)] hover:bg-[var(--s3)] hover:text-[var(--ink)]"
-                  title="Download"
-                  aria-label={`Download ${att.fileName}`}
-                >
-                  <Download className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          );
-        })}
+      <div className="flex flex-wrap gap-3">
+        {items.map((item, index) => (
+          <AttachmentTile key={item.key} item={item} testId="attachment-card" onOpen={() => setOpenIndex(index)} />
+        ))}
       </div>
-
-      {/* Lightbox overlay */}
-      {lightboxIndex !== null && (
-        <Lightbox
-          messageId={messageId}
-          attachments={lightboxItems}
-          startIndex={lightboxIndex}
-          mailboxId={mailboxId}
-          onClose={() => setLightboxIndex(null)}
-        />
-      )}
+      {openIndex !== null && <FilePreview items={items} startIndex={openIndex} onClose={() => setOpenIndex(null)} />}
     </div>
   );
 }

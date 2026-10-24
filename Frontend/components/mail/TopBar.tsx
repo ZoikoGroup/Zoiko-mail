@@ -5,6 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { Search, X, Settings, LogOut, ChevronDown, Bell, Sparkles, UserRound } from "lucide-react";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
+import { LayoutMenu } from "@/components/mail/LayoutMenu";
 import { initials } from "@/lib/useMemberShell";
 import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from "@/lib/admin-hooks";
 
@@ -142,6 +143,7 @@ export function TopBar({
           <Sparkles className="h-4 w-4" aria-hidden /> Alet AI
         </Link>
 
+        <LayoutMenu />
         <ThemeToggle />
 
         <div className="relative" ref={bellRef}>
