@@ -2,18 +2,8 @@ import type { Request, Response } from "express";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
 import { contactService } from "./contact.service.js";
-import { listContactsSchema } from "./contact.schema.js";
+import { activitySchema, listContactsSchema, searchSchema } from "./contact.schema.js";
 
-// function context(req: Request) {
-//   return {
-//     tenantId: req.tenantId!,
-//     userId: req.userId!,
-//     membershipId: req.membershipId!,
-//     requestId: req.requestId,
-//     ipAddress: req.ip ?? null,
-//     userAgent: req.headers["user-agent"] ?? null,
-//   };
-// }
 function context(req: Request) {
   const tenant = req.tenantContext!;
   return {
@@ -28,6 +18,10 @@ function context(req: Request) {
 
 export const list = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await contactService.list(listContactsSchema.parse(req.query), context(req)), req.requestId);
+});
+
+export const summary = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await contactService.summary(context(req)), req.requestId);
 });
 
 export const getById = asyncHandler(async (req: Request, res: Response) => {
@@ -50,6 +44,33 @@ export const update = asyncHandler(async (req: Request, res: Response) => {
 export const remove = asyncHandler(async (req: Request, res: Response) => {
   await contactService.delete(String(req.params.contactId), context(req));
   sendSuccess(res, 204, null, req.requestId);
+});
+
+export const importContacts = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await contactService.importContacts(req.body, context(req)), req.requestId);
+});
+
+export const directory = asyncHandler(async (req: Request, res: Response) => {
+  const { q } = searchSchema.parse(req.query);
+  sendSuccess(res, 200, await contactService.directory(q, context(req)), req.requestId);
+});
+
+export const otherContacts = asyncHandler(async (req: Request, res: Response) => {
+  const { q } = searchSchema.parse(req.query);
+  sendSuccess(res, 200, await contactService.otherContacts(q, context(req)), req.requestId);
+});
+
+export const activity = asyncHandler(async (req: Request, res: Response) => {
+  const { email } = activitySchema.parse(req.query);
+  sendSuccess(res, 200, await contactService.activity(email, context(req)), req.requestId);
+});
+
+export const duplicates = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await contactService.duplicates(context(req)), req.requestId);
+});
+
+export const merge = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await contactService.merge(req.body, context(req)), req.requestId);
 });
 
 export const listTags = asyncHandler(async (req: Request, res: Response) => {

@@ -52,11 +52,14 @@ export function ComposeModal({
   source,
   onClose,
   defaultSendAsMailboxId,
+  initialTo,
 }: {
   open: boolean;
   mode: ComposerMode;
   source: MailItem | null;
   onClose: () => void;
+  /** Recipients a new message starts with (Email from Contacts). */
+  initialTo?: string[];
   /** Reply from a shared inbox as that inbox, rather than as oneself. */
   defaultSendAsMailboxId?: string | null;
 }) {
@@ -195,7 +198,7 @@ export function ComposeModal({
       return;
     }
 
-    setTo([]);
+    setTo(mode === "new" ? initialTo ?? [] : []);
     setCc([]);
     setBcc([]);
     const sig = sigData?.signature;

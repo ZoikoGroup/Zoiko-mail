@@ -5,7 +5,7 @@ import {
   Mail, CalendarDays, CheckSquare, UserRound, Network, Sparkles, HelpCircle, type LucideIcon,
 } from "lucide-react";
 
-/** The Member workspace's sections. Only Mail is built; the rest show Coming Soon. */
+/** The Member workspace's sections. Mail, Calendar and Contacts are built; the rest show Coming Soon. */
 export type WorkspaceSection = "mail" | "calendar" | "tasks" | "contacts" | "work-graph" | "alet" | "help";
 
 export interface SectionInfo {

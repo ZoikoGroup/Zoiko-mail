@@ -77,10 +77,10 @@ test("Ctrl+K focuses search", async ({ page }) => {
   await expect(page.locator("#mail-search")).toBeFocused();
 });
 
+// Calendar (app/mail/calendar) and Contacts (app/mail/contacts) are built;
+// they have their own specs.
 for (const [href, title] of [
-  ["/mail/calendar", "Calendar"],
   ["/mail/tasks", "Tasks"],
-  ["/mail/contacts", "Contacts"],
   ["/mail/work-graph", "Work Graph"],
   ["/mail/alet", "Alet"],
 ] as const) {
@@ -92,7 +92,7 @@ for (const [href, title] of [
     await expect(soon.getByRole("heading", { name: title })).toBeVisible({ timeout: 60_000 });
     await expect(soon.getByText("Coming Soon...")).toBeVisible();
     await expect(soon.getByRole("link", { name: "Back to Mail" })).toHaveAttribute("href", "/mail");
-    if (title === "Calendar") await shot(page, "3-coming-soon");
+    if (title === "Tasks") await shot(page, "3-coming-soon");
   });
 }
 
