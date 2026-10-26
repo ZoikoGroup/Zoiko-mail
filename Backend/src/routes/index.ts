@@ -11,6 +11,7 @@ import { messageRouter, threadRouter } from "../modules/message/message.routes.j
 import { domainRouter } from "../modules/domain/domain.routes.js";
 import { aiRouter } from "../modules/ai/ai.routes.js";
 import { actionRouter } from "../modules/action/action.routes.js";
+import { taskRouter } from "../modules/task/task.routes.js";
 import { notificationRouter } from "../modules/notification/notification.routes.js";
 import { integrationRouter } from "../modules/integration/integration.routes.js";
 import { jobRouter } from "../modules/job/job.routes.js";
@@ -49,6 +50,7 @@ apiRouter.use("/threads", threadRouter);
 apiRouter.use("/domains", domainRouter);
 apiRouter.use("/ai", aiRouter);
 apiRouter.use("/actions", actionRouter);
+apiRouter.use("/tasks", taskRouter);
 apiRouter.use("/notifications", notificationRouter);
 apiRouter.use("/integrations", integrationRouter);
 apiRouter.use("/jobs", jobRouter);

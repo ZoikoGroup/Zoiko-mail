@@ -14,6 +14,7 @@ import { microsoftConnector } from "./modules/connector/m365/m365.connector.js";
 import { withTenant } from "./config/tenantScope.js";
 import { runDueDomainSyncs } from "./modules/domain/domain.sync.js";
 import { mailboxCleanupService } from "./modules/mail/mailbox-cleanup.service.js";
+import { taskService } from "./modules/task/task.service.js";
 
 const app = createApp();
 const PORT = env.PORT;
@@ -63,6 +64,23 @@ const snoozeWorker = setInterval(() => {
     });
 }, env.SNOOZE_WAKE_INTERVAL_MS);
 snoozeWorker.unref();
+
+let reminderWorkerRunning = false;
+const reminderWorker = setInterval(() => {
+  if (reminderWorkerRunning) return;
+  reminderWorkerRunning = true;
+  void taskService.processDueReminders()
+    .then((result) => {
+      if (result.sent > 0) logger.info(result, "Task reminders sent");
+    })
+    .catch((error: unknown) => {
+      logger.error({ error }, "Task reminder sweep failed");
+    })
+    .finally(() => {
+      reminderWorkerRunning = false;
+    });
+}, env.TASK_REMINDER_INTERVAL_MS);
+reminderWorker.unref();
 
 let jobWorkerRunning = false;
 const jobWorker = setInterval(() => {
@@ -323,6 +341,7 @@ async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, "Graceful shutdown started");
   clearInterval(scheduler);
   clearInterval(snoozeWorker);
+  clearInterval(reminderWorker);
   clearInterval(jobWorker);
   clearInterval(providerEventWorker);
   clearInterval(complianceSweep);

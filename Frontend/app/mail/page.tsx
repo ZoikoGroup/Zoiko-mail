@@ -1,9 +1,25 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { WebmailShell } from "@/components/mail/WebmailShell";
 import { MailClient, type MailClientHandle, type MailLink } from "@/components/mail/MailClient";
+import { useSharedInboxes } from "@/lib/mail-hooks";
 import type { MailListFolder, SharedInbox } from "@/lib/mail-api";
+
+const FOLDERS: MailListFolder[] = ["INBOX", "SENT", "DRAFTS", "ARCHIVE", "TRASH", "QUARANTINE", "SPAM", "SNOOZED", "SCHEDULED", "STARRED"];
+
+/**
+ * /mail?message=<id>&folder=<FOLDER>[&mailbox=<shared inbox id>] opens that
+ * message — the link a task's "Open source email" follows.
+ */
+export default function MailPage() {
+  return (
+    <Suspense>
+      <MailPageInner />
+    </Suspense>
+  );
+}
 
 /** Folders a link may open (Contacts → Recent communications). */
 const LINKABLE_FOLDERS: MailListFolder[] = ["INBOX", "SENT", "ARCHIVE", "TRASH", "STARRED", "SNOOZED"];
@@ -13,8 +29,10 @@ const LINKABLE_FOLDERS: MailListFolder[] = ["INBOX", "SENT", "ARCHIVE", "TRASH",
 // the one the Admin and Owner inbox pages render inside their own shells, with
 // no folder prop and their own rail; this is the only route lifting folder,
 // search, label and shared-inbox state up to a shell.
-export default function MailPage() {
-  const [folder, setFolder] = useState<MailListFolder>("INBOX");
+function MailPageInner() {
+  const params = useSearchParams();
+  const linkedFolder = params.get("folder") as MailListFolder | null;
+  const [folder, setFolder] = useState<MailListFolder>(linkedFolder && FOLDERS.includes(linkedFolder) ? linkedFolder : "INBOX");
   // Lifted so the same text reaches both TopBar (what the person sees and
   // types into) and MailClient's operator parser (lib/mail-search.ts).
   const [searchQuery, setSearchQuery] = useState("");
@@ -41,6 +59,20 @@ export default function MailPage() {
     window.history.replaceState(null, "", "/mail");
   }, []);
 
+  // ?mailbox=<id>: the linked message is in a shared inbox, so open that
+  // inbox first, then the message in it. Once only — after that the person
+  // moves between inboxes freely.
+  const linkedMailbox = params.get("mailbox");
+  const { data: sharedInboxes } = useSharedInboxes();
+  const linkApplied = useRef(false);
+  useEffect(() => {
+    if (!linkedMailbox || linkApplied.current || !sharedInboxes) return;
+    linkApplied.current = true;
+    const inbox = sharedInboxes.find((m) => m.id === linkedMailbox);
+    if (inbox) setSharedInbox(inbox);
+  }, [linkedMailbox, sharedInboxes]);
+  const linkResolved = !linkedMailbox || sharedInbox?.id === linkedMailbox || (sharedInboxes !== undefined && !sharedInboxes.some((m) => m.id === linkedMailbox));
+
   return (
     <WebmailShell
       section="mail"
@@ -65,6 +97,7 @@ export default function MailPage() {
         labelId={labelId}
         onLabelChange={setLabelId}
         sharedInbox={sharedInbox}
+        openMessageId={linkResolved ? params.get("message") : null}
         link={link}
       />
     </WebmailShell>

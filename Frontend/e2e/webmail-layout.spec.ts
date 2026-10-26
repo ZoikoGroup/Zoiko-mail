@@ -55,7 +55,7 @@ test("opening a message shows sender, recipients, body, attachment cards and the
   await expect(pane.getByRole("button", { name: "Reply", exact: true })).toBeVisible();
   await expect(pane.getByRole("button", { name: "Reply all" })).toBeVisible();
   await expect(pane.getByRole("button", { name: "Forward" })).toBeVisible();
-  await expect(pane.getByRole("button", { name: /Create task/ })).toHaveAttribute("aria-disabled", "true");
+  await expect(pane.getByRole("button", { name: "Create task" })).toBeEnabled();
   // Opening an unread message marks it read on the server.
   await expect.poll(() => calls.paths.some((p) => p.startsWith("PATCH /mail/m1"))).toBe(true);
   await shot(page, "2-reading");
@@ -80,7 +80,12 @@ test("Ctrl+K focuses search", async ({ page }) => {
 // Calendar (app/mail/calendar) and Contacts (app/mail/contacts) are built;
 // they have their own specs.
 for (const [href, title] of [
+<<<<<<< HEAD
+  ["/mail/calendar", "Calendar"],
+  ["/mail/contacts", "Contacts"],
+=======
   ["/mail/tasks", "Tasks"],
+>>>>>>> 7a420b155b50ef55f8b25fe6e6f4487f5a514c86
   ["/mail/work-graph", "Work Graph"],
   ["/mail/alet", "Alet"],
 ] as const) {

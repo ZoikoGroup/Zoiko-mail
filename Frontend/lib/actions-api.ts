@@ -4,6 +4,7 @@ import { apiRequest } from "./api-client";
 export type ActionPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
 export type ActionStatus =
   | "OPEN"
+  | "PLANNED"
   | "IN_PROGRESS"
   | "SNOOZED"
   | "COMPLETED"

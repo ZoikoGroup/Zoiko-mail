@@ -5,8 +5,8 @@ import { WebmailShell } from "@/components/mail/WebmailShell";
 import { ComingSoon } from "@/components/mail/ComingSoon";
 import { sectionInfo, type WorkspaceSection } from "@/components/mail/AppRail";
 
-/** The Member workspace sections that are not built yet. (Calendar and Contacts have their own routes.) */
-const COMING_SOON: WorkspaceSection[] = ["tasks", "work-graph", "alet", "help"];
+/** The Member workspace sections that are not built yet. (Calendar and Tasks live in their own folders.) */
+const COMING_SOON: WorkspaceSection[] = ["contacts", "work-graph", "alet", "help"];
 
 export default function WorkspaceSectionPage({ params }: { params: { section: string } }) {
   const section = params.section as WorkspaceSection;

@@ -27,6 +27,7 @@ const PRIORITY_TONE: Record<ActionPriority, string> = {
 
 const STATUS_TONE: Record<ActionStatus, string> = {
   OPEN: "accent",
+  PLANNED: "nu",
   IN_PROGRESS: "ai",
   SNOOZED: "nu",
   COMPLETED: "ok",
@@ -35,6 +36,7 @@ const STATUS_TONE: Record<ActionStatus, string> = {
 
 const STATUS_LABEL: Record<ActionStatus, string> = {
   OPEN: "Open",
+  PLANNED: "Planned",
   IN_PROGRESS: "In progress",
   SNOOZED: "Snoozed",
   COMPLETED: "Completed",
