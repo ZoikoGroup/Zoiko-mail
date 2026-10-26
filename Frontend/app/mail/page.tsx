@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { WebmailShell } from "@/components/mail/WebmailShell";
-import { MailClient, type MailClientHandle } from "@/components/mail/MailClient";
+import { MailClient, type MailClientHandle, type MailLink } from "@/components/mail/MailClient";
 import { useSharedInboxes } from "@/lib/mail-hooks";
 import type { MailListFolder, SharedInbox } from "@/lib/mail-api";
 
@@ -21,6 +21,9 @@ export default function MailPage() {
   );
 }
 
+/** Folders a link may open (Contacts → Recent communications). */
+const LINKABLE_FOLDERS: MailListFolder[] = ["INBOX", "SENT", "ARCHIVE", "TRASH", "STARRED", "SNOOZED"];
+
 // WebmailShell replaces AppShell here: the same guards (through the shared
 // useMemberShell hook) with the full-screen mail layout. MailClient itself is
 // the one the Admin and Owner inbox pages render inside their own shells, with
@@ -36,6 +39,25 @@ function MailPageInner() {
   const [labelId, setLabelId] = useState("");
   const [sharedInbox, setSharedInbox] = useState<SharedInbox | null>(null);
   const mailClientRef = useRef<MailClientHandle>(null);
+  const [link, setLink] = useState<MailLink | null>(null);
+
+  // Links from elsewhere in the workspace:
+  //   ?compose=<address>           a new message to that address
+  //   ?open=<messageId>&folder=X   that message, in that folder
+  // Read once, then removed from the address bar so a reload does not repeat them.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const compose = params.get("compose");
+    const open = params.get("open");
+    const linkedFolder = params.get("folder") as MailListFolder | null;
+    if (!compose && !open) return;
+    if (linkedFolder && LINKABLE_FOLDERS.includes(linkedFolder)) setFolder(linkedFolder);
+    setLink({
+      compose: compose?.trim() || undefined,
+      open: open && /^[0-9a-f-]{36}$/i.test(open) ? open : undefined,
+    });
+    window.history.replaceState(null, "", "/mail");
+  }, []);
 
   // ?mailbox=<id>: the linked message is in a shared inbox, so open that
   // inbox first, then the message in it. Once only — after that the person
@@ -76,6 +98,7 @@ function MailPageInner() {
         onLabelChange={setLabelId}
         sharedInbox={sharedInbox}
         openMessageId={linkResolved ? params.get("message") : null}
+        link={link}
       />
     </WebmailShell>
   );

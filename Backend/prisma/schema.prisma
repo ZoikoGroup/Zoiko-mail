@@ -2119,6 +2119,13 @@ model Contact {
   notes        String?
   tags         String[]         @default([])
   avatarUrl    String?          @map("avatar_url")
+  /// The owner's own star. Only the owner sees it, even on a shared contact.
+  isFavorite   Boolean          @default(false) @map("is_favorite")
+  /// PERSONAL is the owner's alone. SHARED is readable by every active member
+  /// of the workspace; only the owner can change or delete it.
+  visibility   ContactVisibility @default(PERSONAL)
+  /// How the contact got here, shown as "Source" on the details panel.
+  source       ContactSource    @default(MANUAL)
   createdAt    DateTime         @default(now()) @map("created_at")
   updatedAt    DateTime         @updatedAt @map("updated_at")
   tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -2126,7 +2133,19 @@ model Contact {
 
   @@unique([tenantId, membershipId, email])
   @@index([tenantId, membershipId])
+  @@index([tenantId, visibility])
   @@map("contacts")
+}
+
+enum ContactVisibility {
+  PERSONAL
+  SHARED
+}
+
+enum ContactSource {
+  MANUAL
+  IMPORT
+  MAIL
 }
 
 model StripeWebhookEvent {
