@@ -334,6 +334,7 @@ export class InvitationService {
   /** Accept, tentatively accept, or decline. */
   async respond(eventId: string, input: RespondInput, context: CalendarContext) {
     const attendee = await this.myAttendance(eventId, context);
+    this.assertNotEnded(attendee);
     await prisma.$transaction(async (tx) => {
       await tx.eventAttendee.update({
         where: { id: attendee.id, tenantId: context.tenantId },
@@ -361,6 +362,7 @@ export class InvitationService {
   /** Suggest another time. Counts as a tentative yes until the organizer decides. */
   async proposeTime(eventId: string, input: ProposeTimeInput, context: CalendarContext) {
     const attendee = await this.myAttendance(eventId, context);
+    this.assertNotEnded(attendee);
     const span = normaliseSpan(input.startsAt, input.endsAt, attendee.event.allDay);
     await prisma.$transaction(async (tx) => {
       await tx.eventAttendee.update({
@@ -533,6 +535,7 @@ export class InvitationService {
             title: true,
             sequence: true,
             startsAt: true,
+            endsAt: true,
             allDay: true,
             timeZone: true,
             organizer: { select: { userId: true } },
@@ -542,6 +545,13 @@ export class InvitationService {
     });
     if (!attendee) throw notFound();
     return attendee;
+  }
+
+  /** An answer or a counter-proposal makes no sense once the meeting is over. */
+  private assertNotEnded(attendee: { event: { endsAt: Date } }) {
+    if (attendee.event.endsAt.getTime() <= Date.now()) {
+      throw new AppError("This meeting has already ended, so it can no longer be answered.", 409, ErrorCodes.CONFLICT, { reason: "EVENT_ENDED" });
+    }
   }
 }
 

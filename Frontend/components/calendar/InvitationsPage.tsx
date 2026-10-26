@@ -305,6 +305,8 @@ function InvitationDetail({ eventId }: { eventId: string }) {
   }
 
   const { start, end } = eventSpan(event);
+  // A finished meeting can no longer be answered (the server refuses it too).
+  const ended = end.getTime() <= Date.now();
   const answer = (response: "ACCEPTED" | "TENTATIVE" | "DECLINED") => respond.mutate({ id: event.id, response });
   const latestUpdate = event.history.find((h) => h.type === "UPDATED");
 
@@ -349,14 +351,26 @@ function InvitationDetail({ eventId }: { eventId: string }) {
               {latestUpdate.actorName}.{event.myResponse === "NEEDS_ACTION" ? " Please answer again." : ""}
             </Callout>
           )}
-          {!event.isOrganizer && event.myResponse === "NEEDS_ACTION" && !event.hasUpdate && (
+          {!event.isOrganizer && event.myResponse === "NEEDS_ACTION" && !event.hasUpdate && !ended && (
             <Callout icon={Clock}>
               <b>Response requested</b> — You haven&apos;t responded. Review the time and agenda before choosing an RSVP status.
             </Callout>
           )}
-          {!event.isOrganizer && event.myResponse && event.myResponse !== "NEEDS_ACTION" && (
+          {!event.isOrganizer && ended && (
+            <p className="mt-4 text-[12.5px] text-[var(--ink2)]" data-testid="ended-note">
+              This meeting has ended, so it can no longer be answered.{" "}
+              {event.myResponse && event.myResponse !== "NEEDS_ACTION" ? (
+                <>
+                  You answered <b style={{ color: RESPONSE_HEX[event.myResponse] }}>{RESPONSE_LABEL[event.myResponse]}</b>.
+                </>
+              ) : (
+                "You did not answer it."
+              )}
+            </p>
+          )}
+          {!event.isOrganizer && !ended && event.myResponse && event.myResponse !== "NEEDS_ACTION" && (
             <p className="mt-4 text-[12.5px] text-[var(--ink2)]">
-              You answered <b style={{ color: RESPONSE_HEX[event.myResponse] }}>{RESPONSE_LABEL[event.myResponse]}</b>. You can change your answer at any time.
+              You answered <b style={{ color: RESPONSE_HEX[event.myResponse] }}>{RESPONSE_LABEL[event.myResponse]}</b>. You can change your answer until the meeting ends.
             </p>
           )}
 
@@ -368,10 +382,10 @@ function InvitationDetail({ eventId }: { eventId: string }) {
             </div>
           ) : (
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4" role="group" aria-label="Your answer">
-              <RsvpButton label="Accept" icon={Check} hex={RESPONSE_HEX.ACCEPTED} active={event.myResponse === "ACCEPTED"} busy={respond.isPending} onClick={() => answer("ACCEPTED")} />
-              <RsvpButton label="Tentative" icon={Clock} hex={RESPONSE_HEX.NEEDS_ACTION} active={event.myResponse === "TENTATIVE"} busy={respond.isPending} onClick={() => answer("TENTATIVE")} />
-              <RsvpButton label="Decline" icon={X} hex={RESPONSE_HEX.DECLINED} active={event.myResponse === "DECLINED"} busy={respond.isPending} onClick={() => answer("DECLINED")} />
-              <button type="button" className="zoiko-btn justify-center" onClick={() => setProposing(true)}>
+              <RsvpButton label="Accept" icon={Check} hex={RESPONSE_HEX.ACCEPTED} active={event.myResponse === "ACCEPTED"} busy={respond.isPending || ended} onClick={() => answer("ACCEPTED")} />
+              <RsvpButton label="Tentative" icon={Clock} hex={RESPONSE_HEX.NEEDS_ACTION} active={event.myResponse === "TENTATIVE"} busy={respond.isPending || ended} onClick={() => answer("TENTATIVE")} />
+              <RsvpButton label="Decline" icon={X} hex={RESPONSE_HEX.DECLINED} active={event.myResponse === "DECLINED"} busy={respond.isPending || ended} onClick={() => answer("DECLINED")} />
+              <button type="button" className="zoiko-btn justify-center" onClick={() => setProposing(true)} disabled={ended}>
                 <CalendarDays className="h-4 w-4" aria-hidden /> Propose new time
               </button>
             </div>
@@ -604,6 +618,8 @@ function ResponsesCard({ event, onSeeAll }: { event: EventDetail; onSeeAll: () =
 /** Real conflicts: my other busy events overlapping this one. */
 function ScheduleCheck({ event }: { event: EventDetail }) {
   const { start, end } = eventSpan(event);
+  // A finished meeting can no longer be answered (the server refuses it too).
+  const ended = end.getTime() <= Date.now();
   const events = useCalendarEvents(start, end);
   const clashes = (events.data ?? []).filter(
     (e: CalendarEvent) => e.id !== event.id && e.showAs === "BUSY" && e.myResponse !== "DECLINED"

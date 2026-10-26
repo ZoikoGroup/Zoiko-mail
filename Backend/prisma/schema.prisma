@@ -67,6 +67,11 @@ model Tenant {
   guestBookings          GuestBooking[]
   meetingTemplates       MeetingTemplate[]
   calendarPreferences    CalendarPreference[]
+  workStreams            WorkStream[]
+  workCommitments        WorkCommitment[]
+  workDecisions          WorkDecision[]
+  workDependencies       WorkDependency[]
+  workEvidence           WorkEvidence[]
   mailboxAccess          MailboxAccess[]
   aliases                Alias[]
   forwardingRules        ForwardingRule[]
@@ -232,6 +237,17 @@ model TenantMembership {
   meetingTemplates        MeetingTemplate[]       @relation("TemplateOwner")
   templateReviews         MeetingTemplate[]       @relation("TemplateReviewer")
   calendarPreference      CalendarPreference?
+  workStreamsOwned        WorkStream[]            @relation("WorkStreamOwner")
+  workStreamsCreated      WorkStream[]            @relation("WorkStreamCreator")
+  workCommitmentsOwned    WorkCommitment[]        @relation("WorkCommitmentOwner")
+  workCommitmentsCreated  WorkCommitment[]        @relation("WorkCommitmentCreator")
+  workDecisionsOwned      WorkDecision[]          @relation("WorkDecisionOwner")
+  workDecisionsToApprove  WorkDecision[]          @relation("WorkDecisionApprover")
+  workDecisionsDecided    WorkDecision[]          @relation("WorkDecisionDecider")
+  workDecisionsCreated    WorkDecision[]          @relation("WorkDecisionCreator")
+  workDependenciesOwned   WorkDependency[]        @relation("WorkDependencyOwner")
+  workDependenciesCreated WorkDependency[]        @relation("WorkDependencyCreator")
+  workEvidenceAdded       WorkEvidence[]          @relation("WorkEvidenceAdder")
 
   @@unique([tenantId, userId])
   @@index([userId])
@@ -2107,29 +2123,29 @@ model Invoice {
 }
 
 model Contact {
-  id           String           @id @default(uuid()) @db.Uuid
-  tenantId     String           @map("tenant_id") @db.Uuid
-  membershipId String           @map("membership_id") @db.Uuid
-  firstName    String?          @map("first_name")
-  lastName     String?          @map("last_name")
+  id           String            @id @default(uuid()) @db.Uuid
+  tenantId     String            @map("tenant_id") @db.Uuid
+  membershipId String            @map("membership_id") @db.Uuid
+  firstName    String?           @map("first_name")
+  lastName     String?           @map("last_name")
   email        String
   phone        String?
   company      String?
-  jobTitle     String?          @map("job_title")
+  jobTitle     String?           @map("job_title")
   notes        String?
-  tags         String[]         @default([])
-  avatarUrl    String?          @map("avatar_url")
+  tags         String[]          @default([])
+  avatarUrl    String?           @map("avatar_url")
   /// The owner's own star. Only the owner sees it, even on a shared contact.
-  isFavorite   Boolean          @default(false) @map("is_favorite")
+  isFavorite   Boolean           @default(false) @map("is_favorite")
   /// PERSONAL is the owner's alone. SHARED is readable by every active member
   /// of the workspace; only the owner can change or delete it.
   visibility   ContactVisibility @default(PERSONAL)
   /// How the contact got here, shown as "Source" on the details panel.
-  source       ContactSource    @default(MANUAL)
-  createdAt    DateTime         @default(now()) @map("created_at")
-  updatedAt    DateTime         @updatedAt @map("updated_at")
-  tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  membership   TenantMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  source       ContactSource     @default(MANUAL)
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+  tenant       Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  membership   TenantMembership  @relation(fields: [membershipId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, membershipId, email])
   @@index([tenantId, membershipId])
@@ -2780,4 +2796,201 @@ model CalendarPreference {
 
   @@index([tenantId])
   @@map("calendar_preferences")
+}
+
+// ── Work Graph ──────────────────────────────────────────────────────────────
+// Connected work: workstreams, the commitments and decisions inside them, what
+// is blocked on what, and the mail and meetings that are the evidence.
+
+enum WorkVisibility {
+  /// The creator, the owner and (for decisions) the approver.
+  PRIVATE
+  /// Every active member of the workspace.
+  WORKSPACE
+}
+
+enum WorkStreamStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum WorkCommitmentStatus {
+  /// Waiting on somebody else to deliver or reply.
+  AWAITING
+  IN_PROGRESS
+  /// Fulfilled, and recorded as such.
+  RECORDED
+  CANCELLED
+}
+
+enum WorkDecisionStatus {
+  PENDING
+  APPROVED
+  DEFERRED
+  SUPERSEDED
+}
+
+enum WorkEvidenceKind {
+  EMAIL
+  MEETING
+  DOCUMENT
+  NOTE
+}
+
+enum WorkSubjectType {
+  STREAM
+  COMMITMENT
+  DECISION
+}
+
+enum WorkBlockerType {
+  DECISION
+  COMMITMENT
+}
+
+model WorkStream {
+  id                    String            @id @default(uuid()) @db.Uuid
+  tenantId              String            @map("tenant_id") @db.Uuid
+  title                 String
+  description           String?
+  /// The accountable owner: a member, or a named team that is not one.
+  ownerMembershipId     String?           @map("owner_membership_id") @db.Uuid
+  ownerLabel            String?           @map("owner_label")
+  nextCheckpointAt      DateTime?         @map("next_checkpoint_at")
+  timeZone              String            @default("UTC") @map("time_zone")
+  status                WorkStreamStatus  @default(ACTIVE)
+  visibility            WorkVisibility    @default(PRIVATE)
+  createdByMembershipId String?           @map("created_by_membership_id") @db.Uuid
+  createdAt             DateTime          @default(now()) @map("created_at")
+  updatedAt             DateTime          @updatedAt @map("updated_at")
+  tenant                Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner                 TenantMembership? @relation("WorkStreamOwner", fields: [ownerMembershipId], references: [id], onDelete: SetNull)
+  createdBy             TenantMembership? @relation("WorkStreamCreator", fields: [createdByMembershipId], references: [id], onDelete: SetNull)
+  commitments           WorkCommitment[]
+  decisions             WorkDecision[]
+  dependencies          WorkDependency[]
+
+  @@index([tenantId, status])
+  @@map("work_streams")
+}
+
+model WorkCommitment {
+  id                    String               @id @default(uuid()) @db.Uuid
+  tenantId              String               @map("tenant_id") @db.Uuid
+  streamId              String?              @map("stream_id") @db.Uuid
+  title                 String
+  description           String?
+  /// Who is accountable: a member, or a named team.
+  ownerMembershipId     String?              @map("owner_membership_id") @db.Uuid
+  ownerLabel            String?              @map("owner_label")
+  /// Who the commitment is expected from, when that is somebody else.
+  expectedFrom          String?              @map("expected_from")
+  dueAt                 DateTime?            @map("due_at")
+  timeZone              String               @default("UTC") @map("time_zone")
+  status                WorkCommitmentStatus @default(IN_PROGRESS)
+  visibility            WorkVisibility       @default(PRIVATE)
+  recordedAt            DateTime?            @map("recorded_at")
+  /// Set when it was confirmed from an AI suggestion, so one is never confirmed twice.
+  sourceAiActionId      String?              @unique @map("source_ai_action_id") @db.Uuid
+  createdByMembershipId String?              @map("created_by_membership_id") @db.Uuid
+  createdAt             DateTime             @default(now()) @map("created_at")
+  updatedAt             DateTime             @updatedAt @map("updated_at")
+  tenant                Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  stream                WorkStream?          @relation(fields: [streamId], references: [id], onDelete: SetNull)
+  owner                 TenantMembership?    @relation("WorkCommitmentOwner", fields: [ownerMembershipId], references: [id], onDelete: SetNull)
+  createdBy             TenantMembership?    @relation("WorkCommitmentCreator", fields: [createdByMembershipId], references: [id], onDelete: SetNull)
+  blocking              WorkDependency[]
+
+  @@index([tenantId, status, dueAt])
+  @@index([tenantId, streamId])
+  @@map("work_commitments")
+}
+
+model WorkDecision {
+  id                    String             @id @default(uuid()) @db.Uuid
+  tenantId              String             @map("tenant_id") @db.Uuid
+  streamId              String?            @map("stream_id") @db.Uuid
+  title                 String
+  rationale             String?
+  ownerMembershipId     String?            @map("owner_membership_id") @db.Uuid
+  ownerLabel            String?            @map("owner_label")
+  /// The one person who may approve it. Nobody named: only a workspace Owner or Admin.
+  approverMembershipId  String?            @map("approver_membership_id") @db.Uuid
+  reviewAt              DateTime?          @map("review_at")
+  timeZone              String             @default("UTC") @map("time_zone")
+  status                WorkDecisionStatus @default(PENDING)
+  decidedAt             DateTime?          @map("decided_at")
+  decidedByMembershipId String?            @map("decided_by_membership_id") @db.Uuid
+  decisionNote          String?            @map("decision_note")
+  supersededById        String?            @map("superseded_by_id") @db.Uuid
+  visibility            WorkVisibility     @default(PRIVATE)
+  sourceAiActionId      String?            @unique @map("source_ai_action_id") @db.Uuid
+  createdByMembershipId String?            @map("created_by_membership_id") @db.Uuid
+  createdAt             DateTime           @default(now()) @map("created_at")
+  updatedAt             DateTime           @updatedAt @map("updated_at")
+  tenant                Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  stream                WorkStream?        @relation(fields: [streamId], references: [id], onDelete: SetNull)
+  owner                 TenantMembership?  @relation("WorkDecisionOwner", fields: [ownerMembershipId], references: [id], onDelete: SetNull)
+  approver              TenantMembership?  @relation("WorkDecisionApprover", fields: [approverMembershipId], references: [id], onDelete: SetNull)
+  decidedBy             TenantMembership?  @relation("WorkDecisionDecider", fields: [decidedByMembershipId], references: [id], onDelete: SetNull)
+  createdBy             TenantMembership?  @relation("WorkDecisionCreator", fields: [createdByMembershipId], references: [id], onDelete: SetNull)
+  blocking              WorkDependency[]
+
+  @@index([tenantId, status, reviewAt])
+  @@index([tenantId, streamId])
+  @@map("work_decisions")
+}
+
+/// A deliverable that cannot proceed until a decision is approved or a
+/// commitment is recorded. It unblocks itself when that happens.
+model WorkDependency {
+  id                    String            @id @default(uuid()) @db.Uuid
+  tenantId              String            @map("tenant_id") @db.Uuid
+  streamId              String?           @map("stream_id") @db.Uuid
+  deliverable           String
+  description           String?
+  ownerMembershipId     String?           @map("owner_membership_id") @db.Uuid
+  ownerLabel            String?           @map("owner_label")
+  blockerType           WorkBlockerType   @map("blocker_type")
+  blockerDecisionId     String?           @map("blocker_decision_id") @db.Uuid
+  blockerCommitmentId   String?           @map("blocker_commitment_id") @db.Uuid
+  visibility            WorkVisibility    @default(PRIVATE)
+  resolvedAt            DateTime?         @map("resolved_at")
+  notifiedAt            DateTime?         @map("notified_at")
+  createdByMembershipId String?           @map("created_by_membership_id") @db.Uuid
+  createdAt             DateTime          @default(now()) @map("created_at")
+  updatedAt             DateTime          @updatedAt @map("updated_at")
+  tenant                Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  stream                WorkStream?       @relation(fields: [streamId], references: [id], onDelete: SetNull)
+  owner                 TenantMembership? @relation("WorkDependencyOwner", fields: [ownerMembershipId], references: [id], onDelete: SetNull)
+  createdBy             TenantMembership? @relation("WorkDependencyCreator", fields: [createdByMembershipId], references: [id], onDelete: SetNull)
+  blockerDecision       WorkDecision?     @relation(fields: [blockerDecisionId], references: [id], onDelete: Cascade)
+  blockerCommitment     WorkCommitment?   @relation(fields: [blockerCommitmentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, resolvedAt])
+  @@index([blockerDecisionId])
+  @@index([blockerCommitmentId])
+  @@map("work_dependencies")
+}
+
+/// Where a commitment, decision or workstream comes from: a message, a meeting,
+/// a document or a note. The reference is checked when it is added, so nobody
+/// can attach a source they cannot read.
+model WorkEvidence {
+  id                  String            @id @default(uuid()) @db.Uuid
+  tenantId            String            @map("tenant_id") @db.Uuid
+  subjectType         WorkSubjectType   @map("subject_type")
+  subjectId           String            @map("subject_id") @db.Uuid
+  kind                WorkEvidenceKind
+  /// The message or meeting this points at (none for a document or note).
+  refId               String?           @map("ref_id") @db.Uuid
+  label               String
+  occurredAt          DateTime?         @map("occurred_at")
+  addedByMembershipId String?           @map("added_by_membership_id") @db.Uuid
+  createdAt           DateTime          @default(now()) @map("created_at")
+  tenant              Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  addedBy             TenantMembership? @relation("WorkEvidenceAdder", fields: [addedByMembershipId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, subjectType, subjectId])
+  @@map("work_evidence")
 }

@@ -578,7 +578,8 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
               {FOLDERS.map((f) => {
                 const Icon = f.icon;
                 const active = folder === f.key;
-                const unread = unreadCounts?.[f.key] ?? 0;
+                // Drafts holds a total, not unread mail, so it has no badge.
+                const unread = f.key === "DRAFTS" ? 0 : unreadCounts?.[f.key] ?? 0;
                 return (
                   <button
                     key={f.key}

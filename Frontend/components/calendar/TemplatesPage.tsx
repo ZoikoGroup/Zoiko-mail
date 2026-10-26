@@ -202,7 +202,7 @@ export function TemplatesPage() {
         <Stat icon={Clock} hex="#E0A33A" value={reviewCount} label="Awaiting approval" hint={reviewCount ? "Team templates to review" : "Nothing waiting"} />
       </div>
 
-      <div role="tablist" aria-label="Templates" className="mb-4 flex gap-1 overflow-x-auto border-b border-[var(--border)]">
+      <div role="tablist" aria-label="Templates" className="mb-4 flex gap-1 overflow-x-auto overflow-y-hidden border-b border-[var(--border)]">
         {(
           [
             ["all", "All Templates", 0],

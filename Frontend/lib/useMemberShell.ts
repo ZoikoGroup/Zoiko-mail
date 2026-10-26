@@ -114,6 +114,7 @@ export function useMemberShell() {
       // An invitation, an answer, a change or a cancellation: the calendar,
       // its invitation lists and badges refresh without a reload.
       if (e.payload?.kind === "calendar") qc.invalidateQueries({ queryKey: ["calendar"] });
+      if (e.payload?.kind === "workgraph") qc.invalidateQueries({ queryKey: ["workgraph"] });
       if (e.payload?.kind === "task") qc.invalidateQueries({ queryKey: ["tasks"] });
       addToast({
         type: "notification",

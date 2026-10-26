@@ -24,7 +24,8 @@ test("the inbox shows the workspace, counts, shared inboxes, storage and message
 
   const folders = page.getByRole("complementary", { name: "Mail folders" });
   await expect(folders.getByRole("button", { name: /Inbox\s*8/ })).toBeVisible();
-  await expect(folders.getByRole("button", { name: /Drafts\s*2/ })).toBeVisible();
+  // Drafts holds a total, not unread mail, so it carries no number.
+  await expect(folders.getByRole("button", { name: "Drafts", exact: true })).toBeVisible();
   const shared = folders.getByTestId("shared-inboxes");
   await expect(shared.getByRole("button", { name: /support\s*5/ })).toBeVisible();
   await expect(shared.getByRole("button", { name: /sales\s*3/ })).toBeVisible();
@@ -77,18 +78,10 @@ test("Ctrl+K focuses search", async ({ page }) => {
   await expect(page.locator("#mail-search")).toBeFocused();
 });
 
-// Calendar (app/mail/calendar) and Contacts (app/mail/contacts) are built;
-// they have their own specs.
-for (const [href, title] of [
-<<<<<<< HEAD
-  ["/mail/calendar", "Calendar"],
-  ["/mail/contacts", "Contacts"],
-=======
-  ["/mail/tasks", "Tasks"],
->>>>>>> 7a420b155b50ef55f8b25fe6e6f4487f5a514c86
-  ["/mail/work-graph", "Work Graph"],
-  ["/mail/alet", "Alet"],
-] as const) {
+// Calendar (app/mail/calendar), Contacts (app/mail/contacts), Tasks
+// (app/mail/tasks) and the Work Graph (app/mail/work-graph) are built; they have
+// their own specs. Only Alet is still a placeholder.
+for (const [href, title] of [["/mail/alet", "Alet"]] as const) {
   test(`${title} shows Coming Soon inside the workspace`, async ({ page }) => {
     await openWebmail(page);
     await page.getByRole("navigation", { name: "Workspace sections" }).first().getByRole("link", { name: title, exact: true }).click();
@@ -97,7 +90,7 @@ for (const [href, title] of [
     await expect(soon.getByRole("heading", { name: title })).toBeVisible({ timeout: 60_000 });
     await expect(soon.getByText("Coming Soon...")).toBeVisible();
     await expect(soon.getByRole("link", { name: "Back to Mail" })).toHaveAttribute("href", "/mail");
-    if (title === "Tasks") await shot(page, "3-coming-soon");
+    if (title === "Alet") await shot(page, "3-coming-soon");
   });
 }
 
