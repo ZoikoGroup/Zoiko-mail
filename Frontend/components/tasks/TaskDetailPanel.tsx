@@ -6,9 +6,12 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowUpRight,
+  BellRing,
   CalendarClock,
   Check,
   CheckCircle2,
+  Eye,
+  EyeOff,
   Lock,
   Mail,
   MoreHorizontal,
@@ -25,19 +28,24 @@ import {
   useAddChecklistItem,
   useCompleteTask,
   useDeleteTask,
+  useFollowTask,
   useRemoveChecklistItem,
   useTask,
+  useTaskActivity,
   useToggleChecklistItem,
   useUpdateTask,
 } from "@/lib/tasks-hooks";
 import type { EditableTaskStatus, LinkedEmail, TaskDetail, TaskUser } from "@/lib/tasks-api";
-import { ReopenDialog, RescheduleDialog, TaskDialog } from "./TaskDialogs";
+import { ReminderDialog, ReopenDialog, RescheduleDialog, TaskDialog } from "./TaskDialogs";
+import { teamHref } from "./TasksSidebar";
 import { PRIORITY_SHORT, STATUS_DOT, STATUS_LABEL, dueLong, initials, stamp } from "./format";
 
 /** Where "Open source email" goes: the mailbox, with that message open. */
 export function emailHref(email: Extract<LinkedEmail, { accessible: true }>): string {
   const params = new URLSearchParams({ message: email.messageId });
   if (email.folder) params.set("folder", email.folder);
+  // In a shared inbox: open that inbox, not one's own.
+  if (email.mailboxId) params.set("mailbox", email.mailboxId);
   return `/mail?${params}`;
 }
 
@@ -181,6 +189,67 @@ function Checklist({ task }: { task: TaskDetail }) {
   );
 }
 
+/** Follow a task you do not own, to hear when it is completed, handed over or reopened. */
+function FollowButton({ task }: { task: TaskDetail }) {
+  const follow = useFollowTask();
+  const on = task.isFollowing;
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      disabled={follow.isPending}
+      onClick={() => follow.mutate({ id: task.id, follow: !on })}
+      title={on ? "Stop following" : "Hear when this is completed, handed over or reopened"}
+      className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[12px] font-medium transition disabled:opacity-60 ${
+        on ? "border-[var(--accent)]/50 bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "border-[var(--border)] text-[var(--ink2)] hover:bg-[var(--s2)]"
+      }`}
+    >
+      {on ? <EyeOff className="h-3.5 w-3.5" aria-hidden /> : <Eye className="h-3.5 w-3.5" aria-hidden />}
+      {on ? "Following" : "Follow"}
+      {task.followerCount > 0 && <span className="text-[var(--ink3)]">· {task.followerCount}</span>}
+    </button>
+  );
+}
+
+/** The task's history from the audit log, newest first. */
+function Activity({ taskId }: { taskId: string }) {
+  const activity = useTaskActivity(taskId);
+  const [all, setAll] = useState(false);
+  const items = [...(activity.data ?? [])].reverse();
+  const shown = all ? items : items.slice(0, 4);
+  return (
+    <Section title="Activity" aside={items.length ? `${items.length} ${items.length === 1 ? "event" : "events"}` : undefined}>
+      {activity.isLoading ? (
+        <p className="text-[12.5px] text-[var(--ink3)]">Loading…</p>
+      ) : activity.isError ? (
+        <p className="text-[12.5px] text-[var(--ink3)]">History is not available right now.</p>
+      ) : items.length === 0 ? (
+        <p className="text-[12.5px] text-[var(--ink3)]">No history yet.</p>
+      ) : (
+        <ol className="space-y-2" data-testid="task-activity">
+          {shown.map((item) => (
+            <li key={item.id} className="flex gap-2.5 text-[12.5px]">
+              <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${item.type.includes("COMPLETED") || item.label === "Marked complete" ? "bg-[var(--ok)]" : "bg-[var(--accent)]"}`} aria-hidden />
+              <span className="min-w-0">
+                <span className="text-[var(--ink)]">{item.label}</span>
+                <span className="block text-[11.5px] text-[var(--ink3)]">
+                  {item.actor ? `${item.actor.displayName} · ` : ""}
+                  {stamp(item.at)}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+      {items.length > 4 && (
+        <button type="button" onClick={() => setAll((v) => !v)} className="mt-2 text-[12px] font-medium text-[var(--accent-ink)] hover:underline">
+          {all ? "Show less" : `Show all ${items.length}`}
+        </button>
+      )}
+    </Section>
+  );
+}
+
 function Correspondence({ email }: { email: LinkedEmail }) {
   if (!email.accessible) {
     return (
@@ -238,7 +307,7 @@ export function TaskDetailPanel({
   const complete = useCompleteTask();
   const update = useUpdateTask();
   const remove = useDeleteTask();
-  const [dialog, setDialog] = useState<"edit" | "reschedule" | "reopen" | "delete" | null>(null);
+  const [dialog, setDialog] = useState<"edit" | "reschedule" | "reminder" | "reopen" | "delete" | null>(null);
 
   const shell = (body: ReactNode) => (
     <section aria-label="Task details" className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
@@ -281,7 +350,10 @@ export function TaskDetailPanel({
           )}
           <h2 className="text-[16px] font-semibold text-[var(--ink)]">{completed ? "Completion details" : "Task details"}</h2>
         </div>
-        {badge}
+        <div className="flex items-center gap-2">
+          {badge}
+          {task.owner.id !== meId && <FollowButton task={task} />}
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
@@ -339,7 +411,7 @@ export function TaskDetailPanel({
             </>
           ) : (
             <>
-              <Row term="Assigned to">
+              <Row term={task.team ? "Accountable owner" : "Assigned to"}>
                 <Person user={task.owner} meId={meId} />
               </Row>
               {task.isAssigned && (
@@ -349,9 +421,26 @@ export function TaskDetailPanel({
               )}
               <Row term="Due date">{dueLong(task.dueAt)}</Row>
               {task.originalDueAt && <Row term="Original due">{dueLong(task.originalDueAt)}</Row>}
+              {task.reminderAt && (
+                <Row term="Reminder">
+                  <span className={task.reminderSentAt ? "text-[var(--ink3)]" : undefined}>
+                    {dueLong(task.reminderAt)}
+                    {task.reminderSentAt ? " · sent" : ""}
+                  </span>
+                </Row>
+              )}
             </>
           )}
           <Row term="Priority">{PRIORITY_SHORT[task.priority]}</Row>
+          <Row term="Workspace">
+            {task.team ? (
+              <Link href={teamHref(task.team.id)} className="text-[var(--accent-ink)] hover:underline" title={task.team.address}>
+                {task.team.name}
+              </Link>
+            ) : (
+              "Personal"
+            )}
+          </Row>
         </dl>
 
         <Checklist task={task} />
@@ -368,6 +457,8 @@ export function TaskDetailPanel({
 
         {task.linkedEmail && <Correspondence email={task.linkedEmail} />}
 
+        <Activity taskId={task.id} />
+
         {completed && (
           <Callout tone="ok">Closing a task preserves its completion record. Reopening requires a reason, which is recorded.</Callout>
         )}
@@ -379,7 +470,7 @@ export function TaskDetailPanel({
         )}
       </div>
 
-      <div className="flex items-center gap-2 border-t border-[var(--border)] px-5 py-3">
+      <div className="flex items-center gap-2 border-t border-[var(--border)] px-5 py-3 [&_.zoiko-btn]:whitespace-nowrap">
         {completed ? (
           <>
             {task.linkedEmail?.accessible && (
@@ -398,6 +489,10 @@ export function TaskDetailPanel({
             </button>
             <button type="button" className="zoiko-btn" onClick={() => setDialog("reschedule")}>
               <CalendarClock className="h-4 w-4" aria-hidden /> Reschedule
+            </button>
+            <button type="button" className="zoiko-btn" onClick={() => setDialog("reminder")} aria-label="Reminder" title="Set a reminder">
+              <BellRing className="h-4 w-4" aria-hidden />
+              <span className="hidden xl:inline">Reminder</span>
             </button>
           </>
         )}
@@ -421,6 +516,7 @@ export function TaskDetailPanel({
 
       {dialog === "edit" && <TaskDialog mode={{ kind: "edit", task }} onClose={() => setDialog(null)} />}
       {dialog === "reschedule" && <RescheduleDialog task={task} onClose={() => setDialog(null)} />}
+      {dialog === "reminder" && <ReminderDialog task={task} onClose={() => setDialog(null)} />}
       {dialog === "reopen" && <ReopenDialog task={task} onClose={() => setDialog(null)} />}
       <ConfirmDialog
         open={dialog === "delete"}

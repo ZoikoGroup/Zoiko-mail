@@ -1,9 +1,18 @@
 "use client";
 
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Mail, Plus, X } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
-import { useCreateTask, useCreateTaskFromMessage, useReopenTask, useRescheduleTask, useUpdateTask } from "@/lib/tasks-hooks";
+import { useMe } from "@/lib/auth-hooks";
+import {
+  useAssignees,
+  useCreateTask,
+  useCreateTaskFromMessage,
+  useReopenTask,
+  useRescheduleTask,
+  useTaskTeams,
+  useUpdateTask,
+} from "@/lib/tasks-hooks";
 import type { EditableTaskStatus, Task, TaskDetail, TaskPriority } from "@/lib/tasks-api";
 import { dueLong } from "./format";
 
@@ -52,13 +61,44 @@ function ErrorLine({ error }: { error: unknown }) {
 }
 
 export type TaskDialogMode =
-  | { kind: "create" }
+  | { kind: "create"; teamId?: string }
   | { kind: "edit"; task: Task }
-  | { kind: "from-message"; messageId: string; subject: string };
+  /** `mailboxId`: the shared inbox the email was read in, whose team it then belongs to. */
+  | { kind: "from-message"; messageId: string; subject: string; mailboxId?: string };
+
+type ReminderChoice = "none" | "due" | "1h" | "1d" | "custom";
+
+/** When the reminder fires, from the choice and the due date it is relative to. */
+function reminderIso(choice: ReminderChoice, dueAt: string | null, date: string, time: string): string | null {
+  if (choice === "none") return null;
+  if (choice === "custom") return toIso(date, time || "09:00");
+  if (!dueAt) return null;
+  const due = new Date(dueAt).getTime();
+  return new Date(choice === "due" ? due : choice === "1h" ? due - 3_600_000 : due - 86_400_000).toISOString();
+}
 
 /** New task, edit task, and "create task from this email" — one form. */
 export function TaskDialog({ mode, onClose, onSaved }: { mode: TaskDialogMode; onClose: () => void; onSaved?: (task: TaskDetail) => void }) {
   const editing = mode.kind === "edit" ? mode.task : null;
+  const { data: me } = useMe();
+  const { data: teams = [] } = useTaskTeams();
+  const [teamId, setTeamId] = useState<string>(
+    editing?.team?.id ?? (mode.kind === "create" ? mode.teamId ?? "" : mode.kind === "from-message" ? mode.mailboxId ?? "" : "")
+  );
+  // A shared inbox that is not a team of mine (a delegated mailbox) is no team.
+  const team = teams.find((t) => t.id === teamId) ?? null;
+  const [ownerId, setOwnerId] = useState<string>(editing?.owner.id ?? "");
+  const [personSearch, setPersonSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(personSearch.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [personSearch]);
+  const assignees = useAssignees(team?.id ?? null, team ? "" : debouncedSearch);
+  const initialReminder = editing?.reminderAt ? new Date(editing.reminderAt) : null;
+  const [reminder, setReminder] = useState<ReminderChoice>(initialReminder ? "custom" : "none");
+  const [reminderDate, setReminderDate] = useState(initialReminder ? dateInput(initialReminder) : "");
+  const [reminderTime, setReminderTime] = useState(initialReminder ? timeInput(initialReminder) : "09:00");
   const initialDue = editing?.dueAt ? new Date(editing.dueAt) : null;
   const [title, setTitle] = useState(
     editing?.title ?? (mode.kind === "from-message" ? (mode.subject.trim() ? `Follow up: ${mode.subject.trim()}` : "Follow up on email") : "")
@@ -85,37 +125,65 @@ export function TaskDialog({ mode, onClose, onSaved }: { mode: TaskDialogMode; o
     setStep("");
   };
 
+  // The people offered: the team's members, or workspace matches — always
+  // including the current owner and me, so the choice on screen is never blank.
+  const people = useMemo(() => {
+    const list = [...(assignees.data ?? [])];
+    if (me && !list.some((p) => p.id === me.id)) list.unshift({ id: me.id, displayName: me.displayName, email: me.email, avatarUrl: null, isMe: true });
+    if (editing && !list.some((p) => p.id === editing.owner.id)) list.push({ ...editing.owner, isMe: editing.owner.id === me?.id });
+    return list;
+  }, [assignees.data, me, editing]);
+  const owner = ownerId || me?.id || "";
+  // Moving to a team whose members do not include the chosen owner: back to me.
+  useEffect(() => {
+    if (team && assignees.data && ownerId && !assignees.data.some((p) => p.id === ownerId)) setOwnerId(me?.id ?? "");
+  }, [team, assignees.data, ownerId, me]);
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!title.trim() || pending) return;
     const dueAt = toIso(date, time);
+    const reminderAt = reminderIso(reminder, dueAt, reminderDate, reminderTime);
     const pendingStep = step.trim();
     const steps = pendingStep ? [...checklist, pendingStep] : checklist;
     const done = (task: TaskDetail) => {
       onSaved?.(task);
       onClose();
     };
+    const common = {
+      title: title.trim(),
+      description: description.trim() || null,
+      dueAt,
+      priority,
+      ...(owner && owner !== me?.id ? { ownerUserId: owner } : {}),
+      teamId: team?.id ?? null,
+      reminderAt,
+    };
     if (mode.kind === "edit") {
+      const t = mode.task;
       update.mutate(
         {
-          id: mode.task.id,
+          id: t.id,
           input: {
-            title: title.trim(),
-            description: description.trim() || null,
+            title: common.title,
+            description: common.description,
             dueAt,
             priority,
             ...(editableStatus ? { status } : {}),
+            ...(owner && owner !== t.owner.id ? { ownerUserId: owner } : {}),
+            ...(common.teamId !== (t.team?.id ?? null) ? { teamId: common.teamId } : {}),
+            ...(reminderAt !== (t.reminderAt ? new Date(t.reminderAt).toISOString() : null) ? { reminderAt } : {}),
           },
         },
         { onSuccess: done }
       );
     } else if (mode.kind === "from-message") {
       fromMessage.mutate(
-        { messageId: mode.messageId, input: { title: title.trim(), description: description.trim() || null, dueAt, priority, status, checklist: steps } },
+        { messageId: mode.messageId, input: { ...common, status, checklist: steps, ...(mode.mailboxId ? { mailboxId: mode.mailboxId } : {}) } },
         { onSuccess: done }
       );
     } else {
-      create.mutate({ title: title.trim(), description: description.trim() || null, dueAt, priority, status, checklist: steps }, { onSuccess: done });
+      create.mutate({ ...common, status, checklist: steps }, { onSuccess: done });
     }
   };
 
@@ -184,6 +252,66 @@ export function TaskDialog({ mode, onClose, onSaved }: { mode: TaskDialogMode; o
                 ))}
               </select>
             </Field>
+          )}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Team workspace" hint={teams.length === 0 ? "You are not on any team yet" : undefined}>
+            <select className="zoiko-input w-full" aria-label="Team workspace" value={team?.id ?? ""} onChange={(e) => setTeamId(e.target.value)} disabled={teams.length === 0}>
+              <option value="">Personal (no team)</option>
+              {teams.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <div>
+            <Field label={team ? "Accountable owner" : "Assigned to"}>
+              <select className="zoiko-input w-full" aria-label="Assigned to" value={owner} onChange={(e) => setOwnerId(e.target.value)}>
+                {people.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.displayName || p.email}
+                    {p.isMe ? " (you)" : ""}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {!team && (
+              <input
+                className="zoiko-input mt-1.5 w-full"
+                value={personSearch}
+                onChange={(e) => setPersonSearch(e.target.value)}
+                placeholder="Find someone in the workspace"
+                aria-label="Find someone to assign"
+              />
+            )}
+          </div>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Reminder" hint={!date && reminder !== "custom" && reminder !== "none" ? "Set a due date for this reminder" : undefined}>
+            <select className="zoiko-input w-full" aria-label="Reminder" value={reminder} onChange={(e) => setReminder(e.target.value as ReminderChoice)}>
+              <option value="none">No reminder</option>
+              <option value="due" disabled={!date}>
+                At the due time
+              </option>
+              <option value="1h" disabled={!date || !time}>
+                1 hour before
+              </option>
+              <option value="1d" disabled={!date}>
+                1 day before
+              </option>
+              <option value="custom">Pick a time…</option>
+            </select>
+          </Field>
+          {reminder === "custom" && (
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Remind on">
+                <input type="date" className="zoiko-input w-full" aria-label="Reminder date" value={reminderDate} onChange={(e) => setReminderDate(e.target.value)} />
+              </Field>
+              <Field label="At">
+                <input type="time" className="zoiko-input w-full" aria-label="Reminder time" value={reminderTime} onChange={(e) => setReminderTime(e.target.value)} />
+              </Field>
+            </div>
           )}
         </div>
         {mode.kind !== "edit" && (
@@ -352,6 +480,80 @@ export function ReopenDialog({ task, onClose }: { task: Task; onClose: () => voi
         />
       </Field>
       <ErrorLine error={reopen.error} />
+    </Modal>
+  );
+}
+
+/** Set or clear when the owner is reminded. The server sends it once, when it comes due. */
+export function ReminderDialog({ task, onClose }: { task: Task; onClose: () => void }) {
+  const update = useUpdateTask();
+  const now = new Date();
+  const inAnHour = new Date(now.getTime() + 3_600_000);
+  inAnHour.setSeconds(0, 0);
+  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 9, 0);
+  const due = task.dueAt ? new Date(task.dueAt) : null;
+  const options = [
+    { label: "In 1 hour", date: inAnHour },
+    { label: "Tomorrow morning", date: tomorrow },
+    ...(due && due.getTime() - 86_400_000 > now.getTime() ? [{ label: "1 day before due", date: new Date(due.getTime() - 86_400_000) }] : []),
+    ...(due && due > now ? [{ label: "At the due time", date: due }] : []),
+  ];
+  const [date, setDate] = useState(dateInput(tomorrow));
+  const [time, setTime] = useState("09:00");
+  const set = (iso: string | null) => update.mutate({ id: task.id, input: { reminderAt: iso } }, { onSuccess: onClose });
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Set a reminder"
+      size="sm"
+      footer={
+        <>
+          {task.reminderAt && (
+            <button type="button" className="zoiko-btn mr-auto" disabled={update.isPending} onClick={() => set(null)}>
+              Remove reminder
+            </button>
+          )}
+          <button type="button" className="zoiko-btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="zoiko-btn pri" disabled={!date || update.isPending} onClick={() => set(toIso(date, time))}>
+            {update.isPending ? "Saving…" : "Set reminder"}
+          </button>
+        </>
+      }
+    >
+      <p className="text-[13px] text-[var(--ink2)]">
+        <b className="text-[var(--ink)]">{task.title}</b>
+        <br />
+        {task.reminderAt ? <>Currently reminding {dueLong(task.reminderAt)}{task.reminderSentAt ? " (sent)" : ""}</> : "No reminder set."}
+        <br />
+        {task.owner.displayName} gets a notification at the time you choose.
+      </p>
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        {options.map((option) => (
+          <button
+            key={option.label}
+            type="button"
+            disabled={update.isPending}
+            onClick={() => set(option.date.toISOString())}
+            className="rounded-lg border border-[var(--border)] px-3 py-2 text-left transition hover:border-[var(--accent)] hover:bg-[var(--s2)] disabled:opacity-50"
+          >
+            <span className="block text-[13px] font-semibold text-[var(--ink)]">{option.label}</span>
+            <span className="block text-[11.5px] text-[var(--ink3)]">{dueLong(option.date.toISOString())}</span>
+          </button>
+        ))}
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <Field label="Pick a date">
+          <input type="date" className="zoiko-input w-full" value={date} onChange={(e) => setDate(e.target.value)} />
+        </Field>
+        <Field label="Time">
+          <input type="time" className="zoiko-input w-full" value={time} onChange={(e) => setTime(e.target.value)} />
+        </Field>
+      </div>
+      <ErrorLine error={update.error} />
     </Modal>
   );
 }

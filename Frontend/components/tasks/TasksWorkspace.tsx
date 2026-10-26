@@ -9,12 +9,22 @@ import { TasksSidebar, type TasksPageKey } from "./TasksSidebar";
  * Every Tasks page: the Member shell (top bar, section rail) with the Tasks
  * sidebar beside the page — the same frame the Calendar pages use.
  */
-export function TasksWorkspace({ active, onNewTask, children }: { active: TasksPageKey; onNewTask: () => void; children: ReactNode }) {
+export function TasksWorkspace({
+  active,
+  activeTeamId,
+  onNewTask,
+  children,
+}: {
+  active: TasksPageKey;
+  activeTeamId?: string;
+  onNewTask: () => void;
+  children: ReactNode;
+}) {
   return (
     <WebmailShell section="tasks">
       <div className="flex h-full min-h-0">
         <div className="hidden lg:block">
-          <TasksSidebar active={active} onNewTask={onNewTask} />
+          <TasksSidebar active={active} activeTeamId={activeTeamId} onNewTask={onNewTask} />
         </div>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-4 pb-4 pt-5 lg:px-6">{children}</div>
       </div>

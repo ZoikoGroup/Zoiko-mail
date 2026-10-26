@@ -12,10 +12,13 @@ export const EDITABLE_STATUSES = ["OPEN", "PLANNED", "IN_PROGRESS"] as const;
 /** Everything that still needs doing. Snoozed work is postponed, not done. */
 export const OPEN_STATUSES = ["OPEN", "PLANNED", "IN_PROGRESS", "SNOOZED"] as const;
 
-export const TASK_VIEWS = ["all", "today", "upcoming", "overdue", "completed", "from_email", "assigned"] as const;
+export const TASK_VIEWS = ["all", "today", "upcoming", "overdue", "completed", "from_email", "assigned", "team", "following"] as const;
 export type TaskView = (typeof TASK_VIEWS)[number];
 
 export const TASK_SORTS = ["due_asc", "due_desc", "priority", "created_desc", "completed_desc"] as const;
+
+/** Completed work: what I own or finished, or what my teams finished. */
+export const COMPLETED_SCOPES = ["mine", "team"] as const;
 
 /** An IANA zone the runtime knows, e.g. "Europe/London". */
 export const timeZoneSchema = z.string().trim().min(1).max(64).refine((zone) => {
@@ -34,19 +37,42 @@ export const taskIdSchema = z.object({ taskId: z.string().uuid() });
 export const checklistItemParamsSchema = z.object({ taskId: z.string().uuid(), itemId: z.string().uuid() });
 export const messageIdParamsSchema = z.object({ messageId: z.string().uuid() });
 
-export const listTasksSchema = paginationQuerySchema.extend({
-  limit: z.coerce.number().int().min(1).max(200).default(100),
-  view: z.enum(TASK_VIEWS).default("all"),
-  q: z.string().trim().max(200).optional(),
-  priority: z.enum(PRIORITIES).optional(),
-  sort: z.enum(TASK_SORTS).optional(),
-  /** Upcoming: how many days ahead (default 7). Completed: how far back (default 30). */
-  days: z.coerce.number().int().min(1).max(365).optional(),
-  /** The zone the client displays in; "today" is a calendar day there. */
-  tz: timeZoneSchema.optional(),
-});
+export const listTasksSchema = paginationQuerySchema
+  .extend({
+    limit: z.coerce.number().int().min(1).max(200).default(100),
+    view: z.enum(TASK_VIEWS).default("all"),
+    /** The team (shared mailbox) for view=team. */
+    teamId: z.string().uuid().optional(),
+    /** For view=completed. */
+    scope: z.enum(COMPLETED_SCOPES).default("mine"),
+    q: z.string().trim().max(200).optional(),
+    priority: z.enum(PRIORITIES).optional(),
+    sort: z.enum(TASK_SORTS).optional(),
+    /** Upcoming: how many days ahead (default 7). Completed: how far back (default 30). */
+    days: z.coerce.number().int().min(1).max(365).optional(),
+    /** The zone the client displays in; "today" is a calendar day there. */
+    tz: timeZoneSchema.optional(),
+  })
+  .refine((value) => value.view !== "team" || value.teamId, { path: ["teamId"], message: "Required for the team view" });
 
 export const summaryQuerySchema = z.object({ tz: timeZoneSchema.optional() });
+
+/** The top bar's search: a phrase, and how many matches to show. */
+export const searchTasksSchema = z.object({
+  q: z.string().trim().min(1).max(200),
+  limit: z.coerce.number().int().min(1).max(20).default(6),
+});
+
+export const assigneesQuerySchema = z.object({
+  teamId: z.string().uuid().optional(),
+  q: z.string().trim().max(200).optional(),
+});
+
+export const exportTasksSchema = z.object({
+  scope: z.enum(COMPLETED_SCOPES).default("mine"),
+  days: z.coerce.number().int().min(1).max(365).default(30),
+  tz: timeZoneSchema.optional(),
+});
 
 export const createTaskSchema = z.object({
   title,
@@ -55,15 +81,22 @@ export const createTaskSchema = z.object({
   priority: z.enum(PRIORITIES).default("MEDIUM"),
   status: z.enum(EDITABLE_STATUSES).default("OPEN"),
   ownerUserId: z.string().uuid().optional(),
+  /** A team (shared mailbox) the creator is on. */
+  teamId: z.string().uuid().nullable().optional(),
+  reminderAt: z.iso.datetime().nullable().optional(),
   messageId: z.string().uuid().optional(),
   threadId: z.string().uuid().optional(),
   checklist: z.array(checklistText).max(50).default([]),
 });
 
-/** From an email: the title falls back to the message's subject. */
+/**
+ * From an email: the title falls back to the message's subject. `mailboxId`
+ * is the shared inbox the message was read in; a task made there belongs to
+ * that team unless another team is named.
+ */
 export const createFromMessageSchema = createTaskSchema
   .omit({ messageId: true, threadId: true })
-  .extend({ title: title.optional() });
+  .extend({ title: title.optional(), mailboxId: z.string().uuid().optional() });
 
 export const updateTaskSchema = z
   .object({
@@ -72,6 +105,11 @@ export const updateTaskSchema = z
     dueAt: z.iso.datetime().nullable().optional(),
     priority: z.enum(PRIORITIES).optional(),
     status: z.enum(EDITABLE_STATUSES).optional(),
+    /** Reassign. */
+    ownerUserId: z.string().uuid().optional(),
+    /** Move to a team, or back to personal work with null. */
+    teamId: z.string().uuid().nullable().optional(),
+    reminderAt: z.iso.datetime().nullable().optional(),
   })
   .refine((value) => Object.values(value).some((v) => v !== undefined), "Nothing to update");
 
@@ -91,3 +129,4 @@ export type ListTasksInput = z.infer<typeof listTasksSchema>;
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
 export type CreateFromMessageInput = z.infer<typeof createFromMessageSchema>;
 export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
+export type ExportTasksInput = z.infer<typeof exportTasksSchema>;

@@ -11,6 +11,7 @@ import {
   Crosshair,
   Diamond,
   Download,
+  Eye,
   Flag,
   Hourglass,
   Mail,
@@ -20,11 +21,11 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useMe } from "@/lib/auth-hooks";
-import { useTaskSummary, useTasks } from "@/lib/tasks-hooks";
-import type { ListTasksParams, Task, TaskSort, TaskSummary } from "@/lib/tasks-api";
+import { useTaskSummary, useTaskTeams, useTasks } from "@/lib/tasks-hooks";
+import { exportCompletedTasks, type ListTasksParams, type Task, type TaskSort, type TaskSummary, type TaskTeam } from "@/lib/tasks-api";
 import { SummaryCards, TasksPageHeader, TasksWorkspace, type SummaryCard } from "./TasksWorkspace";
 import type { TasksPageKey } from "./TasksSidebar";
-import { CompletedTable, GroupedTaskList, OverdueTable } from "./TaskList";
+import { CompletedTable, GroupedTaskList, OverdueTable, TeamTable } from "./TaskList";
 import { TaskDetailPanel } from "./TaskDetailPanel";
 import { ReopenDialog, TaskDialog } from "./TaskDialogs";
 import { groupByDay, groupByState, nextDaysLabel, todayLong, zoneName, type TaskGroup } from "./format";
@@ -50,7 +51,7 @@ interface PageDef {
   subtitle: () => string;
   panelTitle: string;
   panelSubtitle: () => string;
-  layout: "grouped" | "overdue" | "completed";
+  layout: "grouped" | "overdue" | "completed" | "team";
   tabs: TabDef[];
   sorts: { value: TaskSort; label: string }[];
   search?: boolean;
@@ -72,7 +73,37 @@ const DUE_SORTS: PageDef["sorts"] = [
 const count = (tasks: Task[] | undefined, test: (t: Task) => boolean) => (tasks ? tasks.filter(test).length : null);
 const highPriority = (t: Task) => t.priority === "HIGH" || t.priority === "URGENT";
 
-const PAGES: Record<TasksPageKey, PageDef> = {
+/** One team's page (screen 5): its open work, who has it, and when it is due. */
+function teamPage(teamId: string, team: TaskTeam | undefined): PageDef {
+  const name = team?.name ?? "Team";
+  return {
+    icon: Users,
+    title: name,
+    subtitle: () => `Coordinate ownership, priorities and deadlines across the team. ${team ? `${team.address} · ${team.memberCount} ${team.memberCount === 1 ? "member" : "members"}` : ""}`,
+    panelTitle: "Team queue",
+    panelSubtitle: () => `One accountable owner per task · Times in ${zoneName()}`,
+    layout: "team",
+    search: true,
+    tabs: [
+      { key: "all", label: "All team tasks", params: { view: "team", teamId }, grouping: "flat" },
+      { key: "mine", label: "Assigned to me", params: { view: "team", teamId }, filter: (t, me) => t.owner.id === me, grouping: "flat" },
+      { key: "blocked", label: "Blocked", params: { view: "team", teamId }, grouping: "flat", soon: true },
+    ],
+    sorts: [
+      { value: "due_asc", label: "Due date (earliest)" },
+      { value: "priority", label: "Priority first" },
+      { value: "created_desc", label: "Recently added" },
+    ],
+    empty: `Nothing open for ${name}. Create a team task, or turn an email in ${team?.address ?? "the team's inbox"} into one.`,
+    cards: () => [
+      { icon: CheckSquare, tone: "accent", value: team?.counts.open ?? null, label: "Open team tasks", hint: "Across this team" },
+      { icon: Clock, tone: "warn", value: team?.counts.dueNext3Days ?? null, label: "Due in the next 3 days", hint: "Review approaching commitments" },
+      { icon: Flag, tone: "crit", value: null, label: "Blocked tasks", hint: "Waiting on a dependency", soon: true },
+    ],
+  };
+}
+
+const PAGES: Record<Exclude<TasksPageKey, "team">, PageDef> = {
   my: {
     icon: CheckSquare,
     title: "My Tasks",
@@ -181,7 +212,7 @@ const PAGES: Record<TasksPageKey, PageDef> = {
     tabs: [
       { key: "all", label: "All completed", params: { view: "completed" }, grouping: "flat" },
       { key: "mine", label: "Completed by me", params: { view: "completed" }, filter: (t, me) => t.completedBy?.id === me, grouping: "flat" },
-      { key: "team", label: "By my team", params: { view: "completed" }, grouping: "flat", soon: true },
+      { key: "team", label: "By my team", params: { view: "completed", scope: "team" }, grouping: "flat" },
     ],
     sorts: [{ value: "completed_desc", label: "Recently completed" }],
     empty: "Nothing completed in this period.",
@@ -189,7 +220,7 @@ const PAGES: Record<TasksPageKey, PageDef> = {
     cards: (s, _base, extra) => [
       { icon: CheckCheck, tone: "ok", value: s?.counts.completedThisWeek ?? null, label: "Completed this week", hint: "Across tasks you can access" },
       { icon: CalendarDays, tone: "accent", value: extra?.length ?? null, label: "Completed in 30 days", hint: "Historical records available" },
-      { icon: Users, tone: "ai", value: null, label: "Team completions this week", hint: "Within your teams", soon: true },
+      { icon: Users, tone: "ai", value: s?.counts.teamCompletionsThisWeek ?? null, label: "Team completions this week", hint: "Within your teams" },
     ],
   },
   "from-email": {
@@ -205,6 +236,23 @@ const PAGES: Record<TasksPageKey, PageDef> = {
     empty: "No tasks from email yet. Open a message and choose Create task.",
     cards: (s, base) => [
       { icon: Mail, tone: "accent", value: s?.counts.fromEmail ?? null, label: "Open from email", hint: "Linked to a message" },
+      { icon: Clock, tone: "warn", value: count(base, (t) => t.dueState === "today"), label: "Due today", hint: todayLong() },
+      { icon: Flag, tone: "crit", value: count(base, (t) => t.dueState === "overdue"), label: "Overdue", hint: "Needs attention" },
+    ],
+  },
+  following: {
+    icon: Eye,
+    title: "Following",
+    subtitle: () => "Work you keep an eye on without owning it. You hear when it is completed, handed over or reopened.",
+    panelTitle: "Followed work",
+    panelSubtitle: () => `Organised by due date · Times shown in ${zoneName()}`,
+    layout: "grouped",
+    search: true,
+    tabs: [{ key: "all", label: "All followed", params: { view: "following" }, grouping: "state", count: (s) => s.counts.following }],
+    sorts: DUE_SORTS,
+    empty: "You are not following anything. Open a task and choose Follow to keep up with it.",
+    cards: (s, base) => [
+      { icon: Eye, tone: "accent", value: s?.counts.following ?? null, label: "Following", hint: "Open work you watch" },
       { icon: Clock, tone: "warn", value: count(base, (t) => t.dueState === "today"), label: "Due today", hint: todayLong() },
       { icon: Flag, tone: "crit", value: count(base, (t) => t.dueState === "overdue"), label: "Overdue", hint: "Needs attention" },
     ],
@@ -258,8 +306,10 @@ function useWide() {
 }
 
 /** Every Tasks view: header, figures, the queue and the selected task's details. */
-export function TasksPage({ page }: { page: TasksPageKey }) {
-  const def = PAGES[page];
+export function TasksPage({ page, teamId }: { page: TasksPageKey; teamId?: string }) {
+  const teams = useTaskTeams();
+  const team = teamId ? teams.data?.find((t) => t.id === teamId) : undefined;
+  const def = page === "team" ? teamPage(teamId!, team) : PAGES[page];
   const router = useRouter();
   const params = useSearchParams();
   const wide = useWide();
@@ -275,6 +325,15 @@ export function TasksPage({ page }: { page: TasksPageKey }) {
   const [selectedId, setSelectedId] = useState<string | null>(() => params.get("task"));
   const [creating, setCreating] = useState(false);
   const [reopening, setReopening] = useState<Task | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const exportHistory = () => {
+    setExporting(true);
+    setExportError(null);
+    exportCompletedTasks(tab.params.scope ?? "mine", range)
+      .catch((error: unknown) => setExportError(error instanceof Error ? error.message : "Could not export"))
+      .finally(() => setExporting(false));
+  };
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebounced(query.trim()), 250);
@@ -324,7 +383,7 @@ export function TasksPage({ page }: { page: TasksPageKey }) {
   const zone = zoneName();
 
   return (
-    <TasksWorkspace active={page} onNewTask={() => setCreating(true)}>
+    <TasksWorkspace active={page} activeTeamId={teamId} onNewTask={() => setCreating(true)}>
       <TasksPageHeader
         icon={def.icon}
         tone={def.tone}
@@ -333,17 +392,32 @@ export function TasksPage({ page }: { page: TasksPageKey }) {
         actions={
           <>
             {def.focusView && <SoonButton icon={Crosshair} label="Focus view" />}
+            {page === "team" && <SoonButton icon={Users} label="Review workload" />}
             {page === "completed" ? (
-              <SoonButton icon={Download} label="Export history" />
+              <button type="button" className="zoiko-btn" onClick={exportHistory} disabled={exporting || tasks.length === 0} title={`Download the ${tab.params.scope === "team" ? "team's" : "your"} completed tasks as CSV`}>
+                <Download className="h-4 w-4" aria-hidden /> {exporting ? "Exporting…" : "Export history"}
+              </button>
             ) : (
               <button type="button" className="zoiko-btn pri" onClick={() => setCreating(true)}>
-                <Plus className="h-4 w-4" aria-hidden /> New task
+                <Plus className="h-4 w-4" aria-hidden /> {page === "team" ? "New team task" : "New task"}
               </button>
             )}
           </>
         }
       />
 
+      {exportError && (
+        <p role="alert" className="mb-3 text-[12.5px] text-[var(--crit)]">
+          Could not export the history. {exportError}
+        </p>
+      )}
+
+      {page === "team" && teams.data && !team ? (
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center text-[13px] text-[var(--ink2)]" role="alert">
+          This team workspace is not available. You may have been removed from its shared mailbox.
+        </div>
+      ) : (
+      <>
       <SummaryCards cards={def.cards(summary.data, base.data?.items, extra.data?.items)} />
 
       <div className="grid min-h-[560px] flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(340px,420px)]">
@@ -451,6 +525,8 @@ export function TasksPage({ page }: { page: TasksPageKey }) {
               <OverdueTable tasks={tasks} selectedId={selectedId} onSelect={select} />
             ) : def.layout === "completed" ? (
               <CompletedTable tasks={tasks} selectedId={selectedId} onSelect={select} />
+            ) : def.layout === "team" ? (
+              <TeamTable tasks={tasks} selectedId={selectedId} onSelect={select} />
             ) : (
               <GroupedTaskList groups={groups} selectedId={selectedId} onSelect={select} onReopen={setReopening} showHeaders={tab.grouping !== "flat"} />
             )}
@@ -476,8 +552,10 @@ export function TasksPage({ page }: { page: TasksPageKey }) {
           </div>
         )}
       </div>
+      </>
+      )}
 
-      {creating && <TaskDialog mode={{ kind: "create" }} onClose={() => setCreating(false)} onSaved={(task) => select(task.id)} />}
+      {creating && <TaskDialog mode={{ kind: "create", teamId }} onClose={() => setCreating(false)} onSaved={(task) => select(task.id)} />}
       {reopening && <ReopenDialog task={reopening} onClose={() => setReopening(null)} />}
     </TasksWorkspace>
   );

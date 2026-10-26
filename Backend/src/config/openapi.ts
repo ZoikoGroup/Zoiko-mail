@@ -605,7 +605,7 @@ export const openApiDocument = {
         tags: ["Tasks"], summary: "List tasks for a view", security: bearer,
         description: "view = all | today | upcoming | overdue | completed | from_email | assigned. Day boundaries follow `tz`, else the user's then the workspace's time zone.",
         parameters: [
-          { in: "query", name: "view", schema: { type: "string", enum: ["all", "today", "upcoming", "overdue", "completed", "from_email", "assigned"] } },
+          { in: "query", name: "view", schema: { type: "string", enum: ["all", "today", "upcoming", "overdue", "completed", "from_email", "assigned", "team", "following"] } },
           { in: "query", name: "q", schema: { type: "string" } },
           { in: "query", name: "priority", schema: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "URGENT"] } },
           { in: "query", name: "sort", schema: { type: "string", enum: ["due_asc", "due_desc", "priority", "created_desc", "completed_desc"] } },
@@ -620,6 +620,47 @@ export const openApiDocument = {
     },
     "/api/v1/tasks/summary": {
       get: { tags: ["Tasks"], summary: "Counts for the task summary cards and menu", security: bearer, responses: { "200": ok("Task counts") } },
+    },
+    "/api/v1/tasks/teams": {
+      get: { tags: ["Tasks"], summary: "My team workspaces (shared mailboxes) with their open work", security: bearer, responses: { "200": ok("Teams returned") } },
+    },
+    "/api/v1/tasks/assignees": {
+      get: {
+        tags: ["Tasks"], summary: "People a task can be assigned to", security: bearer,
+        parameters: [
+          { in: "query", name: "teamId", schema: { type: "string", format: "uuid" } },
+          { in: "query", name: "q", schema: { type: "string" } },
+        ],
+        responses: { "200": ok("Assignees returned"), "404": ok("Team not found") },
+      },
+    },
+    "/api/v1/tasks/export": {
+      get: {
+        tags: ["Tasks"], summary: "Export completed tasks as CSV", security: bearer,
+        parameters: [
+          { in: "query", name: "scope", schema: { type: "string", enum: ["mine", "team"] } },
+          { in: "query", name: "days", schema: { type: "integer", minimum: 1, maximum: 365 } },
+          { in: "query", name: "tz", schema: { type: "string" } },
+        ],
+        responses: { "200": ok("CSV file") },
+      },
+    },
+    "/api/v1/tasks/search": {
+      get: {
+        tags: ["Tasks"], summary: "Find tasks I can see by title or description", security: bearer,
+        parameters: [
+          { in: "query", name: "q", required: true, schema: { type: "string" } },
+          { in: "query", name: "limit", schema: { type: "integer", minimum: 1, maximum: 20 } },
+        ],
+        responses: { "200": ok("Matching tasks"), "400": ok("Missing search phrase") },
+      },
+    },
+    "/api/v1/tasks/{taskId}/activity": {
+      get: { tags: ["Tasks"], summary: "A task's history, from the audit log", security: bearer, responses: { "200": ok("Activity returned"), "404": ok("Task not found") } },
+    },
+    "/api/v1/tasks/{taskId}/follow": {
+      post: { tags: ["Tasks"], summary: "Follow a task", security: bearer, responses: { "200": ok("Following"), "404": ok("Task not found") } },
+      delete: { tags: ["Tasks"], summary: "Stop following a task", security: bearer, responses: { "200": ok("Not following"), "404": ok("Task not found") } },
     },
     "/api/v1/tasks/from-message/{messageId}": {
       post: { tags: ["Tasks"], summary: "Create a task from an email", security: bearer, responses: { "201": ok("Task created"), "404": ok("Message not found") } },

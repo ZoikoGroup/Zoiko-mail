@@ -1,13 +1,23 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Search, X, Settings, LogOut, ChevronDown, Bell, Sparkles, UserRound } from "lucide-react";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { LayoutMenu } from "@/components/mail/LayoutMenu";
 import { initials } from "@/lib/useMemberShell";
 import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from "@/lib/admin-hooks";
+import { useTaskSearch } from "@/lib/tasks-hooks";
+import type { Task } from "@/lib/tasks-api";
+
+/** Where a found task opens: its team's page, the Completed history, or My Tasks. */
+function taskHref(task: Task): string {
+  if (task.status === "COMPLETED") return `/mail/tasks/completed?task=${task.id}`;
+  if (task.team) return `/mail/tasks/team/${task.team.id}?task=${task.id}`;
+  return `/mail/tasks?task=${task.id}`;
+}
 
 /** Closes a popover on an outside click or Escape. */
 function useDismiss(open: boolean, close: () => void) {
@@ -35,11 +45,15 @@ function useDismiss(open: boolean, close: () => void) {
  * (Ctrl/⌘+K focuses it), Alet, notifications, settings and the account menu.
  *
  * Search text is lifted to the page, which hands it to MailClient's operator
- * parser — "from:hr has:attachment" works here as it always has.
+ * parser — "from:hr has:attachment" works here as it always has. Outside Mail
+ * there is no page to lift it to, so the bar keeps its own text. Either way,
+ * matching tasks are offered beneath it: arrow down to one and press Enter,
+ * or click it.
  */
 export function TopBar({
-  query,
-  onQueryChange,
+  query: liftedQuery,
+  onQueryChange: liftedChange,
+  placeholder = "Search mail — try from:hr has:attachment",
   accountEmail,
   displayName,
   workspaceName,
@@ -47,7 +61,9 @@ export function TopBar({
   signingOut = false,
 }: {
   query: string;
-  onQueryChange: (value: string) => void;
+  /** Absent outside Mail: the bar then keeps its own text. */
+  onQueryChange?: (value: string) => void;
+  placeholder?: string;
   accountEmail?: string;
   displayName?: string;
   workspaceName?: string;
@@ -59,6 +75,40 @@ export function TopBar({
   const menuRef = useDismiss(menuOpen, () => setMenuOpen(false));
   const bellRef = useDismiss(bellOpen, () => setBellOpen(false));
   const searchRef = useRef<HTMLInputElement>(null);
+  const router = useRouter();
+  const [ownQuery, setOwnQuery] = useState("");
+  const query = liftedChange ? liftedQuery : ownQuery;
+  const onQueryChange = liftedChange ?? setOwnQuery;
+
+  // Tasks matching the words typed, without mail operators like from:hr.
+  const taskTerm = query.replace(/\b\w+:\S*/g, "").trim();
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [activeTask, setActiveTask] = useState(-1);
+  const taskResults = useTaskSearch(searchFocused ? taskTerm : "");
+  const tasksFound = taskTerm.length >= 2 ? taskResults.data ?? [] : [];
+  const showTasks = searchFocused && taskTerm.length >= 2 && (tasksFound.length > 0 || !taskResults.isFetching);
+  useEffect(() => setActiveTask(-1), [taskTerm]);
+  const openTask = (task: Task) => {
+    setSearchFocused(false);
+    searchRef.current?.blur();
+    router.push(taskHref(task));
+  };
+  const onSearchKey = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (!showTasks) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveTask((i) => Math.min(i + 1, tasksFound.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveTask((i) => Math.max(i - 1, -1));
+    } else if (e.key === "Enter" && (activeTask >= 0 || !liftedChange) && tasksFound.length > 0) {
+      // In Mail, Enter keeps searching mail unless a task was chosen.
+      e.preventDefault();
+      openTask(tasksFound[Math.max(activeTask, 0)]!);
+    } else if (e.key === "Escape") {
+      setSearchFocused(false);
+    }
+  };
 
   const { data: notifications } = useNotifications();
   const markRead = useMarkNotificationRead();
@@ -108,7 +158,7 @@ export function TopBar({
 
       <div className="relative mx-auto w-full max-w-xl flex-1">
         <label htmlFor="mail-search" className="sr-only">
-          Search mail
+          {liftedChange ? "Search mail and tasks" : "Search tasks"}
         </label>
         <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ink3)]" aria-hidden />
         <input
@@ -117,8 +167,15 @@ export function TopBar({
           type="search"
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
-          placeholder="Search mail — try from:hr has:attachment"
-          className="h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--ground)] pl-10 pr-20 text-sm text-[var(--ink)] outline-none placeholder:text-[var(--ink3)] focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)]"
+          onFocus={() => setSearchFocused(true)}
+          onBlur={() => setSearchFocused(false)}
+          onKeyDown={onSearchKey}
+          role="combobox"
+          aria-expanded={showTasks}
+          aria-controls="task-search-results"
+          aria-activedescendant={activeTask >= 0 ? `task-result-${activeTask}` : undefined}
+          placeholder={placeholder}
+          className="h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--ground)] pl-10 pr-20 text-sm [&::-webkit-search-cancel-button]:appearance-none text-[var(--ink)] outline-none placeholder:text-[var(--ink3)] focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)]"
         />
         {query ? (
           <button
@@ -132,6 +189,63 @@ export function TopBar({
           <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-md border border-[var(--border)] px-1.5 py-0.5 font-sans text-[11px] text-[var(--ink3)]">
             Ctrl K
           </kbd>
+        )}
+        {showTasks && (
+          <div
+            id="task-search-results"
+            role="listbox"
+            aria-label="Tasks"
+            className="absolute left-0 right-0 top-[calc(100%+6px)] z-40 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--sh3)]"
+            // Keep focus in the box while choosing, so the click lands.
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            <div className="flex items-center justify-between px-3.5 pb-1 pt-2.5 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-[var(--ink3)]">
+              <span>Tasks</span>
+              <span className="normal-case tracking-normal">↑↓ to choose · Enter to open</span>
+            </div>
+            {tasksFound.length === 0 ? (
+              <p className="px-3.5 pb-3 pt-1 text-[12.5px] text-[var(--ink3)]">No tasks match “{taskTerm}”.</p>
+            ) : (
+              <ul className="pb-1.5">
+                {tasksFound.map((task, i) => (
+                  <li key={task.id} id={`task-result-${i}`} role="option" aria-selected={i === activeTask}>
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={() => openTask(task)}
+                      onMouseEnter={() => setActiveTask(i)}
+                      className={`flex w-full items-center gap-3 px-3.5 py-2 text-left ${i === activeTask ? "bg-[var(--s2)]" : ""}`}
+                    >
+                      <span
+                        className={`h-2 w-2 shrink-0 rounded-full ${
+                          task.status === "COMPLETED" ? "bg-[var(--ok)]" : task.dueState === "overdue" ? "bg-[var(--crit)]" : "bg-[var(--accent)]"
+                        }`}
+                        aria-hidden
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span
+                          className={`block truncate text-[13px] font-medium ${
+                            task.status === "COMPLETED" ? "text-[var(--ink3)] line-through" : "text-[var(--ink)]"
+                          }`}
+                        >
+                          {task.title}
+                        </span>
+                        <span className="block truncate text-[11.5px] text-[var(--ink3)]">
+                          {[
+                            task.status === "COMPLETED" ? "Completed" : task.dueState === "overdue" ? "Overdue" : null,
+                            task.team?.name ?? "Personal",
+                            task.owner.displayName,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         )}
       </div>
 

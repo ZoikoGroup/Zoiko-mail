@@ -8,7 +8,12 @@ import {
   createTaskFromMessage,
   deleteTask,
   getTask,
+  followTask,
+  getTaskActivity,
   getTaskSummary,
+  searchTasks,
+  listAssignees,
+  listTaskTeams,
   listTasks,
   removeChecklistItem,
   reopenTask,
@@ -38,6 +43,40 @@ export function useTasks(params: ListTasksParams, enabled = true) {
 
 export function useTaskSummary() {
   return useQuery({ queryKey: ["tasks", "summary"], queryFn: getTaskSummary, staleTime: 30_000 });
+}
+
+export function useTaskTeams() {
+  return useQuery({ queryKey: ["tasks", "teams"], queryFn: listTaskTeams, staleTime: 30_000 });
+}
+
+export function useAssignees(teamId: string | null | undefined, q: string, enabled = true) {
+  return useQuery({
+    queryKey: ["tasks", "assignees", teamId ?? null, q],
+    queryFn: () => listAssignees({ teamId, q }),
+    staleTime: 60_000,
+    placeholderData: (previous) => previous,
+    enabled,
+  });
+}
+
+export function useTaskActivity(id: string) {
+  return useQuery({ queryKey: ["tasks", "activity", id], queryFn: () => getTaskActivity(id), staleTime: 15_000 });
+}
+
+/** Tasks matching what is typed in the top bar. */
+export function useTaskSearch(q: string) {
+  const term = q.trim();
+  return useQuery({
+    queryKey: ["tasks", "search", term],
+    queryFn: () => searchTasks(term),
+    enabled: term.length >= 2,
+    staleTime: 15_000,
+    placeholderData: (previous) => previous,
+  });
+}
+
+export function useFollowTask() {
+  return useTaskWrite(({ id, follow }: { id: string; follow: boolean }) => followTask(id, follow));
 }
 
 export function useTask(id: string | null) {

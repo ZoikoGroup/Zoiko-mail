@@ -8,19 +8,21 @@ import {
   CheckCheck,
   CheckSquare,
   Clock,
+  Eye,
   Flag,
   Mail,
   Plus,
-  Sparkles,
   Users,
   type LucideIcon,
 } from "lucide-react";
 import { useMyMailbox } from "@/lib/mail-hooks";
-import { useTaskSummary } from "@/lib/tasks-hooks";
+import { useTaskSummary, useTaskTeams } from "@/lib/tasks-hooks";
 import type { TaskSummary } from "@/lib/tasks-api";
 
-/** The Tasks workspace's pages, in sidebar order. */
-export type TasksPageKey = "my" | "today" | "upcoming" | "overdue" | "completed" | "from-email" | "assigned";
+/** The Tasks workspace's pages, in sidebar order. "team" is one team's page. */
+export type TasksPageKey = "my" | "today" | "upcoming" | "overdue" | "completed" | "from-email" | "assigned" | "following" | "team";
+
+export const teamHref = (teamId: string) => `/mail/tasks/team/${teamId}`;
 
 type CountKey = keyof TaskSummary["counts"];
 
@@ -45,6 +47,7 @@ export const TASK_PAGES: NavItem[] = [
 export const MY_WORK_PAGES: NavItem[] = [
   { key: "from-email", label: "From Emails", href: "/mail/tasks/from-email", icon: Mail, count: "fromEmail" },
   { key: "assigned", label: "Assigned to Me", href: "/mail/tasks/assigned", icon: AtSign, count: "assigned" },
+  { key: "following", label: "Following", href: "/mail/tasks/following", icon: Eye, count: "following" },
 ];
 
 const rowClass = (active: boolean) =>
@@ -68,17 +71,6 @@ function Count({ value, alert }: { value: number; alert?: boolean }) {
     >
       {value}
     </span>
-  );
-}
-
-/** A menu entry that is in the design but arrives in a later phase. */
-function SoonRow({ icon: Icon, label, hint }: { icon: LucideIcon; label: string; hint: string }) {
-  return (
-    <div aria-disabled="true" title={hint} className="flex w-full cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-[13.5px] text-[var(--ink3)]">
-      <Icon className="h-4 w-4 shrink-0" aria-hidden />
-      <span className="truncate">{label}</span>
-      <span className="ml-auto rounded-full border border-[var(--border)] px-1.5 text-[9.5px] font-semibold uppercase tracking-wide">Soon</span>
-    </div>
   );
 }
 
@@ -108,8 +100,9 @@ function gb(bytes: number): string {
 }
 
 /** The Tasks workspace's left column: create, the views with their counts, and mailbox storage. */
-export function TasksSidebar({ active, onNewTask }: { active: TasksPageKey; onNewTask: () => void }) {
+export function TasksSidebar({ active, activeTeamId, onNewTask }: { active: TasksPageKey; activeTeamId?: string; onNewTask: () => void }) {
   const { data: summary } = useTaskSummary();
+  const teams = useTaskTeams();
   const { data: mailbox, isLoading: mailboxLoading } = useMyMailbox();
   const storageUsed = mailbox?.storageUsed ?? 0;
   const storageLimit = mailbox?.storageLimit ?? 0;
@@ -134,11 +127,31 @@ export function TasksSidebar({ active, onNewTask }: { active: TasksPageKey; onNe
         <div className="mx-3 mt-3 border-t border-[var(--border)]" />
         <SectionTitle>My work</SectionTitle>
         <NavList items={MY_WORK_PAGES} active={active} summary={summary} />
-        <SoonRow icon={Sparkles} label="Following" hint="Following arrives in a later update" />
 
         <div className="mx-3 mt-3 border-t border-[var(--border)]" />
         <SectionTitle>Team workspaces</SectionTitle>
-        <SoonRow icon={Users} label="Team workspaces" hint="Shared team task lists arrive in a later update" />
+        {teams.isLoading ? (
+          <p className="px-3 py-1 text-xs text-[var(--ink3)]">Loading…</p>
+        ) : (teams.data ?? []).length === 0 ? (
+          <p className="px-3 py-1 text-[12px] leading-relaxed text-[var(--ink3)]" data-testid="no-teams">
+            No team workspaces yet. A team&rsquo;s tasks appear here once an admin adds you to its shared mailbox.
+          </p>
+        ) : (
+          <ul className="space-y-0.5" data-testid="team-workspaces">
+            {teams.data!.map((team) => {
+              const current = active === "team" && team.id === activeTeamId;
+              return (
+                <li key={team.id}>
+                  <Link href={teamHref(team.id)} className={rowClass(current)} aria-current={current ? "page" : undefined} title={team.address}>
+                    <Users className="h-4 w-4 shrink-0" aria-hidden />
+                    <span className="truncate">{team.name}</span>
+                    <Count value={team.counts.open} />
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </nav>
 
       <div className="m-3 rounded-xl border border-[var(--border)] bg-[var(--s2)] p-3">

@@ -33,6 +33,7 @@ model Tenant {
   aiActions              AIAction[]
   commitments            Commitment[]
   taskChecklistItems     TaskChecklistItem[]
+  taskFollowers          TaskFollower[]
   notifications          Notification[]
   integrationLinks       IntegrationLink[]
   backgroundJobs         BackgroundJob[]
@@ -120,6 +121,7 @@ model AppUser {
   ownedCommitments            Commitment[]           @relation("CommitmentOwner")
   createdCommitments          Commitment[]           @relation("CommitmentCreator")
   completedCommitments        Commitment[]           @relation("CommitmentCompleter")
+  followedTasks               TaskFollower[]         @relation("TaskFollowerUser")
   notifications               Notification[]
   createdIntegrationLinks     IntegrationLink[]      @relation("IntegrationCreator")
   createdJobs                 BackgroundJob[]        @relation("JobCreator")
@@ -433,6 +435,7 @@ model Mailbox {
   aliases               Alias[]
   forwardingRules       ForwardingRule[]
   sentAsMessages        EmailMessage[]             @relation("SentAsMailbox")
+  teamTasks             Commitment[]               @relation("CommitmentTeam")
 
   @@unique([tenantId, address])
   /// One Zoiko mailbox per host account, so two rows can never claim the same
@@ -1011,6 +1014,13 @@ model Commitment {
   snoozedUntil        DateTime?        @map("snoozed_until")
   completedAt         DateTime?        @map("completed_at")
   completedByUserId   String?          @map("completed_by_user_id") @db.Uuid
+  /// The team the task belongs to: a shared (or distribution) mailbox, whose
+  /// members are the people with access to it. Null for personal work.
+  teamMailboxId       String?          @map("team_mailbox_id") @db.Uuid
+  /// When the owner is reminded, and when that reminder went out. Changing
+  /// the time clears the sent mark so the new reminder fires.
+  reminderAt          DateTime?        @map("reminder_at")
+  reminderSentAt      DateTime?        @map("reminder_sent_at")
   createdAt           DateTime         @default(now()) @map("created_at")
   updatedAt           DateTime         @updatedAt @map("updated_at")
   /// Track the AIAction that produced this commitment so a confirmed extraction
@@ -1020,17 +1030,37 @@ model Commitment {
   owner               AppUser          @relation("CommitmentOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
   createdBy           AppUser          @relation("CommitmentCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
   completedBy         AppUser?         @relation("CommitmentCompleter", fields: [completedByUserId], references: [id], onDelete: SetNull)
+  teamMailbox         Mailbox?         @relation("CommitmentTeam", fields: [teamMailboxId], references: [id], onDelete: SetNull)
   owedBy              Participant?     @relation("CommitmentOwedBy", fields: [owedByParticipantId], references: [id], onDelete: SetNull)
   owedTo              Participant?     @relation("CommitmentOwedTo", fields: [owedToParticipantId], references: [id], onDelete: SetNull)
   sourceAiAction      AIAction?        @relation(fields: [sourceAiActionId], references: [id], onDelete: SetNull)
   checklist           TaskChecklistItem[]
+  followers           TaskFollower[]
 
   @@index([tenantId, ownerUserId, status, dueAt])
   @@index([tenantId, ownerUserId, completedAt])
   @@index([tenantId, createdByUserId, status])
   @@index([tenantId, owedByParticipantId])
   @@index([tenantId, owedToParticipantId])
+  @@index([tenantId, teamMailboxId, status, dueAt])
+  @@index([reminderAt])
   @@map("commitments")
+}
+
+/// Someone keeping an eye on a task they do not own. Following never grants
+/// access: a follower who can no longer see the task stops hearing about it.
+model TaskFollower {
+  commitmentId String     @map("commitment_id") @db.Uuid
+  userId       String     @map("user_id") @db.Uuid
+  tenantId     String     @map("tenant_id") @db.Uuid
+  createdAt    DateTime   @default(now()) @map("created_at")
+  commitment   Commitment @relation(fields: [commitmentId], references: [id], onDelete: Cascade)
+  user         AppUser    @relation("TaskFollowerUser", fields: [userId], references: [id], onDelete: Cascade)
+  tenant       Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@id([commitmentId, userId])
+  @@index([tenantId, userId])
+  @@map("task_followers")
 }
 
 /// One step of a task's checklist ("2 of 3 complete").

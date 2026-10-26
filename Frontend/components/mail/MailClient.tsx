@@ -1884,8 +1884,8 @@ function ReadingPane({
         {!view && (
           <>
             <div className="flex-1" />
-            {/* Tasks link to messages in one's own mailbox, so not from a shared one. */}
-            {!sharedInbox && (
+            {/* From a shared inbox, the task belongs to that inbox's team. */}
+            {(
               <button
                 type="button"
                 onClick={() => setCreatingTask(true)}
@@ -1914,7 +1914,7 @@ function ReadingPane({
       />
       {creatingTask && (
         <TaskDialog
-          mode={{ kind: "from-message", messageId, subject: item.message.subject }}
+          mode={{ kind: "from-message", messageId, subject: item.message.subject, mailboxId: sharedInbox && !sharedInbox.delegated ? sharedInbox.id : undefined }}
           onClose={() => setCreatingTask(false)}
           onSaved={(task) => setCreatedTaskId(task.id)}
         />

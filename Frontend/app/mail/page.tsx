@@ -1,14 +1,18 @@
 "use client";
 
-import { Suspense, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { WebmailShell } from "@/components/mail/WebmailShell";
 import { MailClient, type MailClientHandle } from "@/components/mail/MailClient";
+import { useSharedInboxes } from "@/lib/mail-hooks";
 import type { MailListFolder, SharedInbox } from "@/lib/mail-api";
 
 const FOLDERS: MailListFolder[] = ["INBOX", "SENT", "DRAFTS", "ARCHIVE", "TRASH", "QUARANTINE", "SPAM", "SNOOZED", "SCHEDULED", "STARRED"];
 
-/** /mail?message=<id>&folder=<FOLDER> opens that message — the link a task's "Open source email" follows. */
+/**
+ * /mail?message=<id>&folder=<FOLDER>[&mailbox=<shared inbox id>] opens that
+ * message — the link a task's "Open source email" follows.
+ */
 export default function MailPage() {
   return (
     <Suspense>
@@ -32,6 +36,20 @@ function MailPageInner() {
   const [labelId, setLabelId] = useState("");
   const [sharedInbox, setSharedInbox] = useState<SharedInbox | null>(null);
   const mailClientRef = useRef<MailClientHandle>(null);
+
+  // ?mailbox=<id>: the linked message is in a shared inbox, so open that
+  // inbox first, then the message in it. Once only — after that the person
+  // moves between inboxes freely.
+  const linkedMailbox = params.get("mailbox");
+  const { data: sharedInboxes } = useSharedInboxes();
+  const linkApplied = useRef(false);
+  useEffect(() => {
+    if (!linkedMailbox || linkApplied.current || !sharedInboxes) return;
+    linkApplied.current = true;
+    const inbox = sharedInboxes.find((m) => m.id === linkedMailbox);
+    if (inbox) setSharedInbox(inbox);
+  }, [linkedMailbox, sharedInboxes]);
+  const linkResolved = !linkedMailbox || sharedInbox?.id === linkedMailbox || (sharedInboxes !== undefined && !sharedInboxes.some((m) => m.id === linkedMailbox));
 
   return (
     <WebmailShell
@@ -57,7 +75,7 @@ function MailPageInner() {
         labelId={labelId}
         onLabelChange={setLabelId}
         sharedInbox={sharedInbox}
-        openMessageId={params.get("message")}
+        openMessageId={linkResolved ? params.get("message") : null}
       />
     </WebmailShell>
   );

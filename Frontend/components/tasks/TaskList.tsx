@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Flag, ListChecks, Mail, Sparkles, UserRound } from "lucide-react";
+import { BellRing, Check, Flag, ListChecks, Mail, Sparkles, UserRound, Users } from "lucide-react";
 import { useCompleteTask } from "@/lib/tasks-hooks";
 import type { Task } from "@/lib/tasks-api";
 import {
@@ -37,6 +37,11 @@ export function TaskChips({ task }: { task: Task }) {
           <Mail className="h-3 w-3" aria-hidden /> Linked email
         </Chip>
       )}
+      {task.team && (
+        <Chip>
+          <Users className="h-3 w-3" aria-hidden /> {task.team.name}
+        </Chip>
+      )}
       {task.isAssigned && (
         <Chip tone="ai">
           <UserRound className="h-3 w-3" aria-hidden /> From {task.createdBy.displayName.split(" ")[0] || task.createdBy.email}
@@ -48,6 +53,11 @@ export function TaskChips({ task }: { task: Task }) {
         </Chip>
       )}
       {(task.status === "PLANNED" || task.status === "IN_PROGRESS" || task.status === "SNOOZED") && <Chip>{STATUS_LABEL[task.status]}</Chip>}
+      {task.reminderAt && !task.reminderSentAt && (
+        <Chip>
+          <BellRing className="h-3 w-3" aria-hidden /> {dueLabel(task.reminderAt)}
+        </Chip>
+      )}
       {task.checklistProgress.total > 0 && (
         <Chip tone={task.checklistProgress.done === task.checklistProgress.total ? "ok" : "nu"}>
           <ListChecks className="h-3 w-3" aria-hidden /> {task.checklistProgress.done}/{task.checklistProgress.total}
@@ -295,6 +305,59 @@ export function CompletedTable({ tasks, selectedId, onSelect }: { tasks: Task[];
               )}
             </td>
             <td className={`px-3 py-3 text-[12.5px] ${PRIORITY_CLASS[task.priority]}`}>{PRIORITY_SHORT[task.priority]}</td>
+          </TableRow>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+const STATUS_PILL: Record<string, string> = {
+  OPEN: "border-[var(--accent)]/40 text-[var(--accent-ink)]",
+  PLANNED: "border-[var(--border)] text-[var(--ink2)]",
+  IN_PROGRESS: "border-[var(--accent)]/40 text-[var(--accent-ink)]",
+  SNOOZED: "border-[var(--border)] text-[var(--ink3)]",
+};
+
+/** A team's queue: one accountable owner per task, when it is due, and where it stands. */
+export function TeamTable({ tasks, selectedId, onSelect }: { tasks: Task[]; selectedId: string | null; onSelect: (id: string) => void }) {
+  return (
+    <table className="w-full table-fixed" data-testid="task-list">
+      <thead className="sticky top-0 bg-[var(--surface)]">
+        <tr className="border-b border-[var(--border)]">
+          <th className={`${th} pl-5`}>Task / linked source</th>
+          <th className={`${th} w-[140px]`}>Assignee</th>
+          <th className={`${th} w-[110px]`}>Due</th>
+          <th className={`${th} w-[110px]`}>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {tasks.map((task) => (
+          <TableRow key={task.id} task={task} active={task.id === selectedId} onSelect={onSelect}>
+            <TaskCell task={task} />
+            <td className="px-3 py-3 text-[12.5px] text-[var(--ink)]">
+              <span className="flex items-center gap-2">
+                <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-[10px] font-bold text-white" aria-hidden>
+                  {initials(task.owner.displayName || task.owner.email)}
+                </span>
+                <span className="truncate">{task.owner.displayName.split(" ")[0] || task.owner.email}</span>
+              </span>
+            </td>
+            <td className="px-3 py-3 text-[12.5px]">
+              {task.dueAt ? (
+                <>
+                  <span className={`block font-semibold ${task.dueState === "overdue" ? "text-[var(--crit)]" : "text-[var(--ink)]"}`}>{shortDay(task.dueAt)}</span>
+                  <span className="text-[var(--ink3)]">{clock(task.dueAt)}</span>
+                </>
+              ) : (
+                <span className="text-[var(--ink3)]">No date</span>
+              )}
+            </td>
+            <td className="px-3 py-3">
+              <span className={`inline-flex rounded-md border px-2 py-0.5 text-[11.5px] font-semibold ${STATUS_PILL[task.status] ?? STATUS_PILL.PLANNED}`}>
+                {STATUS_LABEL[task.status]}
+              </span>
+            </td>
           </TableRow>
         ))}
       </tbody>
