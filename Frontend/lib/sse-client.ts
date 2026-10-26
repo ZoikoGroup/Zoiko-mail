@@ -14,6 +14,7 @@ export type SSEEventType =
   | "AI_EXTRACTION_DONE"
   | "AI_DRAFT_READY"
   | "NOTIFICATION"
+  | "TASK_UPDATED"
   | "JOB_COMPLETED"
   | "PING";
 
@@ -34,6 +35,7 @@ export interface SSEEvent {
     /** What a NOTIFICATION is about, e.g. "calendar" for invitations and answers. */
     kind?: string;
     eventId?: string;
+    taskId?: string;
   };
   timestamp: string;
 }
@@ -114,7 +116,7 @@ function expiresSoon(token: string): boolean {
 const EVENT_TYPES: SSEEventType[] = [
   "CONNECTED", "NEW_MAIL", "UNREAD_COUNT",
   "AI_EXTRACTION_DONE", "AI_DRAFT_READY",
-  "NOTIFICATION", "JOB_COMPLETED", "PING",
+  "NOTIFICATION", "TASK_UPDATED", "JOB_COMPLETED", "PING",
 ];
 
 /** The server pings every 30s. Silence for this long means a dead connection

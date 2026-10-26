@@ -9,6 +9,7 @@ export type SSEEventType =
   | "AI_EXTRACTION_DONE"
   | "AI_DRAFT_READY"
   | "NOTIFICATION"
+  | "TASK_UPDATED"
   | "JOB_COMPLETED"
   | "PING";
 

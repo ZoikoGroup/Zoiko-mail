@@ -54,6 +54,8 @@ import { MailRow, hashColor, avatarInitials, formatMailTime } from "@/components
 import { SnoozeMenu } from "@/components/mail/SnoozeMenu";
 import { folderLabel as railFolderLabel } from "@/components/mail/FolderRail";
 import { ApiError } from "@/lib/api-client";
+import Link from "next/link";
+import { TaskDialog } from "@/components/tasks/TaskDialogs";
 import {
   type FolderView,
   getFolderView, scheduleBucket, daysAgo,
@@ -245,6 +247,8 @@ interface MailClientProps {
   onLabelChange?: (labelId: string) => void;
   /** A shared or delegated inbox to read instead of one's own. */
   sharedInbox?: SharedInbox | null;
+  /** A message to open on arrival — /mail?message=<id>, followed from a task. */
+  openMessageId?: string | null;
   /** A link into Mail to act on once (app/mail/page.tsx reads it from the URL). */
   link?: MailLink | null;
 }
@@ -277,6 +281,7 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
     labelId: controlledLabelId,
     onLabelChange,
     sharedInbox = null,
+    openMessageId = null,
     link = null,
   },
   ref
@@ -372,6 +377,10 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
     setCheckedIds(new Set());
   }, [starredOnly, unreadOnly, labelFilter, fromFilter, toFilter, hasAttachment, dateAfter, dateBefore, mailboxId, folder, viewTab, datePreset]);
 
+  // After the reset above, so a linked message survives the first render's clear.
+  useEffect(() => {
+    if (openMessageId) setSelectedId(openMessageId);
+  }, [openMessageId]);
   // A link into Mail (from Contacts). Declared after the reset above, so on
   // the render that switches folder the reset runs first and this wins.
   useEffect(() => {
@@ -1394,6 +1403,8 @@ function ReadingPane({
   const update = useUpdateMailItem();
   const permanentlyDelete = usePermanentlyDelete();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [creatingTask, setCreatingTask] = useState(false);
+  const [createdTaskId, setCreatedTaskId] = useState<string | null>(null);
   const { data: labels = [] } = useMailLabels();
   const assignLabel = useAssignLabel();
   const removeLabel = useRemoveLabel();
@@ -1896,7 +1907,17 @@ function ReadingPane({
         {!view && (
           <>
             <div className="flex-1" />
-            <ComingSoonButton icon={ListChecks} label="Create task" hint="Tasks are coming soon" />
+            {/* From a shared inbox, the task belongs to that inbox's team. */}
+            {(
+              <button
+                type="button"
+                onClick={() => setCreatingTask(true)}
+                title="Create a task from this email"
+                className="inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--border)] px-3.5 text-[13px] font-medium text-[var(--ink)] transition hover:bg-[var(--s2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+              >
+                <ListChecks className="h-4 w-4" aria-hidden /> Create task
+              </button>
+            )}
           </>
         )}
       </div>
@@ -1914,6 +1935,24 @@ function ReadingPane({
         variant="danger"
         loading={permanentlyDelete.isPending}
       />
+      {creatingTask && (
+        <TaskDialog
+          mode={{ kind: "from-message", messageId, subject: item.message.subject, mailboxId: sharedInbox && !sharedInbox.delegated ? sharedInbox.id : undefined }}
+          onClose={() => setCreatingTask(false)}
+          onSaved={(task) => setCreatedTaskId(task.id)}
+        />
+      )}
+      {createdTaskId && (
+        <div role="status" className="fixed bottom-20 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 text-[13px] text-[var(--ink)] shadow-[var(--sh3)] lg:bottom-6">
+          <ListChecks className="h-4 w-4 text-[var(--ok)]" aria-hidden /> Task created
+          <Link href={`/mail/tasks/from-email?task=${createdTaskId}`} className="font-semibold text-[var(--accent-ink)] hover:underline">
+            View task
+          </Link>
+          <button type="button" aria-label="Dismiss" onClick={() => setCreatedTaskId(null)} className="rounded p-0.5 text-[var(--ink3)] hover:text-[var(--ink)]">
+            <X className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        </div>
+      )}
     </article>
   );
 }

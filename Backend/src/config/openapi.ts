@@ -19,7 +19,7 @@ export const openApiDocument = {
       "the provider's own event id.",
   },
   servers: [{ url: "http://localhost:5000", description: "Local development" }],
-  tags: ["System", "Authentication", "Users", "Tenants", "Memberships", "Policies", "Mail", "Messages", "Threads", "Participants", "Domains", "AI", "Actions", "Notifications", "Integrations", "Connectors", "Delivery Protection", "Lifecycle", "Support", "Audit", "Billing"].map((name) => ({ name })),
+  tags: ["System", "Authentication", "Users", "Tenants", "Memberships", "Policies", "Mail", "Messages", "Threads", "Participants", "Domains", "AI", "Actions", "Tasks", "Notifications", "Integrations", "Connectors", "Delivery Protection", "Lifecycle", "Support", "Audit", "Billing"].map((name) => ({ name })),
   paths: {
     "/api/health": {
       get: { tags: ["System"], summary: "Health check", responses: { "200": ok("API is healthy") } },
@@ -599,6 +599,95 @@ export const openApiDocument = {
     "/api/v1/actions": {
       get: { tags: ["Actions"], summary: "List owned commitments", security: bearer, responses: { "200": ok("Actions returned") } },
       post: { tags: ["Actions"], summary: "Create or assign a source-linked commitment", security: bearer, responses: { "201": ok("Action created") } },
+    },
+    "/api/v1/tasks": {
+      get: {
+        tags: ["Tasks"], summary: "List tasks for a view", security: bearer,
+        description: "view = all | today | upcoming | overdue | completed | from_email | assigned. Day boundaries follow `tz`, else the user's then the workspace's time zone.",
+        parameters: [
+          { in: "query", name: "view", schema: { type: "string", enum: ["all", "today", "upcoming", "overdue", "completed", "from_email", "assigned", "team", "following"] } },
+          { in: "query", name: "q", schema: { type: "string" } },
+          { in: "query", name: "priority", schema: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "URGENT"] } },
+          { in: "query", name: "sort", schema: { type: "string", enum: ["due_asc", "due_desc", "priority", "created_desc", "completed_desc"] } },
+          { in: "query", name: "days", schema: { type: "integer", minimum: 1, maximum: 365 } },
+          { in: "query", name: "tz", schema: { type: "string", example: "Europe/London" } },
+          { in: "query", name: "limit", schema: { type: "integer", minimum: 1, maximum: 200 } },
+          { in: "query", name: "cursor", schema: { type: "string" } },
+        ],
+        responses: { "200": ok("Page of tasks"), "400": ok("Invalid filter") },
+      },
+      post: { tags: ["Tasks"], summary: "Create a task", security: bearer, responses: { "201": ok("Task created"), "400": ok("Invalid task"), "404": ok("Linked email not found") } },
+    },
+    "/api/v1/tasks/summary": {
+      get: { tags: ["Tasks"], summary: "Counts for the task summary cards and menu", security: bearer, responses: { "200": ok("Task counts") } },
+    },
+    "/api/v1/tasks/teams": {
+      get: { tags: ["Tasks"], summary: "My team workspaces (shared mailboxes) with their open work", security: bearer, responses: { "200": ok("Teams returned") } },
+    },
+    "/api/v1/tasks/assignees": {
+      get: {
+        tags: ["Tasks"], summary: "People a task can be assigned to", security: bearer,
+        parameters: [
+          { in: "query", name: "teamId", schema: { type: "string", format: "uuid" } },
+          { in: "query", name: "q", schema: { type: "string" } },
+        ],
+        responses: { "200": ok("Assignees returned"), "404": ok("Team not found") },
+      },
+    },
+    "/api/v1/tasks/export": {
+      get: {
+        tags: ["Tasks"], summary: "Export completed tasks as CSV", security: bearer,
+        parameters: [
+          { in: "query", name: "scope", schema: { type: "string", enum: ["mine", "team"] } },
+          { in: "query", name: "days", schema: { type: "integer", minimum: 1, maximum: 365 } },
+          { in: "query", name: "tz", schema: { type: "string" } },
+        ],
+        responses: { "200": ok("CSV file") },
+      },
+    },
+    "/api/v1/tasks/search": {
+      get: {
+        tags: ["Tasks"], summary: "Find tasks I can see by title or description", security: bearer,
+        parameters: [
+          { in: "query", name: "q", required: true, schema: { type: "string" } },
+          { in: "query", name: "limit", schema: { type: "integer", minimum: 1, maximum: 20 } },
+        ],
+        responses: { "200": ok("Matching tasks"), "400": ok("Missing search phrase") },
+      },
+    },
+    "/api/v1/tasks/{taskId}/activity": {
+      get: { tags: ["Tasks"], summary: "A task's history, from the audit log", security: bearer, responses: { "200": ok("Activity returned"), "404": ok("Task not found") } },
+    },
+    "/api/v1/tasks/{taskId}/follow": {
+      post: { tags: ["Tasks"], summary: "Follow a task", security: bearer, responses: { "200": ok("Following"), "404": ok("Task not found") } },
+      delete: { tags: ["Tasks"], summary: "Stop following a task", security: bearer, responses: { "200": ok("Not following"), "404": ok("Task not found") } },
+    },
+    "/api/v1/tasks/from-message/{messageId}": {
+      post: { tags: ["Tasks"], summary: "Create a task from an email", security: bearer, responses: { "201": ok("Task created"), "404": ok("Message not found") } },
+    },
+    "/api/v1/tasks/{taskId}": {
+      get: { tags: ["Tasks"], summary: "Task details, checklist and linked email", security: bearer, responses: { "200": ok("Task returned"), "404": ok("Task not found") } },
+      patch: { tags: ["Tasks"], summary: "Edit a task", security: bearer, responses: { "200": ok("Task updated"), "404": ok("Task not found"), "409": ok("Task is completed") } },
+      delete: { tags: ["Tasks"], summary: "Delete (dismiss) a task", security: bearer, responses: { "204": ok("Task deleted"), "403": ok("Not the creator"), "404": ok("Task not found") } },
+    },
+    "/api/v1/tasks/{taskId}/complete": {
+      post: { tags: ["Tasks"], summary: "Mark a task complete", security: bearer, responses: { "200": ok("Task completed"), "404": ok("Task not found") } },
+    },
+    "/api/v1/tasks/{taskId}/reopen": {
+      post: { tags: ["Tasks"], summary: "Reopen a completed task with a reason", security: bearer, responses: { "200": ok("Task reopened"), "409": ok("Task is not completed") } },
+    },
+    "/api/v1/tasks/{taskId}/reschedule": {
+      post: { tags: ["Tasks"], summary: "Move a task's due date, keeping the original", security: bearer, responses: { "200": ok("Task rescheduled"), "409": ok("Task is completed") } },
+    },
+    "/api/v1/tasks/{taskId}/checklist": {
+      post: { tags: ["Tasks"], summary: "Add a checklist item", security: bearer, responses: { "201": ok("Item added"), "409": ok("Task is completed") } },
+    },
+    "/api/v1/tasks/{taskId}/checklist/order": {
+      put: { tags: ["Tasks"], summary: "Reorder the checklist", security: bearer, responses: { "200": ok("Checklist reordered"), "400": ok("Order must list every item once") } },
+    },
+    "/api/v1/tasks/{taskId}/checklist/{itemId}": {
+      patch: { tags: ["Tasks"], summary: "Edit or tick a checklist item", security: bearer, responses: { "200": ok("Item updated"), "404": ok("Item not found") } },
+      delete: { tags: ["Tasks"], summary: "Remove a checklist item", security: bearer, responses: { "200": ok("Item removed"), "404": ok("Item not found") } },
     },
     "/api/v1/notifications": {
       get: { tags: ["Notifications"], summary: "List in-app notifications", security: bearer, responses: { "200": ok("Notifications returned") } },

@@ -56,7 +56,7 @@ test("opening a message shows sender, recipients, body, attachment cards and the
   await expect(pane.getByRole("button", { name: "Reply", exact: true })).toBeVisible();
   await expect(pane.getByRole("button", { name: "Reply all" })).toBeVisible();
   await expect(pane.getByRole("button", { name: "Forward" })).toBeVisible();
-  await expect(pane.getByRole("button", { name: /Create task/ })).toHaveAttribute("aria-disabled", "true");
+  await expect(pane.getByRole("button", { name: "Create task" })).toBeEnabled();
   // Opening an unread message marks it read on the server.
   await expect.poll(() => calls.paths.some((p) => p.startsWith("PATCH /mail/m1"))).toBe(true);
   await shot(page, "2-reading");
@@ -78,12 +78,10 @@ test("Ctrl+K focuses search", async ({ page }) => {
   await expect(page.locator("#mail-search")).toBeFocused();
 });
 
-// Calendar (app/mail/calendar), Contacts (app/mail/contacts) and the Work Graph
-// (app/mail/work-graph) are built; they have their own specs.
-for (const [href, title] of [
-  ["/mail/tasks", "Tasks"],
-  ["/mail/alet", "Alet"],
-] as const) {
+// Calendar (app/mail/calendar), Contacts (app/mail/contacts), Tasks
+// (app/mail/tasks) and the Work Graph (app/mail/work-graph) are built; they have
+// their own specs. Only Alet is still a placeholder.
+for (const [href, title] of [["/mail/alet", "Alet"]] as const) {
   test(`${title} shows Coming Soon inside the workspace`, async ({ page }) => {
     await openWebmail(page);
     await page.getByRole("navigation", { name: "Workspace sections" }).first().getByRole("link", { name: title, exact: true }).click();
@@ -92,7 +90,7 @@ for (const [href, title] of [
     await expect(soon.getByRole("heading", { name: title })).toBeVisible({ timeout: 60_000 });
     await expect(soon.getByText("Coming Soon...")).toBeVisible();
     await expect(soon.getByRole("link", { name: "Back to Mail" })).toHaveAttribute("href", "/mail");
-    if (title === "Tasks") await shot(page, "3-coming-soon");
+    if (title === "Alet") await shot(page, "3-coming-soon");
   });
 }
 

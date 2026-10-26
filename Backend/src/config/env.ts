@@ -57,6 +57,8 @@ export const envSchema = z.object({
   /** How often the snooze wake-up sweep runs. A snoozed message can sit up
    * to this long past its wake time before reappearing in Inbox. */
   SNOOZE_WAKE_INTERVAL_MS: z.coerce.number().int().min(1_000).default(60_000),
+  /** How often due task reminders are sent; a reminder can arrive up to this late. */
+  TASK_REMINDER_INTERVAL_MS: z.coerce.number().int().min(1_000).default(60_000),
   JOB_WORKER_INTERVAL_MS: z.coerce.number().int().min(1_000).default(10_000),
   // Compliance housekeeping: flags deletions past their 30-day SLA and
   // drops expired idempotency records. Minutes rather than seconds, since

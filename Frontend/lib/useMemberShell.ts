@@ -115,6 +115,7 @@ export function useMemberShell() {
       // its invitation lists and badges refresh without a reload.
       if (e.payload?.kind === "calendar") qc.invalidateQueries({ queryKey: ["calendar"] });
       if (e.payload?.kind === "workgraph") qc.invalidateQueries({ queryKey: ["workgraph"] });
+      if (e.payload?.kind === "task") qc.invalidateQueries({ queryKey: ["tasks"] });
       addToast({
         type: "notification",
         title: e.payload?.title ?? "New notification",
@@ -122,6 +123,14 @@ export function useMemberShell() {
         duration: 4000,
       });
     }, [qc, addToast]),
+
+
+    // Someone changed a task this person can see — theirs, one they gave
+    // away, or their team's. Lists, counts and the open panel refresh.
+    TASK_UPDATED: useCallback(() => {
+      void qc.invalidateQueries({ queryKey: ["tasks"] });
+      void qc.invalidateQueries({ queryKey: ["actions"] });
+    }, [qc]),
   }, {
     // Whatever was announced while the stream was down was never received:
     // read the mailbox again rather than wait for the next message.
@@ -129,6 +138,7 @@ export function useMemberShell() {
       void qc.invalidateQueries({ queryKey: ["mail"] });
       void qc.invalidateQueries({ queryKey: ["ai", "actions"] });
       void qc.invalidateQueries({ queryKey: ["notifications"] });
+      void qc.invalidateQueries({ queryKey: ["tasks"] });
     },
   });
 

@@ -128,7 +128,8 @@ function WebmailShellInner({
       <div className="hidden lg:block">
         <TopBar
           query={searchQuery}
-          onQueryChange={onSearchQueryChange ?? noop}
+          onQueryChange={onSearchQueryChange}
+          placeholder={inMail ? undefined : "Search tasks — title or description"}
           accountEmail={accountEmail}
           displayName={me?.displayName}
           workspaceName={me?.tenant?.name}

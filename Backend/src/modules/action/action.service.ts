@@ -82,7 +82,11 @@ export class ActionService {
   async update(id: string, input: Update, tenantId: string, userId: string) {
     const action = await prisma.commitment.findFirst({ where: { id, tenantId, ownerUserId: userId } });
     if (!action) throw new AppError("Commitment not found", 404, ErrorCodes.NOT_FOUND);
-    const updated = await prisma.commitment.update({ where: { id: action.id, tenantId }, data: { status: input.status, snoozedUntil: input.status === "SNOOZED" ? new Date(input.snoozedUntil!) : null }, include: commitmentParticipants });
+    // Tasks read completedAt for the Completed view, so the inbox records it too.
+    const completion = input.status === "COMPLETED"
+      ? (action.status === "COMPLETED" ? {} : { completedAt: new Date(), completedByUserId: userId })
+      : { completedAt: null, completedByUserId: null };
+    const updated = await prisma.commitment.update({ where: { id: action.id, tenantId }, data: { status: input.status, snoozedUntil: input.status === "SNOOZED" ? new Date(input.snoozedUntil!) : null, ...completion }, include: commitmentParticipants });
     await auditService.record({ tenantId, actorUserId: userId, eventType: "COMMITMENT_STATUS_CHANGED", targetType: "Commitment", targetId: id, metadata: { status: input.status } });
     return withParticipantSummaries(updated);
   }
