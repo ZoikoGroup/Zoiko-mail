@@ -125,7 +125,8 @@ export function useDeleteContact() {
   const invalidate = useInvalidateContacts();
   return useMutation({
     mutationFn: (id: string) => deleteContact(id),
-    onSuccess: invalidate,
+    // Also after a failure: a contact already deleted elsewhere (404) must leave the list too.
+    onSettled: invalidate,
   });
 }
 

@@ -410,8 +410,12 @@ async function main(): Promise<void> {
       rules: {
         defaultEffect: "ALLOW",
         conditions: [
-          { field: "source", operator: "NOT_EQUALS", value: "restricted_mailbox", effect: "DENY" },
-          { field: "training_on_customer_data", operator: "EQUALS", value: false, effect: "DENY" },
+          // Deny AI on a restricted mailbox, and any use that would train on
+          // customer data. (These were once written inverted, which denied
+          // every AI request; scripts/fix-inverted-ai-policy.ts corrects
+          // workspaces seeded before the fix.)
+          { field: "source", operator: "EQUALS", value: "restricted_mailbox", effect: "DENY" },
+          { field: "training_on_customer_data", operator: "EQUALS", value: true, effect: "DENY" },
         ],
       },
       activatedAt: ago(20 * DAY),

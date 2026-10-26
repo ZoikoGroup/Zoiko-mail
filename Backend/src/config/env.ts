@@ -245,6 +245,14 @@ export const envSchema = z.object({
   // automatically; exhausted retries surface as a retryable job failure.
   OPENAI_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(300_000).default(30_000),
   OPENAI_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
+  // AI assistant (Alet): questions one person may send per minute, and the
+  // longest answer it may write. Both bound what one account can spend.
+  ASSISTANT_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).max(1000).default(20),
+  ASSISTANT_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(64).max(4000).default(1200),
+  // Files attached to assistant questions: where images are kept, and how big
+  // any one file may be (OpenAI accepts images up to 20 MB).
+  ASSISTANT_STORAGE_PATH: z.string().default("storage/assistant"),
+  ASSISTANT_ATTACHMENT_MAX_BYTES: z.coerce.number().int().positive().max(20 * 1024 * 1024).default(10 * 1024 * 1024),
   // ── Custom-domain DNS ────────────────────────────────────────────────────
   // The platform's own mail infrastructure. Every record a customer domain is
   // asked to publish is derived from these, so they must name hosts that

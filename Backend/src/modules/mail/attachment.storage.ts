@@ -12,11 +12,12 @@ export interface AttachmentStorage {
 }
 
 export class LocalAttachmentStorage implements AttachmentStorage {
-  private readonly root = resolve(
-    isAbsolute(env.ATTACHMENT_STORAGE_PATH)
-      ? env.ATTACHMENT_STORAGE_PATH
-      : resolve(process.cwd(), env.ATTACHMENT_STORAGE_PATH)
-  );
+  private readonly root: string;
+
+  /** `directory` defaults to mail attachments; the assistant keeps its files apart. */
+  constructor(directory: string = env.ATTACHMENT_STORAGE_PATH) {
+    this.root = resolve(isAbsolute(directory) ? directory : resolve(process.cwd(), directory));
+  }
 
   private path(storageKey: string) {
     const filePath = resolve(this.root, storageKey);
