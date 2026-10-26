@@ -105,6 +105,17 @@ export function MyCalendar() {
     if (calendars.length === 0) return;
     setDialog({ mode: "new", seed });
   };
+  // ?invite=<address> (Schedule, from Contacts) opens a new meeting with that
+  // person invited, at the next half hour, once there is a calendar to put it in.
+  const inviteParam = params.get("invite");
+  useEffect(() => {
+    if (!inviteParam || calendars.length === 0) return;
+    const start = new Date();
+    start.setMinutes(start.getMinutes() < 30 ? 30 : 60, 0, 0);
+    setDialog({ mode: "new", seed: { start, end: new Date(start.getTime() + minutes), attendees: [inviteParam] } });
+    router.replace("/mail/calendar");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inviteParam, calendars.length]);
   const openEvent = (event: CalendarEvent) => {
     // Someone else's meeting opens as the invitation, where I answer it.
     if (event.source === "INVITED") {

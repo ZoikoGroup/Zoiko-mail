@@ -245,6 +245,8 @@ interface MailClientProps {
   onLabelChange?: (labelId: string) => void;
   /** A shared or delegated inbox to read instead of one's own. */
   sharedInbox?: SharedInbox | null;
+  /** A link into Mail to act on once (app/mail/page.tsx reads it from the URL). */
+  link?: MailLink | null;
 }
 
 /**
@@ -252,7 +254,16 @@ interface MailClientProps {
  * FolderRail) can open this component's composer.
  */
 export interface MailClientHandle {
-  openCompose: (mode: ComposerMode, source: MailItem | null) => void;
+  /** `to` prefills a new message's recipients (e.g. Email from Contacts). */
+  openCompose: (mode: ComposerMode, source: MailItem | null, to?: string[]) => void;
+  /** Opens one message in the reading pane (e.g. a contact's recent mail). */
+  openMessage: (messageId: string) => void;
+}
+
+/** Where a link into Mail points: a new message to someone, or one message. */
+export interface MailLink {
+  compose?: string;
+  open?: string;
 }
 
 export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function MailClient(
@@ -266,6 +277,7 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
     labelId: controlledLabelId,
     onLabelChange,
     sharedInbox = null,
+    link = null,
   },
   ref
 ) {
@@ -278,14 +290,15 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
   const mailboxId = sharedInbox?.id;
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [compose, setCompose] = useState<{ open: boolean; mode: ComposerMode; source: MailItem | null }>({
+  const [compose, setCompose] = useState<{ open: boolean; mode: ComposerMode; source: MailItem | null; to?: string[] }>({
     open: false,
     mode: "new",
     source: null,
   });
-  const openCompose = (mode: ComposerMode, source: MailItem | null) =>
-    setCompose({ open: true, mode, source });
-  useImperativeHandle(ref, () => ({ openCompose }));
+  const openCompose = (mode: ComposerMode, source: MailItem | null, to?: string[]) =>
+    setCompose({ open: true, mode, source, to });
+  useImperativeHandle(ref, () => ({ openCompose, openMessage: setSelectedId }));
+
 
   // Filters
   const [internalSearchInput, setInternalSearchInput] = useState("");
@@ -358,6 +371,15 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
     setSelectedId(null);
     setCheckedIds(new Set());
   }, [starredOnly, unreadOnly, labelFilter, fromFilter, toFilter, hasAttachment, dateAfter, dateBefore, mailboxId, folder, viewTab, datePreset]);
+
+  // A link into Mail (from Contacts). Declared after the reset above, so on
+  // the render that switches folder the reset runs first and this wins.
+  useEffect(() => {
+    if (!link) return;
+    if (link.open) setSelectedId(link.open);
+    if (link.compose) openCompose("new", null, [link.compose]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [link]);
 
   const toggleChecked = (messageId: string) =>
     setCheckedIds((prev) => {
@@ -1066,6 +1088,7 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
         open={compose.open}
         mode={compose.mode}
         source={compose.source}
+        initialTo={compose.to}
         defaultSendAsMailboxId={compose.mode !== "new" && liveShared?.canSend ? liveShared.id : null}
         onClose={() => setCompose((c) => ({ ...c, open: false }))}
       />
