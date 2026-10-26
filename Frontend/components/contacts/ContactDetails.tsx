@@ -313,6 +313,11 @@ export function ContactDetails({
             <Copy className="h-3.5 w-3.5" aria-hidden /> Copy Email
           </button>
           {ownContact && (
+            <button type="button" onClick={() => onDelete(ownContact)} className="zoiko-btn crit" disabled={busy} data-testid="details-delete">
+              <Trash2 className="h-3.5 w-3.5" aria-hidden /> Delete
+            </button>
+          )}
+          {ownContact && (
             <div className="relative" ref={menuRef}>
               <button
                 type="button"

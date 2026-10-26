@@ -11,7 +11,8 @@ import { lifecycleService } from "./modules/lifecycle/lifecycle.service.js";
 import { purgeExpiredIdempotencyRecords } from "./common/middleware/idempotency.js";
 import { gmailConnector } from "./modules/connector/gmail/gmail.connector.js";
 import { microsoftConnector } from "./modules/connector/m365/m365.connector.js";
-import { withTenant } from "./config/tenantScope.js";
+import { withCrossTenant, withTenant } from "./config/tenantScope.js";
+import { assistantService } from "./modules/assistant/assistant.service.js";
 import { runDueDomainSyncs } from "./modules/domain/domain.sync.js";
 import { mailboxCleanupService } from "./modules/mail/mailbox-cleanup.service.js";
 import { taskService } from "./modules/task/task.service.js";
@@ -154,10 +155,19 @@ let complianceSweepRunning = false;
 const complianceSweep = setInterval(() => {
   if (complianceSweepRunning) return;
   complianceSweepRunning = true;
-  void Promise.all([lifecycleService.sweepOverdue(), purgeExpiredIdempotencyRecords(), mailboxCleanupService.purgeCompleted()])
-    .then(([sla, purged, purgedCleanup]) => {
-      if (sla.breached > 0 || purged > 0 || purgedCleanup > 0) {
-        logger.info({ ...sla, purgedIdempotencyRecords: purged, purgedCleanupTasks: purgedCleanup }, "Compliance sweep completed");
+  void Promise.all([
+    lifecycleService.sweepOverdue(),
+    purgeExpiredIdempotencyRecords(),
+    mailboxCleanupService.purgeCompleted(),
+    // Files uploaded to the assistant and never sent, in every workspace.
+    withCrossTenant(() => assistantService.purgeExpired()),
+  ])
+    .then(([sla, purged, purgedCleanup, purgedUploads]) => {
+      if (sla.breached > 0 || purged > 0 || purgedCleanup > 0 || purgedUploads > 0) {
+        logger.info(
+          { ...sla, purgedIdempotencyRecords: purged, purgedCleanupTasks: purgedCleanup, purgedAssistantUploads: purgedUploads },
+          "Compliance sweep completed"
+        );
       }
     })
     .catch((error: unknown) => logger.error({ error }, "Compliance sweep failed"))

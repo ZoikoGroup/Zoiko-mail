@@ -46,10 +46,11 @@ import {
   ChevronLeft, ChevronRight, Paperclip, ArrowLeft, MailOpen,
   Pencil, Reply, ReplyAll, Forward, Search, ShieldAlert, Tag, X,
   SlidersHorizontal, MailCheck, Clock, ChevronDown, MoreHorizontal, FolderInput,
-  Sparkles, ListChecks, MailX, RotateCcw, CalendarDays, ArrowDown, Undo2,
+  Sparkles, ListChecks, MailX, RotateCcw, CalendarDays, ArrowDown, Undo2, Printer,
 } from "lucide-react";
 import { AttachmentList } from "@/components/mail/AttachmentPreview";
 import { parseMailQuery } from "@/lib/mail-search";
+import { printMessages } from "@/lib/mail-print";
 import { MailRow, hashColor, avatarInitials, formatMailTime } from "@/components/mail/MailRow";
 import { SnoozeMenu } from "@/components/mail/SnoozeMenu";
 import { folderLabel as railFolderLabel } from "@/components/mail/FolderRail";
@@ -1405,6 +1406,7 @@ function ReadingPane({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [creatingTask, setCreatingTask] = useState(false);
   const [createdTaskId, setCreatedTaskId] = useState<string | null>(null);
+  const [printError, setPrintError] = useState<string | null>(null);
   const { data: labels = [] } = useMailLabels();
   const assignLabel = useAssignLabel();
   const removeLabel = useRemoveLabel();
@@ -1491,6 +1493,14 @@ function ReadingPane({
     "inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--border)] px-4 text-[13px] font-medium text-[var(--ink)] transition hover:bg-[var(--s2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-50";
   const dangerButton =
     "inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--crit)]/50 px-4 text-[13px] font-medium text-[var(--crit)] transition hover:bg-[var(--crit-soft)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--crit)] disabled:opacity-50";
+
+  // The whole conversation when there is one, as it reads here; else this message.
+  const print = () => {
+    setPrintError(null);
+    printMessages(threadMessages ?? [m], { plainTextOnly: restricted, mailbox: sharedInbox?.address ?? null }).catch((e: unknown) =>
+      setPrintError(e instanceof Error && e.message ? e.message : "Printing is not available in this browser.")
+    );
+  };
 
   const reschedule = (when: Date) =>
     queued.mutate({ messageId, action: "reschedule", scheduledAt: when.toISOString() });
@@ -1652,6 +1662,9 @@ function ReadingPane({
             })}
           </DropdownMenu>
         )}
+        <button onClick={print} className={TOOL} title="Print or save as PDF" aria-label="Print mail">
+          <Printer className="h-4 w-4" />
+        </button>
         <DropdownMenu
           align="left"
           trigger={
@@ -1680,6 +1693,16 @@ function ReadingPane({
           <X className="h-4 w-4" />
         </button>
       </div>
+
+      {printError && (
+        <div role="alert" className="mx-4 mt-3 flex items-start gap-2 rounded-lg border border-[var(--crit)]/30 bg-[var(--crit-soft)] px-3 py-2 text-[12.5px] text-[var(--crit)]">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          <span className="flex-1">Couldn&rsquo;t print this message. {printError}</span>
+          <button onClick={() => setPrintError(null)} aria-label="Dismiss" className="rounded p-0.5 hover:bg-black/5">
+            <X className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         <div className="mx-auto w-full max-w-[920px] px-5 pb-10 pt-5 lg:px-8">

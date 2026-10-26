@@ -46,10 +46,13 @@ test("the page lists colleagues, creates a contact with validation, and keeps it
   await expect(page).toHaveURL(/\/mail\/contacts$/, { timeout: 60_000 });
   await expect(page.getByTestId("coming-soon")).toHaveCount(0);
 
-  // The other Member is in the directory, and counted as available.
+  // All Contacts holds saved contacts only; the other Member is in the directory.
+  await expect(page.getByTestId("contacts-empty")).toContainText("No contacts yet", { timeout: 60_000 });
+  await expect(page.getByTestId("contacts-available")).toHaveText("0");
+  await page.getByRole("link", { name: "Company Directory" }).click();
   await expect(list(page).getByText(f.recipient.address)).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByTestId("contacts-available")).toHaveText("1");
   await expect(details(page)).toContainText("Workspace member");
+  await page.getByRole("link", { name: "All Contacts" }).first().click();
 
   // A bad address is refused before anything is sent.
   await page.getByRole("button", { name: "New Contact" }).first().click();
@@ -87,7 +90,7 @@ test("the page lists colleagues, creates a contact with validation, and keeps it
 
   await page.reload();
   await expect(list(page).getByText("sarah.chen@example.com")).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByTestId("contacts-available")).toHaveText("2");
+  await expect(page.getByTestId("contacts-available")).toHaveText("1");
   await expect(page.getByRole("link", { name: /Contact Groups\s*1/ })).toBeVisible();
   await context.close();
 });
@@ -103,7 +106,7 @@ test("search, sort, edit, favourite, groups and the tabs", async ({ browser, req
   await openContacts(page);
 
   const names = () => list(page).getByTestId("contact-row").allInnerTexts();
-  await expect.poll(async () => (await names()).length, { timeout: 60_000 }).toBe(4);
+  await expect.poll(async () => (await names()).length, { timeout: 60_000 }).toBe(3);
 
   await page.getByPlaceholder("Search name, email or company…").fill("northstar");
   await expect.poll(async () => (await names()).length).toBe(1);
@@ -115,7 +118,7 @@ test("search, sort, edit, favourite, groups and the tabs", async ({ browser, req
   await page.getByLabel("Sort by").selectOption("company");
   await expect.poll(async () => (await names())[0]).toContain("Amy");
 
-  // My Contacts leaves the colleague out.
+  // My Contacts and All Contacts agree while nothing is shared; the colleague is in the directory.
   await page.getByRole("link", { name: "My Contacts" }).click();
   await expect.poll(async () => (await names()).length, { timeout: 60_000 }).toBe(3);
   await page.getByRole("link", { name: "Company Directory" }).click();
@@ -170,6 +173,10 @@ test("a shared contact reaches the colleague read-only; a personal one never doe
   await list(other.page).getByText("Sarah Chen").click();
   await expect(details(other.page)).toContainText("Shared by E2E");
   await expect(details(other.page).getByRole("button", { name: "Edit" })).toHaveCount(0);
+  await expect(details(other.page).getByTestId("details-delete")).toHaveCount(0);
+  await expect(
+    list(other.page).getByTestId("contact-row").filter({ hasText: "Sarah Chen" }).getByTestId("delete-unavailable")
+  ).toHaveAttribute("title", /Only they can delete it/);
   await expect(details(other.page).getByRole("button", { name: "More" })).toHaveCount(0);
   // Daniel and Amy are the sender's personal contacts.
   await openContacts(other.page);
@@ -292,6 +299,94 @@ test("import and export a CSV, merge duplicates, and delete with confirmation", 
   const left = (await (await me.get("/contacts?q=wilson")).json()).data.items;
   expect(left).toHaveLength(1);
   expect((await (await me.get("/contacts?q=emma")).json()).data.items).toHaveLength(0);
+  await context.close();
+});
+
+test("each own contact has a Delete button that asks first, deletes for good and updates the list", async ({ browser, request }) => {
+  const f = getFixture();
+  const { page, context } = await signIn(browser, f.sender.address, f.password);
+  await page.setViewportSize({ width: 1600, height: 950 });
+  await openContacts(page);
+  const row = (name: string) => list(page).getByTestId("contact-row").filter({ hasText: name });
+  await expect(row("Amy")).toBeVisible({ timeout: 60_000 });
+
+  // Every one of my contacts can be deleted.
+  const rows = list(page).getByTestId("contact-row");
+  await expect.poll(async () => (await rows.count()) > 1, { timeout: 60_000 }).toBe(true);
+  for (const r of await rows.all()) await expect(r.getByRole("button", { name: /^Delete / })).toBeVisible();
+
+  // Cancel keeps it.
+  await row("Amy").getByRole("button", { name: "Delete Amy" }).click();
+  const confirm = page.getByRole("dialog", { name: "Delete Amy?" });
+  await expect(confirm).toContainText("This cannot be undone");
+  await confirm.getByRole("button", { name: "Cancel" }).click();
+  await expect(confirm).toHaveCount(0);
+  await expect(row("Amy")).toBeVisible();
+
+  // Confirming removes it from the list straight away and from the server.
+  const countBefore = await list(page).getByTestId("contact-row").count();
+  await row("Amy").getByRole("button", { name: "Delete Amy" }).click();
+  await page.getByRole("dialog", { name: "Delete Amy?" }).getByRole("button", { name: "Delete contact" }).click();
+  await expect(page.getByTestId("contacts-notice")).toContainText("Contact deleted");
+  await expect(row("Amy")).toHaveCount(0);
+  await expect(list(page).getByTestId("contact-row")).toHaveCount(countBefore - 1);
+
+  const me = await api(request, await token(request, f.sender.address));
+  expect((await (await me.get("/contacts?q=amy%40bridgepoint")).json()).data.items).toHaveLength(0);
+  await page.reload();
+  await expect(list(page).getByTestId("contact-row").first()).toBeVisible({ timeout: 60_000 });
+  await expect(row("Amy")).toHaveCount(0);
+
+  // From the details panel: pick a contact, Delete, confirm.
+  await list(page).getByText("Daniel Brooks").click();
+  await expect(details(page).getByTestId("contact-details-name")).toHaveText("Daniel Brooks");
+  await details(page).getByTestId("details-delete").click();
+  await page.getByRole("dialog", { name: "Delete Daniel?" }).getByRole("button", { name: "Delete contact" }).click();
+  await expect(row("Daniel Brooks")).toHaveCount(0);
+  await expect(details(page).getByTestId("contact-details-name")).not.toHaveText("Daniel Brooks");
+  expect((await (await me.get("/contacts?q=daniel")).json()).data.items).toHaveLength(0);
+
+  // Colleagues cannot be deleted here, and the row says why.
+  await page.getByRole("link", { name: "Company Directory" }).click();
+  const colleague = row(f.recipient.address);
+  await expect(colleague).toBeVisible({ timeout: 60_000 });
+  await expect(colleague.getByRole("button", { name: /^Delete / })).toHaveCount(0);
+  await expect(colleague.getByTestId("delete-unavailable")).toHaveAttribute("title", /admin manages their accounts/);
+  await context.close();
+});
+
+test("a delete that fails says why, and a contact already deleted elsewhere leaves the list", async ({ browser, request }) => {
+  const f = getFixture();
+  const me = await api(request, await token(request, f.sender.address));
+  const gone = (await (await me.post("/contacts", { firstName: "Gone", lastName: "Elsewhere", email: "gone.elsewhere@example.com" })).json()).data;
+
+  const { page, context } = await signIn(browser, f.sender.address, f.password);
+  await page.setViewportSize({ width: 1600, height: 950 });
+  await openContacts(page);
+  const row = list(page).getByTestId("contact-row").filter({ hasText: "Gone Elsewhere" });
+  await expect(row).toBeVisible({ timeout: 60_000 });
+
+  // Deleted from another tab before this one confirms.
+  await request.delete(`${API}/contacts/${gone.id}`, {
+    headers: { Authorization: `Bearer ${await token(request, f.sender.address)}`, "Idempotency-Key": key("ct") },
+  });
+  await row.getByRole("button", { name: "Delete Gone Elsewhere" }).click();
+  await page.getByRole("dialog", { name: "Delete Gone?" }).getByRole("button", { name: "Delete contact" }).click();
+  await expect(page.getByTestId("contacts-notice")).toContainText("Contact not found");
+  await expect(row).toHaveCount(0, { timeout: 30_000 });
+
+  // A server that refuses is reported, and the contact stays.
+  const keep = list(page).getByTestId("contact-row").filter({ hasText: "Sarah Chen" });
+  await page.route("**/api/v1/contacts/*", (route) =>
+    route.request().method() === "DELETE"
+      ? route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ success: false, error: { code: "INTERNAL_ERROR", message: "The server could not delete it." } }) })
+      : route.continue()
+  );
+  await keep.getByRole("button", { name: "Delete Sarah Chen" }).click();
+  await page.getByRole("dialog", { name: "Delete Sarah?" }).getByRole("button", { name: "Delete contact" }).click();
+  await expect(page.getByTestId("contacts-notice")).toContainText("could not delete");
+  await expect(keep).toBeVisible();
+  await page.unroute("**/api/v1/contacts/*");
   await context.close();
 });
 

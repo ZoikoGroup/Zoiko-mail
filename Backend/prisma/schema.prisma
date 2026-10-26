@@ -72,6 +72,10 @@ model Tenant {
   workDecisions          WorkDecision[]
   workDependencies       WorkDependency[]
   workEvidence           WorkEvidence[]
+
+  assistantConversations AssistantConversation[]
+  assistantMessages      AssistantMessage[]
+  assistantAttachments   AssistantAttachment[]
   mailboxAccess          MailboxAccess[]
   aliases                Alias[]
   forwardingRules        ForwardingRule[]
@@ -248,6 +252,9 @@ model TenantMembership {
   workDependenciesOwned   WorkDependency[]        @relation("WorkDependencyOwner")
   workDependenciesCreated WorkDependency[]        @relation("WorkDependencyCreator")
   workEvidenceAdded       WorkEvidence[]          @relation("WorkEvidenceAdder")
+
+  assistantConversations  AssistantConversation[]
+  assistantAttachments    AssistantAttachment[]
 
   @@unique([tenantId, userId])
   @@index([userId])
@@ -2993,4 +3000,89 @@ model WorkEvidence {
 
   @@index([tenantId, subjectType, subjectId])
   @@map("work_evidence")
+}
+
+// ─── AI assistant (Alet) ─────────────────────────────────────────────────────
+// A member's own conversations with the assistant. Nobody else reads them —
+// not the workspace's admins, not Zoiko support — and the member can delete
+// them. Row-level security like the rest of the tenant data.
+
+model AssistantConversation {
+  id           String                @id @default(uuid()) @db.Uuid
+  tenantId     String                @map("tenant_id") @db.Uuid
+  membershipId String                @map("membership_id") @db.Uuid
+  /// From the first question; the member can rename it.
+  title        String
+  createdAt    DateTime              @default(now()) @map("created_at")
+  updatedAt    DateTime              @updatedAt @map("updated_at")
+  tenant       Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  membership   TenantMembership      @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  messages     AssistantMessage[]
+  attachments  AssistantAttachment[]
+
+  @@index([tenantId, membershipId, updatedAt])
+  @@map("assistant_conversations")
+}
+
+model AssistantMessage {
+  id               String                @id @default(uuid()) @db.Uuid
+  tenantId         String                @map("tenant_id") @db.Uuid
+  conversationId   String                @map("conversation_id") @db.Uuid
+  role             AssistantRole
+  content          String
+  /// The model that wrote an assistant answer; null for the member's own messages.
+  model            String?
+  promptTokens     Int?                  @map("prompt_tokens")
+  completionTokens Int?                  @map("completion_tokens")
+  createdAt        DateTime              @default(now()) @map("created_at")
+  tenant           Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation     AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  attachments      AssistantAttachment[]
+
+  @@index([conversationId, createdAt])
+  @@map("assistant_messages")
+}
+
+/// A file attached to a question. Uploaded first (and checked and read then),
+/// attached when the question is sent. A document keeps only its extracted
+/// text; the uploaded bytes are never written to disk. An image is kept (it
+/// is what the model looks at) until its conversation is deleted. One never
+/// attached expires and is removed.
+model AssistantAttachment {
+  id             String                  @id @default(uuid()) @db.Uuid
+  tenantId       String                  @map("tenant_id") @db.Uuid
+  membershipId   String                  @map("membership_id") @db.Uuid
+  conversationId String?                 @map("conversation_id") @db.Uuid
+  messageId      String?                 @map("message_id") @db.Uuid
+  kind           AssistantAttachmentKind
+  fileName       String                  @map("file_name")
+  contentType    String                  @map("content_type")
+  sizeBytes      Int                     @map("size_bytes")
+  /// Documents: their text, possibly cut short (see `truncated`).
+  extractedText  String?                 @map("extracted_text")
+  pageCount      Int?                    @map("page_count")
+  truncated      Boolean                 @default(false)
+  /// Images: where the bytes are (assistant storage).
+  storageKey     String?                 @map("storage_key")
+  /// Set while not yet attached to a question; cleared once it is.
+  expiresAt      DateTime?               @map("expires_at")
+  createdAt      DateTime                @default(now()) @map("created_at")
+  tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  membership     TenantMembership        @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  conversation   AssistantConversation?  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message        AssistantMessage?       @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, membershipId, expiresAt])
+  @@index([messageId])
+  @@map("assistant_attachments")
+}
+
+enum AssistantAttachmentKind {
+  DOCUMENT
+  IMAGE
+}
+
+enum AssistantRole {
+  USER
+  ASSISTANT
 }

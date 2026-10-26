@@ -44,20 +44,22 @@ async function create() {
       });
       people.push({ address: mailbox.address, userId: user.id });
     }
-    // The allow-all sending policy every new workspace gets; without one,
-    // sending is refused with NO_ACTIVE_POLICY.
-    await prisma.tenantPolicy.create({
-      data: {
-        tenantId: tenant.id,
-        type: "SENDING",
-        name: "Default sending policy",
-        version: 1,
-        status: "ACTIVE",
-        rules: { defaultEffect: "ALLOW", conditions: [] },
-        createdByUserId: people[0]!.userId,
-        activatedAt: new Date(),
-      },
-    });
+    // The allow-all sending and AI policies every new workspace gets; without
+    // them, sending and the AI assistant are refused with NO_ACTIVE_POLICY.
+    for (const [type, name] of [["SENDING", "Default sending policy"], ["AI", "Default AI policy"]] as const) {
+      await prisma.tenantPolicy.create({
+        data: {
+          tenantId: tenant.id,
+          type,
+          name,
+          version: 1,
+          status: "ACTIVE",
+          rules: { defaultEffect: "ALLOW", conditions: [] },
+          createdByUserId: people[0]!.userId,
+          activatedAt: new Date(),
+        },
+      });
+    }
     return { tenantId: tenant.id, password: PASSWORD, sender: people[0], recipient: people[1] };
   });
   process.stdout.write(`${JSON.stringify(fixture)}\n`);

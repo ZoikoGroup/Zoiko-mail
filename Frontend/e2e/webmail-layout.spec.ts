@@ -78,19 +78,19 @@ test("Ctrl+K focuses search", async ({ page }) => {
   await expect(page.locator("#mail-search")).toBeFocused();
 });
 
-// Calendar (app/mail/calendar), Contacts (app/mail/contacts), Tasks
-// (app/mail/tasks) and the Work Graph (app/mail/work-graph) are built; they have
-// their own specs. Only Alet is still a placeholder.
-for (const [href, title] of [["/mail/alet", "Alet"]] as const) {
+// Every section in the rail is built and has its own spec (Calendar, Tasks,
+// Contacts, Work Graph, Alet). The Help centre, behind the help button at the
+// foot of the rail, is the one placeholder left.
+for (const [href, title] of [["/mail/help", "Help centre"]] as const) {
   test(`${title} shows Coming Soon inside the workspace`, async ({ page }) => {
     await openWebmail(page);
-    await page.getByRole("navigation", { name: "Workspace sections" }).first().getByRole("link", { name: title, exact: true }).click();
+    await page.getByRole("navigation", { name: "Workspace sections" }).first().getByRole("link", { name: "Help and support" }).click();
     await expect(page).toHaveURL(new RegExp(`${href}$`), { timeout: 60_000 });
     const soon = page.getByTestId("coming-soon");
     await expect(soon.getByRole("heading", { name: title })).toBeVisible({ timeout: 60_000 });
     await expect(soon.getByText("Coming Soon...")).toBeVisible();
     await expect(soon.getByRole("link", { name: "Back to Mail" })).toHaveAttribute("href", "/mail");
-    if (title === "Alet") await shot(page, "3-coming-soon");
+    await shot(page, "3-coming-soon");
   });
 }
 

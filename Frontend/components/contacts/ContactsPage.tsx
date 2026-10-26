@@ -7,11 +7,13 @@ import {
   AlertTriangle,
   ArrowDownToLine,
   CheckCircle2,
+  Loader2,
   Lock,
   Plus,
   Search,
   Star,
   Tags,
+  Trash2,
   Users,
   X,
 } from "lucide-react";
@@ -52,7 +54,7 @@ const SCOPE: Partial<Record<ContactsView, ContactScope>> = {
 };
 
 const SUBTITLE: Record<ContactsView, string> = {
-  all: "Your contacts, contacts shared with the workspace, and your colleagues.",
+  all: "Contacts you saved, and contacts shared with the workspace. Colleagues are in Company Directory.",
   mine: "Contacts you added, whether personal or shared with the workspace.",
   favorites: "The contacts you starred.",
   directory: "Everyone in your workspace.",
@@ -115,9 +117,8 @@ export function ContactsPage() {
     { scope, q: q || undefined, sort, tag: view === "groups" ? group : undefined },
     Boolean(scope) && !pickingGroup
   );
-  const showDirectory = view === "all" || view === "directory";
-  const directory = useDirectory(q, showDirectory);
-  const fullDirectory = useDirectory("");
+  // Colleagues are listed in the directory only; All Contacts is saved contacts.
+  const directory = useDirectory(q, view === "directory");
   const other = useOtherContacts(q, view === "other");
   const update = useUpdateContact();
   const remove = useDeleteContact();
@@ -128,25 +129,12 @@ export function ContactsPage() {
   const people: Person[] = useMemo(() => {
     if (view === "other") return (other.data ?? []).map((o) => ({ kind: "other" as const, other: o }));
     if (view === "directory") return (directory.data ?? []).map((p) => ({ kind: "directory" as const, person: p }));
-    const saved = contacts.map((c) => ({ kind: "contact" as const, contact: c }));
-    if (view !== "all") return saved;
-    // Colleagues one has not saved join the list; a saved one appears once, as the contact.
-    const colleagues = (directory.data ?? [])
-      .filter((p) => !p.savedContactId && !contacts.some((c) => c.email === p.email))
-      .map((p) => ({ kind: "directory" as const, person: p }));
-    const merged: Person[] = [...saved, ...colleagues];
-    if (sort === "recent") return merged;
-    const companyOf = (p: Person) => (p.kind === "contact" ? p.contact.company ?? "" : "");
-    return merged.sort((a, b) =>
-      sort === "company"
-        ? (companyOf(a) || "￿").localeCompare(companyOf(b) || "￿") || personName(a).localeCompare(personName(b))
-        : personName(a).localeCompare(personName(b), undefined, { sensitivity: "base" })
-    );
-  }, [view, contacts, directory.data, other.data, sort]);
+    return contacts.map((c) => ({ kind: "contact" as const, contact: c }));
+  }, [view, contacts, directory.data, other.data]);
 
   const active = view === "other" ? other : view === "directory" ? directory : contactsQuery;
-  const loading = active.isLoading || (view === "all" && directory.isLoading);
-  const failed = active.isError || (view === "all" && directory.isError);
+  const loading = active.isLoading;
+  const failed = active.isError;
 
   const selected = people.find((p) => personKey(p) === selectedKey) ?? null;
   // On a wide screen the first person is shown, as the reading pane is never empty.
@@ -155,10 +143,8 @@ export function ContactsPage() {
   }, [people, selectedKey]);
 
   const groups = summary.data?.groups ?? [];
-  const unsavedColleagues = (fullDirectory.data ?? []).filter((p) => !p.savedContactId).length;
-  const available = (summary.data?.all ?? 0) + unsavedColleagues;
-  const shownTotal =
-    view === "all" ? contactTotal + people.filter((p) => p.kind === "directory").length : scope ? contactTotal : people.length;
+  const available = summary.data?.all ?? 0;
+  const shownTotal = scope ? contactTotal : people.length;
 
   const openNew = (seed?: ContactSeed) => setDialog({ mode: "new", seed });
   const saveFrom = (p: Person) => {
@@ -229,13 +215,13 @@ export function ContactsPage() {
           <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-5 py-3.5" data-testid="contacts-summary">
             <p className="flex items-center gap-2 text-[13px] text-[var(--ink2)]">
               <strong className="font-mono-num text-[20px] text-[var(--ink)]" data-testid="contacts-available">
-                {summary.isLoading || fullDirectory.isLoading ? "…" : available}
+                {summary.isLoading ? "…" : available}
               </strong>
               Contacts available to you
             </p>
             <span className="hidden h-6 w-px bg-[var(--border)] sm:block" aria-hidden />
             <span className="rounded-md border border-[var(--accent)]/40 bg-[var(--accent-soft)] px-2 py-1 text-[11.5px] font-semibold text-[var(--accent-ink)]">
-              Personal + permitted directory
+              Personal + shared contacts
             </span>
             <span className="flex items-center gap-1.5 text-[12px] text-[var(--ink3)] sm:ml-auto">
               <Lock className="h-3.5 w-3.5" aria-hidden /> Visibility follows source permissions
@@ -354,10 +340,11 @@ export function ContactsPage() {
                   )}
                 </div>
 
-                <div className="hidden grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)_96px] gap-3 border-b border-[var(--border)] px-7 pb-2 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-[var(--ink3)] md:grid">
+                <div className="hidden grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)_96px_40px] gap-3 border-b border-[var(--border)] pl-7 pr-3 pb-2 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-[var(--ink3)] md:grid">
                   <span>Name / Email</span>
                   <span>{view === "other" ? "Last contact" : "Role / Company"}</span>
                   <span>Visibility</span>
+                  <span className="sr-only">Actions</span>
                 </div>
 
                 <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2" data-testid="contacts-list">
@@ -377,8 +364,8 @@ export function ContactsPage() {
                     <div role="alert" className="flex flex-col items-center px-6 py-12 text-center">
                       <AlertTriangle className="h-8 w-8 text-[var(--crit)]" aria-hidden />
                       <p className="mt-3 text-[13.5px] font-medium text-[var(--ink)]">Could not load {VIEW_LABEL[view].toLowerCase()}.</p>
-                      <p className="mt-1 text-[12.5px] text-[var(--ink3)]">{errorText(active.error ?? directory.error)}</p>
-                      <button type="button" className="zoiko-btn mt-4" onClick={() => { active.refetch(); if (view === "all") directory.refetch(); }}>
+                      <p className="mt-1 text-[12.5px] text-[var(--ink3)]">{errorText(active.error)}</p>
+                      <button type="button" className="zoiko-btn mt-4" onClick={() => active.refetch()}>
                         Try again
                       </button>
                     </div>
@@ -393,6 +380,8 @@ export function ContactsPage() {
                           view={view}
                           selected={personKey(p) === selectedKey}
                           onSelect={() => setSelectedKey(personKey(p))}
+                          onDelete={p.kind === "contact" && p.contact.owned ? () => setDeleting(p.contact) : undefined}
+                          deleting={remove.isPending && deleting?.id === (p.kind === "contact" ? p.contact.id : null)}
                         />
                       ))}
                     </ul>
@@ -477,7 +466,28 @@ export function ContactsPage() {
   );
 }
 
-function PersonRow({ person, view, selected, onSelect }: { person: Person; view: ContactsView; selected: boolean; onSelect: () => void }) {
+function deleteBlockedReason(person: Person): string {
+  if (person.kind === "directory") return "Workspace members can't be deleted here. An admin manages their accounts in Users.";
+  if (person.kind === "other") return "Not a saved contact. Save it first if you want to keep or delete it.";
+  return `Shared by ${person.contact.ownerName ?? "a colleague"}. Only they can delete it.`;
+}
+
+function PersonRow({
+  person,
+  view,
+  selected,
+  onSelect,
+  onDelete,
+  deleting,
+}: {
+  person: Person;
+  view: ContactsView;
+  selected: boolean;
+  onSelect: () => void;
+  /** Only one's own contacts can be deleted; colleagues and shared contacts of others cannot. */
+  onDelete?: () => void;
+  deleting: boolean;
+}) {
   const name = personName(person);
   const email = personEmail(person);
   const contact = person.kind === "contact" ? person.contact : null;
@@ -491,17 +501,19 @@ function PersonRow({ person, view, selected, onSelect }: { person: Person; view:
             company: new Date(person.other.lastAt).toLocaleDateString(),
           };
   return (
-    <li>
+    <li
+      data-testid="contact-row"
+      className={`group flex items-center rounded-xl border transition ${
+        selected
+          ? "border-[var(--accent)]/60 bg-[var(--zm-selected,var(--accent-soft))] shadow-[inset_3px_0_0_var(--accent)]"
+          : "border-transparent hover:bg-[var(--s2)]"
+      }`}
+    >
       <button
         type="button"
         onClick={onSelect}
         aria-current={selected ? "true" : undefined}
-        data-testid="contact-row"
-        className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border px-4 py-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] md:grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)_96px] ${
-          selected
-            ? "border-[var(--accent)]/60 bg-[var(--zm-selected,var(--accent-soft))] shadow-[inset_3px_0_0_var(--accent)]"
-            : "border-transparent hover:bg-[var(--s2)]"
-        }`}
+        className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl py-3 pl-4 pr-2 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] md:grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)_96px]"
       >
         <span className="flex min-w-0 items-center gap-3">
           <Avatar name={name} />
@@ -522,6 +534,32 @@ function PersonRow({ person, view, selected, onSelect }: { person: Person; view:
           <VisibilityBadge badge={personBadge(person)} />
         </span>
       </button>
+      <span className="flex w-10 shrink-0 justify-center pr-2">
+        {!onDelete && (
+          // Shown, but unavailable, so it is clear why this row cannot be deleted.
+          <span
+            className="cursor-not-allowed rounded-md p-1.5 text-[var(--ink3)] opacity-35"
+            title={deleteBlockedReason(person)}
+            aria-label={deleteBlockedReason(person)}
+            role="img"
+            data-testid="delete-unavailable"
+          >
+            <Trash2 className="h-4 w-4" aria-hidden />
+          </span>
+        )}
+        {onDelete && (
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={deleting}
+            title={`Delete ${name}`}
+            aria-label={`Delete ${name}`}
+            className="rounded-md p-1.5 text-[var(--ink3)] transition hover:bg-[var(--crit-soft)] hover:text-[var(--crit)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--crit)] disabled:opacity-50"
+          >
+            {deleting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Trash2 className="h-4 w-4" aria-hidden />}
+          </button>
+        )}
+      </span>
     </li>
   );
 }
@@ -536,7 +574,7 @@ function EmptyList({ view, query, onNew }: { view: ContactsView; query: string; 
     );
   }
   const text: Partial<Record<ContactsView, [string, string]>> = {
-    all: ["No contacts yet", "Add the people you work with, or import them from a CSV file."],
+    all: ["No contacts yet", "Add the people you work with, or import them from a CSV file. Your colleagues are in Company Directory."],
     mine: ["No contacts yet", "Add the people you work with, or import them from a CSV file."],
     personal: ["No personal contacts", "Contacts you keep to yourself appear here."],
     favorites: ["No favourites yet", "Open a contact and choose More → Add to Favourites."],
