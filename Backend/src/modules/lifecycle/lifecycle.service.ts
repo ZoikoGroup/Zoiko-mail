@@ -6,6 +6,7 @@ import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
 import { mailboxCleanupService } from "../mail/mailbox-cleanup.service.js";
+import { eraseMemberWork } from "../workgraph/erasure.js";
 
 /**
  * The hard-delete service-level agreement — AC-012, Data Model §6.14.
@@ -415,6 +416,10 @@ export class LifecycleService {
         "USER_ERASURE",
         { userId: context.userId, requestId: context.requestId }
       );
+
+      // Work Graph: what they kept private goes with them; what they shared with
+      // the workspace stays, as a former member's (see workgraph/erasure.ts).
+      await eraseMemberWork(tx, tenantId, membership.id);
 
       // Cascades to the personal mailbox, its folder items, shared-mailbox
       // grants and connected accounts. Message recipient rows survive with

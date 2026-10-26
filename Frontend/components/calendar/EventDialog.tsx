@@ -35,6 +35,8 @@ export interface EventDraftSeed {
   attendees?: string[];
   /** Start from this meeting template (Meeting Templates → Use template). */
   templateId?: string;
+  /** Prefill the title (e.g. a follow-up planned from a commitment). */
+  title?: string;
 }
 
 /**
@@ -67,7 +69,7 @@ export function EventDialog({
   }, [event, seed, prefs.defaultDurationMinutes]);
 
   const defaultCalendar = calendars.find((c) => c.id === seed?.calendarId) ?? calendars.find((c) => c.isDefault) ?? calendars[0];
-  const [title, setTitle] = useState(event?.title ?? "");
+  const [title, setTitle] = useState(event?.title ?? seed?.title ?? "");
   const [calendarId, setCalendarId] = useState(event?.calendarId ?? defaultCalendar?.id ?? "");
   const [allDay, setAllDay] = useState(initial.allDay);
   const [startDate, setStartDate] = useState(toDateInput(initial.start));

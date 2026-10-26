@@ -5,7 +5,7 @@ import {
   Mail, CalendarDays, CheckSquare, UserRound, Network, Sparkles, HelpCircle, type LucideIcon,
 } from "lucide-react";
 
-/** The Member workspace's sections. Mail, Calendar and Contacts are built; the rest show Coming Soon. */
+/** The Member workspace's sections. Mail, Calendar, Contacts and the Work Graph are built; the rest show Coming Soon. */
 export type WorkspaceSection = "mail" | "calendar" | "tasks" | "contacts" | "work-graph" | "alet" | "help";
 
 export interface SectionInfo {
@@ -45,7 +45,7 @@ export const SECTIONS: SectionInfo[] = [
     label: "Work Graph",
     href: "/mail/work-graph",
     icon: Network,
-    description: "See how people, projects and conversations connect across your workspace.",
+    description: "See how commitments, decisions and the mail and meetings behind them connect across your workspace.",
   },
   {
     key: "alet",

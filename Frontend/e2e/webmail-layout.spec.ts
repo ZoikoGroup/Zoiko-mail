@@ -24,7 +24,8 @@ test("the inbox shows the workspace, counts, shared inboxes, storage and message
 
   const folders = page.getByRole("complementary", { name: "Mail folders" });
   await expect(folders.getByRole("button", { name: /Inbox\s*8/ })).toBeVisible();
-  await expect(folders.getByRole("button", { name: /Drafts\s*2/ })).toBeVisible();
+  // Drafts holds a total, not unread mail, so it carries no number.
+  await expect(folders.getByRole("button", { name: "Drafts", exact: true })).toBeVisible();
   const shared = folders.getByTestId("shared-inboxes");
   await expect(shared.getByRole("button", { name: /support\s*5/ })).toBeVisible();
   await expect(shared.getByRole("button", { name: /sales\s*3/ })).toBeVisible();
@@ -77,11 +78,10 @@ test("Ctrl+K focuses search", async ({ page }) => {
   await expect(page.locator("#mail-search")).toBeFocused();
 });
 
-// Calendar (app/mail/calendar) and Contacts (app/mail/contacts) are built;
-// they have their own specs.
+// Calendar (app/mail/calendar), Contacts (app/mail/contacts) and the Work Graph
+// (app/mail/work-graph) are built; they have their own specs.
 for (const [href, title] of [
   ["/mail/tasks", "Tasks"],
-  ["/mail/work-graph", "Work Graph"],
   ["/mail/alet", "Alet"],
 ] as const) {
   test(`${title} shows Coming Soon inside the workspace`, async ({ page }) => {

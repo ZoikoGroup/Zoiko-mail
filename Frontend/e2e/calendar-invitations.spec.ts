@@ -181,8 +181,8 @@ interface Api {
   writes: Array<{ method: string; path: string; body: unknown }>;
 }
 
-async function openInvitations(page: Page, { busyAt }: { busyAt?: [Date, Date] } = {}): Promise<Api> {
-  const api: Api = { invites: seed(), writes: [] };
+async function openInvitations(page: Page, { busyAt, extra = [] }: { busyAt?: [Date, Date]; extra?: StubInvite[] } = {}): Promise<Api> {
+  const api: Api = { invites: [...seed(), ...extra], writes: [] };
   await page.addInitScript(() => window.localStorage.setItem("theme", "dark"));
   await page.route(
     (url) => url.pathname.startsWith("/api/v1/"),
@@ -374,4 +374,41 @@ test("an invitation link opens that invitation", async ({ page }) => {
   await openInvitations(page);
   await page.goto("/mail/calendar/invitations?event=inv-design");
   await expect(page.getByTestId("invitation-title")).toHaveText("Design review", { timeout: 30_000 });
+});
+
+test("a meeting that has ended can no longer be answered", async ({ page }) => {
+  const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000);
+  const ended: StubInvite = {
+    id: "inv-ended",
+    title: "Project meeting",
+    description: "Discuss the project",
+    location: null,
+    videoLink: null,
+    start: threeDaysAgo,
+    end: new Date(threeDaysAgo.getTime() + 3_600_000),
+    organizer: { name: "Sarah Chen", email: "sarah@acme.test" },
+    isOrganizer: false,
+    seen: true,
+    attendees: [attendee("d1", "Michael Irvine", "ACCEPTED", true), attendee("d2", "Sarah Chen", "ACCEPTED")],
+  };
+  const api = await openInvitations(page, { extra: [ended] });
+  await page.goto("/mail/calendar/invitations?event=inv-ended");
+  await expect(page.getByTestId("invitation-title")).toHaveText("Project meeting", { timeout: 30_000 });
+  await expect(page.getByTestId("ended-note")).toContainText("This meeting has ended, so it can no longer be answered. You answered Accepted.");
+  const answers = page.getByRole("group", { name: "Your answer" });
+  for (const name of ["Accept", "Tentative", "Decline"]) await expect(answers.getByRole("button", { name })).toBeDisabled();
+  await expect(answers.getByRole("button", { name: /Propose new time/ })).toBeDisabled();
+  expect(api.writes.some((w) => w.path.endsWith("/respond"))).toBe(false);
+});
+
+test("a meeting still to come can be re-answered until it ends", async ({ page }) => {
+  const api = await openInvitations(page);
+  // Opened by its link, it stays selected after it leaves the awaiting list.
+  await page.goto("/mail/calendar/invitations?event=inv-strategy");
+  await expect(page.getByTestId("invitation-title")).toHaveText("Product strategy review", { timeout: 30_000 });
+  const answers = page.getByRole("group", { name: "Your answer" });
+  await answers.getByRole("button", { name: "Accept" }).click();
+  await expect(page.getByText("You can change your answer until the meeting ends.")).toBeVisible();
+  await answers.getByRole("button", { name: "Decline" }).click();
+  await expect.poll(() => api.writes.filter((w) => w.path === "/calendar/events/inv-strategy/respond").map((w) => (w.body as { response: string }).response)).toEqual(["ACCEPTED", "DECLINED"]);
 });

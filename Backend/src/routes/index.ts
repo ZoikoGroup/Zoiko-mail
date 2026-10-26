@@ -27,6 +27,7 @@ import { dashboardRouter } from "../modules/dashboard/dashboard.routes.js";
 import { participantRouter } from "../modules/participant/participant.routes.js";
 import { eventsRouter } from "../modules/events/events.routes.js";
 import { calendarRouter } from "../modules/calendar/calendar.routes.js";
+import { workGraphRouter } from "../modules/workgraph/workgraph.routes.js";
 import { bookingPublicRouter } from "../modules/calendar/booking-public.routes.js";
 
 const apiRouter = Router();
@@ -65,6 +66,7 @@ apiRouter.use("/support", supportRouter);
 apiRouter.use("/connectors", connectorRouter);
 apiRouter.use("/contacts", authenticate, tenantContext, contactRouter);
 apiRouter.use("/calendar", authenticate, tenantContext, calendarRouter);
+apiRouter.use("/workgraph", authenticate, tenantContext, workGraphRouter);
 // Public booking pages: no sign-in (see booking-public.routes.ts).
 apiRouter.use("/public/booking", bookingPublicRouter);
 apiRouter.use("/delivery-protection", deliveryProtectionRouter);

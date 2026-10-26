@@ -241,3 +241,33 @@ describe("when the organizer changes or cancels the event", () => {
     expect(bell.some((n) => n.title === "Cancelled: Product strategy review")).toBe(true);
   });
 });
+
+describe("a meeting that has ended", () => {
+  it("can no longer be answered or countered, and the earlier answer stays", async () => {
+    const { owner, join } = await workspace();
+    const colleague = await join();
+    const daysAgo = (days: number, hour: number) => {
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() - days);
+      d.setUTCHours(hour, 0, 0, 0);
+      return d.toISOString();
+    };
+    const event = await invite(owner, [colleague.email], { startsAt: daysAgo(3, 10), endsAt: daysAgo(3, 11) });
+
+    const refused = await post(colleague, `/events/${event.id}/respond`, { response: "ACCEPTED" }).expect(409);
+    expect(JSON.stringify(refused.body)).toContain("EVENT_ENDED");
+    await post(colleague, `/events/${event.id}/propose`, { startsAt: tomorrow(14), endsAt: tomorrow(15) }).expect(409);
+    // It stays as it was: still unanswered, and it does not count as waiting.
+    expect((await get(colleague, `/events/${event.id}/details`).expect(200)).body.data.myResponse).toBe("NEEDS_ACTION");
+    expect((await get(colleague, "/invitations/counts").expect(200)).body.data.awaiting).toBe(0);
+  });
+
+  it("still lets a meeting that has not ended yet be re-answered", async () => {
+    const { owner, join } = await workspace();
+    const colleague = await join();
+    const event = await invite(owner, [colleague.email]);
+    await post(colleague, `/events/${event.id}/respond`, { response: "ACCEPTED" }).expect(200);
+    await post(colleague, `/events/${event.id}/respond`, { response: "DECLINED" }).expect(200);
+    expect((await get(colleague, `/events/${event.id}/details`).expect(200)).body.data.myResponse).toBe("DECLINED");
+  });
+});

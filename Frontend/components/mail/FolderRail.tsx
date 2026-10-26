@@ -13,7 +13,9 @@ interface FolderRow {
   label: string;
   icon: typeof Inbox;
   /** Which key in the unread-counts response feeds this row's badge, if any.
-   * STARRED has none: starred mail spans every folder. */
+   * Only folders where mail arrives unread have one (Inbox, Spam): a badge means
+   * "unread", so it clears once the mail is read. Drafts, Snoozed and Scheduled
+   * hold totals, which never clear, so they show no number here. */
   countKey?: string;
 }
 
@@ -21,14 +23,14 @@ interface FolderRow {
 const PRIMARY: FolderRow[] = [
   { key: "INBOX", label: "Inbox", icon: Inbox, countKey: "INBOX" },
   { key: "STARRED", label: "Starred", icon: Star },
-  { key: "DRAFTS", label: "Drafts", icon: FileText, countKey: "DRAFTS" },
+  { key: "DRAFTS", label: "Drafts", icon: FileText },
   { key: "SENT", label: "Sent", icon: Send },
-  { key: "SNOOZED", label: "Snoozed", icon: Clock, countKey: "SNOOZED" },
+  { key: "SNOOZED", label: "Snoozed", icon: Clock },
 ];
 
 // Behind "More mail".
 const MORE: FolderRow[] = [
-  { key: "SCHEDULED", label: "Scheduled", icon: CalendarClock, countKey: "SCHEDULED" },
+  { key: "SCHEDULED", label: "Scheduled", icon: CalendarClock },
   { key: "ARCHIVE", label: "Archive", icon: Archive },
   { key: "SPAM", label: "Spam", icon: Ban, countKey: "SPAM" },
   { key: "TRASH", label: "Trash", icon: Trash2 },
