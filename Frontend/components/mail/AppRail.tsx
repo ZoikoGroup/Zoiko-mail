@@ -85,7 +85,7 @@ export function AppRail({ active }: { active: WorkspaceSection }) {
             key={section.key}
             href={section.href}
             aria-current={current ? "page" : undefined}
-            className={`flex w-[64px] flex-col items-center gap-1 rounded-xl px-1 py-2.5 text-[11px] transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${
+            className={`flex w-[64px] flex-col items-center gap-1 whitespace-nowrap rounded-xl px-0 py-2.5 text-center text-[11px] transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${
               current
                 ? "bg-[var(--accent-soft)] font-medium text-[var(--ink)] ring-1 ring-inset ring-[var(--accent)]/40"
                 : "text-[var(--ink3)] hover:bg-[var(--s2)] hover:text-[var(--ink)]"

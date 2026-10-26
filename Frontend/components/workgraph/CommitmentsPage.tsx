@@ -117,7 +117,7 @@ function Body() {
       </div>
 
       <div className="relative mb-4 flex flex-wrap items-center gap-2 border-b border-[var(--border)]">
-        <div role="tablist" aria-label="Commitments" className="flex min-w-0 flex-1 gap-1 overflow-x-auto">
+        <div role="tablist" aria-label="Commitments" className="flex min-w-0 flex-1 gap-1 overflow-x-auto overflow-y-hidden">
           {(
             [
               ["all", `All confirmed (${summary?.confirmed ?? 0})`],

@@ -104,3 +104,20 @@ export async function shot(page: Page, name: string) {
 export const me = { kind: "MEMBER", name: "Michael Irvine", email: "michael@acme.test", isMe: true };
 export const team = (name: string) => ({ kind: "TEAM", name, email: null, isMe: false });
 export const colleague = (name: string, email: string) => ({ kind: "MEMBER", name, email, isMe: false });
+
+/**
+ * On a short window the page scrolls; no card or panel may quietly cut its own
+ * content off instead. Looks at every section and side panel that hides its
+ * overflow and reports any whose content is taller than the box that holds it.
+ * (Lists that scroll on purpose use overflow auto, which is not hidden.)
+ */
+export async function expectNothingClipped(page: Page) {
+  await page.setViewportSize({ width: 1900, height: 640 });
+  await page.waitForTimeout(300);
+  const clipped = await page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLElement>("main section, main aside, section[aria-label], aside[aria-label]"))
+      .filter((el) => getComputedStyle(el).overflowY === "hidden" && el.clientHeight > 0 && el.scrollHeight - el.clientHeight > 1)
+      .map((el) => `${el.getAttribute("aria-label") ?? el.tagName.toLowerCase()} (+${el.scrollHeight - el.clientHeight}px hidden)`)
+  );
+  expect(clipped, "cards with content cut off on a short window").toEqual([]);
+}

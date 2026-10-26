@@ -164,7 +164,7 @@ export function WorkGraphWorkspace({ active, children }: { active: WorkGraphPage
           <div className="hidden lg:block">
             <Sidebar active={active} actions={actions} />
           </div>
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-4 pb-4 pt-4 lg:px-6 lg:pt-5">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-4 pb-4 pt-4 lg:px-6 lg:pt-5 [&>*]:shrink-0">
             <nav aria-label="Work Graph pages" className="-mx-1 mb-3 flex gap-1 overflow-x-auto pb-1 lg:hidden">
               {WORKGRAPH_PAGES.map((page) => (
                 <Link

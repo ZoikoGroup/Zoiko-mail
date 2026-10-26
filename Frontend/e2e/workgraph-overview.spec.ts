@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { noContent, openWorkGraph, shot } from "./workgraph-harness";
+import { expectNothingClipped, noContent, openWorkGraph, shot } from "./workgraph-harness";
 
 /**
  * Work Graph — Overview, against an in-memory stand-in for the API.
@@ -113,6 +113,7 @@ test("draws the workstream with its owner, items and sources, and opens the work
   await expect(panel(page)).toContainText("6 evidence-backed links");
   await expect(panel(page)).toContainText("Email: Creative sign-off");
   await shot(page, "workgraph-4-overview");
+  await expectNothingClipped(page);
 });
 
 test("selecting a node shows that object, and its source opens only if the viewer can open it", async ({ page }) => {

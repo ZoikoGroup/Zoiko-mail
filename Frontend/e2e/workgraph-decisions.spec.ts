@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { colleague, me, noContent, openWorkGraph, refused, shot, team } from "./workgraph-harness";
+import { colleague, expectNothingClipped, me, noContent, openWorkGraph, refused, shot, team } from "./workgraph-harness";
 
 /**
  * Work Graph — Decisions & Dependencies, against an in-memory stand-in for the API.
@@ -155,6 +155,7 @@ test("shows the decision register with owners, review dates, status and impact",
   await expect(detail(page)).toContainText("2 deliverables blocked: Partner email sequence, Release notes");
   await expect(detail(page).getByTestId("decision-evidence")).toContainText("Private source content remains restricted to authorized users.");
   await shot(page, "workgraph-2-decisions");
+  await expectNothingClipped(page);
 });
 
 test("offers approval only to the authorised approver, and says who is for everyone else", async ({ page }) => {
@@ -294,6 +295,29 @@ test("suggested decisions are confirmed by a person", async ({ page }) => {
   const suggestions = page.getByTestId("suggestion-list");
   await expect(suggestions).toContainText("Approve the pricing change");
   await expect(suggestions).toContainText("only the authorized approver can grant it");
+});
+
+test("nothing is clipped on a short window: the table shows whole rows and the tabs have no scrollbar", async ({ page }) => {
+  await open(page, "/mail/work-graph/dependencies");
+  await page.setViewportSize({ width: 1900, height: 640 });
+  const table = page.getByTestId("dependency-table");
+  const rows = table.getByTestId("dependency-row");
+  await expect(rows).toHaveCount(3);
+
+  // Whole table: its content is not taller than the box that holds it.
+  const clipped = await table.evaluate((el) => el.scrollHeight - el.clientHeight);
+  expect(clipped, "the table's contents are cut off").toBeLessThanOrEqual(0);
+  // Every row is fully inside the table's box once scrolled to.
+  await rows.last().scrollIntoViewIfNeeded();
+  const tableBox = (await table.boundingBox())!;
+  const lastBox = (await rows.last().boundingBox())!;
+  expect(lastBox.y + lastBox.height, "the last row spills past the table").toBeLessThanOrEqual(tableBox.y + tableBox.height + 1);
+
+  // The tab strip scrolls sideways when it must, never up and down: it draws no vertical scrollbar.
+  const tabs = page.getByRole("tablist", { name: "Decisions" });
+  expect(await tabs.evaluate((el) => (el as HTMLElement).offsetWidth - el.clientWidth), "the tabs show a vertical scrollbar").toBeLessThanOrEqual(0);
+  expect(await tabs.evaluate((el) => getComputedStyle(el).overflowY)).toBe("hidden");
+  await shot(page, "workgraph-6-dependencies-short");
 });
 
 // `me` is referenced so the fixture helpers stay in step with the harness.

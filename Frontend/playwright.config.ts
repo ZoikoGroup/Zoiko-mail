@@ -27,10 +27,16 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: {
-    command: "npm run dev",
-    url: process.env.E2E_BASE_URL ?? "http://localhost:3000",
-    reuseExistingServer: true,
-    timeout: 180_000,
-  },
+  // With E2E_BASE_URL set, the run is pointed at a server somebody already started
+  // (for example on port 3100, so it never fights the dev server on 3000). Never
+  // start another one in that case: on a cold start the readiness check can give
+  // up early, and the fallback below would then try to take port 3000.
+  webServer: process.env.E2E_BASE_URL
+    ? undefined
+    : {
+        command: "npm run dev",
+        url: "http://localhost:3000",
+        reuseExistingServer: true,
+        timeout: 180_000,
+      },
 });

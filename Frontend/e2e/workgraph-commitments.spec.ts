@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { COLLEAGUES, me, noContent, openWorkGraph, shot, team } from "./workgraph-harness";
+import { COLLEAGUES, expectNothingClipped, me, noContent, openWorkGraph, shot, team } from "./workgraph-harness";
 
 /**
  * Work Graph — Commitments & Follow-ups, against an in-memory stand-in for the API.
@@ -142,6 +142,7 @@ test("shows the register with owners, due times in their own zone, statuses and 
   await expect(detail(page)).toContainText("External partner");
   await expect(detail(page).getByRole("link", { name: "Launch partner handoff" })).toHaveAttribute("href", "/mail?open=msg-2&folder=INBOX");
   await shot(page, "workgraph-1-commitments");
+  await expectNothingClipped(page);
 });
 
 test("names a source the viewer cannot open only as restricted", async ({ page }) => {
