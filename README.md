@@ -425,6 +425,7 @@ In production the API refuses to start if the JWT secrets, `OPERATIONS_KEY` or
 | `STALWART_ACCOUNT_PROVISIONING` | `true` | **Set `false`** to make Zoiko the mail store (production choice) |
 | `STALWART_API_TOKEN_REF` | `stalwart-api-token` | A secret-store *reference*, not the key |
 | `STALWART_AUTO_CREATE_DOMAINS` / `STALWART_DELETE_ENABLED` | `true` / `false` | |
+| `STALWART_ACCOUNT_ROLE_ID` | empty (built-in User role) | A custom role's id; the API key must hold every permission of the role it assigns (`docs/DEPLOYMENT.md`) |
 
 ### Domains / DNS
 

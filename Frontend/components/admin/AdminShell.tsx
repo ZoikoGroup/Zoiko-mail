@@ -14,6 +14,7 @@ import { useCan, useCapabilities } from "@/lib/admin-capabilities";
 import { visibleNav, type AdminNavItem } from "@/lib/admin-nav";
 import { useActiveSupportGrant, useAdminNavCounts, useEndSupportSession } from "@/lib/admin-hooks";
 import { Pill } from "@/components/admin/ui";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 
 /**
  * The admin workspace admits sessions opened for the admin workspace, and
@@ -45,15 +46,13 @@ export function AdminShell({ children }: { children: ReactNode }) {
   // itself while useMe() was in flight and let the console render.
   const access = useWorkspaceAccess(ADMIN_WORKSPACE);
   if (access !== "allowed") {
-    return (
-      <div className="flex h-screen items-center justify-center bg-[var(--ground)]">
-        <span className="text-sm text-[var(--ink3)]">Checking access…</span>
-      </div>
-    );
+    return <BrandLoader label="Opening the admin workspace" />;
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[var(--ground)] text-[var(--ink)]">
+    // zoi-fade: the console settles in as the loader gives way. The shell
+    // lives in the admin layout, so this plays once, not on every page.
+    <div className="zoi-fade flex h-screen overflow-hidden bg-[var(--ground)] text-[var(--ink)]">
       <aside className="hidden w-[232px] shrink-0 flex-col border-r border-[var(--border)] bg-[var(--s2)] md:flex">
         <Rail />
       </aside>

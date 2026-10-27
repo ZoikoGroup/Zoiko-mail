@@ -12,6 +12,7 @@ import {
   type HostedDomain,
   type MailHostingProvider,
   type StalwartErrorCode,
+  type StalwartErrorDetail,
 } from "./stalwart.types.js";
 
 type Invocation = [string, Record<string, unknown>, string];
@@ -36,8 +37,60 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function fail(message: string, code: StalwartErrorCode, retryable: boolean, httpStatus?: number, jmapType?: string): never {
-  throw new StalwartError(message, code, retryable, httpStatus, jmapType);
+function fail(
+  message: string,
+  code: StalwartErrorCode,
+  retryable: boolean,
+  httpStatus?: number,
+  jmapType?: string,
+  detail?: StalwartErrorDetail
+): never {
+  throw new StalwartError(message, code, retryable, httpStatus, jmapType, detail);
+}
+
+const MAX_DESCRIPTION = 500;
+const MAX_PROPERTIES = 20;
+
+/**
+ * The loggable part of a JMAP error object: `description` (or a problem
+ * document's `detail`) and a SetError's `properties`. Bounded, with control
+ * characters removed; nothing else from the response is kept.
+ */
+function errorDetail(raw: unknown): StalwartErrorDetail | undefined {
+  if (!isRecord(raw)) return undefined;
+  const text = typeof raw.description === "string" ? raw.description : typeof raw.detail === "string" ? raw.detail : undefined;
+  const properties = Array.isArray(raw.properties)
+    ? raw.properties.filter((p): p is string => typeof p === "string").slice(0, MAX_PROPERTIES).map((p) => p.slice(0, 200))
+    : undefined;
+  const detail: StalwartErrorDetail = {};
+  if (text) detail.description = text.replace(/[\p{Cc}]+/gu, " ").slice(0, MAX_DESCRIPTION);
+  if (properties?.length) detail.properties = properties;
+  return detail.description || detail.properties ? detail : undefined;
+}
+
+/**
+ * Re-throws a StalwartError with `secret` cut out of its description. A
+ * server explaining an "invalid value" may quote the value, and the value of
+ * a credentials patch is a password.
+ */
+function withoutSecret(error: unknown, secret: string): never {
+  if (error instanceof StalwartError && secret && error.detail?.description?.includes(secret)) {
+    throw new StalwartError(error.message, error.code, error.retryable, error.httpStatus, error.jmapType, {
+      ...error.detail,
+      description: error.detail.description.split(secret).join("[redacted]"),
+    });
+  }
+  throw error;
+}
+
+/**
+ * The `credentials` value Stalwart v0.16.25 accepts: a map keyed by
+ * number-like ids, not an array (an array fails as invalidPatch, "Invalid
+ * value"; a non-numeric key as "Invalid key"). Setting it replaces every
+ * credential the account had.
+ */
+function passwordCredentials(secret: string) {
+  return { "0": { "@type": "Password", secret } };
 }
 
 export interface StalwartClientOptions {
@@ -47,6 +100,8 @@ export interface StalwartClientOptions {
   token?: () => Promise<string>;
   baseUrl?: string;
   enabled?: boolean;
+  /** Test seam. Production reads STALWART_ACCOUNT_ROLE_ID; null forces the User role. */
+  accountRoleId?: string | null;
 }
 
 /**
@@ -69,6 +124,17 @@ export class StalwartClient implements MailHostingProvider {
 
   private get baseUrl(): string | undefined {
     return (this.options.baseUrl ?? env.STALWART_BASE_URL)?.replace(/\/+$/, "");
+  }
+
+  /**
+   * The role a new account gets: a configured custom role, or the built-in
+   * User role. Stalwart refuses (forbidden) to let a key assign a role
+   * holding any permission the key lacks, so this decides how broad the
+   * platform key has to be.
+   */
+  private accountRoles() {
+    const roleId = this.options.accountRoleId !== undefined ? this.options.accountRoleId : env.STALWART_ACCOUNT_ROLE_ID;
+    return roleId ? { "@type": "Custom", roleIds: { [roleId]: true } } : { "@type": "User" };
   }
 
   isConfigured(): boolean {
@@ -131,9 +197,9 @@ export class StalwartClient implements MailHostingProvider {
     if (!response.ok) {
       const type = isRecord(body) && typeof body.type === "string" ? body.type : undefined;
       if (type?.endsWith(":unknownCapability")) {
-        fail("This Stalwart server does not offer the JMAP management capability", "NOT_SUPPORTED", false, response.status, type);
+        fail("This Stalwart server does not offer the JMAP management capability", "NOT_SUPPORTED", false, response.status, type, errorDetail(body));
       }
-      fail("Stalwart refused the request", "INVALID_REQUEST", false, response.status, type);
+      fail("Stalwart refused the request", "INVALID_REQUEST", false, response.status, type, errorDetail(body));
     }
     if (body === null) fail("Stalwart returned a response that is not JSON", "UNEXPECTED_RESPONSE", true, response.status);
     return body;
@@ -215,10 +281,11 @@ export class StalwartClient implements MailHostingProvider {
       const [name, args, id] = entry as [string, Record<string, unknown>, string];
       if (name === "error") {
         const type = typeof args.type === "string" ? args.type : "unknown";
-        if (type === "forbidden") fail("The Stalwart API key lacks the required permission", "FORBIDDEN", false, undefined, type);
-        if (type === "unknownMethod") fail("This Stalwart server does not support the management method", "NOT_SUPPORTED", false, undefined, type);
-        if (type === "serverUnavailable" || type === "serverFail") fail("Stalwart could not complete the request", "UNAVAILABLE", true, undefined, type);
-        fail("Stalwart rejected the request", "INVALID_REQUEST", false, undefined, type);
+        const detail = errorDetail(args);
+        if (type === "forbidden") fail("The Stalwart API key lacks the required permission", "FORBIDDEN", false, undefined, type, detail);
+        if (type === "unknownMethod") fail("This Stalwart server does not support the management method", "NOT_SUPPORTED", false, undefined, type, detail);
+        if (type === "serverUnavailable" || type === "serverFail") fail("Stalwart could not complete the request", "UNAVAILABLE", true, undefined, type, detail);
+        fail("Stalwart rejected the request", "INVALID_REQUEST", false, undefined, type, detail);
       }
       responses.set(id, [name, args]);
     }
@@ -241,9 +308,10 @@ export class StalwartClient implements MailHostingProvider {
     const notCreated = isRecord(args.notCreated) ? args.notCreated[key] : undefined;
     if (isRecord(notCreated)) {
       const type = typeof notCreated.type === "string" ? notCreated.type : "unknown";
-      if (DUPLICATE_TYPES.test(type)) fail("That object already exists in Stalwart", "ALREADY_EXISTS", false, undefined, type);
-      if (type === "forbidden") fail("The Stalwart API key lacks the required permission", "FORBIDDEN", false, undefined, type);
-      fail("Stalwart refused to create the object", "INVALID_REQUEST", false, undefined, type);
+      const detail = errorDetail(notCreated);
+      if (DUPLICATE_TYPES.test(type)) fail("That object already exists in Stalwart", "ALREADY_EXISTS", false, undefined, type, detail);
+      if (type === "forbidden") fail("The Stalwart API key lacks the required permission", "FORBIDDEN", false, undefined, type, detail);
+      fail("Stalwart refused to create the object", "INVALID_REQUEST", false, undefined, type, detail);
     }
     fail("Stalwart did not confirm the object was created", "UNEXPECTED_RESPONSE", true);
   }
@@ -339,28 +407,33 @@ export class StalwartClient implements MailHostingProvider {
   }
 
   async createAccount(input: CreateHostedAccountInput): Promise<HostedAccount> {
-    const responses = await this.call([
-      [
-        "x:Account/set",
-        {
-          create: {
-            a: {
-              "@type": "User",
-              name: input.name.toLowerCase(),
-              domainId: input.domainId,
-              credentials: [{ "@type": "Password", secret: input.secret }],
-              roles: { "@type": "User" },
-              permissions: { "@type": "Inherit" },
-              quotas: { maxDiskQuota: input.diskQuotaBytes },
-              encryptionAtRest: { "@type": "Disabled" },
-              description: input.description,
+    let id: string;
+    try {
+      const responses = await this.call([
+        [
+          "x:Account/set",
+          {
+            create: {
+              a: {
+                "@type": "User",
+                name: input.name.toLowerCase(),
+                domainId: input.domainId,
+                credentials: passwordCredentials(input.secret),
+                roles: this.accountRoles(),
+                permissions: { "@type": "Inherit" },
+                quotas: { maxDiskQuota: input.diskQuotaBytes },
+                encryptionAtRest: { "@type": "Disabled" },
+                description: input.description,
+              },
             },
           },
-        },
-        "s",
-      ],
-    ]);
-    const id = StalwartClient.created(responses.get("s"), "a");
+          "s",
+        ],
+      ]);
+      id = StalwartClient.created(responses.get("s"), "a");
+    } catch (error) {
+      withoutSecret(error, input.secret);
+    }
     // Read back rather than trusting the create response: success is reported
     // only for an account the server will actually show us.
     const account = await this.getAccount(id);
@@ -436,9 +509,9 @@ export class StalwartClient implements MailHostingProvider {
       if (type === "notFound") {
         result = "ALREADY_ABSENT";
       } else if (type === "forbidden") {
-        fail("The Stalwart API key lacks the required permission", "FORBIDDEN", false, undefined, type);
+        fail("The Stalwart API key lacks the required permission", "FORBIDDEN", false, undefined, type, errorDetail(refusal));
       } else {
-        fail("Stalwart refused to destroy the account", "INVALID_REQUEST", false, undefined, type);
+        fail("Stalwart refused to destroy the account", "INVALID_REQUEST", false, undefined, type, errorDetail(refusal));
       }
     }
 
@@ -455,24 +528,29 @@ export class StalwartClient implements MailHostingProvider {
    * secret is sent only in the request body, never logged.
    */
   async setAccountPassword(id: string, secret: string): Promise<void> {
-    const responses = await this.call([
-      ["x:Account/set", { update: { [id]: { credentials: [{ "@type": "Password", secret }] } } }, "s"],
-    ]);
-    const response = responses.get("s");
-    if (!response) fail("Stalwart returned no set response", "UNEXPECTED_RESPONSE", true);
-    const args = response[1];
-    if (isRecord(args.updated) && id in args.updated) {
-      logger.info({ provider: "stalwart", accountId: id }, "Stalwart account password replaced");
-      return;
+    try {
+      const responses = await this.call([
+        ["x:Account/set", { update: { [id]: { credentials: passwordCredentials(secret) } } }, "s"],
+      ]);
+      const response = responses.get("s");
+      if (!response) fail("Stalwart returned no set response", "UNEXPECTED_RESPONSE", true);
+      const args = response[1];
+      if (isRecord(args.updated) && id in args.updated) {
+        logger.info({ provider: "stalwart", accountId: id }, "Stalwart account password replaced");
+        return;
+      }
+      const notUpdated = isRecord(args.notUpdated) ? args.notUpdated[id] : undefined;
+      if (isRecord(notUpdated)) {
+        const type = typeof notUpdated.type === "string" ? notUpdated.type : "unknown";
+        const detail = errorDetail(notUpdated);
+        if (type === "forbidden") fail("The Stalwart API key lacks the required permission", "FORBIDDEN", false, undefined, type, detail);
+        if (type === "notFound") fail("The account no longer exists on the mail server", "INVALID_REQUEST", false, undefined, type, detail);
+        fail("Stalwart refused the password change", "INVALID_REQUEST", false, undefined, type, detail);
+      }
+      fail("Stalwart did not confirm the password change", "UNEXPECTED_RESPONSE", true);
+    } catch (error) {
+      withoutSecret(error, secret);
     }
-    const notUpdated = isRecord(args.notUpdated) ? args.notUpdated[id] : undefined;
-    if (isRecord(notUpdated)) {
-      const type = typeof notUpdated.type === "string" ? notUpdated.type : "unknown";
-      if (type === "forbidden") fail("The Stalwart API key lacks the required permission", "FORBIDDEN", false, undefined, type);
-      if (type === "notFound") fail("The account no longer exists on the mail server", "INVALID_REQUEST", false, undefined, type);
-      fail("Stalwart refused the password change", "INVALID_REQUEST", false, undefined, type);
-    }
-    fail("Stalwart did not confirm the password change", "UNEXPECTED_RESPONSE", true);
   }
 
   async probe() {

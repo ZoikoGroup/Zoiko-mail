@@ -45,6 +45,7 @@ import { useLiveRefresh } from "@/lib/support-hooks";
 import { supportStyles } from "@/components/support/support-styles";
 import TicketsPage from "@/components/support/TicketsPage";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import { AccessDenied } from "@/components/ui/AccessDenied";
 import {
   AlarmClock,
@@ -1504,14 +1505,7 @@ export default function PlatformConsole() {
   // server sent (localStorage-aware state is only resolved in the effect
   // above). Everything below can then safely depend on the browser.
   if (!mounted) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="flex items-center gap-2.5 text-sm text-[var(--ink3)]">
-          <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--accent)]" />
-          Loading…
-        </div>
-      </div>
-    );
+    return <BrandLoader label="Opening the support workspace" />;
   }
 
   // Loading gate: don't render the staff console until we know whether the
@@ -1519,14 +1513,7 @@ export default function PlatformConsole() {
   // a member briefly sees the console UI before the guard redirects them.
   // Staff platform users skip this because their access doesn't depend on /auth/me.
   if (!isPlatform && (meLoading || !me)) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="flex items-center gap-2.5 text-sm text-[var(--ink3)]">
-          <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--accent)]" />
-          Loading…
-        </div>
-      </div>
-    );
+    return <BrandLoader label="Opening the support workspace" />;
   }
   // if (!isPlatform && me && me.membership.role !== "SUPPORT") {
   //   return null;
