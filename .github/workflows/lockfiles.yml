@@ -1,0 +1,50 @@
+name: Lockfiles
+
+# `npm ci` for both apps, on Linux, for every pull request and every push to
+# main — so a lockfile that cannot be installed fails the pull request instead
+# of the production build.
+#
+# Why this exists: package-lock.json files written on Windows have been
+# missing optional, platform-specific packages Linux needs (for example
+# @emnapi/core, @emnapi/runtime and @floating-ui/dom). Windows installs them
+# happily; `npm ci` on Linux refuses with "Missing: … from lock file".
+#
+# Deliberately small. The full pipeline (Backend/.github/workflows/ci.yml)
+# stays where it is and does not run — see the note at the top of that file.
+# This is the one check that has to run on every pull request.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: lockfiles-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  npm-ci:
+    name: npm ci (${{ matrix.app }}, Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [Frontend, Backend]
+        # 22 is what the CI pipeline and the Docker image use; 20 is the
+        # version the missing-entries failure was first reported on.
+        node: [20, 22]
+    defaults:
+      run:
+        working-directory: ${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+      - name: Install exactly what the lockfile says
+        run: npm ci --no-audit --no-fund
