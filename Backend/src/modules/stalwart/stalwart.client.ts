@@ -151,7 +151,15 @@ export class StalwartClient implements MailHostingProvider {
     if (!isRecord(body) || !isRecord(body.capabilities)) {
       fail("Stalwart returned an unexpected session object", "UNEXPECTED_RESPONSE", true);
     }
-    if (!(STALWART_CAPABILITY in body.capabilities)) {
+    const accounts = isRecord(body.accounts) ? body.accounts : {};
+    // Stalwart v0.16.25 advertises management per account (RFC 8620 §2
+    // `accountCapabilities`), not in the top-level capabilities, and may leave
+    // it out of primaryAccounts. Either place counts.
+    const managementAccountId = Object.keys(accounts).find((id) => {
+      const entry = accounts[id];
+      return isRecord(entry) && isRecord(entry.accountCapabilities) && STALWART_CAPABILITY in entry.accountCapabilities;
+    });
+    if (!(STALWART_CAPABILITY in body.capabilities) && managementAccountId === undefined) {
       fail(
         "The Stalwart session does not include the management capability; check the server version and the API key's permissions",
         "NOT_SUPPORTED",
@@ -171,9 +179,9 @@ export class StalwartClient implements MailHostingProvider {
     const primary = isRecord(body.primaryAccounts) ? body.primaryAccounts[STALWART_CAPABILITY] : undefined;
     this.session = {
       apiUrl,
-      accountId: typeof primary === "string" ? primary : undefined,
+      accountId: typeof primary === "string" ? primary : managementAccountId,
       capabilities: new Set(Object.keys(body.capabilities)),
-      accountIds: new Set(isRecord(body.accounts) ? Object.keys(body.accounts) : []),
+      accountIds: new Set(Object.keys(accounts)),
       expiresAt: Date.now() + SESSION_TTL_MS,
     };
     return this.session;

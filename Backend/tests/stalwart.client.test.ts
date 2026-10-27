@@ -149,6 +149,39 @@ describe("StalwartClient", () => {
     await expect(client.findDomain("acme.test")).rejects.toMatchObject({ code: "NOT_SUPPORTED" });
   });
 
+  it("accepts the v0.16.25 session, which advertises management only per account", async () => {
+    const { client, calls } = fakeServer(
+      () => ({ json: { methodResponses: [["x:Domain/query", { ids: [] }, "q"], ["x:Domain/get", { list: [] }, "g"]] } }),
+      {
+        capabilities: { "urn:ietf:params:jmap:core": {}, "urn:ietf:params:jmap:mail": {} },
+        accounts: {
+          a: {
+            name: "admin",
+            isPersonal: true,
+            isReadOnly: false,
+            accountCapabilities: { "urn:ietf:params:jmap:mail": {}, "urn:stalwart:jmap": {} },
+          },
+        },
+        primaryAccounts: { "urn:ietf:params:jmap:mail": "a" },
+      }
+    );
+    expect(await client.findDomain("acme.test")).toBeNull();
+    const call = calls.find((c) => c.method === "POST")!;
+    expect(call.body.using).toEqual(["urn:ietf:params:jmap:core", "urn:stalwart:jmap"]);
+    // primaryAccounts does not name it, so the account that carries it is used.
+    expect(call.body.methodCalls[0][1].accountId).toBe("a");
+    expect(await client.probe()).toEqual({ reachable: true, authenticated: true, managementCapability: true });
+  });
+
+  it("refuses a session whose accounts lack the management capability too", async () => {
+    const { client } = fakeServer(() => ({ json: {} }), {
+      capabilities: { "urn:ietf:params:jmap:core": {} },
+      accounts: { a: { name: "john", accountCapabilities: { "urn:ietf:params:jmap:mail": {} } } },
+      primaryAccounts: {},
+    });
+    await expect(client.findDomain("acme.test")).rejects.toMatchObject({ code: "NOT_SUPPORTED" });
+  });
+
   it("does not follow an apiUrl on another origin", async () => {
     const { client, calls } = fakeServer(
       () => ({ json: { methodResponses: [["x:Domain/query", { ids: [] }, "q"], ["x:Domain/get", { list: [] }, "g"]] } }),
