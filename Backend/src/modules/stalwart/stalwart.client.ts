@@ -143,6 +143,12 @@ export class StalwartClient implements MailHostingProvider {
    * The JMAP session: where to send method calls, and which account they run
    * against. Read rather than assumed, which is what RFC 8620 §2 asks of a
    * client and what settles the `accountId` question without guessing.
+   *
+   * The management capability may be advertised at the top level or only
+   * per account, in `accounts.<id>.accountCapabilities` — Stalwart v0.16.25
+   * does the latter, and lists no primary account for it. Either counts. The
+   * account calls run against is the primary one when the session names it,
+   * otherwise the first account that carries the capability.
    */
   private async resolveSession(): Promise<SessionInfo> {
     if (this.session && this.session.expiresAt > Date.now()) return this.session;
@@ -152,14 +158,11 @@ export class StalwartClient implements MailHostingProvider {
       fail("Stalwart returned an unexpected session object", "UNEXPECTED_RESPONSE", true);
     }
     const accounts = isRecord(body.accounts) ? body.accounts : {};
-    // Stalwart v0.16.25 advertises management per account (RFC 8620 §2
-    // `accountCapabilities`), not in the top-level capabilities, and may leave
-    // it out of primaryAccounts. Either place counts.
-    const managementAccountId = Object.keys(accounts).find((id) => {
-      const entry = accounts[id];
-      return isRecord(entry) && isRecord(entry.accountCapabilities) && STALWART_CAPABILITY in entry.accountCapabilities;
+    const managingAccounts = Object.keys(accounts).filter((id) => {
+      const account = accounts[id];
+      return isRecord(account) && isRecord(account.accountCapabilities) && STALWART_CAPABILITY in account.accountCapabilities;
     });
-    if (!(STALWART_CAPABILITY in body.capabilities) && managementAccountId === undefined) {
+    if (!(STALWART_CAPABILITY in body.capabilities) && managingAccounts.length === 0) {
       fail(
         "The Stalwart session does not include the management capability; check the server version and the API key's permissions",
         "NOT_SUPPORTED",
@@ -179,7 +182,7 @@ export class StalwartClient implements MailHostingProvider {
     const primary = isRecord(body.primaryAccounts) ? body.primaryAccounts[STALWART_CAPABILITY] : undefined;
     this.session = {
       apiUrl,
-      accountId: typeof primary === "string" ? primary : managementAccountId,
+      accountId: typeof primary === "string" ? primary : managingAccounts[0],
       capabilities: new Set(Object.keys(body.capabilities)),
       accountIds: new Set(Object.keys(accounts)),
       expiresAt: Date.now() + SESSION_TTL_MS,

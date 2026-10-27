@@ -149,37 +149,14 @@ describe("StalwartClient", () => {
     await expect(client.findDomain("acme.test")).rejects.toMatchObject({ code: "NOT_SUPPORTED" });
   });
 
-  it("accepts the v0.16.25 session, which advertises management only per account", async () => {
-    const { client, calls } = fakeServer(
-      () => ({ json: { methodResponses: [["x:Domain/query", { ids: [] }, "q"], ["x:Domain/get", { list: [] }, "g"]] } }),
-      {
-        capabilities: { "urn:ietf:params:jmap:core": {}, "urn:ietf:params:jmap:mail": {} },
-        accounts: {
-          a: {
-            name: "admin",
-            isPersonal: true,
-            isReadOnly: false,
-            accountCapabilities: { "urn:ietf:params:jmap:mail": {}, "urn:stalwart:jmap": {} },
-          },
-        },
-        primaryAccounts: { "urn:ietf:params:jmap:mail": "a" },
-      }
-    );
-    expect(await client.findDomain("acme.test")).toBeNull();
-    const call = calls.find((c) => c.method === "POST")!;
-    expect(call.body.using).toEqual(["urn:ietf:params:jmap:core", "urn:stalwart:jmap"]);
-    // primaryAccounts does not name it, so the account that carries it is used.
-    expect(call.body.methodCalls[0][1].accountId).toBe("a");
-    expect(await client.probe()).toEqual({ reachable: true, authenticated: true, managementCapability: true });
-  });
-
-  it("refuses a session whose accounts lack the management capability too", async () => {
-    const { client } = fakeServer(() => ({ json: {} }), {
+  it("still refuses when no account carries the management capability either", async () => {
+    const { client, calls } = fakeServer(() => ({ json: {} }), {
       capabilities: { "urn:ietf:params:jmap:core": {} },
-      accounts: { a: { name: "john", accountCapabilities: { "urn:ietf:params:jmap:mail": {} } } },
       primaryAccounts: {},
+      accounts: { b: { name: "admin", accountCapabilities: { "urn:ietf:params:jmap:mail": {} } } },
     });
-    await expect(client.findDomain("acme.test")).rejects.toMatchObject({ code: "NOT_SUPPORTED" });
+    await expect(client.findDomain("acme.test")).rejects.toMatchObject({ code: "NOT_SUPPORTED", retryable: false });
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
   });
 
   it("does not follow an apiUrl on another origin", async () => {
@@ -211,6 +188,90 @@ describe("StalwartClient", () => {
     const fetchImpl = (async () => new Response("{}", { status: 401 })) as unknown as typeof fetch;
     const client = new StalwartClient({ fetch: fetchImpl, token: async () => TOKEN, baseUrl: BASE, enabled: true });
     expect(await client.probe()).toEqual({ reachable: true, authenticated: false, managementCapability: false });
+  });
+});
+
+/**
+ * The session as Stalwart v0.16.25 serves it: `urn:stalwart:jmap` is not in
+ * the top-level capabilities and has no primary account — it is advertised
+ * only in the account's `accountCapabilities`.
+ */
+const V0_16_25_SESSION = {
+  capabilities: {
+    "urn:ietf:params:jmap:core": { maxSizeUpload: 50000000, maxCallsInRequest: 16 },
+    "urn:ietf:params:jmap:mail": {},
+    "urn:ietf:params:jmap:submission": {},
+  },
+  accounts: {
+    b: {
+      name: "admin",
+      isPersonal: true,
+      isReadOnly: false,
+      accountCapabilities: {
+        "urn:ietf:params:jmap:mail": {},
+        "urn:ietf:params:jmap:submission": {},
+        "urn:stalwart:jmap": {},
+      },
+    },
+  },
+  primaryAccounts: { "urn:ietf:params:jmap:mail": "b", "urn:ietf:params:jmap:submission": "b" },
+};
+
+describe("StalwartClient against a v0.16.25 session", () => {
+  it("finds the management capability on the account and runs calls against that account", async () => {
+    const { client, calls } = fakeServer(
+      () => ({ json: { methodResponses: [["x:Domain/query", { ids: ["d1"] }, "q"], ["x:Domain/get", { list: [{ id: "d1", name: "temveris.com" }] }, "g"]] } }),
+      V0_16_25_SESSION
+    );
+    expect(await client.findDomain("temveris.com")).toEqual({ id: "d1", name: "temveris.com" });
+    const call = calls.find((c) => c.method === "POST")!;
+    expect(call.body.using).toEqual(["urn:ietf:params:jmap:core", "urn:stalwart:jmap"]);
+    expect(call.body.methodCalls[0][1].accountId).toBe("b");
+  });
+
+  it("picks the account that carries the capability, not just the first one listed", async () => {
+    const { client, calls } = fakeServer(
+      () => ({ json: { methodResponses: [["x:Domain/query", { ids: [] }, "q"], ["x:Domain/get", { list: [] }, "g"]] } }),
+      {
+        ...V0_16_25_SESSION,
+        accounts: { a: { name: "shared", accountCapabilities: { "urn:ietf:params:jmap:mail": {} } }, ...V0_16_25_SESSION.accounts },
+      }
+    );
+    await client.findDomain("temveris.com");
+    expect(calls.find((c) => c.method === "POST")!.body.methodCalls[0][1].accountId).toBe("b");
+  });
+
+  it("still prefers a primary account the session names for the capability", async () => {
+    const { client, calls } = fakeServer(
+      () => ({ json: { methodResponses: [["x:Domain/query", { ids: [] }, "q"], ["x:Domain/get", { list: [] }, "g"]] } }),
+      { ...V0_16_25_SESSION, primaryAccounts: { ...V0_16_25_SESSION.primaryAccounts, "urn:stalwart:jmap": "sys" } }
+    );
+    await client.findDomain("temveris.com");
+    expect(calls.find((c) => c.method === "POST")!.body.methodCalls[0][1].accountId).toBe("sys");
+  });
+
+  it("creates an account end to end", async () => {
+    const { client, calls } = fakeServer((body) => {
+      const [method] = body.methodCalls[0];
+      if (method === "x:Account/set") return { json: { methodResponses: [["x:Account/set", { created: { a: { id: "acc1" } } }, "s"]] } };
+      return { json: { methodResponses: [["x:Account/get", { list: [account] }, "g"]] } };
+    }, V0_16_25_SESSION);
+    await expect(
+      client.createAccount({ name: "info", domainId: "dom1", secret: "x", diskQuotaBytes: 1, description: "d" })
+    ).resolves.toMatchObject({ id: "acc1" });
+    expect(calls.filter((c) => c.method === "POST").every((c) => c.body.methodCalls[0][1].accountId === "b")).toBe(true);
+  });
+
+  it("probe reports the management capability", async () => {
+    const { client } = fakeServer(() => ({ json: {} }), V0_16_25_SESSION);
+    expect(await client.probe()).toEqual({ reachable: true, authenticated: true, managementCapability: true });
+  });
+
+  it("maps unknownCapability and unknownMethod from the method call to NOT_SUPPORTED", async () => {
+    const http = fakeServer(() => ({ status: 400, json: { type: "urn:ietf:params:jmap:error:unknownCapability" } }), V0_16_25_SESSION);
+    await expect(http.client.findDomain("temveris.com")).rejects.toMatchObject({ code: "NOT_SUPPORTED", retryable: false });
+    const method = fakeServer(() => ({ json: { methodResponses: [["error", { type: "unknownMethod" }, "q"]] } }), V0_16_25_SESSION);
+    await expect(method.client.findDomain("temveris.com")).rejects.toMatchObject({ code: "NOT_SUPPORTED", retryable: false });
   });
 });
 
