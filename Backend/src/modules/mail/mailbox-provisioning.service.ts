@@ -30,7 +30,7 @@ const GIB = 1024 ** 3;
 
 /** The quota choices offered, in GiB. The plan's storage ceiling trims the top. */
 export const QUOTA_OPTIONS_GIB = [1, 5, 10, 25, 50, 100] as const;
-const DEFAULT_QUOTA_GIB = 10;
+const DEFAULT_QUOTA_GIB = 5;
 
 /**
  * Addresses the mail system itself needs (RFC 2142 and the usual daemon
