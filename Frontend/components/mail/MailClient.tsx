@@ -56,6 +56,7 @@ import { SnoozeMenu } from "@/components/mail/SnoozeMenu";
 import { folderLabel as railFolderLabel } from "@/components/mail/FolderRail";
 import { ApiError } from "@/lib/api-client";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { TaskDialog } from "@/components/tasks/TaskDialogs";
 import {
   type FolderView,
@@ -1136,19 +1137,12 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
   );
 });
 
-function ComingSoonButton({ icon: Icon, label, hint }: { icon: typeof Sparkles; label: string; hint: string }) {
-  return (
-    <button
-      type="button"
-      aria-disabled="true"
-      title={hint}
-      onClick={(e) => e.preventDefault()}
-      className="inline-flex h-10 cursor-not-allowed items-center gap-2 rounded-lg border border-[var(--border)] px-3.5 text-[13px] font-medium text-[var(--ink3)]"
-    >
-      <Icon className="h-4 w-4" aria-hidden /> {label}
-      <span className="rounded-full border border-[var(--border)] px-1.5 text-[9.5px] font-semibold uppercase tracking-wide">Soon</span>
-    </button>
-  );
+/**
+ * "Summarize with Alet": opens Alet with this email attached and waiting.
+ * Nothing goes to the AI until the member presses Analyze Email there.
+ */
+export function aletEmailHref(messageId: string, sharedMailboxId?: string | null): string {
+  return `/mail/alet?email=${messageId}${sharedMailboxId ? `&mailbox=${sharedMailboxId}` : ""}`;
 }
 
 /** Toolbar icon buttons: one size, one look, a tooltip and a name. */
@@ -1399,6 +1393,7 @@ function ReadingPane({
   onClose: () => void;
   onCompose: (mode: ComposerMode, source: MailItem | null) => void;
 }) {
+  const router = useRouter();
   const mailboxId = sharedInbox?.id;
   const { data: item, isLoading, error } = useMessage(messageId, mailboxId);
   const update = useUpdateMailItem();
@@ -1484,6 +1479,8 @@ function ReadingPane({
 
   // Spam is read as plain text, with attachments listed but not opened.
   const restricted = view?.folder === "SPAM";
+  // Alet summarises mail that has been sent or received; not drafts, not spam.
+  const canSummarize = !isDraft && !restricted && folder !== "SPAM";
   const recipientCount = m.recipients.length;
   const attachmentCount = m.attachments.length;
 
@@ -1677,6 +1674,11 @@ function ReadingPane({
           <DropdownItem onClick={() => { update.mutate({ messageId, isRead: false, mailboxId }); onClose(); }}>
             <MailX className="h-3.5 w-3.5" /> Mark as unread
           </DropdownItem>
+          {canSummarize && (
+            <DropdownItem onClick={() => router.push(aletEmailHref(messageId, mailboxId))}>
+              <Sparkles className="h-3.5 w-3.5" /> Summarize with Alet
+            </DropdownItem>
+          )}
           {own && folder === "TRASH" && (
             <DropdownItem danger onClick={() => setConfirmDelete(true)} disabled={permanentlyDelete.isPending}>
               <X className="h-3.5 w-3.5" /> Delete forever
@@ -1684,10 +1686,15 @@ function ReadingPane({
           )}
         </DropdownMenu>
         <div className="flex-1" />
-        {!view && (
-          <div className="mr-1 hidden md:block">
-            <ComingSoonButton icon={Sparkles} label="Summarize with Alet" hint="Alet summaries are coming soon" />
-          </div>
+        {canSummarize && (
+          <Link
+            href={aletEmailHref(messageId, mailboxId)}
+            className="mr-1 hidden h-10 items-center gap-2 rounded-lg border border-[var(--border)] px-3.5 text-[13px] font-medium text-[var(--ink)] transition hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent-ink)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] md:inline-flex"
+            title="Open this email in Alet to summarise it"
+            data-testid="summarize-with-alet"
+          >
+            <Sparkles className="h-4 w-4 text-[var(--accent)]" aria-hidden /> Summarize with Alet
+          </Link>
         )}
         <button onClick={onClose} className={`${TOOL} hidden lg:inline-flex`} aria-label="Close message" title="Close message">
           <X className="h-4 w-4" />
