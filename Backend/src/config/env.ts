@@ -128,6 +128,14 @@ export const envSchema = z.object({
    */
   STALWART_AUTO_CREATE_DOMAINS: boolFlag("true"),
   /**
+   * The Stalwart role new accounts get. Unset: the built-in User role, which
+   * on v0.16.25 carries 244 permissions — and Stalwart only lets a key assign
+   * a role whose every permission the key holds. Set to the id of a custom
+   * role (an `x:Role` object) to give mailboxes just what they need, so the
+   * platform key needs fewer permissions too.
+   */
+  STALWART_ACCOUNT_ROLE_ID: z.preprocess(blankAsUndefined, z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).optional()),
+  /**
    * Decision D1 (implementation guide v2.5 §12): set to false to make Zoiko
    * itself the mailbox store. Create Email then creates the Zoiko mailbox and
    * its owner's invitation and never an account on the mail server, whether
