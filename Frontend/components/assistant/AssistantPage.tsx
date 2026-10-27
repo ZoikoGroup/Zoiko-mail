@@ -41,6 +41,7 @@ import {
   ASSISTANT_MAX_FILES,
   ASSISTANT_MAX_QUESTION_CHARS,
   assistantFileProblem,
+  attachAssistantEmail,
   removeAssistantUpload,
   uploadAssistantFile,
   type AssistantAttachment,
@@ -49,7 +50,18 @@ import {
 } from "@/lib/assistant-api";
 import { newIdempotencyKey } from "@/lib/api-client";
 import { FilePreview, type PreviewItem } from "@/components/mail/AttachmentPreview";
-import { ComposerFileChips, MessageFiles, composerPreviewItem, sentImagePreviewItem, type ComposerFile } from "./AssistantFiles";
+import {
+  ComposerFileChips,
+  EmailCard,
+  MessageFiles,
+  composerPreviewItem,
+  isEmailEntry,
+  sentImagePreviewItem,
+  type ComposerFile,
+} from "./AssistantFiles";
+
+/** What "Analyze Email" asks; the server adds what a good summary covers. */
+const ANALYZE_EMAIL_QUESTION = "Summarize this email.";
 import { avatarInitials, hashColor } from "@/components/mail/MailRow";
 import { AssistantMarkdown } from "./AssistantMarkdown";
 
@@ -100,6 +112,10 @@ export function AssistantPage() {
   const [files, setFiles] = useState<ComposerFile[]>([]);
   const [preview, setPreview] = useState<{ items: PreviewItem[]; index: number } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [emailPreview, setEmailPreview] = useState<{ subject: string; text: string } | null>(null);
+  // One attach per email per visit, with one key, so a reload or a re-render
+  // brings back the same attachment instead of adding a second.
+  const emailKeys = useRef(new Map<string, string>());
   const scroller = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
@@ -137,7 +153,7 @@ export function AssistantPage() {
     setFiles((current) => current.map((f) => (f.key === key ? { ...f, ...patch } : f)));
 
   const uploadFile = (entry: ComposerFile) => {
-    uploadAssistantFile(entry.file, entry.idempotencyKey).then(
+    uploadAssistantFile(entry.file!, entry.idempotencyKey).then(
       (attachment) => patchFile(entry.key, { status: "ready", attachment, error: undefined }),
       (error) => patchFile(entry.key, { status: "error", error: errorText(error) })
     );
@@ -157,6 +173,8 @@ export function AssistantPage() {
       const problem = assistantFileProblem(file);
       return {
         key: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        name: file.name,
+        size: file.size,
         file,
         status: problem ? "error" : "uploading",
         error: problem ?? undefined,
@@ -166,6 +184,42 @@ export function AssistantPage() {
     setFiles((current) => [...current, ...entries]);
     entries.filter((e) => e.status === "uploading").forEach(uploadFile);
   };
+
+  // ?email=<messageId>[&mailbox=<shared inbox>]: "Summarize with Alet" from
+  // Mail. The email is attached and waits; nothing is sent until the member
+  // presses Analyze Email. Any chat on screen and its history are kept.
+  const emailParam = params.get("email");
+  const mailboxParam = params.get("mailbox");
+  useEffect(() => {
+    if (!emailParam || !/^[0-9a-f-]{36}$/i.test(emailParam)) return;
+    let key = emailKeys.current.get(emailParam);
+    const firstTime = !key;
+    if (!key) {
+      key = newIdempotencyKey();
+      emailKeys.current.set(emailParam, key);
+    }
+    // The address bar keeps the open chat, without the one-time email link.
+    router.replace(conversationId ? `/mail/alet?c=${conversationId}` : "/mail/alet");
+    if (!firstTime) return;
+    const entryKey = `email:${emailParam}`;
+    setFiles((current) =>
+      current.some((f) => f.key === entryKey)
+        ? current
+        : [{ key: entryKey, name: "Email", size: 0, status: "uploading", idempotencyKey: key! }, ...current.filter((f) => !isEmailEntry(f))]
+    );
+    attachAssistantEmail(emailParam, mailboxParam, key).then(
+      (attached) =>
+        patchFile(entryKey, {
+          status: "ready",
+          attachment: attached,
+          name: attached.fileName,
+          size: attached.sizeBytes,
+          email: { summary: attached.email, preview: attached.preview },
+        }),
+      (error) => patchFile(entryKey, { status: "error", error: errorText(error) })
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emailParam]);
 
   const removeFile = (key: string) => {
     const entry = files.find((f) => f.key === key);
@@ -193,6 +247,7 @@ export function AssistantPage() {
   };
 
   const readyFiles = files.filter((f) => f.status === "ready").map((f) => f.attachment!);
+  const emailEntry = files.find(isEmailEntry) ?? null;
   const uploading = files.some((f) => f.status === "uploading");
   const refused = files.some((f) => f.status === "error");
   const tooLong = draft.length > ASSISTANT_MAX_QUESTION_CHARS;
@@ -200,6 +255,11 @@ export function AssistantPage() {
     (Boolean(draft.trim()) || readyFiles.length > 0) && !uploading && !refused && !tooLong && !ask.isPending && !shownPending?.error;
   const submit = () => {
     if (canSend) send(draft, conversationId, readyFiles);
+  };
+  // "Analyze Email": the explicit go-ahead before an email reaches the AI.
+  const analyzeEmail = () => {
+    if (!emailEntry || emailEntry.status !== "ready" || uploading || refused || ask.isPending) return;
+    send(draft.trim() || ANALYZE_EMAIL_QUESTION, conversationId, readyFiles);
   };
   const missing = conversationId && conversation.isError;
   const loadingThread = conversationId && conversation.isLoading;
@@ -380,8 +440,10 @@ export function AssistantPage() {
                                   // The files go back to the composer, still uploaded and ready.
                                   setFiles(
                                     shownPending.attachments.map((a) => ({
-                                      key: a.id,
-                                      file: new File([], a.fileName, { type: a.contentType }),
+                                      key: a.kind === "EMAIL" ? `email:${a.id}` : a.id,
+                                      name: a.fileName,
+                                      size: a.sizeBytes,
+                                      file: a.kind === "EMAIL" ? undefined : new File([], a.fileName, { type: a.contentType }),
                                       status: "ready" as const,
                                       attachment: a,
                                       idempotencyKey: newIdempotencyKey(),
@@ -407,9 +469,11 @@ export function AssistantPage() {
                               <span key={i} className="h-2 w-2 animate-bounce rounded-full bg-[var(--ink3)]" style={{ animationDelay: `${i * 150}ms` }} />
                             ))}
                             <span className="ml-2 text-[12.5px] text-[var(--ink3)]">
-                              {shownPending.attachments.length
-                                ? `Alet is reading ${shownPending.attachments.length === 1 ? "your file" : `${shownPending.attachments.length} files`}…`
-                                : "Alet is thinking…"}
+                              {shownPending.attachments.some((a) => a.kind === "EMAIL")
+                                ? "Alet is reading the email…"
+                                : shownPending.attachments.length
+                                  ? `Alet is reading ${shownPending.attachments.length === 1 ? "your file" : `${shownPending.attachments.length} files`}…`
+                                  : "Alet is thinking…"}
                             </span>
                           </div>
                         </li>
@@ -462,9 +526,23 @@ export function AssistantPage() {
               }}
             />
             <div className="mx-auto w-full max-w-[860px]">
+              {emailEntry && (
+                <EmailCard
+                  entry={emailEntry}
+                  busy={ask.isPending || uploading}
+                  onAnalyze={analyzeEmail}
+                  onPreview={() =>
+                    emailEntry.email && setEmailPreview({ subject: emailEntry.email.summary.subject, text: emailEntry.email.preview })
+                  }
+                  onRemove={() => removeFile(emailEntry.key)}
+                />
+              )}
               <ComposerFileChips
                 files={files}
-                onOpen={(index) => setPreview({ items: files.map(composerPreviewItem), index })}
+                onOpen={(key) => {
+                  const local = files.filter((f) => !isEmailEntry(f));
+                  setPreview({ items: local.map(composerPreviewItem), index: Math.max(0, local.findIndex((f) => f.key === key)) });
+                }}
                 onRemove={removeFile}
               />
               <div className={`flex items-end gap-2 rounded-2xl border bg-[var(--ground)] p-2 transition focus-within:border-[var(--accent)] ${tooLong ? "border-[var(--crit)]" : "border-[var(--border)]"}`}>
@@ -540,6 +618,13 @@ export function AssistantPage() {
       </div>
 
       {preview && <FilePreview items={preview.items} startIndex={preview.index} onClose={() => setPreview(null)} />}
+      {emailPreview && (
+        <Modal open onClose={() => setEmailPreview(null)} title={`What Alet will read: ${emailPreview.subject}`} size="lg">
+          <pre className="whitespace-pre-wrap break-words font-sans text-[13px] leading-relaxed text-[var(--ink)]" data-testid="assistant-email-preview">
+            {emailPreview.text}
+          </pre>
+        </Modal>
+      )}
       {renaming && (
         <RenameDialog
           conversation={renaming}

@@ -8,7 +8,14 @@ import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { idempotency, requireCapability, validate } from "../../common/middleware/index.js";
 import { sendSuccess } from "../../common/utils/response.js";
 import { assistantService } from "./assistant.service.js";
-import { attachmentIdParamsSchema, conversationIdParamsSchema, renameConversationSchema, sendMessageSchema } from "./assistant.schema.js";
+import {
+  attachEmailSchema,
+  attachmentIdParamsSchema,
+  conversationIdParamsSchema,
+  renameConversationSchema,
+  sendMessageSchema,
+} from "./assistant.schema.js";
+import { requireMailboxInWorkspace } from "../mail/mailbox-workspace.guard.js";
 
 export const assistantRouter = Router();
 
@@ -136,6 +143,29 @@ assistantRouter.post(
   receiveFile,
   asyncHandler(async (req: Request, res: Response) => {
     sendSuccess(res, 201, await assistantService.upload(req.file!, context(req)), req.requestId);
+  })
+);
+
+// "Summarize with Alet": an email the member is reading, attached to their
+// next question. Behind Mail's own workspace gate, and opened as Mail opens it.
+assistantRouter.post(
+  "/attachments/email",
+  uploadLimit,
+  requireMailboxInWorkspace(),
+  validate(attachEmailSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenant = req.tenantContext!;
+    sendSuccess(
+      res,
+      201,
+      await assistantService.attachEmail(req.body, {
+        ...context(req),
+        email: tenant.user.email,
+        workspace: tenant.workspace,
+        membershipRole: tenant.membershipRole,
+      }),
+      req.requestId
+    );
   })
 );
 

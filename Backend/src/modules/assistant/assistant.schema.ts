@@ -24,6 +24,12 @@ export const renameConversationSchema = z.object({
   title: z.string().trim().min(1, "Give it a name").max(120),
 });
 
+export const attachEmailSchema = z.object({
+  messageId: z.string().uuid(),
+  // A shared inbox the message was read in; absent for one's own mailbox.
+  mailboxId: z.string().uuid().optional(),
+});
+
 export const attachmentIdParamsSchema = z.object({
   attachmentId: z.string().uuid(),
 });
