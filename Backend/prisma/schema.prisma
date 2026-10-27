@@ -253,8 +253,8 @@ model TenantMembership {
   workDependenciesCreated WorkDependency[]        @relation("WorkDependencyCreator")
   workEvidenceAdded       WorkEvidence[]          @relation("WorkEvidenceAdder")
 
-  assistantConversations  AssistantConversation[]
-  assistantAttachments    AssistantAttachment[]
+  assistantConversations AssistantConversation[]
+  assistantAttachments   AssistantAttachment[]
 
   @@unique([tenantId, userId])
   @@index([userId])
@@ -1012,51 +1012,51 @@ model AIAction {
 }
 
 model Commitment {
-  id                  String           @id @default(uuid()) @db.Uuid
-  tenantId            String           @map("tenant_id") @db.Uuid
-  messageId           String?          @map("message_id") @db.Uuid
-  threadId            String?          @map("thread_id") @db.Uuid
-  ownerUserId         String           @map("owner_user_id") @db.Uuid
-  createdByUserId     String           @map("created_by_user_id") @db.Uuid
+  id                  String              @id @default(uuid()) @db.Uuid
+  tenantId            String              @map("tenant_id") @db.Uuid
+  messageId           String?             @map("message_id") @db.Uuid
+  threadId            String?             @map("thread_id") @db.Uuid
+  ownerUserId         String              @map("owner_user_id") @db.Uuid
+  createdByUserId     String              @map("created_by_user_id") @db.Uuid
   /// Who owes the action, and who is waiting for it (§6.10). Either may be
   /// somebody outside the workspace, which is why they are participants
   /// rather than users — an obligation owed to a customer had nowhere to
   /// point before.
-  owedByParticipantId String?          @map("owed_by_participant_id") @db.Uuid
-  owedToParticipantId String?          @map("owed_to_participant_id") @db.Uuid
+  owedByParticipantId String?             @map("owed_by_participant_id") @db.Uuid
+  owedToParticipantId String?             @map("owed_to_participant_id") @db.Uuid
   /// The task's title. Kept under its original name so the inbox, digest and
   /// AI extraction that already write it carry on unchanged.
   text                String
   description         String?
-  dueAt               DateTime?        @map("due_at")
+  dueAt               DateTime?           @map("due_at")
   /// The first due date a rescheduled task had, so "days overdue" and the
   /// original commitment survive a change of date. Null until rescheduled.
-  originalDueAt       DateTime?        @map("original_due_at")
-  priority            ActionPriority   @default(MEDIUM)
-  status              CommitmentStatus @default(OPEN)
-  snoozedUntil        DateTime?        @map("snoozed_until")
-  completedAt         DateTime?        @map("completed_at")
-  completedByUserId   String?          @map("completed_by_user_id") @db.Uuid
+  originalDueAt       DateTime?           @map("original_due_at")
+  priority            ActionPriority      @default(MEDIUM)
+  status              CommitmentStatus    @default(OPEN)
+  snoozedUntil        DateTime?           @map("snoozed_until")
+  completedAt         DateTime?           @map("completed_at")
+  completedByUserId   String?             @map("completed_by_user_id") @db.Uuid
   /// The team the task belongs to: a shared (or distribution) mailbox, whose
   /// members are the people with access to it. Null for personal work.
-  teamMailboxId       String?          @map("team_mailbox_id") @db.Uuid
+  teamMailboxId       String?             @map("team_mailbox_id") @db.Uuid
   /// When the owner is reminded, and when that reminder went out. Changing
   /// the time clears the sent mark so the new reminder fires.
-  reminderAt          DateTime?        @map("reminder_at")
-  reminderSentAt      DateTime?        @map("reminder_sent_at")
-  createdAt           DateTime         @default(now()) @map("created_at")
-  updatedAt           DateTime         @updatedAt @map("updated_at")
+  reminderAt          DateTime?           @map("reminder_at")
+  reminderSentAt      DateTime?           @map("reminder_sent_at")
+  createdAt           DateTime            @default(now()) @map("created_at")
+  updatedAt           DateTime            @updatedAt @map("updated_at")
   /// Track the AIAction that produced this commitment so a confirmed extraction
   /// is never duplicated and can be traced back to its source action (ZM-BE-008).
-  sourceAiActionId    String?          @map("source_ai_action_id") @db.Uuid
-  tenant              Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  owner               AppUser          @relation("CommitmentOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
-  createdBy           AppUser          @relation("CommitmentCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  completedBy         AppUser?         @relation("CommitmentCompleter", fields: [completedByUserId], references: [id], onDelete: SetNull)
-  teamMailbox         Mailbox?         @relation("CommitmentTeam", fields: [teamMailboxId], references: [id], onDelete: SetNull)
-  owedBy              Participant?     @relation("CommitmentOwedBy", fields: [owedByParticipantId], references: [id], onDelete: SetNull)
-  owedTo              Participant?     @relation("CommitmentOwedTo", fields: [owedToParticipantId], references: [id], onDelete: SetNull)
-  sourceAiAction      AIAction?        @relation(fields: [sourceAiActionId], references: [id], onDelete: SetNull)
+  sourceAiActionId    String?             @map("source_ai_action_id") @db.Uuid
+  tenant              Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner               AppUser             @relation("CommitmentOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  createdBy           AppUser             @relation("CommitmentCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  completedBy         AppUser?            @relation("CommitmentCompleter", fields: [completedByUserId], references: [id], onDelete: SetNull)
+  teamMailbox         Mailbox?            @relation("CommitmentTeam", fields: [teamMailboxId], references: [id], onDelete: SetNull)
+  owedBy              Participant?        @relation("CommitmentOwedBy", fields: [owedByParticipantId], references: [id], onDelete: SetNull)
+  owedTo              Participant?        @relation("CommitmentOwedTo", fields: [owedToParticipantId], references: [id], onDelete: SetNull)
+  sourceAiAction      AIAction?           @relation(fields: [sourceAiActionId], references: [id], onDelete: SetNull)
   checklist           TaskChecklistItem[]
   followers           TaskFollower[]
 
@@ -3049,28 +3049,31 @@ model AssistantMessage {
 /// is what the model looks at) until its conversation is deleted. One never
 /// attached expires and is removed.
 model AssistantAttachment {
-  id             String                  @id @default(uuid()) @db.Uuid
-  tenantId       String                  @map("tenant_id") @db.Uuid
-  membershipId   String                  @map("membership_id") @db.Uuid
-  conversationId String?                 @map("conversation_id") @db.Uuid
-  messageId      String?                 @map("message_id") @db.Uuid
-  kind           AssistantAttachmentKind
-  fileName       String                  @map("file_name")
-  contentType    String                  @map("content_type")
-  sizeBytes      Int                     @map("size_bytes")
+  id              String                  @id @default(uuid()) @db.Uuid
+  tenantId        String                  @map("tenant_id") @db.Uuid
+  membershipId    String                  @map("membership_id") @db.Uuid
+  conversationId  String?                 @map("conversation_id") @db.Uuid
+  messageId       String?                 @map("message_id") @db.Uuid
+  kind            AssistantAttachmentKind
+  fileName        String                  @map("file_name")
+  contentType     String                  @map("content_type")
+  sizeBytes       Int                     @map("size_bytes")
   /// Documents: their text, possibly cut short (see `truncated`).
-  extractedText  String?                 @map("extracted_text")
-  pageCount      Int?                    @map("page_count")
-  truncated      Boolean                 @default(false)
+  extractedText   String?                 @map("extracted_text")
+  pageCount       Int?                    @map("page_count")
+  truncated       Boolean                 @default(false)
   /// Images: where the bytes are (assistant storage).
-  storageKey     String?                 @map("storage_key")
+  storageKey      String?                 @map("storage_key")
+  /// Emails: the message it was made from, and the shared inbox it was read in (none for one's own).
+  sourceMessageId String?                 @map("source_message_id") @db.Uuid
+  sourceMailboxId String?                 @map("source_mailbox_id") @db.Uuid
   /// Set while not yet attached to a question; cleared once it is.
-  expiresAt      DateTime?               @map("expires_at")
-  createdAt      DateTime                @default(now()) @map("created_at")
-  tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  membership     TenantMembership        @relation(fields: [membershipId], references: [id], onDelete: Cascade)
-  conversation   AssistantConversation?  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  message        AssistantMessage?       @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  expiresAt       DateTime?               @map("expires_at")
+  createdAt       DateTime                @default(now()) @map("created_at")
+  tenant          Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  membership      TenantMembership        @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  conversation    AssistantConversation?  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message         AssistantMessage?       @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, membershipId, expiresAt])
   @@index([messageId])
@@ -3080,6 +3083,8 @@ model AssistantAttachment {
 enum AssistantAttachmentKind {
   DOCUMENT
   IMAGE
+  /// An email from the member's mail, attached with "Summarize with Alet".
+  EMAIL
 }
 
 enum AssistantRole {

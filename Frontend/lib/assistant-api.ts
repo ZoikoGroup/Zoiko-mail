@@ -10,7 +10,7 @@ import { getAccessToken } from "./auth-storage";
 /** A file attached to a question. Documents are read for their text; images are looked at. */
 export interface AssistantAttachment {
   id: string;
-  kind: "DOCUMENT" | "IMAGE";
+  kind: "DOCUMENT" | "IMAGE" | "EMAIL";
   fileName: string;
   contentType: string;
   sizeBytes: number;
@@ -117,6 +117,36 @@ export async function uploadAssistantFile(file: File, idempotencyKey: string = n
     throw new ApiError(res.status, body.error?.message || `Upload failed (${res.status})`, body.error?.code);
   }
   return (await res.json()).data;
+}
+
+/** An email as its preview card shows it. */
+export interface AssistantEmailSummary {
+  subject: string;
+  from: string;
+  to: string[];
+  cc: string[];
+  date: string;
+  attachmentCount: number;
+  bodyPreview: string;
+}
+
+export interface AttachedEmail extends AssistantAttachment {
+  email: AssistantEmailSummary;
+  /** The email as Alet will read it (headers, body, attachments), for the preview. */
+  preview: string;
+}
+
+/**
+ * "Summarize with Alet": attach an email the member can read in Mail. The
+ * server opens it with Mail's own checks and writes it out; nothing is sent
+ * to the AI until the member asks.
+ */
+export function attachAssistantEmail(messageId: string, mailboxId: string | null, idempotencyKey: string): Promise<AttachedEmail> {
+  return apiRequest<AttachedEmail>("/assistant/attachments/email", {
+    method: "POST",
+    body: { messageId, ...(mailboxId ? { mailboxId } : {}) },
+    headers: { "Idempotency-Key": idempotencyKey },
+  });
 }
 
 export async function removeAssistantUpload(id: string): Promise<void> {
