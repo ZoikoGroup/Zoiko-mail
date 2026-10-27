@@ -8,6 +8,7 @@ import { ShieldAlert } from "lucide-react";
 import { useMe } from "@/lib/auth-hooks";
 import { getPlatformToken } from "@/lib/auth-storage";
 import { resolveWorkspaceHref } from "@/lib/workspace";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 
 // Both consoles are large component trees; loading each one lazily keeps the
 // staff console's chunk out of a tenant member's session (and vice versa) and
@@ -79,14 +80,7 @@ export default function SupportPage() {
 }
 
 function FullPageLoading() {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-[var(--ground)]">
-      <div className="flex items-center gap-2.5 text-sm text-[var(--ink3)]">
-        <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--accent)]" />
-        Loading…
-      </div>
-    </div>
-  );
+  return <BrandLoader label="Opening the support workspace" />;
 }
 
 /**

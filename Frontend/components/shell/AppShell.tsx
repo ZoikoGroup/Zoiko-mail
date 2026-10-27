@@ -11,6 +11,7 @@ import { useMemberShell, initials } from "@/lib/useMemberShell";
 import { ToastContainer } from "@/components/ui/Toast";
 import { NetworkBanner } from "@/components/ui/NetworkBanner";
 import { AccessDenied } from "@/components/ui/AccessDenied";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -21,11 +22,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Without this, a SUPPORT user would briefly see the member dashboard nav
   // and header before the hook's guard effects kick in and redirect them.
   if (status === "loading") {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--ground)]">
-        <div className="h-7 w-7 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-      </div>
-    );
+    return <BrandLoader label="Loading your workspace" />;
   }
   // SUPPORT holding a MEMBER-scoped session: blank page, same as before
   // extracting the guard logic into useMemberShell.
