@@ -1019,6 +1019,7 @@ interface ApiNotification {
   type: string;
   title: string;
   body: string;
+  linkPath?: string | null;
   readAt: string | null;
   createdAt: string;
 }
@@ -1039,6 +1040,7 @@ export async function fetchNotifications(): Promise<NotificationDto[]> {
     ago: ago(n.createdAt),
     severity: SEVERITY[n.type] ?? "INFO",
     readAt: n.readAt ? ago(n.readAt) : null,
+    linkPath: n.linkPath ?? null,
   }));
 }
 

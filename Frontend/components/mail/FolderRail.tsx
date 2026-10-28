@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import Link from "next/link";
 import {
@@ -301,7 +302,12 @@ export function FolderRail({
         </ul>
       </nav>
 
-      <div className="border-t border-[var(--border)] px-4 py-3.5" data-testid="storage-meter">
+      <Link
+        href="/mail/storage"
+        aria-label="Mailbox storage details"
+        className="block border-t border-[var(--border)] px-4 py-3.5 transition hover:bg-[var(--s2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)]"
+        data-testid="storage-meter"
+      >
         <div className="flex items-center justify-between text-[11.5px] text-[var(--ink3)]">
           <span>Mailbox storage</span>
           <span>{storageLoading ? "…" : `${gb(storageUsed)} of ${gb(storageLimit)} GB`}</span>
@@ -319,7 +325,7 @@ export function FolderRail({
             style={{ width: `${Math.max(storagePct, storageUsed > 0 ? 2 : 0)}%` }}
           />
         </div>
-      </div>
+      </Link>
     </aside>
   );
 }

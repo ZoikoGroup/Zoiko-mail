@@ -154,7 +154,7 @@ export function TasksSidebar({ active, activeTeamId, onNewTask }: { active: Task
         )}
       </nav>
 
-      <div className="m-3 rounded-xl border border-[var(--border)] bg-[var(--s2)] p-3">
+      <Link href="/mail/storage" aria-label="Mailbox storage details" className="m-3 block rounded-xl border border-[var(--border)] bg-[var(--s2)] p-3 transition hover:border-[var(--accent)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
         <div className="flex items-center justify-between text-[12px]">
           <span className="font-semibold text-[var(--ink)]">Mailbox storage</span>
           <span className="font-mono-num text-[var(--ink2)]">{mailboxLoading ? "…" : `${gb(storageUsed)} / ${gb(storageLimit)} GB`}</span>
@@ -162,7 +162,7 @@ export function TasksSidebar({ active, activeTeamId, onNewTask }: { active: Task
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--s3,var(--border))]">
           <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${storagePct}%` }} />
         </div>
-      </div>
+      </Link>
     </aside>
   );
 }

@@ -45,6 +45,9 @@ mailRouter.get("/shared-inboxes", controller.listSharedInboxes);
 // The caller's own mailbox: account menu + storage meter. Literal path, so
 // it must sit above "/:messageId" for the same reason "/send-as" does.
 mailRouter.get("/mailbox", controller.getMyMailbox);
+// Where the storage went, and an exact recount. Literal paths, above "/:messageId".
+mailRouter.get("/storage", controller.storageOverview);
+mailRouter.post("/storage/recalculate", controller.storageRecalculate);
 mailRouter.get("/", validate(listMailSchema, "query"), controller.list);
 mailRouter.post("/drafts", validate(createDraftSchema), controller.createDraft);
 mailRouter.patch("/bulk", validate(bulkMailboxActionSchema), controller.bulkAction);

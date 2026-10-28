@@ -408,6 +408,7 @@ export interface NotificationDto {
   ago: string;
   severity: "INFO" | "WARNING" | "ACTION_REQUIRED" | "CRITICAL";
   readAt: string | null;
+  linkPath?: string | null;
 }
 
 /* ── Workspace settings ────────────────────────────────────────────────── */
