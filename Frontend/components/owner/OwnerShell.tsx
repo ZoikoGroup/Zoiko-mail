@@ -11,6 +11,7 @@ import { GlobalSearch } from "./GlobalSearch";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { ProfileMenu } from "@/components/shell/ProfileMenu";
 import { AccessDenied } from "@/components/ui/AccessDenied";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 
 /**
  * The owner workspace admits sessions opened for the owner workspace only.
@@ -35,15 +36,13 @@ export function OwnerShell({ children }: { children: ReactNode }) {
   // skipped itself while useMe() was in flight and let the console render.
   const access = useWorkspaceAccess(OWNER_WORKSPACE);
   if (access !== "allowed") {
-    return (
-      <div className="flex h-screen items-center justify-center bg-[var(--ground)]">
-        <span className="text-sm text-[var(--ink3)]">Checking access…</span>
-      </div>
-    );
+    return <BrandLoader label="Opening the owner workspace" />;
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[var(--ground)] text-[var(--ink)]">
+    // zoi-fade: the console settles in as the loader gives way. The shell
+    // lives in the owner layout, so this plays once, not on every page.
+    <div className="zoi-fade flex h-screen overflow-hidden bg-[var(--ground)] text-[var(--ink)]">
       {/* Desktop sidebar */}
       <aside className="hidden w-64 shrink-0 flex-col border-r border-[var(--border)] bg-[var(--surface)] md:flex">
         <OwnerSidebar role={me?.membership.role} />

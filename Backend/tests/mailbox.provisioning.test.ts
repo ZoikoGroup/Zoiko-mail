@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
 import { env } from "../src/config/env.js";
+import { logger } from "../src/config/logger.js";
 import { systemMailer } from "../src/common/mailer/system-mailer.js";
 import { mailboxProvisioningService } from "../src/modules/mail/mailbox-provisioning.service.js";
 import { stalwartClient } from "../src/modules/stalwart/stalwart.client.js";
@@ -285,6 +286,30 @@ describe("Create Email — failures and recovery", () => {
       .expect(200);
     expect(retried.body.data.provisioningStatus).toBe("PROVISIONED");
     expect(host.accounts.size).toBe(1);
+  });
+
+  it("logs what the mail server said about a refusal, and nothing it was sent", async () => {
+    const w = await workspace("refusal");
+    const warn = vi.spyOn(logger, "warn");
+    host.failBefore = new StalwartError("Stalwart refused to create the object", "INVALID_REQUEST", false, undefined, "invalidPatch", {
+      description: "Invalid value",
+      properties: ["credentials"],
+    });
+    const res = await provision(w.owner.accessToken, body(w.domainId)).expect(202);
+    expect(res.body.data).toMatchObject({ provisioningStatus: "FAILED", provisioningError: "STALWART_INVALID_REQUEST" });
+
+    const line = warn.mock.calls.find((call) => call[1] === "Mailbox provisioning failed");
+    expect(line?.[0]).toMatchObject({
+      code: "STALWART_INVALID_REQUEST",
+      retryable: false,
+      stalwartType: "invalidPatch",
+      stalwartDescription: "Invalid value",
+      stalwartProperties: ["credentials"],
+    });
+    // No request body: the password the host was handed appears nowhere.
+    const secret = host.createCalls.at(-1)!.secret;
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(secret);
+    warn.mockRestore();
   });
 
   it("adopts the account a lost response created, instead of creating another", async () => {

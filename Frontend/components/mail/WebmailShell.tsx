@@ -13,6 +13,7 @@ import { BottomNav } from "@/components/mail/BottomNav";
 import { ToastContainer } from "@/components/ui/Toast";
 import { NetworkBanner } from "@/components/ui/NetworkBanner";
 import { AccessDenied } from "@/components/ui/AccessDenied";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import { PaneDivider } from "@/components/mail/PaneDivider";
 import { FOLDER_PANE, PaneLayoutProvider, usePaneLayout } from "@/lib/pane-layout";
 
@@ -79,15 +80,7 @@ function WebmailShellInner({
   const folderPane = useRef<HTMLDivElement>(null);
 
   if (status === "loading") {
-    return (
-      <div className="zm-webmail flex min-h-screen items-center justify-center bg-[var(--ground)]">
-        <div
-          className="h-7 w-7 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent"
-          role="status"
-          aria-label="Loading"
-        />
-      </div>
-    );
+    return <BrandLoader className="zm-webmail" label="Loading your mail" />;
   }
   if (status === "denied-silent") {
     return null;

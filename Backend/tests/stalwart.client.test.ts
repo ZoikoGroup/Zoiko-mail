@@ -87,7 +87,8 @@ describe("StalwartClient", () => {
       "@type": "User",
       name: "john",
       domainId: "dom1",
-      credentials: [{ "@type": "Password", secret: "initial-secret" }],
+      // A map keyed by a number-like id: v0.16.25 refuses an array.
+      credentials: { "0": { "@type": "Password", secret: "initial-secret" } },
       roles: { "@type": "User" },
       quotas: { maxDiskQuota: 5368709120 },
     });
@@ -262,9 +263,89 @@ describe("StalwartClient against a v0.16.25 session", () => {
     expect(calls.filter((c) => c.method === "POST").every((c) => c.body.methodCalls[0][1].accountId === "b")).toBe(true);
   });
 
+  it("assigns the User role by default, or the configured custom role", async () => {
+    const created = (accountRoleId: string | null) => {
+      const calls: any[] = [];
+      const fetchImpl = (async (input: string | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/jmap/session")) return new Response(JSON.stringify(V0_16_25_SESSION));
+        const body = JSON.parse(String(init!.body));
+        calls.push(body);
+        const method = body.methodCalls[0][0];
+        const json = method === "x:Account/set"
+          ? { methodResponses: [["x:Account/set", { created: { a: { id: "acc1" } } }, "s"]] }
+          : { methodResponses: [["x:Account/get", { list: [account] }, "g"]] };
+        return new Response(JSON.stringify(json));
+      }) as typeof fetch;
+      const client = new StalwartClient({ fetch: fetchImpl, token: async () => TOKEN, baseUrl: BASE, enabled: true, accountRoleId });
+      return client
+        .createAccount({ name: "info", domainId: "dom1", secret: "x", diskQuotaBytes: 1, description: "d" })
+        .then(() => calls[0].methodCalls[0][1].create.a.roles);
+    };
+    expect(await created(null)).toEqual({ "@type": "User" });
+    expect(await created("g")).toEqual({ "@type": "Custom", roleIds: { g: true } });
+  });
+
   it("probe reports the management capability", async () => {
     const { client } = fakeServer(() => ({ json: {} }), V0_16_25_SESSION);
     expect(await client.probe()).toEqual({ reachable: true, authenticated: true, managementCapability: true });
+  });
+
+  it("replaces the password with credentials as a map keyed by a number-like id", async () => {
+    const { client, calls } = fakeServer(
+      () => ({ json: { methodResponses: [["x:Account/set", { updated: { acc1: null } }, "s"]] } }),
+      V0_16_25_SESSION
+    );
+    await client.setAccountPassword("acc1", "new-secret");
+    const args = calls.find((c) => c.method === "POST")!.body.methodCalls[0][1];
+    expect(args).toMatchObject({ accountId: "b", update: { acc1: { credentials: { "0": { "@type": "Password", secret: "new-secret" } } } } });
+    expect(Array.isArray(args.update.acc1.credentials)).toBe(false);
+  });
+
+  it("keeps Stalwart's type, description and properties on a refused create, without the password", async () => {
+    const { client } = fakeServer(
+      () => ({
+        json: {
+          methodResponses: [
+            [
+              "x:Account/set",
+              { notCreated: { a: { type: "invalidPatch", description: "Invalid value \"initial-secret\"", properties: ["credentials"] } } },
+              "s",
+            ],
+          ],
+        },
+      }),
+      V0_16_25_SESSION
+    );
+    const error = await client
+      .createAccount({ name: "info", domainId: "dom1", secret: "initial-secret", diskQuotaBytes: 1, description: "d" })
+      .catch((e) => e);
+    expect(error).toBeInstanceOf(StalwartError);
+    expect(error).toMatchObject({ code: "INVALID_REQUEST", jmapType: "invalidPatch", detail: { properties: ["credentials"] } });
+    expect(error.detail.description).toBe("Invalid value \"[redacted]\"");
+    expect(JSON.stringify(error)).not.toContain("initial-secret");
+  });
+
+  it("keeps the detail of a refused password change, without the password", async () => {
+    const { client } = fakeServer(
+      () => ({
+        json: { methodResponses: [["x:Account/set", { notUpdated: { acc1: { type: "invalidPatch", description: "Invalid key: new-secret" } } }, "s"]] },
+      }),
+      V0_16_25_SESSION
+    );
+    const error = await client.setAccountPassword("acc1", "new-secret").catch((e) => e);
+    expect(error).toMatchObject({ code: "INVALID_REQUEST", jmapType: "invalidPatch", detail: { description: "Invalid key: [redacted]" } });
+  });
+
+  it("keeps the description of a method-level error, bounded", async () => {
+    const { client } = fakeServer(
+      () => ({ json: { methodResponses: [["error", { type: "invalidArguments", description: `bad\n${"x".repeat(2000)}` }, "q"]] } }),
+      V0_16_25_SESSION
+    );
+    const error = await client.findDomain("temveris.com").catch((e) => e);
+    expect(error).toMatchObject({ code: "INVALID_REQUEST", jmapType: "invalidArguments" });
+    expect(error.detail.description.startsWith("bad x")).toBe(true);
+    expect(error.detail.description.length).toBe(500);
   });
 
   it("maps unknownCapability and unknownMethod from the method call to NOT_SUPPORTED", async () => {

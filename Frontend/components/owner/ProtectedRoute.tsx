@@ -6,6 +6,7 @@ import { isLoggedIn } from "@/lib/auth-storage";
 import { useMe } from "@/lib/auth-hooks";
 import type { MeResponse } from "@/lib/auth-api";
 import { AccessDenied } from "@/components/ui/AccessDenied";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 
 interface ProtectedRouteProps {
   allowedRoles?: string[];
@@ -34,11 +35,8 @@ export function ProtectedRoute({ allowedRoles = ["OWNER", "ADMIN"], children }: 
   // Identical placeholder on server and client until mounted, so hydration
   // always matches. The token is unreadable before mount anyway.
   if (!mounted || (isPending && !isError)) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-      </div>
-    );
+    // Inside the owner console's frame, so the compact variant.
+    return <BrandLoader variant="inline" label="Loading" />;
   }
 
   // Settled without a user (expired/invalid token): the shell's effect

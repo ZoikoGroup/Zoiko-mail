@@ -19,6 +19,7 @@
     "db:seed:compiled": "node dist/prisma/seed.js",
     "db:studio": "prisma studio",
     "test": "vitest run",
+    "test:stalwart-real": "node scripts/test-stalwart-real.mjs",
     "test:watch": "vitest"
   },
   "keywords": [],
