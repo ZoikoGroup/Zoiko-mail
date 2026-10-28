@@ -117,11 +117,6 @@ export function MailboxesManager({ domainsHref }: { domainsHref: string }) {
         }
       />
 
-      <Notice tone="info">
-        Shared mailboxes live on the Groups screen, where assignments and their
-        read, send, manage and assign permissions are set.
-      </Notice>
-
       {setWorkspaces.isError && (
         <Notice tone="crit">
           <b className="text-[var(--crit)]">Could not change workspace access.</b>{" "}
