@@ -66,6 +66,8 @@ export function MailRow({
   showDeleteDraft = false,
   onDeleteDraft,
   selectable = true,
+  compact = false,
+  showPreview = true,
 }: {
   item: MailListItem;
   /** Sent and Drafts show the recipient instead of the (always-you) sender. */
@@ -78,6 +80,10 @@ export function MailRow({
   onDeleteDraft?: () => void;
   /** Bulk selection is offered for one's own mailbox only. */
   selectable?: boolean;
+  /** Settings → Mailbox Preferences: Compact density. */
+  compact?: boolean;
+  /** Settings → Mailbox Preferences: the excerpt under the subject. */
+  showPreview?: boolean;
 }) {
   const showRecipient = folder === "SENT" || folder === "DRAFTS" || folder === "SCHEDULED";
   const name = showRecipient ? recipientSummary(item) : senderName(item);
@@ -106,12 +112,12 @@ export function MailRow({
       }`}
     >
       {/* Unread marker, then the checkbox — in the reference's order. */}
-      <span className="flex w-4 shrink-0 justify-end self-stretch pt-[26px]" aria-hidden>
+      <span className={`flex w-4 shrink-0 justify-end self-stretch ${compact ? "pt-[17px]" : "pt-[26px]"}`} aria-hidden>
         {unread && <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />}
       </span>
       {selectable ? (
         <label
-          className="flex shrink-0 cursor-pointer items-start self-stretch px-2.5 pt-[21px]"
+          className={`flex shrink-0 cursor-pointer items-start self-stretch px-2.5 ${compact ? "pt-[12px]" : "pt-[21px]"}`}
           onClick={(e) => e.stopPropagation()}
         >
           <span className="sr-only">Select message from {label}</span>
@@ -129,10 +135,11 @@ export function MailRow({
       <button
         onClick={onSelect}
         aria-current={selected ? "true" : undefined}
-        className="flex min-w-0 flex-1 items-start gap-3 py-4 pr-4 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)]"
+        className={`flex min-w-0 flex-1 items-start gap-3 pr-4 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)] ${compact ? "py-2" : "py-4"}`}
+        data-density={compact ? "compact" : "comfortable"}
       >
         <span
-          className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold text-white"
+          className={`mt-0.5 inline-flex shrink-0 items-center justify-center rounded-full font-semibold text-white ${compact ? "h-7 w-7 text-[10.5px]" : "h-9 w-9 text-[12px]"}`}
           style={{ backgroundColor: hashColor(name) }}
           aria-hidden
         >
@@ -152,11 +159,11 @@ export function MailRow({
           <span className={`mt-0.5 block truncate text-[13px] ${unread ? "font-semibold text-[var(--ink)]" : "text-[var(--ink2)]"}`}>
             {item.message.subject || "(no subject)"}
           </span>
-          {item.message.snippet && (
+          {showPreview && item.message.snippet && (
             <span className="mt-0.5 block truncate text-[12.5px] text-[var(--ink3)]">{item.message.snippet}</span>
           )}
           {(statusTag || attachments > 0 || item.labels.length > 0) && (
-            <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <span className={`flex flex-wrap items-center gap-1.5 ${compact ? "mt-1" : "mt-1.5"}`}>
               {statusTag}
               {item.labels.slice(0, 3).map((l) => (
                 <span

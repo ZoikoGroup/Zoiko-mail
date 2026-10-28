@@ -79,7 +79,7 @@ export function MfaSettings() {
   const failure = begin.error ?? confirm.error ?? regenerate.error ?? disable.error;
 
   if (isLoading) {
-    return <Shell><p className="text-[12.5px] text-slate-500">Checking…</p></Shell>;
+    return <Shell><p className="text-[12.5px] text-[var(--ink3)]">Checking…</p></Shell>;
   }
 
   // A read that failed and "not enrolled" are different facts. Saying
@@ -87,7 +87,7 @@ export function MfaSettings() {
   if (error || !status) {
     return (
       <Shell>
-        <p className="text-[12.5px] text-rose-600 dark:text-rose-400">
+        <p className="text-[12.5px] text-[var(--crit)]">
           Could not read your two-factor status. {error?.message ?? ""}
         </p>
       </Shell>
@@ -98,14 +98,14 @@ export function MfaSettings() {
     <Shell>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">
+          <p className="text-[13px] font-semibold text-[var(--ink)]">
             {status.enrolled
               ? "On — your authenticator is required at sign-in"
               : status.enrolmentPending
                 ? "Started but not finished"
                 : "Off"}
           </p>
-          <p className="mt-0.5 text-[12px] text-slate-500 dark:text-slate-400">
+          <p className="mt-0.5 text-[12px] text-[var(--ink3)]">
             {status.enrolled
               ? `${status.remainingRecoveryCodes} recovery code${
                   status.remainingRecoveryCodes === 1 ? "" : "s"
@@ -155,13 +155,13 @@ export function MfaSettings() {
       </div>
 
       {failure && (
-        <p className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-[12px] text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+        <p className="mt-3 rounded-lg bg-[var(--crit-soft)] px-3 py-2 text-[12px] text-[var(--crit)]">
           {failure.message}
         </p>
       )}
 
       {mode === "enrolling" && !codes && (
-        <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900">
+        <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--s2)] p-4">
           {begin.data ? (
             <>
               <MfaQrCode uri={begin.data.uri} />
@@ -169,21 +169,21 @@ export function MfaSettings() {
               {/* Same order as the sign-in enrolment screen: scan first, type
                   only if you have to. The key is kept because a desktop
                   authenticator has no camera to point. */}
-              <p className="mt-4 text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              <p className="mt-4 text-[11px] uppercase tracking-wide text-[var(--ink3)]">
                 Or enter this key by hand
               </p>
-              <p className="mt-1 break-all font-mono text-[13px] text-slate-900 dark:text-slate-100">
+              <p className="mt-1 break-all font-mono text-[13px] text-[var(--ink)]">
                 {begin.data.secret}
               </p>
               <a
-                className="mt-2 inline-block text-[12px] text-slate-600 underline dark:text-slate-300"
+                className="mt-2 inline-block text-[12px] text-[var(--accent)] underline"
                 href={begin.data.uri}
               >
                 Open in an authenticator app on this device
               </a>
             </>
           ) : (
-            <p className="text-[12.5px] text-slate-500">Preparing your key…</p>
+            <p className="text-[12.5px] text-[var(--ink3)]">Preparing your key…</p>
           )}
         </div>
       )}
@@ -192,7 +192,7 @@ export function MfaSettings() {
         <div className="mt-4">
           <label
             htmlFor="mfa-code"
-            className="mb-1 block text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400"
+            className="mb-1 block text-[11px] uppercase tracking-wide text-[var(--ink3)]"
           >
             {mode === "enrolling"
               ? "Code from your authenticator"
@@ -210,7 +210,7 @@ export function MfaSettings() {
               onKeyDown={(event) => {
                 if (event.key === "Enter" && code) submit();
               }}
-              className="w-[160px] rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-[13px] text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
+              className="w-[160px] rounded-lg border border-[var(--border)] bg-[var(--ground)] px-3 py-2 font-mono text-[13px] text-[var(--ink)] outline-none focus:border-[var(--accent)]"
             />
             <button className="zoiko-btn pri sm" disabled={busy || !code} onClick={submit}>
               {busy
@@ -226,12 +226,12 @@ export function MfaSettings() {
             </button>
           </div>
           {mode === "regenerating" && (
-            <p className="mt-2 text-[11.5px] text-slate-500 dark:text-slate-400">
+            <p className="mt-2 text-[11.5px] text-[var(--ink3)]">
               Your existing recovery codes stop working the moment new ones are issued.
             </p>
           )}
           {mode === "disabling" && (
-            <p className="mt-2 text-[11.5px] text-slate-500 dark:text-slate-400">
+            <p className="mt-2 text-[11.5px] text-[var(--ink3)]">
               A current code is required, so someone at an unlocked screen cannot remove
               the protection that would have stopped them.
             </p>
@@ -240,15 +240,15 @@ export function MfaSettings() {
       )}
 
       {codes && (
-        <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900">
-          <p className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">
+        <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--s2)] p-4">
+          <p className="text-[13px] font-semibold text-[var(--ink)]">
             Save your recovery codes
           </p>
-          <p className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">
+          <p className="mt-1 text-[12px] text-[var(--ink3)]">
             Each works once, if you lose your authenticator. Only hashes are stored, so
             this is the only time they are shown.
           </p>
-          <ul className="mt-3 grid grid-cols-2 gap-2 font-mono text-[13px] text-slate-900 dark:text-slate-100">
+          <ul className="mt-3 grid grid-cols-2 gap-2 font-mono text-[13px] text-[var(--ink)]">
             {codes.map((recoveryCode) => (
               <li key={recoveryCode}>{recoveryCode}</li>
             ))}
@@ -272,14 +272,14 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="p-5">
       <div className="mb-3 flex items-center gap-2.5">
-        <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+        <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--s2)] text-[var(--ink2)]">
           <ShieldCheck className="h-4 w-4" />
         </span>
         <div>
-          <p className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">
+          <p className="text-[13px] font-semibold text-[var(--ink)]">
             Two-factor authentication
           </p>
-          <p className="text-[12px] text-slate-500 dark:text-slate-400">
+          <p className="text-[12px] text-[var(--ink3)]">
             A code from your authenticator, in addition to your password.
           </p>
         </div>

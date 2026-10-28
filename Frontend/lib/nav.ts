@@ -46,7 +46,7 @@ export const MEMBER_NAV: NavItem[] = [
     desc: "Send and receive from your Zoiko mailbox."
   },
   {
-    section: "Account", label: "Profile", href: "/account", icon: KeyRound, status: "live",
+    section: "Account", label: "Profile", href: "/mail/settings/profile", icon: KeyRound, status: "live",
     desc: "Your account details and sign-in security."
   },
   {
@@ -54,7 +54,7 @@ export const MEMBER_NAV: NavItem[] = [
     desc: "Manage your personal and team contacts."
   },
   {
-    section: "Account", label: "Settings", href: "/settings", icon: Settings, status: "live",
+    section: "Account", label: "Settings", href: "/mail/settings", icon: Settings, status: "live",
     desc: "Appearance, notifications, and preferences."
   },
 ];

@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   Pencil, Inbox, Star, Clock, Send, CalendarClock, FileText, Archive,
   Ban, Trash2, MoreHorizontal, ChevronRight, Folder, Tag, Users, UserRound,
 } from "lucide-react";
 import type { MailListFolder, SharedInbox } from "@/lib/mail-api";
 import { useMailLabels, useSharedInboxes } from "@/lib/mail-hooks";
+import { SETTINGS_SECTIONS, type SettingsSectionKey } from "@/components/settings/sections";
 
 interface FolderRow {
   key: MailListFolder;
@@ -86,6 +88,8 @@ export function FolderRail({
   sharedMailboxId = null,
   onOpenShared,
   fill = false,
+  settingsSection = null,
+  onNavigate,
 }: {
   folder: MailListFolder;
   onFolderChange: (folder: MailListFolder) => void;
@@ -102,6 +106,10 @@ export function FolderRail({
   onOpenShared?: (inbox: SharedInbox | null) => void;
   /** Fill a parent that sets the width (the resizable desktop column). */
   fill?: boolean;
+  /** The Settings page being shown, if any: it is highlighted instead of a folder. */
+  settingsSection?: SettingsSectionKey | null;
+  /** Called when a Settings link is followed (the phone drawer closes). */
+  onNavigate?: () => void;
 }) {
   const inMore = MORE.some((row) => row.key === folder);
   const [moreOpen, setMoreOpen] = useState(inMore);
@@ -109,7 +117,8 @@ export function FolderRail({
   const [allShared, setAllShared] = useState(false);
   const { data: labels = [] } = useMailLabels();
   const { data: shared = [], isLoading: sharedLoading } = useSharedInboxes();
-  const ownMailbox = sharedMailboxId === null;
+  // In Settings no folder is the current page, though the shell still holds one.
+  const ownMailbox = sharedMailboxId === null && !settingsSection;
 
   const folderButton = (row: FolderRow) => {
     const Icon = row.icon;
@@ -272,6 +281,23 @@ export function FolderRail({
                 );
               })
             ))}
+        </ul>
+
+        <div className="mx-3 mt-3 border-t border-[var(--border)]" />
+        <SectionTitle>Settings</SectionTitle>
+        <ul className="space-y-0.5" data-testid="settings-nav">
+          {SETTINGS_SECTIONS.map((s) => {
+            const Icon = s.icon;
+            const active = settingsSection === s.key;
+            return (
+              <li key={s.key}>
+                <Link href={s.href} onClick={onNavigate} className={rowClass(active)} aria-current={active ? "page" : undefined}>
+                  <Icon className="h-4 w-4 shrink-0" aria-hidden />
+                  <span className="truncate">{s.label}</span>
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       </nav>
 

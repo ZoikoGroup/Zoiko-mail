@@ -1,21 +1,17 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { AppShell } from "@/components/shell/AppShell";
-import { ConnectedAccounts } from "@/components/connectors/ConnectedAccounts";
-
-export default function ConnectedAccountsPage() {
-  const router = useRouter();
-  // This is the Track A Gmail/Microsoft 365 read-only connector — a
-  // different feature from the IMAP/SMTP desktop-client setup guide the
-  // new webmail design calls "Connected accounts". It's no longer in
-  // member nav; webmail is the member home now. Nothing below was
-  // deleted, it just isn't reachable from the UI.
-  useEffect(() => { router.replace("/mail"); }, [router]);
-  return (
-    <AppShell>
-      <ConnectedAccounts />
-    </AppShell>
-  );
+/**
+ * The old Connected Accounts page, now Settings → Connected Mailboxes.
+ *
+ * Still the address Google and Microsoft sign-in return to (the backend's
+ * OAuth callbacks redirect here), so the query string — ?connected=true&
+ * provider=…, or ?error=… — is passed on for the new page to report.
+ */
+export default function ConnectedAccountsPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(searchParams)) {
+    for (const v of Array.isArray(value) ? value : value === undefined ? [] : [value]) query.append(key, v);
+  }
+  const qs = query.toString();
+  redirect(`/mail/settings/connected-mailboxes${qs ? `?${qs}` : ""}`);
 }

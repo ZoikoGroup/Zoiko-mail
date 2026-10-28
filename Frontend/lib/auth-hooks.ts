@@ -11,6 +11,8 @@ import {
   logoutAll,
   changePassword,
   getMe,
+  getProfile,
+  updateProfile,
   verifyOtp,
   resendOtp,
   createWorkspace,
@@ -26,6 +28,7 @@ import {
   type LoginInput,
   type RegisterInput,
   type ChangePasswordInput,
+  type UpdateProfileInput,
 
   type VerifyOtpInput,
   type ResendOtpInput,
@@ -361,6 +364,31 @@ export function useChangePassword() {
       await qc.invalidateQueries({
         queryKey: ["me"],
       });
+    },
+  });
+}
+
+/** The signed-in account's own details (name, phone, time zone, language). */
+export function useProfile() {
+  return useQuery({
+    queryKey: ["profile"],
+    queryFn: getProfile,
+    enabled: isLoggedIn() && !getPlatformToken(),
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * Saves the account's own details. ['me'] is refreshed too: the top bar and
+ * the account menu show the display name from it.
+ */
+export function useUpdateProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpdateProfileInput) => updateProfile(input),
+    onSuccess: async (profile) => {
+      qc.setQueryData(["profile"], profile);
+      await qc.invalidateQueries({ queryKey: ["me"] });
     },
   });
 }
