@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 import {
   login,
@@ -11,6 +12,8 @@ import {
   logoutAll,
   changePassword,
   getMe,
+  getProfile,
+  updateProfile,
   verifyOtp,
   resendOtp,
   createWorkspace,
@@ -26,6 +29,7 @@ import {
   type LoginInput,
   type RegisterInput,
   type ChangePasswordInput,
+  type UpdateProfileInput,
 
   type VerifyOtpInput,
   type ResendOtpInput,
@@ -34,7 +38,7 @@ import {
   type ForgotPasswordInput,
   type ResetPasswordInput,
 } from "./auth-api";
-import { getPlatformToken, isLoggedIn } from "./auth-storage";
+import { getPlatformToken, isLoggedIn, setSignOutNotice } from "./auth-storage";
 import { AuthResponse } from "./auth-api";
 import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { resolveWorkspaceHref } from "./workspace";
@@ -365,6 +369,31 @@ export function useChangePassword() {
   });
 }
 
+/** The signed-in account's own details (name, phone, time zone, language). */
+export function useProfile() {
+  return useQuery({
+    queryKey: ["profile"],
+    queryFn: getProfile,
+    enabled: isLoggedIn() && !getPlatformToken(),
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * Saves the account's own details. ['me'] is refreshed too: the top bar and
+ * the account menu show the display name from it.
+ */
+export function useUpdateProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpdateProfileInput) => updateProfile(input),
+    onSuccess: async (profile) => {
+      qc.setQueryData(["profile"], profile);
+      await qc.invalidateQueries({ queryKey: ["me"] });
+    },
+  });
+}
+
 export function useLogout() {
   const qc = useQueryClient();
   const router = useRouter();
@@ -388,6 +417,27 @@ export function useLogoutAll() {
       router.replace("/login");
     },
   });
+}
+
+/**
+ * "Switch workspace": sign out, with a note on the sign-in page saying why.
+ *
+ * Moving to another workspace means signing in again: a session is bound to
+ * the workspace it was opened for, and the workspace picker needs the
+ * selection token that only a sign-in issues. Linking straight to
+ * /select-workspace (as the menus first did) found no token and bounced to
+ * /login with no explanation. `switching` is true from the click until /login
+ * takes over, for the caller to cover the screen with the loader.
+ */
+export function useSwitchWorkspace() {
+  const logout = useLogout();
+  const [switching, setSwitching] = useState(false);
+  const switchWorkspace = () => {
+    setSwitching(true);
+    setSignOutNotice("To open another workspace, sign in again and choose it.");
+    logout.mutate();
+  };
+  return { switching, switchWorkspace };
 }
 
 /* ── second factor, from the account screen ────────────────────────────── */

@@ -68,6 +68,7 @@ import {
 import { ownPreview, senderAddress, senderLabel, splitHtmlQuote, splitTextQuote } from "@/lib/mail-quote";
 import { PaneDivider } from "@/components/mail/PaneDivider";
 import { LIST_PANE, READING_PANE_MIN, usePaneLayout } from "@/lib/pane-layout";
+import { useMailPreferences } from "@/lib/mail-preferences";
 
 /**
  * Why a folder failed, in words that point at the fix.
@@ -269,6 +270,7 @@ export interface MailClientHandle {
 
 /** Where a link into Mail points: a new message to someone, or one message. */
 export interface MailLink {
+  /** An address to write to, or "" for a blank message. */
   compose?: string;
   open?: string;
 }
@@ -294,6 +296,10 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
   // Resizable panes in the Member inbox (WebmailShell provides the layout);
   // the Admin and Owner inboxes have no provider and keep fixed panes.
   const layout = usePaneLayout();
+  const { prefs: mailPrefs, loaded: prefsLoaded } = useMailPreferences();
+  // Where the reading pane sits. Only the Member inbox has a choice; the
+  // Admin and Owner inboxes keep it on the right.
+  const pane = layout ? mailPrefs.readingPane : "right";
   const listPane = useRef<HTMLElement>(null);
   const mailboxId = sharedInbox?.id;
   const [page, setPage] = useState(1);
@@ -380,6 +386,19 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
     setCheckedIds(new Set());
   }, [starredOnly, unreadOnly, labelFilter, fromFilter, toFilter, hasAttachment, dateAfter, dateBefore, mailboxId, folder, viewTab, datePreset]);
 
+  // The member's default inbox view (Settings → Mailbox Preferences), applied
+  // once, when Mail opens on the Inbox. Not when a link opens a particular
+  // message: switching the filter would clear the selection it made.
+  const defaultViewApplied = useRef(false);
+  useEffect(() => {
+    if (!prefsLoaded || defaultViewApplied.current) return;
+    defaultViewApplied.current = true;
+    if (folder !== "INBOX" || openMessageId || link) return;
+    if (mailPrefs.defaultView === "unread") setUnreadOnly(true);
+    if (mailPrefs.defaultView === "starred") setStarredOnly(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefsLoaded]);
+
   // After the reset above, so a linked message survives the first render's clear.
   useEffect(() => {
     if (openMessageId) setSelectedId(openMessageId);
@@ -389,7 +408,7 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
   useEffect(() => {
     if (!link) return;
     if (link.open) setSelectedId(link.open);
-    if (link.compose) openCompose("new", null, [link.compose]);
+    if (link.compose !== undefined) openCompose("new", null, link.compose ? [link.compose] : undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [link]);
 
@@ -572,7 +591,7 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
 
   return (
     <>
-      <div className="flex h-full min-h-0">
+      <div className={`flex h-full min-h-0 ${pane === "bottom" ? "lg:flex-col" : ""}`} data-reading-pane={pane}>
         {/* The Admin and Owner inboxes' own rail; the member route passes
             hideRail and renders FolderRail in its shell instead. */}
         {!hideRail && (
@@ -614,16 +633,23 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
           data-testid="message-list-pane"
           aria-label={`${title} messages`}
           className={`flex min-w-0 flex-col border-r border-[var(--border)] bg-[var(--surface)] ${
-            layout
-              ? // A fixed desktop width — Standard (360, or 410 on xl) or the
-                // custom one — that always leaves the reading pane its minimum.
-                `${selectedId ? "hidden lg:flex" : "flex flex-1"} lg:flex-none lg:min-w-[300px] lg:w-[min(var(--zm-list-w,360px),calc(100%_-_420px))] xl:w-[min(var(--zm-list-w,410px),calc(100%_-_420px))]`
-              : selectedId
-                ? "hidden lg:flex lg:w-[360px] xl:w-[410px]"
-                : "flex flex-1 lg:max-w-none"
+            pane === "off"
+              ? // No reading pane: an opened message takes the list's place,
+                // on every width, as it does on a phone.
+                selectedId ? "hidden" : "flex flex-1"
+              : pane === "bottom"
+                ? // The full width, the message below it.
+                  `${selectedId ? "hidden lg:flex" : "flex flex-1"} lg:h-[42%] lg:min-h-[240px] lg:w-full lg:flex-none lg:border-b lg:border-r-0`
+                : layout
+                  ? // A fixed desktop width — Standard (360, or 410 on xl) or the
+                    // custom one — that always leaves the reading pane its minimum.
+                    `${selectedId ? "hidden lg:flex" : "flex flex-1"} lg:flex-none lg:min-w-[300px] lg:w-[min(var(--zm-list-w,360px),calc(100%_-_420px))] xl:w-[min(var(--zm-list-w,410px),calc(100%_-_420px))]`
+                  : selectedId
+                    ? "hidden lg:flex lg:w-[360px] xl:w-[410px]"
+                    : "flex flex-1 lg:max-w-none"
           }`}
           style={
-            layout?.effectiveListWidth
+            pane === "right" && layout?.effectiveListWidth
               ? ({ "--zm-list-w": `${layout.effectiveListWidth}px` } as CSSProperties)
               : undefined
           }
@@ -1036,6 +1062,8 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
                   showDeleteDraft={ownMailbox && folder === "DRAFTS"}
                   onDeleteDraft={() => setDraftToDelete(it.messageId)}
                   selectable={ownMailbox}
+                  compact={mailPrefs.density === "compact"}
+                  showPreview={mailPrefs.showPreview}
                 />
               ))}
             </ul>
@@ -1062,7 +1090,8 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
           )}
         </section>
 
-        {layout && (
+        {/* Only beside the list: below it or off, there is no width to drag. */}
+        {layout && pane === "right" && (
           <PaneDivider
             label="Resize message list"
             testId="list-divider"
@@ -1082,7 +1111,7 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
         {/* Reading pane */}
         <section
           aria-label="Message"
-          className={`min-w-0 flex-1 overflow-hidden bg-[var(--surface)] ${selectedId ? "flex" : "hidden lg:flex"}`}
+          className={`min-h-0 min-w-0 flex-1 overflow-hidden bg-[var(--surface)] ${selectedId ? "flex" : pane === "off" ? "hidden" : "hidden lg:flex"}`}
         >
           {selectedId ? (
             <ReadingPane
@@ -1423,12 +1452,22 @@ function ReadingPane({
   const latestRef = useRef<HTMLDivElement>(null);
   const scrolledFor = useRef<string | null>(null);
 
-  // Mark read on open (once we have the item and it's unread).
+  // Mark read on open (once we have the item and it's unread) — at once, after
+  // the member's chosen delay, or never (Settings → Mailbox Preferences).
+  // Leaving the message before the delay is up leaves it unread.
   const isUnread = item && !item.isRead;
+  const { markReadDelay } = useMailPreferences().prefs;
   useEffect(() => {
-    if (isUnread) update.mutate({ messageId, isRead: true, mailboxId });
+    if (!isUnread || markReadDelay === null) return;
+    const mark = () => update.mutate({ messageId, isRead: true, mailboxId });
+    if (markReadDelay === 0) {
+      mark();
+      return;
+    }
+    const timer = setTimeout(mark, markReadDelay * 1000);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messageId, isUnread]);
+  }, [messageId, isUnread, markReadDelay]);
 
   const threadMessages = thread && thread.messages.length > 1 ? thread.messages : null;
   const latestId = threadMessages?.[threadMessages.length - 1]?.id ?? null;

@@ -379,7 +379,7 @@ model Mailbox {
   domainId              String?                    @map("domain_id") @db.Uuid
   address               String
   storageUsed           BigInt                     @default(0) @map("storage_used")
-  storageLimit          BigInt                     @default(10737418240) @map("storage_limit")
+  storageLimit          BigInt                     @default(5368709120) @map("storage_limit")
   sendWindowStartedAt   DateTime                   @default(now()) @map("send_window_started_at")
   sendRecipientCount    Int                        @default(0) @map("send_recipient_count")
   sendSuspendedAt       DateTime?                  @map("send_suspended_at")

@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import {
-  Mail, CalendarDays, CheckSquare, UserRound, Network, Sparkles, HelpCircle, type LucideIcon,
+  Mail, CalendarDays, CheckSquare, UserRound, Network, Sparkles, HelpCircle, HardDrive, type LucideIcon,
 } from "lucide-react";
 
-/** The Member workspace's sections. Every section in the rail is built; only the Help centre shows Coming Soon. */
-export type WorkspaceSection = "mail" | "calendar" | "tasks" | "contacts" | "work-graph" | "alet" | "help";
+/** The Member workspace's sections. The rail lists the first six; Help and Storage are reached from its foot and from the storage meters. */
+export type WorkspaceSection = "mail" | "calendar" | "tasks" | "contacts" | "work-graph" | "alet" | "help" | "storage";
 
 export interface SectionInfo {
   key: WorkspaceSection;
@@ -65,8 +65,18 @@ export const HELP_SECTION: SectionInfo = {
   description: "Guides and answers for Zoiko Mail. Until it opens, your workspace administrator can help.",
 };
 
+/** Reached from the storage meter beside every section's sidebar, not listed in the rail. */
+export const STORAGE_SECTION: SectionInfo = {
+  key: "storage",
+  label: "Storage",
+  href: "/mail/storage",
+  icon: HardDrive,
+  description: "Where your mailbox space went, and how to free some.",
+};
+
 export function sectionInfo(key: WorkspaceSection): SectionInfo {
   if (key === "help") return HELP_SECTION;
+  if (key === "storage") return STORAGE_SECTION;
   return SECTIONS.find((section) => section.key === key) ?? SECTIONS[0];
 }
 

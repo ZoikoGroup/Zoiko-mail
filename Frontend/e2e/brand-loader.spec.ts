@@ -97,11 +97,12 @@ async function warm(page: Page, path: string) {
 /**
  * `landmark` is something only that workspace renders once it has taken over,
  * so a session the shell turned away (a redirect to /login) cannot pass.
- * /account rather than /inbox for AppShell: /inbox, /ai, /digest and
- * /notifications redirect to /mail on mount.
+ * /contacts rather than /inbox for AppShell: /inbox, /ai, /digest and
+ * /notifications redirect to /mail on mount, and /account and /settings to
+ * Settings in Mail.
  */
 const WORKSPACES: { name: string; workspace: Workspace; path: string; label: RegExp; landmark: (page: Page) => Locator }[] = [
-  { name: "member home", workspace: "MEMBER", path: "/account", label: /Loading your workspace/, landmark: (p) => p.getByText("Acme Corp").first() },
+  { name: "member home", workspace: "MEMBER", path: "/contacts", label: /Loading your workspace/, landmark: (p) => p.getByText("Acme Corp").first() },
   { name: "member mail", workspace: "MEMBER", path: "/mail", label: /Loading Zoiko Mail/, landmark: (p) => p.getByText("Work Graph").first() },
   { name: "admin", workspace: "ADMIN", path: "/admin", label: /Opening the admin workspace/, landmark: (p) => p.getByText("Admin workspace") },
   { name: "owner", workspace: "OWNER", path: "/owner", label: /Opening the owner workspace/, landmark: (p) => p.getByText("Users & Roles").first() },

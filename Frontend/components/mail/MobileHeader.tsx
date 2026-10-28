@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Menu, Search, X } from "lucide-react";
 import { initials } from "@/lib/useMemberShell";
 
@@ -38,9 +39,14 @@ export function MobileHeader({
           </button>
         )}
         <h1 className="flex-1 truncate text-base font-semibold text-[var(--ink)]">{title}</h1>
-        <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-[11px] font-semibold text-white">
+        {/* The phone's way to its profile; Settings is in the folder drawer. */}
+        <Link
+          href="/mail/settings/profile"
+          aria-label="Profile"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-[11px] font-semibold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]"
+        >
           {initials(displayName, accountEmail)}
-        </span>
+        </Link>
       </div>
 
       {showSearch && (

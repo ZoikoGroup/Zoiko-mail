@@ -37,13 +37,15 @@ function MailPageInner() {
   // Lifted so the same text reaches both TopBar (what the person sees and
   // types into) and MailClient's operator parser (lib/mail-search.ts).
   const [searchQuery, setSearchQuery] = useState("");
-  const [labelId, setLabelId] = useState("");
+  // ?label=<id> opens a label's mail — the folder column's labels, followed from Settings.
+  const [labelId, setLabelId] = useState(params.get("label") ?? "");
   const [sharedInbox, setSharedInbox] = useState<SharedInbox | null>(null);
   const mailClientRef = useRef<MailClientHandle>(null);
   const [link, setLink] = useState<MailLink | null>(null);
 
   // Links from elsewhere in the workspace:
   //   ?compose=<address>           a new message to that address
+  //   ?compose=                    a blank new message (Compose, pressed in Settings)
   //   ?open=<messageId>&folder=X   that message, in that folder
   // Read once, then removed from the address bar so a reload does not repeat them.
   useEffect(() => {
@@ -51,10 +53,10 @@ function MailPageInner() {
     const compose = params.get("compose");
     const open = params.get("open");
     const linkedFolder = params.get("folder") as MailListFolder | null;
-    if (!compose && !open) return;
+    if (compose === null && !open) return;
     if (linkedFolder && LINKABLE_FOLDERS.includes(linkedFolder)) setFolder(linkedFolder);
     setLink({
-      compose: compose?.trim() || undefined,
+      compose: compose === null ? undefined : compose.trim(),
       open: open && /^[0-9a-f-]{36}$/i.test(open) ? open : undefined,
     });
     window.history.replaceState(null, "", "/mail");

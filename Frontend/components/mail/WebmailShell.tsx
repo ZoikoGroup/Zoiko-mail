@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { useMemberShell } from "@/lib/useMemberShell";
 import { useMyMailbox, useUnreadCounts } from "@/lib/mail-hooks";
 import type { MailListFolder, SharedInbox } from "@/lib/mail-api";
@@ -16,6 +17,8 @@ import { AccessDenied } from "@/components/ui/AccessDenied";
 import { BrandLoader } from "@/components/ui/BrandLoader";
 import { PaneDivider } from "@/components/mail/PaneDivider";
 import { FOLDER_PANE, PaneLayoutProvider, usePaneLayout } from "@/lib/pane-layout";
+import { MailPreferencesProvider } from "@/lib/mail-preferences";
+import { settingsSection as settingsInfo, type SettingsSectionKey } from "@/components/settings/sections";
 
 /**
  * The Member workspace's full-screen shell: top bar, the section rail
@@ -30,15 +33,21 @@ import { FOLDER_PANE, PaneLayoutProvider, usePaneLayout } from "@/lib/pane-layou
  * Phone (< lg): MobileHeader with a folder drawer, the content, a compose
  * button and the section BottomNav.
  *
+ * Settings (/mail/settings/*) is part of Mail: the folder column stays, with
+ * the Settings page highlighted, and choosing a folder there goes back to Mail.
+ *
  * Wrapped in .zm-webmail, which re-values the design tokens for the mail
  * look (globals.css) without touching the other consoles.
  */
 export function WebmailShell(props: ComponentProps<typeof WebmailShellInner>) {
   // The pane sizes are shared by the top bar's Layout menu, the folder
-  // column here and the list inside MailClient, so they live above all three.
+  // column here and the list inside MailClient, so they live above all three;
+  // the mailbox preferences are shared by Settings and MailClient likewise.
   return (
     <PaneLayoutProvider>
-      <WebmailShellInner {...props} />
+      <MailPreferencesProvider>
+        <WebmailShellInner {...props} />
+      </MailPreferencesProvider>
     </PaneLayoutProvider>
   );
 }
@@ -54,6 +63,7 @@ function WebmailShellInner({
   onLabelChange,
   sharedInbox = null,
   onOpenShared,
+  settingsSection = null,
   children,
 }: {
   section?: WorkspaceSection;
@@ -69,9 +79,12 @@ function WebmailShellInner({
   /** The shared inbox being read, or null for one's own mailbox. */
   sharedInbox?: SharedInbox | null;
   onOpenShared?: (inbox: SharedInbox | null) => void;
+  /** Set on a Settings page: the folder column then links back into Mail. */
+  settingsSection?: SettingsSectionKey | null;
   children: ReactNode;
 }) {
   const { me, status, logout, toasts, dismissToast } = useMemberShell();
+  const router = useRouter();
   const { data: mailbox, isLoading: mailboxLoading } = useMyMailbox();
   const { data: unreadCounts } = useUnreadCounts();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -92,7 +105,17 @@ function WebmailShellInner({
   }
 
   const noop = () => undefined;
+  // Settings has no mail list to update, so the folder column's choices open
+  // Mail on them instead. A folder click also clears the label and shared
+  // inbox (the empty values), which there is nothing to clear here.
+  if (settingsSection) {
+    onFolderChange = (f) => router.push(f === "INBOX" ? "/mail" : `/mail?folder=${f}`);
+    onLabelChange = (id) => id && router.push(`/mail?label=${id}`);
+    onOpenShared = (inbox) => inbox && router.push(`/mail?mailbox=${inbox.id}`);
+    onCompose = () => router.push("/mail?compose=");
+  }
   const railProps = {
+    settingsSection,
     folder,
     unreadCounts,
     storageUsed: mailbox?.storageUsed ?? 0,
@@ -106,7 +129,9 @@ function WebmailShellInner({
   const accountEmail = mailbox?.address ?? me?.email;
   const mobileTitle = !inMail
     ? sectionInfo(section).label
-    : sharedInbox
+    : settingsSection
+      ? settingsInfo(settingsSection)?.label ?? "Settings"
+      : sharedInbox
       ? sharedInbox.address
       : folderLabel(folder);
 
@@ -183,6 +208,7 @@ function WebmailShellInner({
             <div className="absolute inset-y-0 left-0 max-w-[85vw] shadow-[var(--sh3)]">
               <FolderRail
                 {...railProps}
+                onNavigate={() => setDrawerOpen(false)}
                 onFolderChange={(f) => {
                   onFolderChange?.(f);
                   setDrawerOpen(false);

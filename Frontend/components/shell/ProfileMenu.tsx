@@ -4,10 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Building2, ChevronRight, LogOut, MonitorSmartphone, UserCircle } from "lucide-react";
 
-import { useLogout, useLogoutAll, useMe } from "@/lib/auth-hooks";
+import { useLogout, useLogoutAll, useMe, useSwitchWorkspace } from "@/lib/auth-hooks";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { BrandLoader } from "@/components/ui/BrandLoader";
-import { setSignOutNotice } from "@/lib/auth-storage";
 
 /**
  * The account menu behind the avatar.
@@ -52,7 +51,7 @@ export function ProfileMenu({
 
   const [open, setOpen] = useState(false);
   const [confirmingEverywhere, setConfirmingEverywhere] = useState(false);
-  const [switching, setSwitching] = useState(false);
+  const { switching, switchWorkspace: startSwitch } = useSwitchWorkspace();
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -85,18 +84,12 @@ export function ProfileMenu({
 
   if (!me) return null;
 
-  // Offered only when there is somewhere to go. Moving to another workspace
-  // means signing in again (a session is bound to the workspace it was opened
-  // for, and the picker needs the selection token only a sign-in issues), so
-  // this signs out with a note saying why; signing back in shows the picker.
-  // It used to push to /select-workspace, which, with no selection token in
-  // the tab, bounced to /login with no explanation.
+  // Offered only when there is somewhere to go. Switching signs out with a
+  // note on the sign-in page (see useSwitchWorkspace for why).
   const canSwitch = (me.workspaceCount ?? 1) > 1;
   const switchWorkspace = () => {
     setOpen(false);
-    setSwitching(true);
-    setSignOutNotice("To open another workspace, sign in again and choose it.");
-    logout.mutate();
+    startSwitch();
   };
 
   const row =

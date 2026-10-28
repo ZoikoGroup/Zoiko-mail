@@ -79,20 +79,15 @@ test("Ctrl+K focuses search", async ({ page }) => {
 });
 
 // Every section in the rail is built and has its own spec (Calendar, Tasks,
-// Contacts, Work Graph, Alet). The Help centre, behind the help button at the
-// foot of the rail, is the one placeholder left.
-for (const [href, title] of [["/mail/help", "Help centre"]] as const) {
-  test(`${title} shows Coming Soon inside the workspace`, async ({ page }) => {
-    await openWebmail(page);
-    await page.getByRole("navigation", { name: "Workspace sections" }).first().getByRole("link", { name: "Help and support" }).click();
-    await expect(page).toHaveURL(new RegExp(`${href}$`), { timeout: 60_000 });
-    const soon = page.getByTestId("coming-soon");
-    await expect(soon.getByRole("heading", { name: title })).toBeVisible({ timeout: 60_000 });
-    await expect(soon.getByText("Coming Soon...")).toBeVisible();
-    await expect(soon.getByRole("link", { name: "Back to Mail" })).toHaveAttribute("href", "/mail");
-    await shot(page, "3-coming-soon");
-  });
-}
+// Contacts, Work Graph, Alet), as do the Help centre and Storage page
+// (storage-help.spec.ts). This only checks the help button reaches the Help centre.
+test("the help button opens the Help centre inside the workspace", async ({ page }) => {
+  await openWebmail(page);
+  await page.getByRole("navigation", { name: "Workspace sections" }).first().getByRole("link", { name: "Help and support" }).click();
+  await expect(page).toHaveURL(/\/mail\/help$/, { timeout: 60_000 });
+  await expect(page.getByTestId("help-centre").getByRole("heading", { name: "Help centre" })).toBeVisible({ timeout: 60_000 });
+  await shot(page, "3-help-centre");
+});
 
 test("on a phone, folders are in a drawer and sections along the bottom", async ({ page }) => {
   await openWebmail(page);

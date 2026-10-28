@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { asyncHandler } from "../../common/middleware/asyncHandler.js";
 import { sendSuccess } from "../../common/utils/response.js";
 import { mailService } from "./mail.service.js";
+import { storageService } from "./storage.service.js";
 import { previewDocument } from "./attachment-preview.service.js";
 import { sharedMailboxService } from "./shared-mailbox.service.js";
 import { aliasService } from "./alias.service.js";
@@ -53,6 +54,12 @@ export const unreadCounts = asyncHandler(async (req: Request, res: Response) => 
 });
 export const getMyMailbox = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, 200, await mailService.getMyMailbox(context(req)), req.requestId);
+});
+export const storageOverview = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await storageService.overview(context(req)), req.requestId);
+});
+export const storageRecalculate = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, 200, await storageService.recalculate(context(req)), req.requestId);
 });
 export const snooze = asyncHandler(async (req: Request, res: Response) => {
   const until = req.body.until ? new Date(req.body.until) : null;

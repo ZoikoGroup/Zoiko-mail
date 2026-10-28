@@ -113,9 +113,10 @@ async function openAccount(
   await page.getByPlaceholder("john@example.com").fill("member@zoiko.test");
   await page.getByPlaceholder("Enter your password").fill("Password123!");
   await page.getByRole("button", { name: "Sign In", exact: true }).click();
-  await expect(page).toHaveURL(/\/inbox$/, { timeout: 60_000 });
+  // A member's home is Mail now; /inbox used to be.
+  await expect(page).toHaveURL(/\/mail$/, { timeout: 60_000 });
 
-  await page.goto("/account");
+  await page.goto("/mail/settings/profile");
   await expect(page.getByText("Two-factor authentication")).toBeVisible();
   return calls;
 }
