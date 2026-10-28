@@ -29,6 +29,9 @@ process.env.SYSTEM_MAIL_ENABLED = "false";
 // unset), no outbound relay, no inbound secret. Suites that exercise the Zoiko
 // store, the relay or ingest switch them on themselves.
 process.env.STALWART_ACCOUNT_PROVISIONING = "true";
+// The built-in User role, whatever a developer's .env names; the client tests
+// that cover a custom role pass it to the client themselves.
+process.env.STALWART_ACCOUNT_ROLE_ID = "";
 process.env.RELAY_ENABLED = "false";
 process.env.INBOUND_WEBHOOK_SECRET = "";
 // Suites re-check a domain several times in a row; the cooldown that stops an

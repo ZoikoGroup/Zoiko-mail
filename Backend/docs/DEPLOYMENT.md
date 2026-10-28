@@ -59,9 +59,14 @@ STALWART_BASE_URL=https://mail.zoikomail.com   # the server origin, not /admin o
 STALWART_API_TOKEN_REF=stalwart-api-token      # secret-store reference, not the key
 STALWART_TIMEOUT_MS=15000
 STALWART_AUTO_CREATE_DOMAINS=true
+STALWART_ACCOUNT_ROLE_ID=                      # empty: built-in User role; or a custom role's id (step 1)
 ```
 
-1. **Create a dedicated API key in Stalwart** (WebUI → Account → Credentials → API Keys) for a service account. Use the permission mode *Replace* and grant only `authenticate`, `sysAccountGet`, `sysAccountQuery`, `sysAccountCreate`, `sysDomainGet`, `sysDomainQuery` and `sysDomainCreate`. Leave out every `*Destroy` permission **for as long as deletion is off** (see *Deleting hosted mailboxes* below, which is the only reason to add `sysAccountDestroy`). The key is shown once.
+1. **Choose the role new mailboxes get, then create a dedicated API key** (WebUI → Account → Credentials → API Keys) for a service account, with the permission mode *Replace*. Stalwart only lets a key assign a role when the key holds **every** permission that role carries; otherwise account creation fails with `forbidden: You are not authorized to grant permissions: …`. So the role decides how broad the key must be:
+   - **Built-in User role** (`STALWART_ACCOUNT_ROLE_ID` empty). On v0.16.25 it carries 244 permissions (calendars, contacts, files, WebDAV, POP3, Sieve, …), and the key needs all of them.
+   - **A custom mailbox role** (recommended). Create a role (WebUI, or `x:Role/set`) with `authenticate`, `authenticateWithAlias`, `emailSend`, `emailReceive` and the `imap*` permissions: 32 in all on v0.16.25. Set `STALWART_ACCOUNT_ROLE_ID` to its id. Accounts with it sign in over IMAP and send over SMTP; they get no calendars, contacts, files, POP3 or Sieve.
+
+   On top of the role's permissions, the key needs `sysAccountGet`, `sysAccountQuery`, `sysAccountCreate`, `sysAccountUpdate` (password changes), `sysDomainGet`, `sysDomainQuery` and `sysDomainCreate`. Leave out every `*Destroy` permission **for as long as deletion is off** (see *Deleting hosted mailboxes* below, which is the only reason to add `sysAccountDestroy`). The key is shown once. `npm run test:stalwart-real` runs this setup against a v0.16.25 container (Docker only, no database): the key above with a custom mailbox role, including that it is refused the User role and cannot delete, and a second key with `sysAccountDestroy` added for its deletion step.
 2. **Store the key in the secret store**, never in `.env` or the compose file:
    - `SECRET_STORE=gcp`: create the secret named by `STALWART_API_TOKEN_REF` in Secret Manager.
    - `SECRET_STORE=env`: write it to `$SECRET_FILE_DIR/stalwart-api-token.secret` (in docker-compose, `/app/storage/secrets/` on the `zoiko_storage` volume), readable only by the API user.

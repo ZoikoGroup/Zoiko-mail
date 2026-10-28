@@ -41,11 +41,21 @@ export type StalwartErrorCode =
   | "COUNT_UNAVAILABLE";
 
 /**
+ * What Stalwart said about a refusal: the JMAP error's `description` and, for
+ * a SetError, the `properties` it names. Bounded in size, and any secret the
+ * request carried is removed from the description, so it is safe to log.
+ */
+export interface StalwartErrorDetail {
+  description?: string;
+  properties?: string[];
+}
+
+/**
  * A failure talking to Stalwart.
  *
  * The message is written for operators and never carries the response body,
  * the request, or the credential. `jmapType` is the JMAP error type string
- * (for example `invalidProperties`), which is safe to record.
+ * (for example `invalidProperties`), which is safe to record, as is `detail`.
  */
 export class StalwartError extends Error {
   constructor(
@@ -53,7 +63,8 @@ export class StalwartError extends Error {
     public readonly code: StalwartErrorCode,
     public readonly retryable: boolean,
     public readonly httpStatus?: number,
-    public readonly jmapType?: string
+    public readonly jmapType?: string,
+    public readonly detail?: StalwartErrorDetail
   ) {
     super(message);
     this.name = "StalwartError";

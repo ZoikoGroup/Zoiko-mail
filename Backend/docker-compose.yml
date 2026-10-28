@@ -69,6 +69,9 @@ services:
       STALWART_API_TOKEN_REF: ${STALWART_API_TOKEN_REF:-stalwart-api-token}
       STALWART_TIMEOUT_MS: ${STALWART_TIMEOUT_MS:-15000}
       STALWART_AUTO_CREATE_DOMAINS: ${STALWART_AUTO_CREATE_DOMAINS:-true}
+      # Empty: new accounts get Stalwart's built-in User role. Otherwise the id
+      # of a custom role (see docs/DEPLOYMENT.md).
+      STALWART_ACCOUNT_ROLE_ID: ${STALWART_ACCOUNT_ROLE_ID:-}
       # Off until the staging checks in docs/DEPLOYMENT.md pass.
       STALWART_DELETE_ENABLED: ${STALWART_DELETE_ENABLED:-false}
       MAIL_CLEANUP_INTERVAL_MS: ${MAIL_CLEANUP_INTERVAL_MS:-30000}

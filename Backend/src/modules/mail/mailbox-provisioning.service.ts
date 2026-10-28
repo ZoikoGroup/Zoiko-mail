@@ -577,7 +577,20 @@ export class MailboxProvisioningService {
       if (!(error instanceof StalwartError)) {
         logger.error({ err: error, mailboxId: row.id }, "Mailbox provisioning failed unexpectedly");
       } else {
-        logger.warn({ mailboxId: row.id, code, retryable }, "Mailbox provisioning failed");
+        // What Stalwart said, never what was sent: the request carries the
+        // password, and the client has already cut it out of the description.
+        logger.warn(
+          {
+            mailboxId: row.id,
+            code,
+            retryable,
+            httpStatus: error.httpStatus,
+            stalwartType: error.jmapType,
+            stalwartDescription: error.detail?.description,
+            stalwartProperties: error.detail?.properties,
+          },
+          "Mailbox provisioning failed"
+        );
       }
       await prisma.mailbox.update({
         where: { id: row.id },
