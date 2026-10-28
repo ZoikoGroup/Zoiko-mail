@@ -249,6 +249,34 @@ export async function getMe(): Promise<MeResponse> {
   return apiRequest<MeResponse>("/auth/me");
 }
 
+/** The account's own details, as GET /users/me returns them — more than /auth/me carries. */
+export interface Profile {
+  id: string;
+  email: string;
+  displayName: string;
+  avatarUrl: string | null;
+  phoneNumber: string | null;
+  timezone: string | null;
+  language: string | null;
+  createdAt: string;
+}
+
+/** The fields a member may change about themselves (PATCH /users/me). */
+export interface UpdateProfileInput {
+  displayName?: string;
+  phoneNumber?: string | null;
+  timezone?: string;
+  language?: string;
+}
+
+export async function getProfile(): Promise<Profile> {
+  return apiRequest<Profile>("/users/me");
+}
+
+export async function updateProfile(input: UpdateProfileInput): Promise<Profile> {
+  return apiRequest<Profile>("/users/me", { method: "PATCH", body: input });
+}
+
 export async function logout(): Promise<void> {
   const refreshToken = getRefreshToken();
   try {

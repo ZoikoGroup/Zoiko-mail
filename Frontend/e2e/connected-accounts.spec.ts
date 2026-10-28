@@ -1,10 +1,11 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 
 /**
- * Dedicated Connected Accounts coverage: listing, status/re-sync state, watch
- * expiry, REAUTH_REQUIRED reconnect, on-demand Sync Now (incl. failure) and
- * disconnect. Driven against a stubbed API like action-inbox.spec.ts — the
- * subject is client wiring, not the server.
+ * Settings → Connected Mailboxes: listing, the connection's detail (status,
+ * permission scope, last sync), REAUTH_REQUIRED reconnect through the
+ * provider's return address (/connected-accounts), on-demand Sync now (incl.
+ * failure) and disconnect. Driven against a stubbed API like
+ * action-inbox.spec.ts — the subject is client wiring, not the server.
  *
  * Route precedence: the catch-all is registered FIRST and specific stubs after
  * it (most-recently-registered wins).
@@ -84,7 +85,7 @@ async function signIn(page: Page) {
   await page.getByPlaceholder("john@example.com").fill("someone@zoiko.test");
   await page.getByPlaceholder("Enter your password").fill("Password123!");
   await page.getByRole("button", { name: "Sign In", exact: true }).click();
-  await expect(page).toHaveURL(/\/inbox$/, { timeout: 60_000 });
+  await expect(page).toHaveURL(/\/mail$/, { timeout: 60_000 });
 }
 
 async function stubConnectors(page: Page, accounts: unknown[]) {
@@ -106,7 +107,9 @@ test.beforeEach(async ({ page }) => {
   await stubSessionReads(page);
 });
 
-test("Connected account lists status, email, last sync and watch expiry, and Sync Now works", async ({ page }) => {
+const PAGE = "/mail/settings/connected-mailboxes";
+
+test("a connection shows its status, read-only scope and last sync, and Sync now works", async ({ page }) => {
   const accounts = [connector()];
   await stubConnectors(page, accounts);
   let syncCount = 0;
@@ -117,49 +120,51 @@ test("Connected account lists status, email, last sync and watch expiry, and Syn
   });
 
   await signIn(page);
-  await page.goto("/connected-accounts");
+  await page.goto(PAGE);
 
-  await expect(page.getByRole("heading", { name: "Connected accounts" })).toBeVisible();
-  await expect(page.getByText("Gmail", { exact: true })).toBeVisible();
-  await expect(page.getByText("someone@zoiko.test")).toBeVisible();
-  await expect(page.getByText("ACTIVE", { exact: true })).toBeVisible();
-  await expect(page.getByText(/Last synced: Sep 1,/)).toBeVisible();
-  await expect(page.getByText(/Watch expires: Sep 5,/)).toBeVisible();
+  const list = page.getByTestId("connection-list");
+  await expect(list.getByText("someone@zoiko.test")).toBeVisible({ timeout: 60_000 });
+  await expect(list.getByText("Connected", { exact: true })).toBeVisible();
+
+  const detail = page.getByTestId("connection-detail");
+  await expect(detail.getByRole("heading", { name: "Gmail" })).toBeVisible();
+  const scope = detail.getByTestId("permission-scope");
+  await expect(scope.getByText("Read messages and labels in this account")).toBeVisible();
+  await expect(scope.getByText("Not granted")).toHaveCount(2);
+  await expect(detail.getByText(/Sep 1/).first()).toBeVisible();
 
   const syncResponse = page.waitForResponse((r) => r.url().includes("/connectors/c1/sync") && r.request().method() === "POST");
-  await page.getByRole("button", { name: /Sync now/ }).click();
-  await expect(page.getByText(/Syncing latest messages/)).toBeVisible();
+  await detail.getByRole("button", { name: "Sync now" }).click();
+  await expect(detail.getByRole("button", { name: "Syncing…" })).toBeVisible();
   await syncResponse;
-  await expect(page.getByText(/Syncing latest messages/)).not.toBeVisible({ timeout: 10_000 });
+  await expect(detail.getByRole("button", { name: "Sync now" })).toBeVisible({ timeout: 10_000 });
   expect(syncCount).toBe(1);
 });
 
-test("Sync Now surfaces a friendly error when the provider call fails", async ({ page }) => {
+test("Sync now says so when the provider call fails", async ({ page }) => {
   const accounts = [connector()];
   await stubConnectors(page, accounts);
   await page.route(`${API}/connectors/*/sync`, (route) =>
     route.fulfill({
       status: 502,
       contentType: "application/json",
-      body: JSON.stringify({ success: false, error: { code: "PROVIDER_ERROR", message: "Sync failed \u2014 the provider may be unavailable or needs reauthorization" } }),
+      body: JSON.stringify({ success: false, error: { code: "PROVIDER_ERROR", message: "Sync failed — the provider may be unavailable or needs reauthorization" } }),
     })
   );
 
   await signIn(page);
-  await page.goto("/connected-accounts");
-  await page.getByRole("button", { name: /Sync now/ }).click();
-  await expect(page.getByText(/Gmail sync failed/)).toBeVisible({ timeout: 15_000 });
+  await page.goto(PAGE);
+  await page.getByTestId("connection-detail").getByRole("button", { name: "Sync now" }).click({ timeout: 60_000 });
+  await expect(page.getByText(/Sync failed: Sync failed/)).toBeVisible({ timeout: 15_000 });
 });
 
-test("REAUTH_REQUIRED account invites a reconnect that restarts OAuth", async ({ page }) => {
-  const accounts = [
-    connector({ status: "REAUTH_REQUIRED", lastErrorCode: "NO_REFRESH_TOKEN" }),
-  ];
+test("a connection that needs review reconnects through the provider's return address", async ({ page }) => {
+  const accounts = [connector({ status: "REAUTH_REQUIRED", lastErrorCode: "NO_REFRESH_TOKEN" })];
   await stubConnectors(page, accounts);
 
-  // Reconnect fetches the existing backend OAuth URL, then navigates there.
-  // Pointing it at the local connected-accounts path simulates the provider
-  // callback landing the user back — no external network needed.
+  // Reconnect fetches the backend's OAuth URL, then navigates there. Pointing
+  // it at /connected-accounts — where the real callbacks land — simulates the
+  // provider sending the user back, with no external network.
   let authFetched = 0;
   await page.route(`${API}/connectors/auth/google`, (route) => {
     authFetched += 1;
@@ -167,31 +172,38 @@ test("REAUTH_REQUIRED account invites a reconnect that restarts OAuth", async ({
   });
 
   await signIn(page);
-  await page.goto("/connected-accounts");
+  await page.goto(PAGE);
 
-  await expect(page.getByText("REAUTH_REQUIRED", { exact: true })).toBeVisible();
-  await expect(page.getByText(/Reauthorization needed/)).toBeVisible();
+  await expect(page.getByTestId("needs-review")).toContainText("1 connection needs review", { timeout: 60_000 });
+  const detail = page.getByTestId("connection-detail");
+  await expect(detail.getByText(/needs you to sign in again/)).toBeVisible();
 
   const connectResponse = page.waitForResponse((r) => r.url().includes("/connectors/auth/google"));
-  await page.getByRole("button", { name: /Reconnect/ }).click();
+  await detail.getByRole("button", { name: "Reconnect" }).click();
   await connectResponse;
-  await expect(page).toHaveURL(/connected=true&provider=GMAIL/, { timeout: 15_000 });
-  await expect(page.getByText(/Gmail connected successfully/)).toBeVisible();
+  await expect(page).toHaveURL(/\/mail\/settings\/connected-mailboxes$/, { timeout: 30_000 });
+  await expect(page.getByText("Gmail connected. Mail will start syncing shortly.")).toBeVisible({ timeout: 30_000 });
   expect(authFetched).toBe(1);
 });
 
-test("Disconnect requires confirmation and removes the account after refetch", async ({ page }) => {
-  const accounts: unknown[] = [connector()];
+test("disconnect asks first, then removes the connection", async ({ page }) => {
+  const accounts = [connector()];
   await stubConnectors(page, accounts);
 
   await signIn(page);
-  await page.goto("/connected-accounts");
-  await expect(page.getByText("Gmail", { exact: true })).toBeVisible();
+  await page.goto(PAGE);
+  const detail = page.getByTestId("connection-detail");
+  await detail.getByRole("button", { name: "Disconnect" }).click({ timeout: 60_000 });
+  await expect(page.getByText(/Syncing from someone@zoiko.test stops/)).toBeVisible();
 
-  await page.getByRole("button", { name: "Disconnect", exact: true }).click();
-  await expect(page.getByText(/Disconnect someone@zoiko.test/)).toBeVisible();
-  const deleteResponse = page.waitForResponse((r) => r.url().endsWith("/connectors/c1") && r.request().method() === "DELETE");
   await page.getByRole("button", { name: "Disconnect", exact: true }).last().click();
-  await deleteResponse;
-  await expect(page.getByText("No accounts connected")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("No mailboxes connected")).toBeVisible({ timeout: 15_000 });
+});
+
+test("the old address keeps a failed sign-in's reason", async ({ page }) => {
+  await stubConnectors(page, []);
+  await signIn(page);
+  await page.goto("/connected-accounts?error=access_denied");
+  await expect(page).toHaveURL(/\/mail\/settings\/connected-mailboxes$/, { timeout: 60_000 });
+  await expect(page.getByRole("alert").filter({ hasText: "The connection did not complete: Access denied." })).toBeVisible({ timeout: 30_000 });
 });

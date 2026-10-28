@@ -4,10 +4,14 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent }
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { Search, X, Settings, LogOut, ChevronDown, Bell, Sparkles, UserRound } from "lucide-react";
+import {
+  Search, X, Settings, LogOut, ChevronDown, Bell, Sparkles, UserRound, Building2, MonitorSmartphone,
+} from "lucide-react";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { LayoutMenu } from "@/components/mail/LayoutMenu";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { initials } from "@/lib/useMemberShell";
+import { useLogoutAll, useMe } from "@/lib/auth-hooks";
 import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from "@/lib/admin-hooks";
 import { useTaskSearch } from "@/lib/tasks-hooks";
 import type { Task } from "@/lib/tasks-api";
@@ -110,6 +114,12 @@ export function TopBar({
     }
   };
 
+  const { data: me } = useMe();
+  const logoutAll = useLogoutAll();
+  const [confirmingEverywhere, setConfirmingEverywhere] = useState(false);
+  // Switching is offered only when there is another workspace to switch to.
+  const canSwitch = (me?.workspaceCount ?? 1) > 1;
+
   const { data: notifications } = useNotifications();
   const markRead = useMarkNotificationRead();
   const markAll = useMarkAllNotificationsRead();
@@ -142,18 +152,7 @@ export function TopBar({
       </Link>
 
       {workspaceName && (
-        <div
-          className="hidden h-11 min-w-0 max-w-[230px] shrink-0 items-center gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--s2)] px-3 xl:flex"
-          title={`Workspace: ${workspaceName}`}
-        >
-          <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--accent)] text-sm font-bold text-white">
-            {workspaceName.trim().charAt(0).toUpperCase()}
-          </span>
-          <span className="min-w-0 leading-tight">
-            <span className="block truncate text-[13px] font-semibold text-[var(--ink)]">{workspaceName}</span>
-            <span className="block text-[11px] text-[var(--ink3)]">Business mail</span>
-          </span>
-        </div>
+        <WorkspaceCard name={workspaceName} canSwitch={canSwitch} />
       )}
 
       <div className="relative mx-auto w-full max-w-xl flex-1">
@@ -335,7 +334,7 @@ export function TopBar({
           )}
         </div>
 
-        <Link href="/settings" className={iconButton} aria-label="Settings" title="Settings">
+        <Link href="/mail/settings" className={iconButton} aria-label="Settings" title="Settings">
           <Settings className="h-[18px] w-[18px]" aria-hidden />
         </Link>
 
@@ -356,33 +355,138 @@ export function TopBar({
           {menuOpen && (
             <div
               role="menu"
-              className="absolute right-0 top-full z-30 mt-2 w-60 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] py-1 shadow-[var(--sh3)]"
+              className="absolute right-0 top-full z-30 mt-2 w-64 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--sh3)]"
             >
-              <div className="border-b border-[var(--border)] px-4 py-2.5">
-                {displayName && <div className="truncate text-sm font-semibold text-[var(--ink)]">{displayName}</div>}
-                <div className="truncate text-xs text-[var(--ink3)]">{accountEmail ?? "…"}</div>
+              <div className="flex items-start gap-3 border-b border-[var(--border)] px-4 py-3">
+                <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-[13px] font-semibold text-white">
+                  {initials(displayName, accountEmail)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  {displayName && <div className="truncate text-sm font-semibold text-[var(--ink)]">{displayName}</div>}
+                  <div className="truncate text-xs text-[var(--ink3)]">{accountEmail ?? "…"}</div>
+                  {/* A session is bound to one workspace, so which one is worth saying. */}
+                  {me && (
+                    <span className="mt-1.5 inline-flex max-w-full items-center gap-1 rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--accent-ink)]">
+                      <Building2 className="h-3 w-3 shrink-0" aria-hidden />
+                      <span className="truncate">
+                        {me.membership.role.charAt(0) + me.membership.role.slice(1).toLowerCase()} · {me.tenant.name}
+                      </span>
+                    </span>
+                  )}
+                </div>
               </div>
-              <Link
-                role="menuitem"
-                href="/account"
-                className="flex items-center gap-2 px-4 py-2 text-sm text-[var(--ink2)] hover:bg-[var(--s2)]"
-                onClick={() => setMenuOpen(false)}
-              >
-                <UserRound className="h-3.5 w-3.5" aria-hidden /> Profile
-              </Link>
-              <button
-                role="menuitem"
-                onClick={onSignOut}
-                disabled={signingOut}
-                className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-[var(--ink2)] hover:bg-[var(--s2)] disabled:opacity-60"
-              >
-                <LogOut className="h-3.5 w-3.5" aria-hidden />
-                {signingOut ? "Signing out…" : "Sign out"}
-              </button>
+              <div className="border-b border-[var(--border)] py-1">
+                <MenuLink href="/mail/settings/profile" icon={UserRound} onClick={() => setMenuOpen(false)}>
+                  Profile
+                </MenuLink>
+                <MenuLink href="/mail/settings" icon={Settings} onClick={() => setMenuOpen(false)}>
+                  Settings
+                </MenuLink>
+                {canSwitch && (
+                  <MenuLink href="/select-workspace" icon={Building2} onClick={() => setMenuOpen(false)}>
+                    Switch workspace
+                  </MenuLink>
+                )}
+              </div>
+              <div className="py-1">
+                <button
+                  role="menuitem"
+                  onClick={onSignOut}
+                  disabled={signingOut}
+                  className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-[var(--ink2)] hover:bg-[var(--s2)] disabled:opacity-60"
+                >
+                  <LogOut className="h-3.5 w-3.5" aria-hidden />
+                  {signingOut ? "Signing out…" : "Sign out"}
+                </button>
+                {/* Ends this session too, so it is confirmed first. */}
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setConfirmingEverywhere(true);
+                  }}
+                  disabled={logoutAll.isPending}
+                  className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-[var(--ink2)] hover:bg-[var(--s2)] disabled:opacity-60"
+                >
+                  <MonitorSmartphone className="h-3.5 w-3.5" aria-hidden />
+                  {logoutAll.isPending ? "Signing out…" : "Sign out everywhere"}
+                </button>
+              </div>
             </div>
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmingEverywhere}
+        onClose={() => setConfirmingEverywhere(false)}
+        onConfirm={() => {
+          setConfirmingEverywhere(false);
+          logoutAll.mutate();
+        }}
+        title="Sign out on every device?"
+        message="Every session for this account ends, on every browser and device — including this one. Anyone signed in elsewhere will have to sign in again."
+        confirmLabel="Sign out everywhere"
+        loading={logoutAll.isPending}
+      />
     </header>
+  );
+}
+
+function MenuLink({
+  href,
+  icon: Icon,
+  onClick,
+  children,
+}: {
+  href: string;
+  icon: typeof Settings;
+  onClick: () => void;
+  children: string;
+}) {
+  return (
+    <Link
+      role="menuitem"
+      href={href}
+      className="flex items-center gap-2 px-4 py-2 text-sm text-[var(--ink2)] hover:bg-[var(--s2)]"
+      onClick={onClick}
+    >
+      <Icon className="h-3.5 w-3.5" aria-hidden /> {children}
+    </Link>
+  );
+}
+
+/**
+ * The workspace this session is in. With another workspace to go to it opens
+ * the workspace picker; otherwise it is a label, not a button that leads nowhere.
+ */
+function WorkspaceCard({ name, canSwitch }: { name: string; canSwitch: boolean }) {
+  const body = (
+    <>
+      <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--accent)] text-sm font-bold text-white">
+        {name.trim().charAt(0).toUpperCase()}
+      </span>
+      <span className="min-w-0 flex-1 leading-tight">
+        <span className="block truncate text-[13px] font-semibold text-[var(--ink)]">{name}</span>
+        <span className="block text-[11px] text-[var(--ink3)]">Business mail</span>
+      </span>
+      {canSwitch && <ChevronDown className="h-4 w-4 shrink-0 text-[var(--ink3)]" aria-hidden />}
+    </>
+  );
+  const box =
+    "hidden h-11 min-w-0 max-w-[230px] shrink-0 items-center gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--s2)] px-3 xl:flex";
+  return canSwitch ? (
+    <Link
+      href="/select-workspace"
+      className={`${box} transition hover:border-[var(--accent)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]`}
+      title={`Workspace: ${name} — switch workspace`}
+      aria-label={`Workspace: ${name}. Switch workspace`}
+    >
+      {body}
+    </Link>
+  ) : (
+    <div className={box} title={`Workspace: ${name}`}>
+      {body}
+    </div>
   );
 }

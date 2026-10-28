@@ -60,6 +60,23 @@ export async function syncConnector(accountId: string): Promise<{ synced: boolea
   return data;
 }
 
+/** One thing the provider told us about a connected account (GET /connectors/:id/events). */
+export interface ConnectorEvent {
+  id: string;
+  provider: ConnectorProvider;
+  eventType: string;
+  receivedAt: string;
+  processedAt: string | null;
+  processingStatus: string;
+  errorCode: string | null;
+}
+
+/** The account's recent provider events, newest first (the server keeps the latest 100). */
+export async function listConnectorEvents(accountId: string): Promise<ConnectorEvent[]> {
+  const data = await apiRequest<{ events: ConnectorEvent[] }>(`/connectors/${accountId}/events`);
+  return data.events ?? [];
+}
+
 // ---- OAuth endpoints -------------------------------------------------------
 export async function getGoogleAuthUrl(): Promise<{ url: string }> {
   return apiRequest<{ url: string }>("/connectors/auth/google");

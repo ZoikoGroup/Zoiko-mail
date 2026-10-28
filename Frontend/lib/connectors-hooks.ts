@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   listConnectors,
+  listConnectorEvents,
   createConnector,
   disconnectConnector,
   syncConnector,
@@ -21,6 +22,16 @@ const DEADLETTER_KEY = ["connectors", "dead-letter"] as const;
 
 export function useConnectors() {
   return useQuery({ queryKey: KEY, queryFn: listConnectors, staleTime: 15_000 });
+}
+
+/** Recent activity for one connected account; nothing is fetched until one is chosen. */
+export function useConnectorEvents(accountId: string | null) {
+  return useQuery({
+    queryKey: [...KEY, accountId, "events"],
+    queryFn: () => listConnectorEvents(accountId!),
+    enabled: Boolean(accountId),
+    staleTime: 15_000,
+  });
 }
 
 export function useCreateConnector() {
@@ -52,6 +63,7 @@ export function useSyncConnector() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (accountId: string) => syncConnector(accountId),
+    // KEY is a prefix of each account's events key, so its activity refreshes too.
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
   });
 }
