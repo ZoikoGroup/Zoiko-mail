@@ -306,7 +306,13 @@ export function TopBar({
                     <li key={n.id} className="border-b border-[var(--border)] last:border-0">
                       <button
                         type="button"
-                        onClick={() => !n.readAt && markRead.mutate(n.id)}
+                        onClick={() => {
+                          if (!n.readAt) markRead.mutate(n.id);
+                          if (n.linkPath) {
+                            setBellOpen(false);
+                            router.push(n.linkPath);
+                          }
+                        }}
                         className="flex w-full gap-2.5 px-4 py-3 text-left transition hover:bg-[var(--s2)]"
                       >
                         <span

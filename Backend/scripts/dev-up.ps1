@@ -26,15 +26,15 @@
   Stop what this script starts.
 
 .PARAMETER NoFrontend
-  Bring up everything the frontend needs — Docker, postgres, the schema and
-  the API — and stop there. The frontend's `npm run dev` calls this before it
+  Bring up everything the frontend needs - Docker, postgres, the schema and
+  the API - and stop there. The frontend's `npm run dev` calls this before it
   starts (Frontend/scripts/ensure-api.mjs), so starting the frontend the usual
   way also starts the API it cannot work without.
 .PARAMETER Docker
   Run the API from its container image instead of from source, rebuilding the
   image first. Use this when you want the containerised platform; the rebuild
   is what keeps it from being the stale image described above. Slower and far
-  more memory-hungry than the default. The frontend still runs with npm —
+  more memory-hungry than the default. The frontend still runs with npm -
   there is no Frontend/Dockerfile.
 
 .EXAMPLE
@@ -82,7 +82,7 @@ function Get-DatabaseUrl {
   # postgres container restarts: TCP still connects, the Postgres handshake
   # never answers, and every API query fails after Prisma's 5s timeout with
   # "Can't reach database server". IPv4 goes through Docker's own forward and
-  # keeps working — and it is what Test-Port checks, so the status table and
+  # keeps working - and it is what Test-Port checks, so the status table and
   # the API now agree.
   return "postgresql://zoiko:$pw@127.0.0.1:$DbPort/zoiko_mail?schema=public"
 }
@@ -111,7 +111,7 @@ function Test-ApiScoped {
       if ($scope) { return @{ Scoped = $true; Detail = $scope } }
       # The seed account is privileged, so a current API stops it at the
       # second-factor step instead of issuing a session. That gate is newer
-      # than workspace scoping, so reaching it proves the API is current —
+      # than workspace scoping, so reaching it proves the API is current -
       # reading it as "no workspace" reported a fresh API as stale.
       if ($res.data.state -in @('MFA_REQUIRED', 'MFA_ENROLLMENT_REQUIRED')) {
         return @{ Scoped = $true; Detail = "current (sign-in reached the $($res.data.state) step)" }
@@ -197,7 +197,7 @@ function Start-DockerEngine {
 
   $exe = Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe'
   if (-not (Test-Path $exe)) {
-    Write-Bad "Docker Desktop not found at $exe — start it yourself, then re-run."
+    Write-Bad "Docker Desktop not found at $exe - start it yourself, then re-run."
     return $false
   }
 
@@ -239,7 +239,7 @@ function Sync-Dependencies([string]$Dir, [string]$Name) {
   Brings the local database and Prisma client up to the checked-out schema.
 
   The from-source API never ran migrations, so a pull that added one left the
-  API querying tables and enum values the database did not have yet — the
+  API querying tables and enum values the database did not have yet - the
   "Couldn't load this folder" on the Scheduled folder was exactly that.
   `migrate deploy` applies only committed migrations and is a no-op when
   there is nothing new, so running it every time costs a second.
@@ -288,14 +288,14 @@ if ($Docker) {
 
   # The image build is by far the heaviest thing here: two npm ci runs, a
   # prisma generate and a tsc build. On a machine this tight it does not
-  # merely fail — it takes the Docker engine down with it, which then looks
+  # merely fail - it takes the Docker engine down with it, which then looks
   # like an unrelated "cannot connect to the docker API" error. Refusing up
   # front is kinder than a half-finished teardown.
   $freeForBuild = [math]::Round((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1KB)
   if ($freeForBuild -lt 1500) {
     Write-Bad "Not enough memory to build the image: ${freeForBuild} MB free, and this needs about 1.5 GB."
     Write-Bad 'Close some VS Code windows and re-run, or drop -Docker to run the API from source.'
-    Write-Warn 'Nothing was changed — whatever is running stays running.'
+    Write-Warn 'Nothing was changed - whatever is running stays running.'
     return
   }
 
@@ -321,12 +321,12 @@ if ($Docker) {
     # memory. Name the likely cause instead.
     & docker info --format '{{.ServerVersion}}' 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) {
-      Write-Bad 'The Docker engine went down during the build — almost always memory.'
+      Write-Bad 'The Docker engine went down during the build - almost always memory.'
     } else {
       Write-Bad 'The image build failed. A build killed for memory shows as exit 137.'
     }
     Write-Bad 'Free some RAM and re-run, or drop -Docker to run the API from source.'
-    Write-Warn 'Nothing was swapped — whatever was running is still running.'
+    Write-Warn 'Nothing was swapped - whatever was running is still running.'
     return
   }
 
@@ -375,10 +375,10 @@ if ((Test-Port 5000) -and -not (docker ps -q --filter 'name=backend-api-1')) {
 #
 # Then wait for the port to clear before deciding anything. Without the wait,
 # the check below saw the stopping container still listening, reported
-# "already up on 5000", started nothing, and left no API at all — the status
+# "already up on 5000", started nothing, and left no API at all - the status
 # table two lines later said down.
 # Its compose restart policy is unless-stopped, so whenever Docker Desktop
-# restarts — a reboot, a crash, low memory — the stale container came back
+# restarts - a reboot, a crash, low memory - the stale container came back
 # up, took port 5000 from the source API and served old code again ("the
 # server did not accept this folder"). Turning the policy off keeps it down
 # until -Docker rebuilds and recreates it with the policy restored.
@@ -397,40 +397,40 @@ if (Test-Port 5000) {
 Set-Location '$BackendDir'
 `$env:DATABASE_URL = '$dbUrl'
 `$env:PORT = '5000'
-Write-Host 'Zoiko API (from source, supervised) — Ctrl+C to stop. Log: Backend\.dev-api.log' -ForegroundColor Cyan
+Write-Host 'Zoiko API (from source, supervised) - Ctrl+C to stop. Log: Backend\.dev-api.log' -ForegroundColor Cyan
 node scripts/dev-api.mjs
 "@
   Start-Process -FilePath 'pwsh' -ArgumentList '-NoExit', '-NoProfile', '-Command', $cmd | Out-Null
   $deadline = (Get-Date).AddMinutes(2)
   while (-not (Test-Port 5000) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 3 }
-  if (Test-Port 5000) { Write-Ok 'up on 5000 (own window)' } else { Write-Bad 'api did not come up — check its window' }
+  if (Test-Port 5000) { Write-Ok 'up on 5000 (own window)' } else { Write-Bad 'api did not come up - check its window' }
 }
 
 }
 
 if ($NoFrontend) {
   # Called from the frontend's own `npm run dev`, which is about to start it.
-  if (Test-Port 5000) { Write-Ok 'api ready on 5000 — the frontend can start' }
+  if (Test-Port 5000) { Write-Ok 'api ready on 5000 - the frontend can start' }
   return
 }
 
-# The frontend is not containerised — there is no Frontend/Dockerfile and no
-# frontend service in compose — so it runs with npm in both modes. Said here
+# The frontend is not containerised - there is no Frontend/Dockerfile and no
+# frontend service in compose - so it runs with npm in both modes. Said here
 # rather than left implicit, because "-Docker" reasonably implies otherwise.
-Write-Step '4/4  frontend (npm — not containerised)'
+Write-Step '4/4  frontend (npm - not containerised)'
 Sync-Dependencies $FrontendDir 'frontend'
 if (Test-Port 3000) {
   Write-Ok 'already up on 3000'
 } else {
   $cmd = @"
 Set-Location '$FrontendDir'
-Write-Host 'Zoiko frontend — Ctrl+C to stop' -ForegroundColor Cyan
+Write-Host 'Zoiko frontend - Ctrl+C to stop' -ForegroundColor Cyan
 npm run dev
 "@
   Start-Process -FilePath 'pwsh' -ArgumentList '-NoExit', '-NoProfile', '-Command', $cmd | Out-Null
   $deadline = (Get-Date).AddMinutes(3)
   while (-not (Test-Port 3000) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 3 }
-  if (Test-Port 3000) { Write-Ok 'up on 3000 (own window)' } else { Write-Bad 'frontend did not come up — check its window' }
+  if (Test-Port 3000) { Write-Ok 'up on 3000 (own window)' } else { Write-Bad 'frontend did not come up - check its window' }
 }
 
 Show-Status

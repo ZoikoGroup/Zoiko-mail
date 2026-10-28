@@ -40,27 +40,37 @@ export function AdminShell({ children }: { children: ReactNode }) {
   const me = data as MeResponse | undefined;
   const logout = useLogout();
   const [mobileOpen, setMobileOpen] = useState(false);
+  // The admin's own mailbox is the full mail client: it fills the area edge to
+  // edge, as in the Member workspace, instead of sitting in the padded column.
+  const fullBleed = pathname === "/admin/inbox";
+
+  // The Member palette (see .zm-webmail in globals.css). Also set on <body> so
+  // menus portalled out of the shell (DropdownMenu) take the same colours.
+  useEffect(() => {
+    document.body.classList.add("zm-webmail", "zm-admin");
+    return () => document.body.classList.remove("zm-webmail", "zm-admin");
+  }, []);
 
   // Fail closed: nothing renders until the role is known and permitted.
   // The previous guard was `me && !ALLOWED.includes(...)`, which skipped
   // itself while useMe() was in flight and let the console render.
   const access = useWorkspaceAccess(ADMIN_WORKSPACE);
   if (access !== "allowed") {
-    return <BrandLoader label="Opening the admin workspace" />;
+    return <BrandLoader className="zm-webmail zm-admin" label="Opening the admin workspace" />;
   }
 
   return (
     // zoi-fade: the console settles in as the loader gives way. The shell
     // lives in the admin layout, so this plays once, not on every page.
-    <div className="zoi-fade flex h-screen overflow-hidden bg-[var(--ground)] text-[var(--ink)]">
-      <aside className="hidden w-[232px] shrink-0 flex-col border-r border-[var(--border)] bg-[var(--s2)] md:flex">
+    <div className="zoi-fade zm-webmail zm-admin flex h-screen overflow-hidden bg-[var(--ground)] text-[var(--ink)]">
+      <aside className="hidden w-[232px] shrink-0 flex-col border-r border-[var(--border)] bg-[var(--zm-rail)] md:flex">
         <Rail />
       </aside>
 
       {mobileOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
           <div className="absolute inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
-          <aside className="zoi-drawer absolute left-0 top-0 flex h-full w-[232px] flex-col border-r border-[var(--border)] bg-[var(--s2)]">
+          <aside className="zoi-drawer absolute left-0 top-0 flex h-full w-[232px] flex-col border-r border-[var(--border)] bg-[var(--zm-rail)]">
             <div className="flex justify-end p-2">
               <button
                 onClick={() => setMobileOpen(false)}
@@ -122,8 +132,11 @@ export function AdminShell({ children }: { children: ReactNode }) {
         <SupportGrantBanner />
 
         {/* Keyed by pathname: fades the page in on navigation (see .page-enter CSS). */}
-        <main key={pathname} className="page-enter flex-1 overflow-y-auto px-5 py-5 sm:px-7">
-          <div className="mx-auto max-w-[1180px]">{children}</div>
+        <main
+          key={pathname}
+          className={`page-enter flex-1 ${fullBleed ? "min-h-0 overflow-hidden" : "overflow-y-auto px-3 py-5 sm:px-4"}`}
+        >
+          {fullBleed ? <div className="h-full">{children}</div> : <div className="w-full">{children}</div>}
         </main>
       </div>
     </div>
@@ -276,7 +289,7 @@ function RailRow({
   onNavigate?: () => void;
 }) {
   const Icon = item.icon;
-  const base = "flex items-center gap-2.5 rounded-lg px-3 py-2 text-[12.5px] transition";
+  const base = "flex items-center gap-2.5 rounded-xl px-3 py-2 text-[12.5px] transition";
 
   const badge = item.count !== undefined && (
     <span
@@ -309,7 +322,7 @@ function RailRow({
       aria-current={active ? "page" : undefined}
       className={`${base} ${
         active
-          ? "bg-[var(--surface)] font-semibold text-[var(--ink)] shadow-[inset_2px_0_0_0_var(--accent)]"
+          ? "bg-[var(--accent-soft)] font-medium text-[var(--ink)] ring-1 ring-inset ring-[var(--accent)]/40"
           : "text-[var(--ink2)] hover:bg-[var(--s3)] hover:text-[var(--ink)]"
       }`}
     >

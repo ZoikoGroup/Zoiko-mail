@@ -8,6 +8,7 @@ import { auditService } from "../audit/audit.service.js";
 import { billingService } from "../billing/billing.service.js";
 import { policyService } from "../policy/policy.service.js";
 import { attachmentStorage } from "./attachment.storage.js";
+import { storageService } from "./storage.service.js";
 import {
   messageListSelect,
   normalizeSubject,
@@ -1811,7 +1812,7 @@ export class MailService {
 
   async emptyTrash(context: MailContext) {
     const mailbox = await this.mailbox(context);
-    return prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const result = await tx.mailboxMessage.deleteMany({
         where: { tenantId: context.tenantId, mailboxId: mailbox.id, folder: "TRASH" },
       });
@@ -1819,6 +1820,9 @@ export class MailService {
       await this.audit(tx, context, "MAIL_TRASH_EMPTIED", mailbox.id, { deletedCount: result.count });
       return { deletedCount: result.count };
     });
+    // Emptying Trash is the way to free space, so the meter has to follow it.
+    await storageService.syncUsage(context);
+    return result;
   }
 
   /**

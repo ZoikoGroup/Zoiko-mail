@@ -268,10 +268,10 @@ describe("admin mailbox attribute updates", () => {
     const res = await request(app)
       .patch(`/api/v1/mail/admin/mailboxes/${mailboxId}`)
       .set(authHeader(owner.accessToken))
-      .send({ storageLimit: 5_368_709_120, customWarmupCap: 250 })
+      .send({ storageLimit: 2_147_483_648, customWarmupCap: 250 })
       .expect(200);
 
-    expect(res.body.data.storageLimit).toBe(5_368_709_120);
+    expect(res.body.data.storageLimit).toBe(2_147_483_648);
     expect(res.body.data.customWarmupCap).toBe(250);
 
     const event = await prisma.auditEvent.findFirst({
@@ -282,8 +282,8 @@ describe("admin mailbox attribute updates", () => {
     const metadata = event!.metadata as Record<string, Record<string, number>>;
     // Audit §6.2 wants before/after for material configuration changes: a
     // quota cut that starts bouncing mail needs the prior value on record.
-    expect(metadata.before.storageLimit).toBe(10_737_418_240);
-    expect(metadata.after.storageLimit).toBe(5_368_709_120);
+    expect(metadata.before.storageLimit).toBe(5_368_709_120);
+    expect(metadata.after.storageLimit).toBe(2_147_483_648);
   });
 
   it("clears a warm-up override with null", async () => {
