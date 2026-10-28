@@ -289,7 +289,8 @@ test("New booking opens the booking form, with a choice of room", async ({ page 
 test("with no rooms yet, New booking tells a member why", async ({ page }) => {
   await open(page, { manager: false, empty: true });
   await page.getByRole("button", { name: "New booking" }).click();
-  await expect(page.getByRole("status")).toContainText("There are no rooms or resources to book yet");
+  // The board's loader is a status too, while it is up.
+  await expect(page.getByRole("status").filter({ hasText: "There are no rooms or resources to book yet" })).toBeVisible();
 });
 
 test("with no rooms yet, New booking takes an Owner or Admin to add one", async ({ page }) => {

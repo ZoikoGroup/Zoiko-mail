@@ -7,6 +7,7 @@ import { MessagesSquare, Search } from "lucide-react";
 import {AppShell} from "@/components/shell/AppShell";
 import { useThreads } from "@/lib/mail-hooks";
 import type { ThreadSummary } from "@/lib/mail-api";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 
 const PAGE_SIZE = 25;
 
@@ -20,7 +21,7 @@ export default function ThreadsPage() {
   const [searchInput, setSearchInput] = useState("");
   const [activeQuery, setActiveQuery] = useState("");
 
-  const { data, isLoading, isError, error } = useThreads({
+  const { data, isPending, isError, error, refetch } = useThreads({
     page,
     limit: PAGE_SIZE,
     q: activeQuery || undefined,
@@ -82,11 +83,7 @@ export default function ThreadsPage() {
         )}
 
         {/* States */}
-        {isLoading && (
-          <div className="flex min-h-[300px] items-center justify-center text-sm text-[var(--ink3)]">
-            Loading threads…
-          </div>
-        )}
+        {isPending && <BrandLoader variant="panel" label="Loading threads" onRetry={() => void refetch()} />}
 
         {isError && (
           <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">

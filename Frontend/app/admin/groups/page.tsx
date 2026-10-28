@@ -33,7 +33,7 @@ import {
 export default function AdminGroupsPage() {
   const can = useCan();
   const canManage = can("workspace.groups.manage");
-  const { data: groups, isLoading, error } = useGroups();
+  const { data: groups, isLoading, error, refetch } = useGroups();
 
   const [openId, setOpenId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -67,7 +67,7 @@ export default function AdminGroupsPage() {
         }
       >
         {error ? (
-          <InlineError message={error.message} />
+          <InlineError message={error.message} onRetry={refetch} />
         ) : isLoading || !groups ? (
           <LoadingRows rows={4} />
         ) : groups.length === 0 ? (
@@ -185,7 +185,7 @@ const PERMISSIONS = [
  * read-only triage and send-as-the-team into the same grant.
  */
 function Assignees({ mailboxId }: { mailboxId: string }) {
-  const { data: assignees, isLoading, error } = useGroupAssignees(mailboxId);
+  const { data: assignees, isLoading, error, refetch } = useGroupAssignees(mailboxId);
   const { data: people } = useWorkspacePeople();
   const assign = useAssignToGroup();
   const remove = useRemoveFromGroup();
@@ -196,7 +196,7 @@ function Assignees({ mailboxId }: { mailboxId: string }) {
   return (
     <div className="border-t border-[var(--border)] bg-[var(--s2)] px-4 py-3">
       {error ? (
-        <InlineError message={error.message} />
+        <InlineError message={error.message} onRetry={refetch} />
       ) : isLoading || !assignees ? (
         <LoadingRows rows={2} />
       ) : (

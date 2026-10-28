@@ -74,7 +74,7 @@ export function MfaQrCode({ uri, className = "" }: { uri: string; className?: st
             aria-label="Scan this code with your authenticator app"
           />
         ) : (
-          <div className="h-40 w-40 animate-pulse rounded bg-slate-200" />
+          <div className="zoi-skeleton h-40 w-40 rounded" />
         )}
       </div>
     </div>

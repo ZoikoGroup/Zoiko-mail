@@ -72,6 +72,12 @@ export function DataTable<T>({
     <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--sh1)]">
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
+          {/* The skeleton rows are visual only; this tells assistive technology. */}
+          {loading && (
+            <caption className="sr-only" role="status">
+              Loading…
+            </caption>
+          )}
           <thead>
             <tr className="border-b border-[var(--border)] bg-[var(--s2)]">
               {columns.map((col) => (

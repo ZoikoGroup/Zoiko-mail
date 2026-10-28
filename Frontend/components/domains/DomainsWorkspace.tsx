@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Card, InlineEmpty, InlineError, LoadingRows } from "@/components/admin/ui";
+import { Card, InlineEmpty, InlineError } from "@/components/admin/ui";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import { useAddDomainDetail, useDnsProviders, useDomainList } from "@/lib/domains-hooks";
 import { DomainCard } from "./DomainCard";
 import { DnsProvidersPanel } from "./DnsProvidersPanel";
@@ -33,8 +34,10 @@ export function DomainsWorkspace({ canManage, addOpen, onAddOpenChange }: {
           <InlineError message={domains.error.message} onRetry={() => void domains.refetch()} />
         </Card>
       ) : domains.isLoading || !domains.data ? (
+        // The brand loader, not skeleton rows: each domain is a card of its
+        // own, which placeholder table rows did not resemble.
         <Card>
-          <LoadingRows rows={4} />
+          <BrandLoader variant="compact" label="Loading domains" onRetry={() => void domains.refetch()} />
         </Card>
       ) : domains.data.length === 0 ? (
         <Card>

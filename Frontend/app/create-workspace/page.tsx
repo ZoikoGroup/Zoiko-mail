@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AuthLayout, AuthContainer, CreateWorkspaceForm } from "@/components/auth";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 
 /**
  * First workspace for an account that has none.
@@ -65,7 +66,7 @@ export default function CreateFirstWorkspacePage() {
       <AuthLayout>
         <AuthContainer>
           <div className="flex h-40 items-center justify-center">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+            <BrandLoader variant="compact" label="Preparing your workspace setup" />
           </div>
         </AuthContainer>
       </AuthLayout>

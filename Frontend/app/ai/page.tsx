@@ -6,9 +6,11 @@ import { AppShell } from "@/components/shell/AppShell";
 import { useAiActions, useReviewAiAction } from "@/lib/ai-hooks";
 import type { AIAction, AIActionType, AIActionStatus } from "@/lib/ai-api";
 import {
-  Sparkles, Loader2, AlertCircle, CheckCircle2, XCircle, FileText,
+  Sparkles, AlertCircle, CheckCircle2, XCircle, FileText,
   ListChecks, Clock, ThumbsUp, Inbox,
 } from "lucide-react";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { Spinner } from "@/components/ui/Spinner";
 
 const TYPE_LABEL: Record<AIActionType, string> = {
   DRAFT: "Draft reply",
@@ -35,7 +37,7 @@ export default function AiActionsPage() {
   // is the member home now. Nothing below was deleted, it just isn't
   // reachable from the UI.
   useEffect(() => { router.replace("/mail"); }, [router]);
-  const { data: actions = [], isLoading, error } = useAiActions();
+  const { data: actions = [], isPending, error, refetch } = useAiActions();
   const review = useReviewAiAction();
   const [tab, setTab] = useState<Tab>("review");
 
@@ -87,17 +89,13 @@ export default function AiActionsPage() {
         </div>
 
         <div className="mt-4 space-y-3">
-          {isLoading && (
-            <div className="flex items-center gap-2 py-10 text-sm text-[var(--ink3)]">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading AI actions…
-            </div>
-          )}
+          {isPending && <BrandLoader variant="compact" label="Loading AI actions" onRetry={() => void refetch()} />}
           {error && (
             <div className="flex items-start gap-2 rounded-lg border border-[var(--crit)]/30 bg-[var(--crit-soft)] p-4 text-sm text-[var(--crit)]">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> Couldn&rsquo;t load AI actions.
             </div>
           )}
-          {!isLoading && !error && visible.length === 0 && (
+          {!isPending && !error && visible.length === 0 && (
             <div className="flex flex-col items-center py-16 text-center text-[var(--ink3)]">
               <Inbox className="h-10 w-10" />
               <p className="mt-3 text-sm font-medium text-[var(--ink2)]">Nothing here</p>
@@ -156,8 +154,8 @@ function AiActionCard({
 
       {/* Output */}
       {a.status === "PENDING" && (
-        <p className="mt-3 flex items-center gap-2 text-sm text-[var(--ink3)]">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" /> The AI is still working on this…
+        <p className="mt-3 text-sm">
+          <Spinner size="sm" label="The AI is still working on this…" />
         </p>
       )}
       {a.status === "FAILED" && (

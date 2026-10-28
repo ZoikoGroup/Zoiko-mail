@@ -26,6 +26,7 @@ import {
   Video,
 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import type { ExternalGuestPolicy, MeetingTemplate, TemplateInput } from "@/lib/calendar-api";
 import {
   useAccessibleCalendars,
@@ -238,7 +239,9 @@ export function TemplatesPage() {
           </div>
           <ul className="min-h-0 flex-1 overflow-y-auto p-2" data-testid="template-list">
             {templates.isLoading ? (
-              <li className="p-3 text-[12.5px] text-[var(--ink3)]">Loading…</li>
+              <li>
+                <BrandLoader variant="compact" label="Loading templates" onRetry={() => void templates.refetch()} />
+              </li>
             ) : templates.isError ? (
               <li role="alert" className="p-3 text-[12.5px] text-[var(--crit)]">
                 {(templates.error as Error).message}
@@ -294,9 +297,8 @@ export function TemplatesPage() {
           </>
         ) : (
           <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center text-[13px] text-[var(--ink3)] 2xl:col-span-2">
-            {templates.isLoading ? (
-              "Loading…"
-            ) : (
+            {/* While the library loads, its own loader is the one on screen. */}
+            {templates.isLoading ? null : (
               <>
                 <FileText className="h-8 w-8" aria-hidden />
                 Create a template for a meeting you run often — its length, place, agenda and guests are filled in for you.

@@ -10,11 +10,13 @@ import {
 } from "lucide-react";
 import { useSignature, useUpdateSignature } from "@/lib/mail-hooks";
 import { FileSignature, CheckCircle2 } from "lucide-react";
+import { QueryState } from "@/components/ui/QueryState";
 
 export default function SettingsPage() {
   const digest = useSendDigest();
   const [digestNote, setDigestNote] = useState<string | null>(null);
-  const { data: sigData, isLoading: sigLoading } = useSignature();
+  const sigQuery = useSignature();
+  const sigData = sigQuery.data;
   const updateSig = useUpdateSignature();
   const [sigDraft, setSigDraft] = useState("");
   const [sigSaved, setSigSaved] = useState(false);
@@ -72,55 +74,61 @@ export default function SettingsPage() {
           <p className="mt-0.5 text-xs text-[var(--ink3)]">
             Automatically appended to new messages. You can edit or remove it per message.
           </p>
-          {sigLoading ? (
-            <div className="mt-3 flex items-center gap-2 text-sm text-[var(--ink3)]">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-            </div>
-          ) : (
-            <>
-              <textarea
-                value={sigDraft}
-                onChange={(e) => setSigDraft(e.target.value)}
-                placeholder="e.g. John Doe\nSoftware Engineer\njohn@company.com"
-                rows={4}
-                className="mt-3 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--ink)] placeholder:text-[var(--ink3)] focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
-              />
-              <div className="mt-2 flex items-center gap-2">
-                <button
-                  onClick={saveSig}
-                  disabled={!sigChanged || updateSig.isPending}
-                  className="zoiko-btn sm pri disabled:opacity-50"
-                >
-                  {updateSig.isPending ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    "Save signature"
-                  )}
-                </button>
-                {sigDraft && (
+          {/* An error rather than an empty editor when the read fails, so
+              nobody saves a blank signature over the one they have. */}
+          <QueryState
+            query={sigQuery}
+            variant="compact"
+            label="Loading your signature"
+            errorMessage="Couldn't load your signature."
+            className="mt-3"
+          >
+            {() => (
+              <>
+                <textarea
+                  value={sigDraft}
+                  onChange={(e) => setSigDraft(e.target.value)}
+                  placeholder="e.g. John Doe\nSoftware Engineer\njohn@company.com"
+                  rows={4}
+                  className="mt-3 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--ink)] placeholder:text-[var(--ink3)] focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+                />
+                <div className="mt-2 flex items-center gap-2">
                   <button
-                    onClick={() => { setSigDraft(""); }}
-                    className="zoiko-btn sm"
+                    onClick={saveSig}
+                    disabled={!sigChanged || updateSig.isPending}
+                    className="zoiko-btn sm pri disabled:opacity-50"
                   >
-                    Clear
+                    {updateSig.isPending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      "Save signature"
+                    )}
                   </button>
-                )}
-                {sigSaved && (
-                  <span className="flex items-center gap-1 text-xs text-[var(--ok)]">
-                    <CheckCircle2 className="h-3.5 w-3.5" /> Saved
-                  </span>
-                )}
-              </div>
-              {sigDraft.trim() && (
-                <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--s2)] p-3">
-                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--ink3)]">Preview</div>
-                  <pre className="whitespace-pre-wrap font-sans text-sm text-[var(--ink2)]">
-                    --{"\n"}{sigDraft}
-                  </pre>
+                  {sigDraft && (
+                    <button
+                      onClick={() => { setSigDraft(""); }}
+                      className="zoiko-btn sm"
+                    >
+                      Clear
+                    </button>
+                  )}
+                  {sigSaved && (
+                    <span className="flex items-center gap-1 text-xs text-[var(--ok)]">
+                      <CheckCircle2 className="h-3.5 w-3.5" /> Saved
+                    </span>
+                  )}
                 </div>
-              )}
-            </>
-          )}
+                {sigDraft.trim() && (
+                  <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--s2)] p-3">
+                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--ink3)]">Preview</div>
+                    <pre className="whitespace-pre-wrap font-sans text-sm text-[var(--ink2)]">
+                      --{"\n"}{sigDraft}
+                    </pre>
+                  </div>
+                )}
+              </>
+            )}
+          </QueryState>
         </div>
 
         {/* Notifications section — trigger + link out to the standalone page */}

@@ -13,6 +13,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { routeAuthState } from "@/lib/auth-hooks";
 import { ApiError } from "@/lib/api-client";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 
 /**
  * The second factor — AC-002.
@@ -159,7 +160,9 @@ export default function VerifyMfaPage() {
     else router.replace("/login");
   };
 
-  if (!ready) return null;
+  // The first render, before the stash is read: identical on server and
+  // client, and what stays up while a missing stash redirects to /login.
+  if (!ready) return <BrandLoader label="Checking your sign-in" />;
 
   const field =
     "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-center text-lg tracking-[0.4em] text-slate-900 outline-none focus:border-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100";
@@ -247,8 +250,11 @@ export default function VerifyMfaPage() {
                   Open in an authenticator app on this device
                 </a>
               </div>
-            ) : (
-              <p className="mt-5 text-center text-sm text-slate-400">Preparing your key…</p>
+            ) : error ? null : (
+              // A failed start shows its error below instead.
+              <div className="mt-5">
+                <BrandLoader variant="compact" label="Preparing your key" />
+              </div>
             )}
 
             <input

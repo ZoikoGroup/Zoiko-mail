@@ -18,7 +18,7 @@ import {
 } from "@/components/admin/ui";
 
 export default function AdminPermissionsPage() {
-  const { data: matrix, isLoading, error } = useCapabilityMatrix();
+  const { data: matrix, isLoading, error, refetch } = useCapabilityMatrix();
   const { data: guardrails } = useGuardrails();
 
   const capabilityCount = matrix?.reduce((total, group) => total + group.rows.length, 0) ?? 0;
@@ -44,7 +44,7 @@ export default function AdminPermissionsPage() {
         badge={<Pill tone="nu">{`${capabilityCount} capabilities`}</Pill>}
       >
         {error ? (
-          <InlineError message={error.message} />
+          <InlineError message={error.message} onRetry={refetch} />
         ) : isLoading || !matrix ? (
           <LoadingRows rows={8} />
         ) : (

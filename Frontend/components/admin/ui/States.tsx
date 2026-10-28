@@ -24,14 +24,19 @@ export function InlineEmpty({ title, hint }: { title: string; hint?: string }) {
   );
 }
 
+/**
+ * Placeholder rows while a table card's data loads: its layout is known, so
+ * a skeleton rather than the brand loader (see BrandLoader's loading rules).
+ * Uses the platform's shimmer (.zoi-skeleton), like DataTable and Skeleton.
+ */
 export function LoadingRows({ rows = 4 }: { rows?: number }) {
   return (
-    <div aria-busy="true" aria-live="polite">
+    <div role="status" aria-live="polite">
       <span className="sr-only">Loading…</span>
       {Array.from({ length: rows }).map((_, i) => (
         <div key={i} className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3.5 last:border-b-0">
-          <div className="h-3 w-1/3 animate-pulse rounded bg-[var(--s3)]" />
-          <div className="ml-auto h-3 w-16 animate-pulse rounded bg-[var(--s3)]" />
+          <div className="zoi-skeleton h-3 w-1/3 rounded" />
+          <div className="zoi-skeleton ml-auto h-3 w-16 rounded" />
         </div>
       ))}
     </div>

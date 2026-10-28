@@ -9,6 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import { useUsage } from "@/lib/owner-hooks";
 
 const SERIES = [
@@ -23,7 +24,7 @@ function tickDate(value: string) {
 }
 
 export function MailActivityChart({ days = 30 }: { days?: number }) {
-  const { data, isLoading, isError } = useUsage(days);
+  const { data, isLoading, isError, refetch } = useUsage(days);
 
   const rows = data?.emailVolumeByStatus ?? [];
   const totals = SERIES.reduce<Record<string, number>>((acc, s) => {
@@ -39,10 +40,10 @@ export function MailActivityChart({ days = 30 }: { days?: number }) {
       </div>
 
       {isLoading ? (
-        <div className="flex h-64 items-center justify-center">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+        <div className="flex h-64">
+          <BrandLoader variant="compact" label="Loading mail activity" onRetry={() => void refetch()} />
         </div>
-      ) : isError ? (
+      ) : isError && !data ? (
         <div className="flex h-64 items-center justify-center text-sm text-[var(--crit)]">
           Couldn&rsquo;t load mail activity.
         </div>

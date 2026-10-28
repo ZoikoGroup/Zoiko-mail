@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Check, ShieldCheck, Trash2 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import { CALENDAR_COLORS, type AccessibleCalendar, type CalendarAccess, type CalendarColor } from "@/lib/calendar-api";
 import {
   useCreateTeamCalendar,
@@ -155,7 +156,7 @@ export function AccessDialog({ calendar, onClose }: { calendar: AccessibleCalend
         )}
 
         {shares.isLoading ? (
-          <p className="text-[12.5px] text-[var(--ink3)]">Loading…</p>
+          <BrandLoader variant="compact" label="Loading who has access" onRetry={() => void shares.refetch()} />
         ) : shares.error instanceof ApiError && shares.error.status === 403 ? (
           <p className="text-[12.5px] text-[var(--ink3)]">With free/busy access you see only when it is busy, not who else can see it.</p>
         ) : (

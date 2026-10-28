@@ -26,6 +26,7 @@ import { swatchStyle } from "./palette";
 import { CalendarDialog } from "./CalendarDialog";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DropdownMenu, DropdownItem } from "@/components/ui/DropdownMenu";
+import { Spinner } from "@/components/ui/Spinner";
 
 /** The Calendar workspace's pages, in sidebar order. */
 export type CalendarPage = "my" | "team" | "shared" | "invitations" | "rooms" | "scheduling" | "templates" | "settings";
@@ -208,7 +209,7 @@ export function CalendarSidebar({
           My calendars
         </SectionTitle>
         {isLoading ? (
-          <p className="px-3 py-1 text-xs text-[var(--ink3)]">Loading…</p>
+          <Spinner size="sm" label="Loading calendars" className="px-3 py-1 text-xs" />
         ) : (
           <ul className="space-y-0.5" data-testid="my-calendars">
             {calendars.map((calendar) => (

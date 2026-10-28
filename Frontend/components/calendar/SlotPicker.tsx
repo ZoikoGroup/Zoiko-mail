@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { Slot } from "@/lib/calendar-api";
 import { addMonths, formatTime, isSameDay, viewRange, weekdayNames } from "@/lib/calendar-dates";
+import { Spinner } from "@/components/ui/Spinner";
 
 
 const monthYear = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" });
@@ -100,7 +101,7 @@ export function SlotPicker({
       </div>
       <div className="mt-3" data-testid="slot-times">
         {loading ? (
-          <p className="text-[12px] text-[var(--ink3)]">Finding free times…</p>
+          <Spinner size="sm" label="Finding free times…" className="text-[12px]" />
         ) : !selectedDay ? (
           <p className="text-[12px] text-[var(--ink3)]">{slots.length ? "Choose a highlighted day." : "No free times this month."}</p>
         ) : (

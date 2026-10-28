@@ -13,6 +13,9 @@ import { TimeGrid } from "./TimeGrid";
 import { AccessDialog, Avatar, RequestAccessDialog, ShareCalendarDialog } from "./SharingDialogs";
 import { ACCESS_LABEL, AccessPill, CalendarChecklist } from "./access";
 import { swatchStyle } from "./palette";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { ErrorState } from "@/components/ui/ErrorState";
+import { Spinner } from "@/components/ui/Spinner";
 
 type SharedView = "week" | "matrix";
 const dayHeading = new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric", month: "short" });
@@ -56,7 +59,11 @@ export function SharedCalendarsPage() {
         <h2 className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[var(--ink3)]">Shared with me</h2>
       </div>
       {sharedWithMe.length === 0 ? (
-        <p className="px-3 py-1 text-xs text-[var(--ink3)]">{accessible.isLoading ? "Loading…" : "Nothing shared with you yet."}</p>
+        accessible.isLoading ? (
+          <Spinner size="sm" label="Loading calendars" className="px-3 py-1 text-xs" />
+        ) : (
+          <p className="px-3 py-1 text-xs text-[var(--ink3)]">Nothing shared with you yet.</p>
+        )
       ) : (
         <CalendarChecklist calendars={sharedWithMe} showAccess testId="shared-with-me" />
       )}
@@ -136,7 +143,11 @@ export function SharedCalendarsPage() {
             onView={setView}
           />
           {view === "week" ? (
-            sharedWithMe.length === 0 && !accessible.isLoading ? (
+            accessible.isError && !accessible.data ? (
+              <ErrorState compact message="Could not load the calendars shared with you." onRetry={() => void accessible.refetch()} />
+            ) : accessible.isLoading ? (
+              <BrandLoader variant="compact" label="Loading shared calendars" onRetry={() => void accessible.refetch()} />
+            ) : sharedWithMe.length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center p-10 text-center" data-testid="shared-empty">
                 <Layers className="h-10 w-10 text-[var(--accent-ink)]" aria-hidden />
                 <h2 className="mt-3 text-[18px] font-semibold text-[var(--ink)]">Nothing shared with you yet</h2>
@@ -145,6 +156,11 @@ export function SharedCalendarsPage() {
                   <KeyRound className="h-4 w-4" aria-hidden /> Request access
                 </button>
               </div>
+            ) : events.isError && !events.data ? (
+              <ErrorState compact message="Could not load the shared events." onRetry={() => void events.refetch()} />
+            ) : events.data === undefined ? (
+              // First load only: a new week keeps the previous one's events on screen.
+              <BrandLoader variant="compact" label="Loading shared events" onRetry={() => void events.refetch()} />
             ) : (
               <TimeGrid
                 days={range.days}
@@ -271,8 +287,10 @@ function WhoCanSee({ calendar, onDetails }: { calendar: AccessibleCalendar | nul
       </div>
       {hidden ? (
         <p className="text-[12.5px] text-[var(--ink3)]">With free/busy access you see only when it is busy.</p>
+      ) : shares.isError && !shares.data ? (
+        <ErrorState compact message="Could not load who has access." onRetry={() => void shares.refetch()} />
       ) : shares.isLoading ? (
-        <p className="text-[12.5px] text-[var(--ink3)]">Loading…</p>
+        <BrandLoader variant="compact" label="Loading access" onRetry={() => void shares.refetch()} />
       ) : (
         <ul className="space-y-2.5">
           {shares.data?.owner && (

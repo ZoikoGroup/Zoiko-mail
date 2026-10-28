@@ -97,7 +97,9 @@ function BillingPageInner() {
     error,
     refetch,
   } = useSubscription();
-  const { data: invoices = [], isLoading: invoicesLoading } = useInvoices();
+  const invoicesQuery = useInvoices();
+  const invoices = invoicesQuery.data ?? [];
+  const invoicesLoading = invoicesQuery.isLoading;
   const { data: members = [] } = useMembers();
   const { data: mailboxes = [] } = useAdminMailboxes();
 
@@ -353,6 +355,12 @@ function BillingPageInner() {
                     <Skeleton className="h-10 w-full" />
                     <Skeleton className="h-10 w-full" />
                   </div>
+                ) : invoicesQuery.isError && !invoicesQuery.data ? (
+                  <ErrorState
+                    compact
+                    message="Couldn't load your billing history."
+                    onRetry={() => void invoicesQuery.refetch()}
+                  />
                 ) : invoices.length === 0 ? (
                   <EmptyState
                     icon={<Receipt className="h-7 w-7" />}

@@ -31,6 +31,8 @@ import {
 import { addDays, formatTime, fromInputs, localZone, startOfDay, toDateInput } from "@/lib/calendar-dates";
 import { CalendarPageHeader, CalendarWorkspace } from "./CalendarWorkspace";
 import { BookingDialog, FeatureList, ResourceEditDialog } from "./ResourceDialogs";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { ErrorState } from "@/components/ui/ErrorState";
 
 type RoomsView = "board" | "mine" | "pending" | "manage";
 const HOURS = [9, 10, 11, 12, 13, 14, 15, 16];
@@ -339,7 +341,7 @@ export function RoomsPage() {
 
             <div className="min-h-0 flex-1 overflow-auto p-4" data-testid="availability-board">
               {board.isLoading ? (
-                <p className="text-[13px] text-[var(--ink3)]">Loading…</p>
+                <BrandLoader variant="compact" label="Loading rooms and resources" onRetry={() => void board.refetch()} />
               ) : board.isError ? (
                 <p role="alert" className="p-6 text-center text-[13px] text-[var(--crit)]">
                   Could not load rooms and resources. {(board.error as Error).message}
@@ -633,7 +635,7 @@ function BookingList({
   mode,
 }: {
   title: string;
-  query: { data?: ResourceBookingView[]; isLoading: boolean; error: unknown };
+  query: { data?: ResourceBookingView[]; isLoading: boolean; error: unknown; refetch: () => unknown };
   mode: "mine" | "pending";
 }) {
   const cancel = useCancelBooking();
@@ -643,8 +645,10 @@ function BookingList({
   return (
     <section aria-label={title} className="rounded-2xl border border-[var(--border)] bg-[var(--surface)]" data-testid={mode === "mine" ? "my-reservations" : "pending-approvals"}>
       <h2 className="border-b border-[var(--border)] px-4 py-3 text-[16px] font-semibold text-[var(--ink)]">{title}</h2>
-      {query.isLoading ? (
-        <p className="p-4 text-[13px] text-[var(--ink3)]">Loading…</p>
+      {query.error && !query.data ? (
+        <ErrorState compact message={(query.error as Error).message || undefined} onRetry={() => void query.refetch()} />
+      ) : query.isLoading ? (
+        <BrandLoader variant="compact" label={mode === "mine" ? "Loading your reservations" : "Loading pending approvals"} onRetry={() => void query.refetch()} />
       ) : list.length === 0 ? (
         <p className="p-6 text-center text-[13px] text-[var(--ink3)]">{mode === "mine" ? "You have no room or resource bookings." : "Nothing is waiting for approval."}</p>
       ) : (

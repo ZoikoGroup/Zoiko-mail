@@ -23,6 +23,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
+import { Spinner } from "@/components/ui/Spinner";
 import type { CalendarEvent, CalendarPreferences, PreferencesInput } from "@/lib/calendar-api";
 import { useAccessibleCalendars, useCalendarEvents, useCalendarPreferences, useCalendars, useUpdatePreferences } from "@/lib/calendar-hooks";
 import { DEFAULT_CALENDAR_PREFERENCES } from "@/lib/calendar-api";
@@ -570,7 +571,7 @@ function Sharing({ v, set }: Props) {
           </Link>
         </div>
         {accessible.isLoading ? (
-          <p className="text-[12.5px] text-[var(--ink3)]">Loading…</p>
+          <Spinner size="sm" label="Loading your calendars" className="text-[12.5px]" />
         ) : (
           <ul className="divide-y divide-[var(--border)] rounded-xl border border-[var(--border)]" data-testid="my-calendar-shares">
             {mine.map((c) => (

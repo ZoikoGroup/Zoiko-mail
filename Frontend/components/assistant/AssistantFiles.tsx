@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, Check, Eye, FileText, Image as ImageIcon, Loader2, Mail, Paperclip, Sparkles, X } from "lucide-react";
+import { AlertTriangle, Check, Eye, FileText, Image as ImageIcon, Mail, Paperclip, Sparkles, X } from "lucide-react";
+import { Spinner } from "@/components/ui/Spinner";
 import type { PreviewItem } from "@/components/mail/AttachmentPreview";
 import { localFilePreviewItem } from "@/components/mail/AttachmentPreview";
 import { loadAssistantImage, type AssistantAttachment, type AssistantEmailSummary } from "@/lib/assistant-api";
@@ -127,11 +128,7 @@ export function ComposerFileChips({
                   className={`flex items-center gap-1 text-[11px] ${f.status === "error" ? "text-[var(--crit)]" : "text-[var(--ink3)]"}`}
                   title={f.error}
                 >
-                  {f.status === "uploading" && (
-                    <>
-                      <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> Reading…
-                    </>
-                  )}
+                  {f.status === "uploading" && <Spinner size="xs" label="Reading…" className="!gap-1" />}
                   {f.status === "ready" && (
                     <>
                       <Check className="h-3 w-3 text-[var(--ok)]" aria-hidden /> {formatBytes(f.size)}
@@ -197,8 +194,8 @@ export function EmailCard({
         <div className="min-w-0 flex-1">
           <p className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-[var(--ink3)]">Email from Mail · not sent to Alet yet</p>
           {entry.status === "uploading" && (
-            <p className="mt-1 flex items-center gap-2 text-[13px] text-[var(--ink2)]" role="status">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Preparing the email…
+            <p className="mt-1 text-[13px]">
+              <Spinner size="md" label="Preparing the email…" />
             </p>
           )}
           {entry.status === "error" && (
@@ -278,7 +275,7 @@ function SentImage({ attachment, onOpen }: { attachment: AssistantAttachment; on
         <img src={url} alt={attachment.fileName} className="h-28 w-auto max-w-[220px] object-cover" />
       ) : (
         <span className="flex h-28 w-28 items-center justify-center text-white/80">
-          {failed ? <ImageIcon className="h-6 w-6" aria-hidden /> : <Loader2 className="h-5 w-5 animate-spin" aria-hidden />}
+          {failed ? <ImageIcon className="h-6 w-6" aria-hidden /> : <Spinner size="lg" />}
         </span>
       )}
     </button>

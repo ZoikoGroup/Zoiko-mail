@@ -43,7 +43,8 @@ import {
 } from "@/lib/support-api";
 import { useLiveRefresh } from "@/lib/support-hooks";
 import { supportStyles } from "@/components/support/support-styles";
-import TicketsPage from "@/components/support/TicketsPage";
+import TicketsPage, { TableSkeleton } from "@/components/support/TicketsPage";
+import { Spinner } from "@/components/ui/Spinner";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { BrandLoader } from "@/components/ui/BrandLoader";
 import { AccessDenied } from "@/components/ui/AccessDenied";
@@ -223,20 +224,6 @@ function LoadErr({ error, onRetry }: { error: string; onRetry: () => void }) {
       <button className="btn sm" onClick={onRetry}>
         Retry
       </button>
-    </div>
-  );
-}
-
-function Spinner() {
-  return (
-    <div className="bd pad" style={{ color: "var(--ink3)", fontSize: 12 }}>
-      <div className="sloader">
-        <span className="ring" /> Loading&hellip;
-      </div>
-      <div className="skel" style={{ width: "45%", height: 11, marginTop: 14 }} />
-      <div className="skel" style={{ width: "80%", height: 10, marginTop: 9 }} />
-      <div className="skel" style={{ width: "66%", height: 10, marginTop: 8 }} />
-      <div className="skel" style={{ width: "72%", height: 10, marginTop: 8 }} />
     </div>
   );
 }
@@ -726,7 +713,9 @@ function TenantsPage({
   const [q, setQ] = useState("");
   const [applied, setApplied] = useState("");
   const [tenants, setTenants] = useState<PlatformTenant[]>([]);
-  const [loading, setLoading] = useState(false);
+  // True from the start: the list is searched on mount, so the first frame
+  // shows placeholder rows rather than "No tenants found."
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<TenantOverview | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -806,15 +795,15 @@ function TenantsPage({
     }
   }, []);
 
-  if (domainLoading) return <div><button className="btn sm" onClick={() => setDomainDetail(null)}>← Back to tenant</button><Spinner /></div>;
+  if (domainLoading) return <div><button className="btn sm" onClick={() => setDomainDetail(null)}>← Back to tenant</button><BrandLoader variant="panel" label="Loading domain" /></div>;
   if (domainError) return <div><button className="btn sm" onClick={() => { setDomainError(null); setDomainDetail(null); }}>← Back to tenant</button><LoadErr error={domainError} onRetry={() => { }} /></div>;
   if (domainDetail) return <DomainDetail data={domainDetail} onBack={() => setDomainDetail(null)} />;
 
-  if (mailboxLoading) return <div><button className="btn sm" onClick={() => setMailboxDetail(null)}>← Back to tenant</button><Spinner /></div>;
+  if (mailboxLoading) return <div><button className="btn sm" onClick={() => setMailboxDetail(null)}>← Back to tenant</button><BrandLoader variant="panel" label="Loading mailbox" /></div>;
   if (mailboxError) return <div><button className="btn sm" onClick={() => { setMailboxError(null); setMailboxDetail(null); }}>← Back to tenant</button><LoadErr error={mailboxError} onRetry={() => { }} /></div>;
   if (mailboxDetail) return <MailboxDetail data={mailboxDetail} onBack={() => setMailboxDetail(null)} />;
 
-  if (detailLoading) return <Spinner />;
+  if (detailLoading) return <BrandLoader variant="panel" label="Loading tenant" />;
   if (detailError) return <LoadErr error={detailError} onRetry={() => openTenant(detail?.tenant.id ?? "")} />;
 
   if (detail) return <TenantDetail tenant={detail} onBack={() => setDetail(null)} onOpenDomain={openDomain} onOpenMailbox={openMailbox} />;
@@ -856,33 +845,37 @@ function TenantsPage({
             <span className="pill nu">{tenants.length}</span>
           </div>
         </div>
-        <div className="bd">
-          <Table headers={["Tenant", "Status", "Plan", "Members", "Mailboxes", "Domains", "Accounts", "Created"]}>
-            {tenants.map((t) => (
-              <tr key={t.id} className="clickable" onClick={() => openTenant(t.id)}>
-                <td className="nm">{t.name}</td>
-                <td>
-                  <Pill status={t.status} />
-                </td>
-                <td>
-                  <span className="pill accent">{t.planCode || "—"}</span>
-                </td>
-                <td>{t.members}</td>
-                <td>{t.mailboxes}</td>
-                <td>{t.domains}</td>
-                <td>{t.connectedAccounts}</td>
-                <td className="muted">{ago(t.createdAt)}</td>
-              </tr>
-            ))}
-            {tenants.length === 0 && !loading && (
-              <tr>
-                <td colSpan={8} className="muted">
-                  No tenants found.
-                </td>
-              </tr>
-            )}
-          </Table>
-        </div>
+        {loading ? (
+          <TableSkeleton cols={8} />
+        ) : (
+          <div className="bd">
+            <Table headers={["Tenant", "Status", "Plan", "Members", "Mailboxes", "Domains", "Accounts", "Created"]}>
+              {tenants.map((t) => (
+                <tr key={t.id} className="clickable" onClick={() => openTenant(t.id)}>
+                  <td className="nm">{t.name}</td>
+                  <td>
+                    <Pill status={t.status} />
+                  </td>
+                  <td>
+                    <span className="pill accent">{t.planCode || "—"}</span>
+                  </td>
+                  <td>{t.members}</td>
+                  <td>{t.mailboxes}</td>
+                  <td>{t.domains}</td>
+                  <td>{t.connectedAccounts}</td>
+                  <td className="muted">{ago(t.createdAt)}</td>
+                </tr>
+              ))}
+              {tenants.length === 0 && !loading && (
+                <tr>
+                  <td colSpan={8} className="muted">
+                    No tenants found.
+                  </td>
+                </tr>
+              )}
+            </Table>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -988,7 +981,7 @@ function ListShell<T>({
           </div>
         </div>
         {loading ? (
-          <Spinner />
+          <TableSkeleton cols={headers.length} />
         ) : (
           <div className="bd">
             <Table headers={headers}>{rows.map(render)}</Table>
@@ -1570,7 +1563,7 @@ export default function PlatformConsole() {
               }}
             >
               <div className="gsearch" style={{ flex: 1, maxWidth: "none", marginLeft: 0 }}>
-                <span>{globLoading ? "…" : "⌕"}</span>
+                <span>{globLoading ? <Spinner size="xs" /> : "⌕"}</span>
                 <input
                   placeholder="Search tenants by name…"
                   value={globQ}
@@ -1637,9 +1630,11 @@ export default function PlatformConsole() {
               </div>
             </div>
 
+            {/* Only the first load shows the loader: the live refresh reloads
+                this every minute, and the overview stays up while it does. */}
             {page === "overview" &&
-              (overviewLoading ? (
-                <Spinner />
+              (overviewLoading && !overview ? (
+                <BrandLoader variant="panel" label="Loading the fleet overview" onRetry={loadOverview} />
               ) : overviewError ? (
                 <LoadErr error={overviewError} onRetry={loadOverview} />
               ) : (

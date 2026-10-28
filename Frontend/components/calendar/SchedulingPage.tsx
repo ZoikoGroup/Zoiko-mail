@@ -38,6 +38,8 @@ import {
 import { addMonths, formatTime, localZone, preferredZone, startOfMonth } from "@/lib/calendar-dates";
 import { CalendarPageHeader, CalendarWorkspace } from "./CalendarWorkspace";
 import { SlotPicker } from "./SlotPicker";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { ErrorState } from "@/components/ui/ErrorState";
 
 type Tab = "mine" | "team" | "requests";
 const DAYS = [
@@ -171,7 +173,10 @@ export function SchedulingPage() {
       </div>
 
       {tab === "requests" ? (
-        <RequestList requests={requests.data ?? []} loading={requests.isLoading} />
+        <RequestList requests={requests.data ?? []} loading={requests.isLoading}
+          loadError={requests.data ? null : (requests.error as Error | null)}
+          onRetry={() => void requests.refetch()}
+        />
       ) : (
         <div className="grid min-h-[600px] flex-1 gap-4 lg:grid-cols-[300px_minmax(0,1fr)] 2xl:grid-cols-[300px_minmax(0,1fr)_340px]">
           <section aria-label="Booking links" className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
@@ -190,8 +195,14 @@ export function SchedulingPage() {
               <input className="zoiko-input w-full" placeholder="Search booking links…" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search booking links" />
             </div>
             <ul className="min-h-0 flex-1 overflow-y-auto p-2" data-testid="link-list">
-              {links.isLoading ? (
-                <li className="p-3 text-[12.5px] text-[var(--ink3)]">Loading…</li>
+              {links.isError && !links.data ? (
+                <li>
+                  <ErrorState compact message={(links.error as Error).message || undefined} onRetry={() => void links.refetch()} />
+                </li>
+              ) : links.isLoading ? (
+                <li>
+                  <BrandLoader variant="compact" label="Loading booking links" onRetry={() => void links.refetch()} />
+                </li>
               ) : listed.length === 0 ? (
                 <li className="p-4 text-center text-[12.5px] text-[var(--ink3)]">
                   {tab === "team" ? "No links book into a team calendar you belong to." : "No booking links yet. Create one to share your availability."}
@@ -242,7 +253,8 @@ export function SchedulingPage() {
             </>
           ) : (
             <div className="flex items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center text-[13px] text-[var(--ink3)] 2xl:col-span-2">
-              {links.isLoading ? "Loading…" : "Create a booking link to let people pick a time with you."}
+              {/* While the links load (or fail), the list says so. */}
+              {links.isLoading || (links.isError && !links.data) ? null : "Create a booking link to let people pick a time with you."}
             </div>
           )}
         </div>
@@ -644,7 +656,18 @@ function GuestPreview({ link }: { link: BookingLink }) {
 const REQUEST_HEX: Record<GuestBookingView["status"], string> = { PENDING: "#E0A33A", CONFIRMED: "#22B07D", DECLINED: "#E5484D", CANCELLED: "#7C8DA6" };
 const REQUEST_TEXT: Record<GuestBookingView["status"], string> = { PENDING: "Awaiting your review", CONFIRMED: "Confirmed", DECLINED: "Declined", CANCELLED: "Cancelled" };
 
-function RequestList({ requests, loading }: { requests: GuestBookingView[]; loading: boolean }) {
+function RequestList({
+  requests,
+  loading,
+  loadError,
+  onRetry,
+}: {
+  requests: GuestBookingView[];
+  loading: boolean;
+  /** The first load failed: there is nothing to show. */
+  loadError: Error | null;
+  onRetry: () => void;
+}) {
   const decide = useDecideGuestBooking();
   const cancel = useCancelGuestBooking();
   const sorted = [...requests].sort((a, b) => Number(b.status === "PENDING") - Number(a.status === "PENDING") || a.startsAt.localeCompare(b.startsAt));
@@ -652,8 +675,10 @@ function RequestList({ requests, loading }: { requests: GuestBookingView[]; load
   return (
     <section aria-label="Booking requests" className="rounded-2xl border border-[var(--border)] bg-[var(--surface)]" data-testid="booking-requests">
       <h2 className="border-b border-[var(--border)] px-4 py-3 text-[16px] font-semibold text-[var(--ink)]">Booking requests</h2>
-      {loading ? (
-        <p className="p-4 text-[13px] text-[var(--ink3)]">Loading…</p>
+      {loadError ? (
+        <ErrorState compact message={loadError.message || undefined} onRetry={onRetry} />
+      ) : loading ? (
+        <BrandLoader variant="compact" label="Loading booking requests" onRetry={onRetry} />
       ) : sorted.length === 0 ? (
         <p className="flex items-center justify-center gap-2 p-8 text-[13px] text-[var(--ink3)]">
           <Inbox className="h-4 w-4" aria-hidden /> No bookings through your links yet.

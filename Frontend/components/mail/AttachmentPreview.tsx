@@ -6,7 +6,6 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
-  Loader2,
   Eye,
   FileText,
   Image as ImageIcon,
@@ -28,6 +27,8 @@ import { attachmentUrl, downloadAttachment } from "@/lib/mail-api";
 import { API_BASE } from "@/lib/config";
 import { ApiError, newIdempotencyKey } from "@/lib/api-client";
 import { fileKind, formatBytes, type FileCategory, type FileKind, type PreviewMode } from "@/lib/file-kind";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { Spinner } from "@/components/ui/Spinner";
 
 /*
  * Attachment previews, the same for mail being written and mail received.
@@ -456,8 +457,10 @@ function TilePicture({ item, kind }: { item: PreviewItem; kind: FileKind }) {
   }
   if (data.status === "loading") {
     return (
-      <div className="flex h-full items-center justify-center" role="status" aria-label={`Loading preview of ${item.fileName}`}>
-        <Loader2 className="h-5 w-5 animate-spin text-[var(--ink3)]" />
+      // A Spinner, not the logo loader: the tile is a button, and the loader's
+      // slow-load notice carries a button of its own.
+      <div className="flex h-full items-center justify-center text-[var(--ink3)]" role="status" aria-label={`Loading preview of ${item.fileName}`}>
+        <Spinner size="lg" />
       </div>
     );
   }
@@ -525,8 +528,8 @@ export function AttachmentTile({
       >
         <TilePicture item={item} kind={kind} />
         {uploading && (
-          <span className="absolute right-1.5 top-1.5 inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[10px] text-white">
-            <Loader2 className="h-3 w-3 animate-spin" /> Uploading
+          <span className="absolute right-1.5 top-1.5 inline-flex rounded-full bg-black/60 px-2 py-0.5 text-[10px]">
+            <Spinner size="xs" label="Uploading" className="!gap-1 !text-white" />
           </span>
         )}
       </button>
@@ -626,8 +629,9 @@ function ViewerBody({
   }
   if (data.status === "loading") {
     return (
-      <div className="flex h-full items-center justify-center" role="status" aria-label="Loading preview">
-        <Loader2 className="h-10 w-10 animate-spin text-white/50" />
+      // The viewer is dark in either theme, so the caption is lightened.
+      <div className="flex h-full items-center justify-center">
+        <BrandLoader variant="compact" label="Preparing preview" className="!text-white/70" onRetry={data.retry} />
       </div>
     );
   }

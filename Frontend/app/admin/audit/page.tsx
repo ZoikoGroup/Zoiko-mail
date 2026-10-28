@@ -116,7 +116,7 @@ function AuditLog() {
     };
   }, [category, actor, fromDay, toDay]);
 
-  const { data, isLoading, error } = useAuditEvents({ ...filters, cursor, limit: PAGE_SIZE });
+  const { data, isLoading, error, refetch } = useAuditEvents({ ...filters, cursor, limit: PAGE_SIZE });
   const exporter = useExportAuditEvents();
 
   const events = data?.events ?? [];
@@ -157,7 +157,7 @@ function AuditLog() {
         enumeration becomes visible.
       </Notice>
 
-      {error ? <InlineError message={error.message} /> : null}
+      {error ? <InlineError message={error.message} onRetry={refetch} /> : null}
       {exporter.error ? (
         <Notice tone="warn">Could not export the log. {exporter.error.message}</Notice>
       ) : null}

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/shell/AppShell";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { ErrorState } from "@/components/ui/ErrorState";
 import {
   Search, Plus, Trash2, Pencil, X, Loader2, Tag, User, Building2,
   Phone, Mail, StickyNote, ChevronLeft, ChevronRight, BookUser,
@@ -247,7 +249,7 @@ export default function ContactsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [modal, setModal] = useState<{ open: boolean; contact: Contact | null }>({ open: false, contact: null });
 
-  const { data, isLoading } = useContacts({ q, tag: tagFilter || undefined, page, limit: 50 });
+  const { data, isError, refetch } = useContacts({ q, tag: tagFilter || undefined, page, limit: 50 });
   const { data: tags = [] } = useContactTags();
 
   const items = data?.items ?? [];
@@ -311,10 +313,16 @@ export default function ContactsPage() {
 
           {/* Contact list */}
           <div className="flex-1 overflow-y-auto">
-            {isLoading ? (
-              <div className="flex items-center justify-center py-12 text-[var(--ink3)]">
-                <Loader2 className="h-5 w-5 animate-spin" />
-              </div>
+            {data === undefined ? (
+              isError ? (
+                <ErrorState compact message="Couldn’t load your contacts." onRetry={() => void refetch()} />
+              ) : (
+                <BrandLoader
+                  variant="compact"
+                  label={q || tagFilter ? "Searching…" : "Loading contacts"}
+                  onRetry={() => void refetch()}
+                />
+              )
             ) : items.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-[var(--ink3)]">
                 <BookUser className="h-10 w-10" />

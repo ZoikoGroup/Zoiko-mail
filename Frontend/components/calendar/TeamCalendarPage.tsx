@@ -14,6 +14,9 @@ import { FindTimeDialog } from "./FindTimeDialog";
 import { AccessDialog, Avatar, TeamCalendarDialog } from "./SharingDialogs";
 import { CalendarChecklist } from "./access";
 import { swatchStyle } from "./palette";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { ErrorState } from "@/components/ui/ErrorState";
+import { Spinner } from "@/components/ui/Spinner";
 
 type TeamView = "week" | "availability";
 const BUSY_KEY = "zm.calendar.team.busyBlocks";
@@ -143,7 +146,11 @@ export function TeamCalendarPage() {
         </button>
       </div>
       {teams.length === 0 ? (
-        <p className="px-3 py-1 text-xs text-[var(--ink3)]">{accessible.isLoading ? "Loading…" : "No team calendars yet."}</p>
+        accessible.isLoading ? (
+          <Spinner size="sm" label="Loading calendars" className="px-3 py-1 text-xs" />
+        ) : (
+          <p className="px-3 py-1 text-xs text-[var(--ink3)]">No team calendars yet.</p>
+        )
       ) : (
         <CalendarChecklist calendars={teams} testId="team-calendars" />
       )}
@@ -189,7 +196,11 @@ export function TeamCalendarPage() {
         }
       />
 
-      {!accessible.isLoading && teams.length === 0 ? (
+      {accessible.isError && !accessible.data ? (
+        <ErrorState message="Could not load your team calendars." onRetry={() => void accessible.refetch()} />
+      ) : accessible.isLoading ? (
+        <BrandLoader variant="panel" label="Loading team calendars" onRetry={() => void accessible.refetch()} />
+      ) : teams.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-10 text-center" data-testid="team-empty">
           <Users className="h-10 w-10 text-[var(--accent-ink)]" aria-hidden />
           <h2 className="mt-3 text-[18px] font-semibold text-[var(--ink)]">No team calendars yet</h2>
@@ -216,7 +227,12 @@ export function TeamCalendarPage() {
               view={view}
               onView={setView}
             />
-            {view === "week" ? (
+            {view === "week" && events.isError && !events.data ? (
+              <ErrorState compact message="Could not load the team events." onRetry={() => void events.refetch()} />
+            ) : view === "week" && events.data === undefined ? (
+              // First load only: a new week keeps the previous one's events on screen.
+              <BrandLoader variant="compact" label="Loading team events" onRetry={() => void events.refetch()} />
+            ) : view === "week" ? (
               <TimeGrid
                 days={range.days}
                 events={[...teamEvents, ...busyEvents]}
@@ -231,7 +247,7 @@ export function TeamCalendarPage() {
                 }}
               />
             ) : (
-              <AvailabilityGrid day={anchor} people={busy.data ?? []} loading={busy.isLoading} />
+              <AvailabilityGrid day={anchor} people={busy.data ?? []} loading={busy.isLoading} onRetry={() => void busy.refetch()} />
             )}
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)] px-4 py-2.5 text-[12px] text-[var(--ink3)]">
               <span className="flex items-center gap-2">
@@ -295,7 +311,11 @@ function TeamAvailability({ members }: { members: Member[] }) {
         <span className="text-[12px] text-[var(--accent-ink)]">{people.length} members</span>
       </div>
       {people.length === 0 ? (
-        <p className="text-[12.5px] text-[var(--ink3)]">{freeBusy.isLoading ? "Checking…" : "Nobody else in your visible teams yet."}</p>
+        freeBusy.isLoading ? (
+          <BrandLoader variant="compact" label="Checking availability" onRetry={() => void freeBusy.refetch()} />
+        ) : (
+          <p className="text-[12.5px] text-[var(--ink3)]">Nobody else in your visible teams yet.</p>
+        )
       ) : (
         <ul className="space-y-2.5">
           {people.map((p) => {
@@ -417,7 +437,7 @@ function FindTogether({
         <>
           <p className="text-[12.5px] text-[var(--ink2)]">For {names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0]}</p>
           {find.isPending ? (
-            <p className="mt-2 text-[12.5px] text-[var(--ink3)]">Looking…</p>
+            <Spinner size="sm" label="Looking…" className="mt-2 text-[12.5px]" />
           ) : slot ? (
             <div className="mt-2 flex items-center justify-between gap-2 text-[13px]">
               <span className="text-[var(--ink)]">
@@ -447,7 +467,7 @@ function FindTogether({
 const HOURS = Array.from({ length: 10 }, (_, i) => 8 + i); // 08:00–18:00
 
 /** One row per person, busy time drawn across the working day. */
-function AvailabilityGrid({ day, people, loading }: { day: Date; people: FreeBusyPerson[]; loading: boolean }) {
+function AvailabilityGrid({ day, people, loading, onRetry }: { day: Date; people: FreeBusyPerson[]; loading: boolean; onRetry: () => void }) {
   const start = new Date(day);
   start.setHours(8, 0, 0, 0);
   const spanMs = 10 * 3_600_000;
@@ -468,7 +488,7 @@ function AvailabilityGrid({ day, people, loading }: { day: Date; people: FreeBus
           </div>
         </div>
         {loading && sorted.length === 0 ? (
-          <p className="text-[12.5px] text-[var(--ink3)]">Loading…</p>
+          <BrandLoader variant="compact" label="Loading availability" onRetry={onRetry} />
         ) : sorted.length === 0 ? (
           <p className="text-[12.5px] text-[var(--ink3)]">Nobody to show yet.</p>
         ) : (

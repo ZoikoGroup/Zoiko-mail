@@ -4,7 +4,8 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { StepIndicator } from "@/components/ui/StepIndicator";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { Skeleton } from "@/components/ui/Skeleton";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { ErrorState } from "@/components/ui/ErrorState";
 import {
   useOnboardingStatus,
   useAddDomain,
@@ -87,35 +88,24 @@ const STEPS: StepDef[] = [
 ];
 
 export function OnboardingWizard() {
-  const { data: status, isLoading, refetch } = useOnboardingStatus();
+  const { data: status, isLoading, isError, refetch } = useOnboardingStatus();
   const [currentStep, setCurrentStep] = useState(0);
 
+  // The wizard shows either the next step or the "all set" screen, so its
+  // layout is not known until the status arrives: the logo loader, not a
+  // skeleton of one of the two.
   if (isLoading) {
+    return <BrandLoader variant="panel" label="Loading your setup progress" onRetry={() => void refetch()} />;
+  }
+
+  if (!status) {
+    if (!isError) return null;
     return (
-      <div className="mx-auto max-w-2xl space-y-6 px-4 py-8 sm:px-6">
-        <div className="space-y-3">
-          <Skeleton className="h-8 w-64" />
-          <Skeleton className="h-4 w-96" />
-        </div>
-        <Skeleton className="h-1 w-full" />
-        <div className="space-y-4">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="zoiko-card p-6">
-              <div className="flex items-center gap-4">
-                <Skeleton variant="circle" className="h-12 w-12" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-5 w-40" />
-                  <Skeleton className="h-3 w-64" />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+      <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
+        <ErrorState message="Couldn't load your setup progress." onRetry={() => void refetch()} />
       </div>
     );
   }
-
-  if (!status) return null;
 
   if (status.isComplete) {
     return (

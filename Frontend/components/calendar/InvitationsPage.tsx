@@ -37,6 +37,8 @@ import { EventDialog } from "./EventDialog";
 import { ProposeTimeDialog } from "./ProposeTimeDialog";
 import { initials } from "./AttendeeInput";
 import { PILL_LABEL, RESPONSE_HEX, RESPONSE_LABEL, pillStyle } from "./rsvp";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { Spinner } from "@/components/ui/Spinner";
 
 const TABS: { key: InvitationTab; label: string; countKey?: "awaiting" | "updates" }[] = [
   { key: "awaiting", label: "Awaiting Your Response", countKey: "awaiting" },
@@ -142,6 +144,7 @@ export function InvitationsPage() {
           items={items}
           loading={list.isLoading}
           error={list.error as Error | null}
+          onRetry={() => void list.refetch()}
           query={query}
           onQuery={setQuery}
           selectedId={selectedId}
@@ -151,7 +154,8 @@ export function InvitationsPage() {
           <InvitationDetail key={selectedId} eventId={selectedId} />
         ) : (
           <div className="flex items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center text-[13px] text-[var(--ink3)] 2xl:col-span-2">
-            {list.isLoading ? "Loading…" : "Nothing here yet. Invitations you receive or send appear in these tabs."}
+            {/* While the list loads, its own loader is the one on screen. */}
+            {list.isLoading ? null : "Nothing here yet. Invitations you receive or send appear in these tabs."}
           </div>
         )}
       </div>
@@ -166,6 +170,7 @@ function InvitationList({
   items,
   loading,
   error,
+  onRetry,
   query,
   onQuery,
   selectedId,
@@ -175,6 +180,7 @@ function InvitationList({
   items: InvitationItem[];
   loading: boolean;
   error: Error | null;
+  onRetry: () => void;
   query: string;
   onQuery: (q: string) => void;
   selectedId: string | null;
@@ -208,7 +214,9 @@ function InvitationList({
             Could not load invitations. {error.message}
           </li>
         ) : loading ? (
-          <li className="p-4 text-[12.5px] text-[var(--ink3)]">Loading…</li>
+          <li>
+            <BrandLoader variant="compact" label="Loading invitations" onRetry={onRetry} />
+          </li>
         ) : items.length === 0 ? (
           <li className="p-6 text-center text-[12.5px] text-[var(--ink3)]">
             {tab === "awaiting" ? "You're all caught up — nothing is waiting for your answer." : "No invitations here."}
@@ -294,7 +302,11 @@ function InvitationDetail({ eventId }: { eventId: string }) {
   }, [event, markSeen]);
 
   if (detail.isLoading) {
-    return <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-8 text-[13px] text-[var(--ink3)] 2xl:col-span-2">Loading…</div>;
+    return (
+      <div className="flex rounded-2xl border border-[var(--border)] bg-[var(--surface)] 2xl:col-span-2">
+        <BrandLoader variant="compact" label="Loading invitation" onRetry={() => void detail.refetch()} />
+      </div>
+    );
   }
   if (detail.isError || !event) {
     return (
@@ -631,7 +643,7 @@ function ScheduleCheck({ event }: { event: EventDetail }) {
         <Clock className="h-4 w-4" aria-hidden /> Schedule check
       </h3>
       {events.isLoading ? (
-        <p className="text-[12.5px] text-[var(--ink3)]">Checking your calendar…</p>
+        <Spinner size="sm" label="Checking your calendar…" className="text-[12.5px]" />
       ) : clashes.length === 0 ? (
         <p
           className="flex items-start gap-2 rounded-xl border px-3 py-2.5 text-[12.5px] text-[#4FD1A1]"

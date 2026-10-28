@@ -12,6 +12,8 @@ import type { AIAction, AIActionType, AIActionStatus } from "@/lib/ai-api";
 import type { MailItem } from "@/lib/mail-api";
 import { useMessage } from "@/lib/mail-hooks";
 import { Modal } from "@/components/ui/Modal";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { Spinner } from "@/components/ui/Spinner";
 
 // ---- token tones -----------------------------------------------------------
 const TYPE_LABEL: Record<AIActionType, string> = {
@@ -79,7 +81,7 @@ type FilterKey = "review" | "all" | "CONFIRMED" | "DISMISSED" | "FAILED";
 
 // ===========================================================================
 export function AiActionsInbox() {
-  const { data: actions = [], isLoading, error } = useAiActions();
+  const { data: actions = [], isPending, error, refetch } = useAiActions();
   const [filter, setFilter] = useState<FilterKey>("review");
   const [selected, setSelected] = useState<AIAction | null>(null);
 
@@ -138,11 +140,7 @@ export function AiActionsInbox() {
 
       {/* List */}
       <div className="mt-4 space-y-2">
-        {isLoading && (
-          <div className="flex items-center gap-2 py-10 text-sm text-[var(--ink3)]">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading AI actions…
-          </div>
-        )}
+        {isPending && <BrandLoader variant="compact" label="Loading AI actions" onRetry={() => void refetch()} />}
 
         {error && (
           <div className="flex items-start gap-2 rounded-lg border border-[var(--crit)]/30 bg-[var(--crit-soft)] p-4 text-sm text-[var(--crit)]">
@@ -151,7 +149,7 @@ export function AiActionsInbox() {
           </div>
         )}
 
-        {!isLoading && !error && visible.length === 0 && (
+        {!isPending && !error && visible.length === 0 && (
           <div className="flex flex-col items-center py-16 text-center text-[var(--ink3)]">
             <Inbox className="h-10 w-10" />
             <p className="mt-3 text-sm font-medium text-[var(--ink2)]">No AI actions here</p>
@@ -224,8 +222,8 @@ function ActionCard({
       {text && <p className="mt-2 text-sm text-[var(--ink)]">{text}</p>}
 
       {a.status === "PENDING" && (
-        <p className="mt-2 flex items-center gap-2 text-sm text-[var(--ink3)]">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Still analysing…
+        <p className="mt-2 text-sm">
+          <Spinner size="sm" label="Still analysing…" />
         </p>
       )}
 
@@ -423,8 +421,8 @@ function SourceMessage({ action: a }: { action: AIAction }) {
       {item ? (
         <SourceCard item={item} />
       ) : isLoading ? (
-        <p className="mt-1 flex items-center gap-2 text-sm text-[var(--ink3)]">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading message…
+        <p className="mt-1 text-sm">
+          <Spinner size="sm" label="Loading message…" />
         </p>
       ) : (
         <p className="mt-1 text-sm text-[var(--ink3)]">

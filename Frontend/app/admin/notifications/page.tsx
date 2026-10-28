@@ -26,7 +26,7 @@ const SEVERITY: Record<NotificationDto["severity"], { label: string; tone: Tone 
 };
 
 export default function AdminNotificationsPage() {
-  const { data: notifications, isLoading, error } = useNotifications();
+  const { data: notifications, isLoading, error, refetch } = useNotifications();
 
   // Read state belongs to the server. It used to live in a local Set, so
   // clearing an alert lasted until the next refresh and the rail badge never
@@ -69,7 +69,7 @@ export default function AdminNotificationsPage() {
         badge={unread > 0 ? <Pill tone="warn">{`${unread} unread`}</Pill> : <Pill tone="ok">All read</Pill>}
       >
         {error ? (
-          <InlineError message={error.message} />
+          <InlineError message={error.message} onRetry={refetch} />
         ) : isLoading || !notifications ? (
           <LoadingRows rows={4} />
         ) : notifications.length === 0 ? (

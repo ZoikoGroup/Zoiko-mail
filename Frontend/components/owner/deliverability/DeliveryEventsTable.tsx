@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Modal } from "@/components/ui/Modal";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { useDeliveryEvents } from "@/lib/owner-hooks";
 import type { DeliveryEventRow, DeliveryEventType } from "@/lib/owner-api";
 import { Activity } from "lucide-react";
@@ -64,7 +65,8 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
 export function DeliveryEventsTable() {
   const [type, setType] = useState<DeliveryEventType | "">("");
   const [selected, setSelected] = useState<DeliveryEventRow | null>(null);
-  const { data: events = [], isLoading } = useDeliveryEvents(type ? { type } : {});
+  const { data, isPending, isError, error, refetch } = useDeliveryEvents(type ? { type } : {});
+  const events = data ?? [];
 
   const columns: Column<DeliveryEventRow>[] = [
     { key: "type", label: "Type", render: (row) => typePill(row.type) },
@@ -129,15 +131,19 @@ export function DeliveryEventsTable() {
         </span>
       </div>
 
-      <DataTable
-        columns={columns}
-        data={events}
-        keyExtractor={(row) => row.id}
-        pageSize={15}
-        loading={isLoading}
-        emptyMessage={isLoading ? "Loading delivery events…" : "No delivery events recorded."}
-        onRowClick={(row) => setSelected(row)}
-      />
+      {isError && !data ? (
+        <ErrorState message={error?.message} onRetry={() => void refetch()} />
+      ) : (
+        <DataTable
+          columns={columns}
+          data={events}
+          keyExtractor={(row) => row.id}
+          pageSize={15}
+          loading={isPending}
+          emptyMessage="No delivery events recorded."
+          onRowClick={(row) => setSelected(row)}
+        />
+      )}
 
       <Modal
         open={!!selected}

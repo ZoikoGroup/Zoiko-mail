@@ -80,7 +80,9 @@ function WebmailShellInner({
   const folderPane = useRef<HTMLDivElement>(null);
 
   if (status === "loading") {
-    return <BrandLoader className="zm-webmail" label="Loading your mail" />;
+    // Every member section (Mail, Calendar, Tasks, Work Graph…) opens behind
+    // this, so the caption names the app; the section's own loader follows.
+    return <BrandLoader className="zm-webmail" label="Loading Zoiko Mail" />;
   }
   if (status === "denied-silent") {
     return null;

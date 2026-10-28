@@ -29,7 +29,7 @@ const ROLE_TONE: Record<MembershipRole, Tone> = {
 
 export default function AdminUsersPage() {
   const can = useCan();
-  const { data: people, isLoading, error } = useWorkspacePeople();
+  const { data: people, isLoading, error, refetch } = useWorkspacePeople();
   const [managing, setManaging] = useState<MemberDto | null>(null);
 
   return (
@@ -55,7 +55,7 @@ export default function AdminUsersPage() {
         badge={people ? <Pill tone="nu">{`Showing ${people.length}`}</Pill> : undefined}
       >
         {error ? (
-          <InlineError message={error.message} />
+          <InlineError message={error.message} onRetry={refetch} />
         ) : isLoading || !people ? (
           <LoadingRows rows={6} />
         ) : people.length === 0 ? (

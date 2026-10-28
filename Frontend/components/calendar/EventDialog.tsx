@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, LayoutTemplate, Lock, MapPin, Video, AlignLeft, Trash2, Users } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
+import { Spinner } from "@/components/ui/Spinner";
 import { freeBusy, type Calendar, type CalendarEvent, type EventInput, type MeetingTemplate } from "@/lib/calendar-api";
 
 /** What the dialog needs to know about a calendar it can save to. */
@@ -357,7 +358,7 @@ export function EventDialog({
               setAttendees(next);
             }}
           />
-          {event && loaded.isLoading && <p className="mt-1 text-[11.5px] text-[var(--ink3)]">Loading who is invited…</p>}
+          {event && loaded.isLoading && <Spinner size="xs" label="Loading who is invited…" className="mt-1 text-[11.5px]" />}
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">

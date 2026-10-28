@@ -198,7 +198,6 @@ export const supportStyles = `
 @keyframes supp-pop { from { opacity: 0; transform: translateY(-4px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes supp-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes supp-page { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes supp-spin { to { transform: rotate(360deg); } }
 @keyframes supp-shimmer { to { transform: translateX(100%); } }
 
 .support-workspace .drawer .panel { animation: supp-drawer 0.22s cubic-bezier(0.22, 1, 0.36, 1) both; }
@@ -231,10 +230,9 @@ export const supportStyles = `
 .support-workspace button:focus-visible, .support-workspace a:focus-visible, .support-workspace input:focus-visible, .support-workspace select:focus-visible, .support-workspace textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ---- Loading ---------------------------------------------------------------
-   A compact spinner and shimmering skeleton blocks replace the bare "Loading…"
-   text that every page showed, so async fetches read as activity up front. */
-.support-workspace .sloader { display: flex; align-items: center; gap: 10px; color: var(--ink3); font-size: 12px; }
-.support-workspace .sloader .ring { width: 15px; height: 15px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: supp-spin 0.7s linear infinite; flex: none; }
+   Shimmering placeholder rows for tables loading for the first time
+   (TableSkeleton in TicketsPage). Views without a table use the shared
+   BrandLoader, and small in-place waits the shared Spinner. */
 .support-workspace .skel { position: relative; overflow: hidden; background: var(--s3); border-radius: 6px; }
 .support-workspace .skel::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgb(from var(--surface) r g b / 0.9), transparent); animation: supp-shimmer 1.4s ease-in-out infinite; }
 .support-workspace .skelrows { border-top: 1px solid var(--border); }

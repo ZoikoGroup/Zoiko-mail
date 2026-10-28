@@ -7,6 +7,8 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { FilterBar, FilterSelect } from "@/components/ui/FilterBar";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { useAuditEvents } from "@/lib/owner-hooks";
 import type { AuditEventQuery } from "@/lib/owner-api";
 
@@ -54,7 +56,7 @@ function Loading() {
   return (
     <div className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6">
       <PageHeader title="Audit Logs" description="Track all privileged actions and security events." />
-      <div className="flex h-48 items-center justify-center text-sm text-[var(--ink3)]">Loading audit logs…</div>
+      <BrandLoader variant="panel" label="Loading audit logs" />
     </div>
   );
 }
@@ -81,7 +83,7 @@ function AuditLogs() {
     };
   }, [category, fromDay, toDay, grantId, page]);
 
-  const { data, isLoading } = useAuditEvents(filters);
+  const { data, isPending, isError, error, refetch } = useAuditEvents(filters);
 
   const events = data?.events ?? [];
   const total = data?.total ?? 0;
@@ -194,14 +196,18 @@ function AuditLogs() {
         )}
       </FilterBar>
 
-      <DataTable
-        columns={columns}
-        data={filtered}
-        keyExtractor={(row) => row.id}
-        pageSize={15}
-        loading={isLoading}
-        emptyMessage={isLoading ? "Loading audit events…" : total > 0 ? "No results for your server-side filters on this page." : "No audit events match your filters."}
-      />
+      {isError && !data ? (
+        <ErrorState message={error?.message} onRetry={() => void refetch()} />
+      ) : (
+        <DataTable
+          columns={columns}
+          data={filtered}
+          keyExtractor={(row) => row.id}
+          pageSize={15}
+          loading={isPending}
+          emptyMessage={total > 0 ? "No results for your server-side filters on this page." : "No audit events match your filters."}
+        />
+      )}
       {total > 15 && (
         <div className="flex justify-center gap-2">
           <button

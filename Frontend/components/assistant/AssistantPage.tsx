@@ -27,6 +27,7 @@ import { WebmailShell } from "@/components/mail/WebmailShell";
 import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DropdownMenu, DropdownItem } from "@/components/ui/DropdownMenu";
+import { Spinner } from "@/components/ui/Spinner";
 import { ApiError } from "@/lib/api-client";
 import { useMe } from "@/lib/auth-hooks";
 import {
@@ -269,7 +270,7 @@ export function AssistantPage() {
     <nav aria-label="Conversations" className="min-h-0 flex-1 overflow-y-auto px-2 pb-3" data-testid="assistant-conversations">
       <h2 className="px-3 pb-1.5 pt-4 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[var(--ink3)]">Recent chats</h2>
       {conversations.isLoading ? (
-        <p className="px-3 py-1 text-xs text-[var(--ink3)]" role="status">Loading…</p>
+        <Spinner size="sm" label="Loading chats" className="px-3 py-1 text-xs" />
       ) : conversations.isError ? (
         <p className="px-3 py-1 text-xs text-[var(--crit)]">
           Couldn&rsquo;t load your chats.{" "}
@@ -387,7 +388,7 @@ export function AssistantPage() {
               ) : loadingThread ? (
                 <div className="space-y-4" role="status" aria-label="Loading conversation">
                   {[0, 1, 2].map((i) => (
-                    <div key={i} className={`h-16 animate-pulse rounded-2xl bg-[var(--s2)] ${i % 2 ? "ml-auto w-2/3" : "w-3/4"}`} />
+                    <div key={i} className={`zoi-skeleton h-16 rounded-2xl ${i % 2 ? "ml-auto w-2/3" : "w-3/4"}`} />
                   ))}
                 </div>
               ) : messages.length === 0 && !shownPending ? (

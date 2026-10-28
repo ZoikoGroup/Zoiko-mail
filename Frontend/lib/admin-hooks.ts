@@ -116,6 +116,8 @@ export interface QueryLike<T> {
   data: T | undefined;
   isLoading: boolean;
   error: Error | null;
+  /** Loads it again: what an error's Retry and the loader's "Try again" call. */
+  refetch?: () => unknown;
 }
 
 /**
@@ -129,8 +131,9 @@ function shape<T>(q: {
   data: T | undefined;
   isLoading: boolean;
   error: unknown;
+  refetch: () => unknown;
 }): QueryLike<T> {
-  return { data: q.data, isLoading: q.isLoading, error: (q.error as Error) ?? null };
+  return { data: q.data, isLoading: q.isLoading, error: (q.error as Error) ?? null, refetch: q.refetch };
 }
 
 /* ── people ────────────────────────────────────────────────────────────── */
@@ -147,11 +150,12 @@ export function useMembers(): QueryLike<MemberDto[]> {
  * SupportAccessGrant requires one — it is not a member of the workspace.
  */
 export function useWorkspacePeople(): QueryLike<MemberDto[]> {
-  const { data, isLoading, error } = useMembers();
+  const { data, isLoading, error, refetch } = useMembers();
   return {
     data: data?.filter((m) => m.status === "ACTIVE" && m.role !== "SUPPORT"),
     isLoading,
     error,
+    refetch,
   };
 }
 

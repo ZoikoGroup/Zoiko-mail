@@ -13,6 +13,7 @@ import {
   useGoogleAuth,
   useMicrosoftAuth,
 } from "@/lib/connectors-hooks";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import {
   READONLY_SCOPES,
   type Connector,
@@ -48,7 +49,7 @@ function formatDate(iso: string | null): string {
 
 export function ConnectedAccounts() {
 
-  const { data: accounts = [], isLoading, error } = useConnectors();
+  const { data: accounts = [], isPending, error, refetch } = useConnectors();
   const disconnect = useDisconnectConnector();
   const syncAccount = useSyncConnector();
   const googleAuth = useGoogleAuth();
@@ -139,17 +140,13 @@ export function ConnectedAccounts() {
       {showConnect && <ConnectPanel onDone={() => setShowConnect(false)} />}
 
       <div className="mt-4 space-y-2">
-        {isLoading && (
-          <div className="flex items-center gap-2 py-10 text-sm text-[var(--ink3)]">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading accounts…
-          </div>
-        )}
+        {isPending && <BrandLoader variant="compact" label="Loading connected accounts" onRetry={() => void refetch()} />}
         {error && (
           <div className="flex items-start gap-2 rounded-lg border border-[var(--crit)]/30 bg-[var(--crit-soft)] p-4 text-sm text-[var(--crit)]">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> Couldn&rsquo;t load accounts. Try again.
           </div>
         )}
-        {!isLoading && !error && accounts.length === 0 && (
+        {!isPending && !error && accounts.length === 0 && (
           <div className="flex flex-col items-center py-16 text-center text-[var(--ink3)]">
             <Link2 className="h-10 w-10" />
             <p className="mt-3 text-sm font-medium text-[var(--ink2)]">No accounts connected</p>

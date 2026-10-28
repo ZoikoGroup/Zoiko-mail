@@ -15,7 +15,7 @@ import { ProtectedRoute } from "@/components/owner/ProtectedRoute";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { Skeleton } from "@/components/ui/Skeleton";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import { useCan } from "@/lib/admin-capabilities";
 import { useReviewSecurityAlert, useSecurityAlerts } from "@/lib/owner-hooks";
 import type {
@@ -86,7 +86,7 @@ function when(iso: string): string {
 }
 
 export default function SecurityAlertsPage() {
-  const { data, isLoading, error } = useSecurityAlerts();
+  const { data, isLoading, error, refetch } = useSecurityAlerts();
   const review = useReviewSecurityAlert();
   const can = useCan();
 
@@ -156,7 +156,7 @@ export default function SecurityAlertsPage() {
         </div>
 
         {isLoading ? (
-          <Skeleton className="h-48 w-full" />
+          <BrandLoader variant="panel" label="Loading security alerts" onRetry={() => void refetch()} />
         ) : error ? (
           <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             Could not load security alerts. {(error as Error).message}

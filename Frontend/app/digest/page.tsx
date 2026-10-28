@@ -166,7 +166,7 @@ export default function DigestPage() {
             icon={AlertCircle}
             title="Overdue"
             count={overdue.length}
-            isLoading={activeItems.isLoading}
+            isLoading={activeItems.isPending}
             isError={!!activeItems.error}
             emptyMessage="Nothing overdue. Nice work."
             viewAllHref={overdue.length > 3 ? "/inbox" : undefined}
@@ -197,7 +197,7 @@ export default function DigestPage() {
             icon={Clock}
             title="Due today"
             count={dueToday.length}
-            isLoading={activeItems.isLoading}
+            isLoading={activeItems.isPending}
             isError={!!activeItems.error}
             emptyMessage="Nothing due today."
             viewAllHref={dueToday.length > 3 ? "/inbox" : undefined}
@@ -228,7 +228,7 @@ export default function DigestPage() {
             icon={Mail}
             title="Unread mail"
             count={unreadMail.data?.pagination.total ?? 0}
-            isLoading={unreadMail.isLoading}
+            isLoading={unreadMail.isPending}
             isError={!!unreadMail.error}
             emptyMessage="Inbox is clear."
             viewAllHref="/mail"
@@ -255,7 +255,7 @@ export default function DigestPage() {
             icon={MessagesSquare}
             title="Recent threads"
             count={recentThreads.data?.pagination.total ?? 0}
-            isLoading={recentThreads.isLoading}
+            isLoading={recentThreads.isPending}
             isError={!!recentThreads.error}
             emptyMessage="No threads yet."
             viewAllHref="/threads"

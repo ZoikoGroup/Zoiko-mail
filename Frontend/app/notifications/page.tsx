@@ -9,6 +9,7 @@ import {
   useMarkNotificationRead,
 } from "@/lib/notifications-hooks";
 import { Bell, Loader2, MailCheck, AlertCircle } from "lucide-react";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -27,7 +28,7 @@ export default function NotificationsPage() {
   // the member home now, with its own toasts via AppShell's SSE wiring.
   // Nothing below was deleted, it just isn't reachable from the UI.
   useEffect(() => { router.replace("/mail"); }, [router]);
-  const { data: notifications = [], isLoading, error, refetch, isFetching } =
+  const { data: notifications = [], isPending, error, refetch, isFetching } =
     useNotifications(false);
   const markRead = useMarkNotificationRead();
 
@@ -64,10 +65,8 @@ export default function NotificationsPage() {
         </div>
 
         <div className="zoiko-card mt-6">
-          {isLoading && (
-            <div className="flex items-center gap-2 p-6 text-sm text-[var(--ink3)]">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-            </div>
+          {isPending && (
+            <BrandLoader variant="compact" label="Loading notifications" onRetry={() => void refetch()} />
           )}
 
           {error && (
@@ -77,7 +76,7 @@ export default function NotificationsPage() {
             </div>
           )}
 
-          {!isLoading && !error && notifications.length === 0 && (
+          {!isPending && !error && notifications.length === 0 && (
             <div className="flex flex-col items-center gap-2 py-16 text-center text-[var(--ink3)]">
               <MailCheck className="h-10 w-10 text-[var(--ok)]" />
               <p className="text-sm">You&rsquo;re all caught up.</p>
@@ -87,7 +86,7 @@ export default function NotificationsPage() {
             </div>
           )}
 
-          {!isLoading && !error && notifications.length > 0 && (
+          {!isPending && !error && notifications.length > 0 && (
             <ul className="divide-y divide-[var(--border)]">
               {notifications.map((n) => (
                 <li

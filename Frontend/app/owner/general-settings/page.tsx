@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { ProtectedRoute } from "@/components/owner/ProtectedRoute";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Modal } from "@/components/ui/Modal";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { useGeneralSettings, useUpdateGeneralSettings, useUpdateTenant } from "@/lib/owner-hooks";
 import { useMfaStatus, useBeginMfaEnrolment, useConfirmMfaEnrolment, useDisableMfa, useRegenerateMfaRecoveryCodes } from "@/lib/auth-hooks";
 import type { GeneralWorkspaceSettings } from "@/lib/owner-api";
@@ -58,10 +60,10 @@ const LANGUAGES = [
 ];
 
 export default function GeneralSettingsPage() {
-  const { data: serverSettings, isLoading } = useGeneralSettings();
+  const { data: serverSettings, isLoading, isError: settingsError, refetch: refetchSettings } = useGeneralSettings();
   const updateGeneral = useUpdateGeneralSettings();
   const updateTenant = useUpdateTenant();
-  const { data: mfaStatus, isLoading: mfaLoading, refetch: refetchMfa } = useMfaStatus();
+  const { data: mfaStatus, isLoading: mfaLoading, isError: mfaError, refetch: refetchMfa } = useMfaStatus();
   const beginEnrolment = useBeginMfaEnrolment();
   const confirmEnrolment = useConfirmMfaEnrolment();
   const disableMfa = useDisableMfa();
@@ -176,14 +178,16 @@ export default function GeneralSettingsPage() {
     navigator.clipboard.writeText(text);
   };
 
-  if (isLoading) {
+  if (isLoading || (settingsError && !serverSettings)) {
     return (
       <ProtectedRoute allowedRoles={["OWNER", "ADMIN"]}>
         <div className="mx-auto max-w-3xl space-y-6 px-4 py-8 sm:px-6">
           <PageHeader title="General Settings" description="Configure your workspace preferences." />
-          <div className="flex h-48 items-center justify-center">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-          </div>
+          {isLoading ? (
+            <BrandLoader variant="panel" label="Loading settings" onRetry={() => void refetchSettings()} />
+          ) : (
+            <ErrorState message="Couldn't load your workspace settings." onRetry={() => void refetchSettings()} />
+          )}
         </div>
       </ProtectedRoute>
     );
@@ -384,7 +388,9 @@ export default function GeneralSettingsPage() {
           </div>
 
           {mfaLoading ? (
-            <div className="flex h-24 items-center justify-center text-sm text-[var(--ink3)]">Loading MFA status…</div>
+            <BrandLoader variant="compact" label="Loading MFA status" onRetry={() => void refetchMfa()} />
+          ) : mfaError && !mfaStatus ? (
+            <ErrorState compact message="Couldn't load your MFA status." onRetry={() => void refetchMfa()} />
           ) : mfaStatus ? (
             <>
               {mfaStatus.enrolled ? (

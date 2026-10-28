@@ -24,6 +24,7 @@ import {
 } from "@/lib/support-api";
 import { useLiveRefresh } from "@/lib/support-hooks";
 import { ApiError } from "@/lib/api-client";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 
 const STATUSES: TicketStatus[] = ["OPEN", "IN_PROGRESS", "WAITING_TENANT", "RESOLVED", "CLOSED"];
 const SEVERITIES: TicketSeverity[] = ["LOW", "MEDIUM", "HIGH", "URGENT"];
@@ -34,8 +35,9 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : "Something went wrong";
 }
 
-// Shimmering stand-ins for table rows while the queue is loading.
-function TableSkeleton({ cols }: { cols: number }) {
+// Shimmering stand-ins for table rows while the queue is loading. Shared with
+// the consoles' other tables, which load into the same layout.
+export function TableSkeleton({ cols }: { cols: number }) {
   const widths = ["38%", "55%", "42%", "60%", "48%", "52%", "44%", "50%", "40%"];
   return (
     <div className="skelrows">
@@ -121,7 +123,10 @@ export default function TicketsPage({ mode = "staff" }: { mode?: "staff" | "tena
   const [overdue, setOverdue] = useState("");
 
   const [rows, setRows] = useState<SupportTicket[]>([]);
-  const [loading, setLoading] = useState(false);
+  // Whether any load has finished. The live refresh below reloads every
+  // thirty seconds; only the first load shows the placeholder rows, so the
+  // queue does not blank out under the operator on each refresh.
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
 
@@ -130,7 +135,6 @@ export default function TicketsPage({ mode = "staff" }: { mode?: "staff" | "tena
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     setError(null);
     (isTenant
       ? listTenantTickets({ status: params.status, q: params.q, limit: params.limit })
@@ -150,7 +154,7 @@ export default function TicketsPage({ mode = "staff" }: { mode?: "staff" | "tena
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setLoaded(true);
       });
     return () => {
       cancelled = true;
@@ -284,7 +288,7 @@ export default function TicketsPage({ mode = "staff" }: { mode?: "staff" | "tena
             <span className="pill nu">{rows.length}</span>
           </div>
         </div>
-        {loading ? (
+        {!loaded ? (
           <TableSkeleton cols={isTenant ? 7 : 9} />
         ) : (
           <div className="tblwrap">
@@ -589,21 +593,7 @@ function TicketDetail({ ticketId, tenant = false, onBack }: { ticketId: string; 
   }, [ticket]);
 
   if (loading && !ticket) {
-    return (
-      <div>
-        <div className="sloader" style={{ padding: "14px 2px 12px" }}>
-          <span className="ring" /> Loading ticket…
-        </div>
-        <div className="card">
-          <div className="bd pad">
-            <div className="skel" style={{ width: "56%", height: 13 }} />
-            <div className="skel" style={{ width: "82%", height: 10, marginTop: 10 }} />
-            <div className="skel" style={{ width: "70%", height: 10, marginTop: 8 }} />
-            <div className="skel" style={{ width: "60%", height: 10, marginTop: 8 }} />
-          </div>
-        </div>
-      </div>
-    );
+    return <BrandLoader variant="panel" label="Loading ticket" onRetry={load} />;
   }
 
   if (!ticket) {

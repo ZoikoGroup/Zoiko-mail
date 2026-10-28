@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CalendarDays, ChevronRight, Clock, FileText, Filter, Flag, Mail, Network, Pencil, Plus, Repeat, ShieldCheck, Sparkles, StickyNote, Target, Trash2, UserRound, Waypoints, type LucideIcon } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import type { GraphEdge, GraphNode, NodeType, Overview, Stream } from "@/lib/workgraph-api";
 import { useOverview, useRemoveEvidence, useUpdateCommitment, useUpdateDecision, useUpdateDependency } from "@/lib/workgraph-hooks";
 import { StreamDialog } from "./dialogs";
@@ -212,7 +213,7 @@ function Body() {
           Could not load the Work Graph. {(overview.error as Error).message}
         </p>
       ) : overview.isLoading ? (
-        <p className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 text-[13px] text-[var(--ink3)]">Loading…</p>
+        <BrandLoader variant="panel" label="Loading the Work Graph" onRetry={() => void overview.refetch()} />
       ) : !data?.stream ? (
         <div className="flex flex-col items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-10 text-center" data-testid="graph-empty">
           <Waypoints className="h-9 w-9 text-[var(--accent-ink)]" aria-hidden />

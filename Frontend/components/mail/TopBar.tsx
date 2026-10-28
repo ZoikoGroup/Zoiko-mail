@@ -7,6 +7,8 @@ import Image from "next/image";
 import { Search, X, Settings, LogOut, ChevronDown, Bell, Sparkles, UserRound } from "lucide-react";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { LayoutMenu } from "@/components/mail/LayoutMenu";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { initials } from "@/lib/useMemberShell";
 import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from "@/lib/admin-hooks";
 import { useTaskSearch } from "@/lib/tasks-hooks";
@@ -110,7 +112,7 @@ export function TopBar({
     }
   };
 
-  const { data: notifications } = useNotifications();
+  const { data: notifications, error: notificationsError, refetch: refetchNotifications } = useNotifications();
   const markRead = useMarkNotificationRead();
   const markAll = useMarkAllNotificationsRead();
   const unread = (notifications ?? []).filter((n) => !n.readAt);
@@ -299,7 +301,16 @@ export function TopBar({
                 )}
               </div>
               <ul className="max-h-80 overflow-y-auto">
-                {(notifications ?? []).length === 0 ? (
+                {notifications === undefined ? (
+                  // Not "all caught up" before the first answer, or after it failed.
+                  <li>
+                    {notificationsError ? (
+                      <ErrorState compact message="Couldn’t load your notifications." onRetry={refetchNotifications} />
+                    ) : (
+                      <BrandLoader variant="compact" label="Loading notifications" onRetry={refetchNotifications} />
+                    )}
+                  </li>
+                ) : notifications.length === 0 ? (
                   <li className="px-4 py-6 text-center text-sm text-[var(--ink3)]">You&rsquo;re all caught up.</li>
                 ) : (
                   (notifications ?? []).slice(0, 20).map((n) => (

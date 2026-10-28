@@ -7,6 +7,7 @@ import { useAdminMailboxes } from "@/lib/owner-hooks";
 import { useSubscription } from "@/lib/billing-hooks";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { ErrorState } from "@/components/ui/ErrorState";
 import type { Subscription } from "@/lib/billing-api";
 
 /** The badge variants this file can produce; mirrors `StatusBadge`'s union. */
@@ -79,7 +80,10 @@ function Fact({ label, value, hint }: { label: string; value: string; hint?: str
 }
 
 export function DomainBillingSummary() {
-  const { data: domains = [], isLoading: domainsLoading } = useDomainList();
+  const domainsQuery = useDomainList();
+  // Memoised so the empty fallback is one array, not a new one each render.
+  const domains = useMemo(() => domainsQuery.data ?? [], [domainsQuery.data]);
+  const domainsLoading = domainsQuery.isLoading;
   const { data: mailboxes = [], isLoading: mailboxesLoading } = useAdminMailboxes();
   const { data: sub, isLoading: subLoading } = useSubscription();
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -158,6 +162,16 @@ export function DomainBillingSummary() {
                   </td>
                 </tr>
               ))
+            ) : domainsQuery.isError && !domainsQuery.data ? (
+              <tr>
+                <td colSpan={6}>
+                  <ErrorState
+                    compact
+                    message="Couldn't load your domains."
+                    onRetry={() => void domainsQuery.refetch()}
+                  />
+                </td>
+              </tr>
             ) : sortedDomains.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-4 py-8 text-center text-sm text-[var(--ink3)]">

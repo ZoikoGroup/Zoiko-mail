@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 
 import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { Spinner } from "@/components/ui/Spinner";
+import { InlineError } from "@/components/admin/ui";
 import {
   useCreateMailbox,
   useDelegateMailbox,
@@ -35,7 +38,7 @@ export function CreateMailboxDialog({
   existing?: MailboxDto[];
   onClose: () => void;
 }) {
-  const { data: members, isLoading, error } = useMailboxCandidates();
+  const { data: members, isLoading, error, refetch: refetchMembers } = useMailboxCandidates();
   const { data: domains } = useDomains();
   const create = useCreateMailbox();
   const [membershipId, setMembershipId] = useState("");
@@ -149,7 +152,7 @@ export function CreateMailboxDialog({
           Could not load the member list. {error.message}
         </p>
       ) : isLoading ? (
-        <p className="text-[12.5px] text-[var(--ink3)]">Loading members…</p>
+        <BrandLoader variant="compact" label="Loading members" onRetry={() => void refetchMembers()} />
       ) : (
         <div>
           <label
@@ -549,7 +552,12 @@ export function DelegateMailboxDialog({
   onClose: () => void;
 }) {
   const { data: people } = useWorkspacePeople();
-  const { data: delegates, isLoading } = useMailboxDelegates(mailbox.id);
+  const {
+    data: delegates,
+    isLoading,
+    error: delegatesError,
+    refetch: refetchDelegates,
+  } = useMailboxDelegates(mailbox.id);
   const grant = useDelegateMailbox(mailbox.id);
   const revoke = useRevokeMailboxDelegate(mailbox.id);
 
@@ -642,7 +650,11 @@ export function DelegateMailboxDialog({
           Current delegates
         </p>
         {isLoading ? (
-          <p className="text-[12.5px] text-[var(--ink3)]">Loading…</p>
+          <Spinner size="sm" label="Loading delegates" className="text-[12.5px]" />
+        ) : delegatesError && !delegates ? (
+          // Without this a failed read fell through to "Nobody else can reach
+          // this mailbox", which is the one thing it cannot know.
+          <InlineError message={delegatesError.message} onRetry={() => void refetchDelegates()} />
         ) : !delegates || delegates.length === 0 ? (
           <p className="text-[12.5px] text-[var(--ink2)]">
             Nobody else can reach this mailbox.
