@@ -268,10 +268,16 @@ body {
    settles on every route change while sidebars/headers stay put. */
 @keyframes page-enter {
   from { opacity: 0; transform: translateY(10px); }
-  to   { opacity: 1; transform: translateY(0); }
+  /* none, not translateY(0): a held transform makes this element the
+     containing block for position:fixed descendants, so every dialog opened
+     inside a page was placed against the page, not the window. */
+  to   { opacity: 1; transform: none; }
 }
 .page-enter {
-  animation: page-enter 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+  /* backwards, not both: a transform animation that keeps filling forwards
+     still makes this element the containing block for position:fixed
+     descendants, which put every dialog at the page, not the window. */
+  animation: page-enter 0.26s cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
 /* Panels inside a freshly navigated page settle in on a short stagger so the
