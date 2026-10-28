@@ -249,7 +249,7 @@ function MyRequests() {
     <section aria-label="Your requests" className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
       <h2 className="text-sm font-semibold text-[var(--ink)]">Your requests</h2>
       {isLoading ? (
-        <div className="mt-3 h-16 animate-pulse rounded-lg bg-[var(--s2)]" aria-busy="true" />
+        <div className="zoi-skeleton mt-3 h-16 rounded-lg" role="status" aria-label="Loading your requests" />
       ) : isError ? (
         <p role="alert" className="mt-3 text-sm text-[var(--crit)]">
           Couldn’t load your requests. {message(error)}
@@ -288,7 +288,7 @@ function RequestThread({ ticketId }: { ticketId: string }) {
   const reply = useReplyToRequest(ticketId);
   const [body, setBody] = useState("");
 
-  if (isLoading) return <div className="mb-3 h-12 animate-pulse rounded-lg bg-[var(--s2)]" aria-busy="true" />;
+  if (isLoading) return <div className="zoi-skeleton mb-3 h-12 rounded-lg" role="status" aria-label="Loading this request" />;
   if (isError || !ticket) {
     return (
       <p role="alert" className="mb-3 text-sm text-[var(--crit)]">
