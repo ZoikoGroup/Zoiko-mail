@@ -297,55 +297,6 @@ body {
   animation-delay: 170ms;
 }
 
-/* ---- Top loading bar --------------------------------------------------------
-   Fixed accent-colored bar shown while a navigation is in flight. */
-.route-progress {
-  position: fixed;
-  top: 0;
-  left: 0;
-  height: 3px;
-  width: 100%;
-  z-index: 10000;
-  pointer-events: none;
-  background: linear-gradient(90deg, var(--accent), var(--ai));
-  box-shadow: 0 0 8px rgb(from var(--accent) r g b / 0.55);
-}
-.route-progress[data-phase="running"] {
-  transform-origin: left center;
-  animation: route-progress-run 7s cubic-bezier(0.1, 0.55, 0.3, 1) both;
-}
-.route-progress[data-phase="finishing"] {
-  transform-origin: left center;
-  animation: route-progress-done 0.35s ease-in both;
-}
-/* API activity between navigations: a thinner bar with a segment sweeping
-   across, since there is no end point to fill towards. */
-.route-progress[data-phase="busy"] {
-  height: 2px;
-  background: rgb(from var(--accent) r g b / 0.16);
-  box-shadow: none;
-  overflow: hidden;
-  animation: zoi-fade 0.2s var(--ease) both;
-}
-.route-progress[data-phase="busy"]::after {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 35%;
-  background: linear-gradient(90deg, transparent, var(--accent), var(--ai));
-  animation: brand-loader-glide 1.2s cubic-bezier(0.45, 0, 0.25, 1) infinite;
-}
-@keyframes route-progress-run {
-  from { transform: scaleX(0); opacity: 1; }
-  55%  { transform: scaleX(0.65); }
-  to   { transform: scaleX(0.85); opacity: 1; }
-}
-@keyframes route-progress-done {
-  from { transform: scaleX(0.85); opacity: 1; }
-  30%  { transform: scaleX(1); opacity: 1; }
-  to   { transform: scaleX(1); opacity: 0; }
-}
-
 /* ---- Brand loader -------------------------------------------------------------
    The loading screen (components/ui/BrandLoader.tsx). CSS alone decides when
    each part shows: the loader fades in after 140ms, so quick loads never
@@ -464,6 +415,23 @@ body {
   background: var(--surface);
 }
 .brand-loader__slow button:hover { background: var(--accent-soft); }
+
+/* Page-to-page navigation (components/shell/NavigationLoader): the loading
+   screen over the page being left, until the next page and its first data are
+   ready. Above page content and dialogs, below the switch-workspace cover. */
+.nav-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  transition: opacity 0.18s var(--ease-in-out);
+}
+.nav-loader[data-deferred] {
+  visibility: hidden;
+}
+.nav-loader[data-leaving] {
+  opacity: 0;
+  pointer-events: none;
+}
 
 /* Taking over from a loader that was just on screen (see BrandLoader): every
    animation is offset by the time the sequence has already run (--bl-elapsed
@@ -588,8 +556,6 @@ body {
     scroll-behavior: auto !important;
   }
   .page-enter { animation-duration: 0.01s; }
-  .route-progress[data-phase="running"] { animation-duration: 0.6s; }
-  .route-progress[data-phase="finishing"] { animation-duration: 0.01s; }
   /* Still: no breathing or halo, and the bar rests as a centred segment. */
   .brand-loader__halo { display: none; }
   .brand-loader__bar { animation: none; left: 30%; }

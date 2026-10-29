@@ -60,7 +60,10 @@ function continuationStyle(): CSSProperties | null {
  *     card grids whose layout is known before the data arrives.
  *   - <Spinner>: buttons, single rows, "load more" and background refreshes.
  *     Never a full-screen or panel loader for those.
- *   - The top bar (RouteProgress): page navigation and API calls in flight.
+ *   - Moving between pages, and the first load of the app until the page's
+ *     content is in: the full-screen NavigationLoader
+ *     (components/shell/NavigationLoader), and nothing else. There is no
+ *     top progress bar.
  */
 export type BrandLoaderVariant = "screen" | "panel" | "compact" | "inline";
 
