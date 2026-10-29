@@ -14,18 +14,18 @@ import type { SettingsSection } from "@/components/settings/sections";
 export function SettingsHeader({ section, actions }: { section: SettingsSection; actions?: ReactNode }) {
   const Icon = section.icon;
   return (
-    <header className="flex flex-wrap items-start gap-4">
-      <span className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-[var(--accent)]/40 bg-[var(--accent-soft)] text-[var(--accent-ink)]">
-        <Icon className="h-6 w-6" aria-hidden />
+    <header className="flex flex-wrap items-start gap-x-4 gap-y-3">
+      <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-[var(--accent)]/40 bg-[var(--accent-soft)] text-[var(--accent-ink)] sm:h-14 sm:w-14">
+        <Icon className="h-5 w-5 sm:h-6 sm:w-6" aria-hidden />
       </span>
       <div className="min-w-0 flex-1">
         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--accent-ink)]">
           Settings / {section.eyebrow}
         </p>
-        <h1 className="mt-1 text-[26px] font-bold leading-tight text-[var(--ink)]">{section.title}</h1>
-        <p className="mt-1 text-[13.5px] text-[var(--ink2)]">{section.subtitle}</p>
+        <h1 className="mt-1 text-[21px] font-bold leading-tight text-[var(--ink)] sm:text-[26px]">{section.title}</h1>
+        <p className="mt-1 text-[13px] text-[var(--ink2)] sm:text-[13.5px]">{section.subtitle}</p>
       </div>
-      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+      {actions && <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">{actions}</div>}
     </header>
   );
 }
