@@ -1,5 +1,6 @@
 "use client";
 
+import { formatStorageUsage } from "@/lib/storage-api";
 import { useState } from "react";
 import {
   AtSign, Download, FileArchive, FolderInput, HardDrive, History, Info, ListChecks, Search, ShieldCheck, Upload,
@@ -27,11 +28,6 @@ const SOURCES: { key: string; name: string; text: string; logo: "GMAIL" | "MICRO
   { key: "imap", name: "IMAP mailbox", text: "Any mail account with IMAP access", logo: "imap" },
   { key: "mbox", name: "MBOX / EML files", text: "Upload exported mail files", logo: "file" },
 ];
-
-function gb(bytes: number): string {
-  const value = bytes / 1024 ** 3;
-  return value >= 10 ? value.toFixed(0) : value.toFixed(1);
-}
 
 export function ImportExport({ section }: { section: SettingsSection }) {
   const [tab, setTab] = useState<Tab>("import");
@@ -167,7 +163,7 @@ function StorageCard() {
         <HardDrive className="h-4 w-4 text-[var(--accent)]" aria-hidden /> Storage used
       </h2>
       <p className="mt-2 text-[20px] font-bold text-[var(--ink)]">
-        {isLoading ? "…" : `${gb(used)} / ${gb(limit)} GB`}
+        {isLoading ? "…" : `${formatStorageUsage(used, limit)}`}
       </p>
       <div
         className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--s3)]"

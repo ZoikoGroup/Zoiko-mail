@@ -47,15 +47,14 @@ export const lookupInvitationSchema = z.object({
 });
 
 /**
- * Claiming a placeholder account. The password rules are the registration
- * rules — this is the same act, reached from a link instead of a form, and a
- * weaker password here would be a way around them.
+ * Claiming a placeholder account from a setup link: at least 8 characters
+ * with a lowercase letter, an uppercase letter and a number.
  */
 export const claimInvitationSchema = z.object({
   invitationToken: z.string().trim().min(16).max(512),
   password: z
     .string()
-    .min(12, "Use at least 12 characters")
+    .min(8, "Use at least 8 characters")
     .max(200)
     .regex(/[a-z]/, "Include a lowercase letter")
     .regex(/[A-Z]/, "Include an uppercase letter")

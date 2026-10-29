@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Menu, Search, X } from "lucide-react";
+import { Menu, Search, Settings, X } from "lucide-react";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { initials } from "@/lib/useMemberShell";
 
 /**
@@ -39,7 +40,15 @@ export function MobileHeader({
           </button>
         )}
         <h1 className="flex-1 truncate text-base font-semibold text-[var(--ink)]">{title}</h1>
-        {/* The phone's way to its profile; Settings is in the folder drawer. */}
+        {/* The desktop top bar has these; on a phone they live here. */}
+        <ThemeToggle />
+        <Link
+          href="/mail/settings"
+          aria-label="Settings"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--ink2)] hover:bg-[var(--s2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+        >
+          <Settings className="h-[18px] w-[18px]" aria-hidden />
+        </Link>
         <Link
           href="/mail/settings/profile"
           aria-label="Profile"

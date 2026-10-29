@@ -1,5 +1,6 @@
 "use client";
 
+import { formatStorageUsage } from "@/lib/storage-api";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import {
@@ -95,11 +96,6 @@ function NavList({ items, active, summary }: { items: NavItem[]; active: TasksPa
   );
 }
 
-function gb(bytes: number): string {
-  const value = bytes / 1024 ** 3;
-  return value >= 10 ? value.toFixed(0) : value.toFixed(1);
-}
-
 /** The Tasks workspace's left column: create, the views with their counts, and mailbox storage. */
 export function TasksSidebar({ active, activeTeamId, onNewTask }: { active: TasksPageKey; activeTeamId?: string; onNewTask: () => void }) {
   const { data: summary } = useTaskSummary();
@@ -158,7 +154,7 @@ export function TasksSidebar({ active, activeTeamId, onNewTask }: { active: Task
       <Link href="/mail/storage" aria-label="Mailbox storage details" className="m-3 block rounded-xl border border-[var(--border)] bg-[var(--s2)] p-3 transition hover:border-[var(--accent)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
         <div className="flex items-center justify-between text-[12px]">
           <span className="font-semibold text-[var(--ink)]">Mailbox storage</span>
-          <span className="font-mono-num text-[var(--ink2)]">{mailboxLoading ? "…" : `${gb(storageUsed)} / ${gb(storageLimit)} GB`}</span>
+          <span className="font-mono-num text-[var(--ink2)]">{mailboxLoading ? "…" : `${formatStorageUsage(storageUsed, storageLimit)}`}</span>
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--s3,var(--border))]">
           <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${storagePct}%` }} />

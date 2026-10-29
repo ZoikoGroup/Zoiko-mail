@@ -129,9 +129,12 @@ export function AssistantPage() {
   const shownPending = pending && pending.conversationId === conversationId ? pending : null;
   const title = conversationId ? conversation.data?.title ?? "Conversation" : "New chat";
 
+  const welcome = messages.length === 0 && !shownPending;
   useEffect(() => {
-    scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
-  }, [messages.length, shownPending?.content, shownPending?.error]);
+    // The welcome screen stays at the top; only a real conversation follows its end.
+    const top = welcome ? 0 : scroller.current?.scrollHeight ?? 0;
+    scroller.current?.scrollTo({ top, behavior: "smooth" });
+  }, [welcome, messages.length, shownPending?.content, shownPending?.error]);
   useEffect(() => {
     if (!notice) return;
     const t = setTimeout(() => setNotice(null), 3500);
@@ -377,7 +380,7 @@ export function AssistantPage() {
           )}
 
           <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto" data-testid="assistant-thread">
-            <div className="mx-auto w-full max-w-[860px] px-4 py-6 lg:px-6">
+            <div className={`mx-auto w-full max-w-[860px] px-4 lg:px-6 ${messages.length === 0 && !shownPending && !missing && !loadingThread ? "py-3" : "py-6"}`}>
               {missing ? (
                 <div role="alert" className="mx-auto mt-10 max-w-md text-center">
                   <AlertTriangle className="mx-auto h-8 w-8 text-[var(--crit)]" aria-hidden />
@@ -732,15 +735,15 @@ function MessageRow({
 
 function Welcome({ name, onPick }: { name?: string; onPick: (prompt: string, attach?: boolean) => void }) {
   return (
-    <div className="mx-auto mt-4 max-w-2xl text-center sm:mt-10" data-testid="assistant-welcome">
-      <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--zm-compose-from)] to-[var(--zm-compose-to)] text-white shadow-[0_10px_30px_-10px_rgba(47,111,237,0.8)]">
-        <Sparkles className="h-7 w-7" aria-hidden />
+    <div className="mx-auto max-w-2xl text-center" data-testid="assistant-welcome">
+      <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--zm-compose-from)] to-[var(--zm-compose-to)] text-white shadow-[0_10px_30px_-10px_rgba(47,111,237,0.8)]">
+        <Sparkles className="h-6 w-6" aria-hidden />
       </span>
-      <h2 className="mt-4 text-[22px] font-semibold text-[var(--ink)]">{name ? `Hi ${name}, how can I help?` : "How can I help?"}</h2>
-      <p className="mt-1.5 text-[13.5px] text-[var(--ink2)]">
+      <h2 className="mt-3 text-[21px] font-semibold text-[var(--ink)]">{name ? `Hi ${name}, how can I help?` : "How can I help?"}</h2>
+      <p className="mt-1 text-[13.5px] text-[var(--ink2)]">
         Ask Alet to draft and polish emails, read and answer questions about files you attach, or plan your work.
       </p>
-      <div className="mt-6 grid gap-2.5 text-left sm:grid-cols-2">
+      <div className="mt-4 grid gap-2 text-left sm:grid-cols-2">
         {SUGGESTIONS.map((s) => {
           const Icon = s.icon;
           return (
@@ -748,7 +751,7 @@ function Welcome({ name, onPick }: { name?: string; onPick: (prompt: string, att
               key={s.title}
               type="button"
               onClick={() => onPick(s.prompt, "attach" in s && s.attach)}
-              className="flex items-start gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3.5 text-left transition hover:border-[var(--accent)]/50 hover:bg-[var(--s2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+              className="flex items-start gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-left transition hover:border-[var(--accent)]/50 hover:bg-[var(--s2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
             >
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent-ink)]">
                 <Icon className="h-4 w-4" aria-hidden />

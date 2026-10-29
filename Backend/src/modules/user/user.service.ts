@@ -19,6 +19,7 @@ const profileSelect = {
   phoneNumber: true,
   timezone: true,
   language: true,
+  dailyDigest: true,
   status: true,
   createdAt: true,
   updatedAt: true,

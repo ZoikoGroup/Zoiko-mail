@@ -184,6 +184,24 @@ if ($freeMb -lt 700) {
 }
 
 <#
+  Is the Docker engine answering?
+
+  A stopped engine makes docker.exe write to stderr, and under
+  $ErrorActionPreference = Stop Windows PowerShell 5.1 turns that into a
+  terminating NativeCommandError even with 2>$null, so the script died on a
+  cold machine before Start-DockerEngine could start Docker Desktop. Errors
+  are non-terminating for this one probe.
+#>
+function Test-DockerEngine {
+  $previous = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    & docker info --format '{{.ServerVersion}}' 2>$null | Out-Null
+    return ($LASTEXITCODE -eq 0)
+  } finally { $ErrorActionPreference = $previous }
+}
+
+<#
   Docker Desktop, started if it is not already.
 
   Needed because a cold machine has no engine running, and "one command" is
@@ -192,12 +210,20 @@ if ($freeMb -lt 700) {
   is still coming up, and it is the engine that compose talks to.
 #>
 function Start-DockerEngine {
-  & docker info --format '{{.ServerVersion}}' 2>$null | Out-Null
-  if ($LASTEXITCODE -eq 0) { Write-Ok 'engine already running'; return $true }
+  if (Test-DockerEngine) { Write-Ok 'engine already running'; return $true }
 
-  $exe = Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe'
-  if (-not (Test-Path $exe)) {
-    Write-Bad "Docker Desktop not found at $exe - start it yourself, then re-run."
+  # Docker Desktop installs per machine (Program Files) or per user
+  # (%LOCALAPPDATA%\Programs); a per-user install is what the default
+  # installer picks without admin rights. Also try next to the docker.exe on PATH.
+  $candidates = @(
+    (Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe'),
+    (Join-Path $env:LOCALAPPDATA 'Programs\DockerDesktop\Docker Desktop.exe')
+  )
+  $cli = Get-Command docker -ErrorAction SilentlyContinue
+  if ($cli) { $candidates += (Join-Path (Split-Path (Split-Path (Split-Path $cli.Source))) 'Docker Desktop.exe') }
+  $exe = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+  if (-not $exe) {
+    Write-Bad "Docker Desktop not found (looked in: $($candidates -join '; ')) - start it yourself, then re-run."
     return $false
   }
 
@@ -207,8 +233,7 @@ function Start-DockerEngine {
   $deadline = (Get-Date).AddMinutes(4)
   while ((Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 10
-    & docker info --format '{{.ServerVersion}}' 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) { Write-Ok 'engine up'; return $true }
+    if (Test-DockerEngine) { Write-Ok 'engine up'; return $true }
   }
   Write-Bad 'Docker did not start within 4 minutes.'
   return $false
@@ -319,8 +344,7 @@ if ($Docker) {
     # The engine dying mid-build is the common shape of this on a tight
     # machine, and its own error message points at a pipe rather than at
     # memory. Name the likely cause instead.
-    & docker info --format '{{.ServerVersion}}' 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) {
+    if (-not (Test-DockerEngine)) {
       Write-Bad 'The Docker engine went down during the build - almost always memory.'
     } else {
       Write-Bad 'The image build failed. A build killed for memory shows as exit 137.'

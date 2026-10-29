@@ -28,8 +28,8 @@ body {
   --border: #DBE3EA;
   --bstrong: #C2CED8;
   --ink: #0A141D;
-  --ink2: #33465A;
-  --ink3: #6C8092;
+  --ink2: #2A3B4E;
+  --ink3: #52657A;
   --accent: #0A7EA4;
   --accent-ink: #075D7A;
   --accent-soft: #DFF0F6;
@@ -86,8 +86,8 @@ body {
   --s3: #E8EEF7;
   --border: #DCE4EF;
   --ink: #0E1B2E;
-  --ink2: #3A4B63;
-  --ink3: #66788F;
+  --ink2: #2B3C55;
+  --ink3: #4F6179;
   --accent: #2563EB;
   --accent-ink: #1D4ED8;
   --accent-soft: #E3ECFD;
@@ -644,4 +644,18 @@ body {
   background: var(--accent-soft);
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   color: var(--accent-ink);
+}
+
+/* Member section rail (AppRail): keeps its dark navy look in light mode too.
+   Only the rail re-values the tokens, so nothing else in light mode changes;
+   in dark mode these are the values it already had. */
+:root:not(.dark) .zm-rail-dark {
+  --zm-rail: #08101D;
+  --border: #1D2D45;
+  --ink: #E8EEF7;
+  --ink2: #AFBCCE;
+  --ink3: #7689A2;
+  --s2: #111F33;
+  --accent: #3B7BF6;
+  --accent-soft: #15315C;
 }

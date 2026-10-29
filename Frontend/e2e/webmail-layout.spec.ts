@@ -29,7 +29,7 @@ test("the inbox shows the workspace, counts, shared inboxes, storage and message
   const shared = folders.getByTestId("shared-inboxes");
   await expect(shared.getByRole("button", { name: /support\s*5/ })).toBeVisible();
   await expect(shared.getByRole("button", { name: /sales\s*3/ })).toBeVisible();
-  await expect(folders.getByTestId("storage-meter")).toContainText("2.4 of 10 GB");
+  await expect(folders.getByTestId("storage-meter")).toContainText("2.4 GB / 10 GB");
 
   const list = page.getByRole("region", { name: "Inbox messages" });
   await expect(list.getByText("Personal mailbox")).toBeVisible();

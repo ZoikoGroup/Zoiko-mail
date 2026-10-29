@@ -105,6 +105,12 @@ model AppUser {
   phoneNumber                 String?                @map("phone_number")
   timezone                    String?                @default("UTC")
   language                    String?                @default("en")
+  /// Settings → Mailbox Preferences → Daily digest: one summary notification
+  /// a day, first thing in the morning of the account's own time zone.
+  dailyDigest                 Boolean                @default(false) @map("daily_digest")
+  /// The local date (YYYY-MM-DD, in the account's time zone) the last daily
+  /// digest was queued for, so a day gets one digest however often it is swept.
+  dailyDigestLastOn           String?                @map("daily_digest_last_on") @db.VarChar(10)
   status                      AppUserStatus          @default(ACTIVE)
   platformRole                PlatformRole           @default(NONE) @map("platform_role")
   emailVerifiedAt             DateTime?              @map("email_verified_at")

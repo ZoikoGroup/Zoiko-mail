@@ -85,7 +85,7 @@ export function AppRail({ active }: { active: WorkspaceSection }) {
   return (
     <nav
       aria-label="Workspace sections"
-      className="flex h-full w-[76px] shrink-0 flex-col items-center gap-1 border-r border-[var(--border)] bg-[var(--zm-rail)] py-3"
+      className="zm-rail-dark flex h-full w-[76px] shrink-0 flex-col items-center gap-1 border-r border-[var(--border)] bg-[var(--zm-rail)] py-3"
     >
       {SECTIONS.map((section) => {
         const Icon = section.icon;

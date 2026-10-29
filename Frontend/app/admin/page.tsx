@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useDashboard } from "@/lib/admin-hooks";
+import { formatBytes } from "@/lib/storage-api";
 import { useCan } from "@/lib/admin-capabilities";
 import { BrandLoader } from "@/components/ui/BrandLoader";
 import {
@@ -196,9 +197,8 @@ export default function AdminDashboardPage() {
         />
         <StatTile
           label="Storage"
-          value={c.storageUsedGb}
-          suffix=" GB"
-          meter={pct(c.storageUsedGb, c.storageLimitGb)}
+          value={c.storageUsedBytes !== undefined ? formatBytes(c.storageUsedBytes) : `${c.storageUsedGb} GB`}
+          meter={pct(c.storageUsedBytes ?? c.storageUsedGb, c.storageUsedBytes !== undefined ? c.storageLimitBytes ?? 0 : c.storageLimitGb)}
         />
       </div>
 

@@ -258,6 +258,8 @@ export interface Profile {
   phoneNumber: string | null;
   timezone: string | null;
   language: string | null;
+  /** One summary notification a day (Settings → Mailbox Preferences). */
+  dailyDigest: boolean;
   createdAt: string;
 }
 
@@ -267,6 +269,7 @@ export interface UpdateProfileInput {
   phoneNumber?: string | null;
   timezone?: string;
   language?: string;
+  dailyDigest?: boolean;
 }
 
 export async function getProfile(): Promise<Profile> {

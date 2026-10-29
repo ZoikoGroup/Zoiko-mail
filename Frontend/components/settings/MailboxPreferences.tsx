@@ -9,7 +9,7 @@ import {
   useMailPreferences,
   type InboxView, type MailPreferences, type MarkReadDelay, type MessageDensity, type ReadingPanePosition,
 } from "@/lib/mail-preferences";
-import { applyThemePref, readThemePref, type ThemePref } from "@/lib/theme";
+import { applyThemePref, followSystemTheme, readThemePref, THEME_EVENT, type ThemePref } from "@/lib/theme";
 import { useSignature, useUpdateSignature } from "@/lib/mail-hooks";
 import { useProfile, useUpdateProfile } from "@/lib/auth-hooks";
 import { useSendDigest } from "@/lib/notifications-hooks";
@@ -21,14 +21,14 @@ import type { SettingsSection } from "@/components/settings/sections";
  * Settings → Mailbox Preferences: how Mail lists and opens your mail, how it
  * looks, your signature, language and time zone.
  *
- * Everything is a draft until Save changes. The mail preferences and the
- * theme are remembered in this browser; the signature, language and time
- * zone are saved to the account.
+ * Everything is a draft until Save changes, except Appearance, which applies
+ * the moment it is chosen so the page shows what you picked. The mail
+ * preferences and the theme are remembered in this browser; the signature,
+ * language and time zone are saved to the account.
  */
 
 type Draft = {
   prefs: Partial<MailPreferences>;
-  theme?: ThemePref;
   signature?: string;
   language?: string;
   timezone?: string;
@@ -84,7 +84,16 @@ export function MailboxPreferences({ section }: { section: SettingsSection }) {
 
   // Read after mount, like the preferences: the server render has no storage.
   const [savedTheme, setSavedTheme] = useState<ThemePref>("system");
-  useEffect(() => setSavedTheme(readThemePref()), []);
+  useEffect(() => {
+    const sync = () => setSavedTheme(readThemePref());
+    sync();
+    window.addEventListener(THEME_EVENT, sync);
+    const stopFollowing = followSystemTheme();
+    return () => {
+      window.removeEventListener(THEME_EVENT, sync);
+      stopFollowing();
+    };
+  }, []);
 
   const [draft, setDraft] = useState<Draft>({ prefs: {} });
   const [saving, setSaving] = useState(false);
@@ -97,17 +106,16 @@ export function MailboxPreferences({ section }: { section: SettingsSection }) {
 
   // What the page shows: the saved values with the draft on top.
   const v: MailPreferences = { ...prefs, ...draft.prefs };
-  const theme = draft.theme ?? savedTheme;
+  const theme = savedTheme;
   const sig = draft.signature ?? savedSignature;
   const language = draft.language ?? savedLanguage;
   const timezone = draft.timezone ?? savedTimezone;
 
   const prefsChanged = (Object.keys(draft.prefs) as (keyof MailPreferences)[]).some((k) => draft.prefs[k] !== prefs[k]);
-  const themeChanged = draft.theme !== undefined && draft.theme !== savedTheme;
   const sigChanged = draft.signature !== undefined && draft.signature.trim() !== savedSignature.trim();
   const languageChanged = draft.language !== undefined && draft.language !== savedLanguage;
   const timezoneChanged = draft.timezone !== undefined && draft.timezone !== savedTimezone;
-  const dirty = prefsChanged || themeChanged || sigChanged || languageChanged || timezoneChanged;
+  const dirty = prefsChanged || sigChanged || languageChanged || timezoneChanged;
 
   const setPref = <K extends keyof MailPreferences>(key: K, value: MailPreferences[K]) => {
     setDraft((d) => ({ ...d, prefs: { ...d.prefs, [key]: value } }));
@@ -132,10 +140,6 @@ export function MailboxPreferences({ section }: { section: SettingsSection }) {
     setFailure(null);
     // The browser-side settings cannot fail; apply them first.
     if (prefsChanged) savePrefs(draft.prefs);
-    if (themeChanged && draft.theme) {
-      applyThemePref(draft.theme);
-      setSavedTheme(draft.theme);
-    }
     const left: Draft = { prefs: {} };
     const problems: string[] = [];
     if (sigChanged) {
@@ -286,7 +290,7 @@ export function MailboxPreferences({ section }: { section: SettingsSection }) {
 
         <aside className="flex flex-col gap-4">
           <LivePreview prefs={v} />
-          <AppearanceCard value={theme} onChange={(t) => setField({ theme: t })} />
+          <AppearanceCard value={theme} onChange={(t) => { applyThemePref(t); setSavedTheme(t); }} />
           <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
             <h2 className="flex items-center justify-between text-[14px] font-semibold text-[var(--ink)]">
               Policy protections <span className="text-[11.5px] font-medium text-[var(--ink3)]">View only</span>
@@ -397,7 +401,11 @@ function Segmented<T extends string>({ label, value, options, disabled, onChange
 /** Actions, not preferences: they happen at once and are not part of Save. */
 function NotificationsCard() {
   const digest = useSendDigest();
+  const profile = useProfile();
+  const updateProfile = useUpdateProfile();
   const [note, setNote] = useState<string | null>(null);
+  const [dailyError, setDailyError] = useState<string | null>(null);
+  const dailyOn = profile.data?.dailyDigest ?? false;
   useEffect(() => {
     if (!note) return;
     const t = setTimeout(() => setNote(null), 4000);
@@ -406,7 +414,7 @@ function NotificationsCard() {
 
   return (
     <Card title="Notifications" count={3}>
-      <Row icon={Send} title="Send a digest now" description={note ?? "An on-demand summary of what needs your attention, sent to your inbox."}>
+      <Row icon={Send} title="Send a digest now" description={note ?? "An on-demand summary of what needs your attention, added to your notifications."}>
         <button
           type="button"
           className="zoiko-btn"
@@ -423,7 +431,21 @@ function NotificationsCard() {
         </button>
       </Row>
       <Row icon={BellRing} title="Desktop notifications" description="Browser notifications for new mail and activity." soon />
-      <Row icon={Mail} title="Daily digest" description="Receive a summary automatically once a day." soon />
+      <Row
+        icon={Mail}
+        title="Daily digest"
+        description={dailyError ?? "A summary of your unread mail and notifications, added to your notifications each morning (from 8:00 in your time zone)."}
+      >
+        <Toggle
+          label="Daily digest"
+          checked={dailyOn}
+          disabled={profile.isLoading || updateProfile.isPending}
+          onChange={(on) => {
+            setDailyError(null);
+            updateProfile.mutate({ dailyDigest: on }, { onError: (error) => setDailyError(`Could not change the daily digest: ${(error as Error).message}`) });
+          }}
+        />
+      </Row>
     </Card>
   );
 }
@@ -523,7 +545,7 @@ function AppearanceCard({ value, onChange }: { value: ThemePref; onChange: (valu
         })}
       </div>
       <p className="mt-3 text-[11.5px] text-[var(--ink3)]">
-        {value === "system" ? "Follows your device's light or dark setting." : "Saved in this browser."}
+        {value === "system" ? "Follows your device's light or dark setting." : "Applies at once and is saved in this browser."}
       </p>
     </section>
   );

@@ -1,11 +1,12 @@
 "use client";
 
+import { formatStorageUsage } from "@/lib/storage-api";
 import Link from "next/link";
 import { useState } from "react";
 // import Link from "next/link";
 import {
   Pencil, Inbox, Star, Clock, Send, CalendarClock, FileText, Archive,
-  Ban, Trash2, MoreHorizontal, ChevronRight, Folder, Tag, Users, UserRound,
+  Ban, Trash2, MoreHorizontal, ChevronRight, Folder, Tag, Users, UserRound, Network, HelpCircle,
 } from "lucide-react";
 import type { MailListFolder, SharedInbox } from "@/lib/mail-api";
 import { useMailLabels, useSharedInboxes } from "@/lib/mail-hooks";
@@ -44,11 +45,6 @@ const SHARED_SHOWN = 5;
 
 export function folderLabel(folder: MailListFolder): string {
   return [...PRIMARY, ...MORE].find((row) => row.key === folder)?.label ?? "Mail";
-}
-
-function gb(bytes: number): string {
-  const value = bytes / 1024 ** 3;
-  return value >= 10 ? value.toFixed(0) : value.toFixed(1);
 }
 
 function Count({ value, active }: { value: number; active: boolean }) {
@@ -301,6 +297,28 @@ export function FolderRail({
             );
           })}
         </ul>
+
+        {/* Phone drawer only: Work Graph and Help have no bottom-nav tab or rail on a phone. */}
+        {onNavigate && (
+          <>
+            <div className="mx-3 mt-3 border-t border-[var(--border)]" />
+            <SectionTitle>More</SectionTitle>
+            <ul className="space-y-0.5" data-testid="more-nav">
+              <li>
+                <Link href="/mail/work-graph" onClick={onNavigate} className={rowClass(false)}>
+                  <Network className="h-4 w-4 shrink-0" aria-hidden />
+                  <span className="truncate">Work Graph</span>
+                </Link>
+              </li>
+              <li>
+                <Link href="/mail/help" onClick={onNavigate} className={rowClass(false)}>
+                  <HelpCircle className="h-4 w-4 shrink-0" aria-hidden />
+                  <span className="truncate">Help centre</span>
+                </Link>
+              </li>
+            </ul>
+          </>
+        )}
       </nav>
 
       <Link
@@ -311,7 +329,7 @@ export function FolderRail({
       >
         <div className="flex items-center justify-between text-[11.5px] text-[var(--ink3)]">
           <span>Mailbox storage</span>
-          <span>{storageLoading ? "…" : `${gb(storageUsed)} of ${gb(storageLimit)} GB`}</span>
+          <span>{storageLoading ? "…" : `${formatStorageUsage(storageUsed, storageLimit)}`}</span>
         </div>
         <div
           className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--s3)]"

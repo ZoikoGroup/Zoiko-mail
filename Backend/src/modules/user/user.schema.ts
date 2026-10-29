@@ -16,6 +16,7 @@ export const updateProfileSchema = z
     phoneNumber: z.string().trim().regex(/^\+?[1-9]\d{6,14}$/, "Invalid phone number").nullable().optional(),
     timezone: timezone.optional(),
     language: z.string().trim().regex(/^[a-z]{2,3}(-[A-Z]{2})?$/).max(10).optional(),
+    dailyDigest: z.boolean().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "At least one profile field is required",
