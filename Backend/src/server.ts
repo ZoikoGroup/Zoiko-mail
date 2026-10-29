@@ -16,6 +16,7 @@ import { assistantService } from "./modules/assistant/assistant.service.js";
 import { runDueDomainSyncs } from "./modules/domain/domain.sync.js";
 import { mailboxCleanupService } from "./modules/mail/mailbox-cleanup.service.js";
 import { taskService } from "./modules/task/task.service.js";
+import { notificationService } from "./modules/notification/notification.service.js";
 
 const app = createApp();
 const PORT = env.PORT;
@@ -82,6 +83,24 @@ const reminderWorker = setInterval(() => {
     });
 }, env.TASK_REMINDER_INTERVAL_MS);
 reminderWorker.unref();
+
+// Daily digests: checked every ten minutes, queued once per local day.
+let dailyDigestRunning = false;
+const dailyDigestWorker = setInterval(() => {
+  if (dailyDigestRunning) return;
+  dailyDigestRunning = true;
+  void notificationService.processDailyDigests()
+    .then((result) => {
+      if (result.queued > 0) logger.info(result, "Daily digests queued");
+    })
+    .catch((error: unknown) => {
+      logger.error({ error }, "Daily digest sweep failed");
+    })
+    .finally(() => {
+      dailyDigestRunning = false;
+    });
+}, 10 * 60 * 1000);
+dailyDigestWorker.unref();
 
 let jobWorkerRunning = false;
 const jobWorker = setInterval(() => {
@@ -352,6 +371,7 @@ async function shutdown(signal: string): Promise<void> {
   clearInterval(scheduler);
   clearInterval(snoozeWorker);
   clearInterval(reminderWorker);
+  clearInterval(dailyDigestWorker);
   clearInterval(jobWorker);
   clearInterval(providerEventWorker);
   clearInterval(complianceSweep);

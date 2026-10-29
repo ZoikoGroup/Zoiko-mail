@@ -645,3 +645,17 @@ body {
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   color: var(--accent-ink);
 }
+
+/* Member section rail (AppRail): keeps its dark navy look in light mode too.
+   Only the rail re-values the tokens, so nothing else in light mode changes;
+   in dark mode these are the values it already had. */
+:root:not(.dark) .zm-rail-dark {
+  --zm-rail: #08101D;
+  --border: #1D2D45;
+  --ink: #E8EEF7;
+  --ink2: #AFBCCE;
+  --ink3: #7689A2;
+  --s2: #111F33;
+  --accent: #3B7BF6;
+  --accent-soft: #15315C;
+}

@@ -4,6 +4,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Eye, EyeOff } from "lucide-react";
 import {
   acceptInvitation,
   claimInvitation,
@@ -48,7 +49,7 @@ type Phase =
 
 /** The server's password rule for a new account, checked as they type. */
 const RULES: { label: string; test: (p: string) => boolean }[] = [
-  { label: "At least 12 characters", test: (p) => p.length >= 12 },
+  { label: "At least 8 characters", test: (p) => p.length >= 8 },
   { label: "An uppercase letter", test: (p) => /[A-Z]/.test(p) },
   { label: "A lowercase letter", test: (p) => /[a-z]/.test(p) },
   { label: "A number", test: (p) => /[0-9]/.test(p) },
@@ -109,6 +110,8 @@ function AcceptInvitationInner() {
   const [invite, setInvite] = useState<InvitationLookup | null>(null);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [touched, setTouched] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [busy, setBusy] = useState(false);
@@ -215,6 +218,8 @@ function AcceptInvitationInner() {
 
   const field =
     "w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-teal-500 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100";
+  const eyeButton =
+    "absolute inset-y-0 right-0 flex w-10 items-center justify-center rounded-r-lg text-slate-400 hover:text-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 dark:hover:text-slate-200";
   const fieldLabel = "mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300";
   const primary =
     "mt-6 inline-block rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-teal-700";
@@ -265,18 +270,29 @@ function AcceptInvitationInner() {
 
               <div>
                 <label htmlFor="new-password" className={fieldLabel}>Password</label>
-                <input
-                  id="new-password"
-                  type="password"
-                  autoComplete="new-password"
-                  className={field}
-                  value={password}
-                  disabled={busy}
-                  aria-invalid={touched && failing.length > 0}
-                  aria-describedby="password-rules"
-                  onChange={(event) => setPassword(event.target.value)}
-                />
-                <ul id="password-rules" className="mt-2 space-y-0.5" aria-label="Password requirements">
+                <div className="relative">
+                  <input
+                    id="new-password"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="new-password"
+                    className={`${field} pr-10`}
+                    value={password}
+                    disabled={busy}
+                    aria-invalid={touched && failing.length > 0}
+                    aria-describedby="password-rules"
+                    onChange={(event) => setPassword(event.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className={eyeButton}
+                    onClick={() => setShowPassword((v) => !v)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    aria-pressed={showPassword}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
+                  </button>
+                </div>
+                <ul id="password-rules" className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1" aria-label="Password requirements">
                   {RULES.map((rule) => {
                     const met = rule.test(password);
                     return (
@@ -295,16 +311,27 @@ function AcceptInvitationInner() {
 
               <div>
                 <label htmlFor="confirm-password" className={fieldLabel}>Confirm password</label>
-                <input
-                  id="confirm-password"
-                  type="password"
-                  autoComplete="new-password"
-                  className={field}
-                  value={confirm}
-                  disabled={busy}
-                  aria-invalid={mismatch || (touched && confirm.length === 0)}
-                  onChange={(event) => setConfirm(event.target.value)}
-                />
+                <div className="relative">
+                  <input
+                    id="confirm-password"
+                    type={showConfirm ? "text" : "password"}
+                    autoComplete="new-password"
+                    className={`${field} pr-10`}
+                    value={confirm}
+                    disabled={busy}
+                    aria-invalid={mismatch || (touched && confirm.length === 0)}
+                    onChange={(event) => setConfirm(event.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className={eyeButton}
+                    onClick={() => setShowConfirm((v) => !v)}
+                    aria-label={showConfirm ? "Hide confirmation" : "Show confirmation"}
+                    aria-pressed={showConfirm}
+                  >
+                    {showConfirm ? <EyeOff className="h-4 w-4" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
+                  </button>
+                </div>
                 {mismatch ? (
                   <p className="mt-1 text-xs text-red-600 dark:text-red-400">Passwords do not match.</p>
                 ) : touched && confirm.length === 0 ? (

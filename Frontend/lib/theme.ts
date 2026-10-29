@@ -22,6 +22,9 @@ export function systemPrefersDark(): boolean {
   return typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
+/** Fired on window whenever the theme is applied, so every toggle shows the real one. */
+export const THEME_EVENT = "zoiko-theme";
+
 export function applyThemePref(pref: ThemePref) {
   const dark = pref === "dark" || (pref === "system" && systemPrefersDark());
   document.documentElement.classList.toggle("dark", dark);
@@ -31,4 +34,18 @@ export function applyThemePref(pref: ThemePref) {
   } catch {
     /* Not remembered, but applied for this visit. */
   }
+  window.dispatchEvent(new Event(THEME_EVENT));
+}
+
+/**
+ * While the preference is "system", follows the device when it switches
+ * between light and dark. Returns a function that stops listening.
+ */
+export function followSystemTheme(): () => void {
+  const query = window.matchMedia("(prefers-color-scheme: dark)");
+  const onChange = () => {
+    if (readThemePref() === "system") applyThemePref("system");
+  };
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
+import { THEME_EVENT, applyThemePref } from "@/lib/theme";
 
 /**
  * Toggles the `.dark` class on <html> and persists the choice.
@@ -11,19 +12,19 @@ import { Moon, Sun } from "lucide-react";
 export function ThemeToggle() {
   const [dark, setDark] = useState(false);
 
+  // Also follows changes made elsewhere (Settings → Appearance), so this
+  // button never shows the opposite of what the page is doing.
   useEffect(() => {
-    setDark(document.documentElement.classList.contains("dark"));
+    const sync = () => setDark(document.documentElement.classList.contains("dark"));
+    sync();
+    window.addEventListener(THEME_EVENT, sync);
+    return () => window.removeEventListener(THEME_EVENT, sync);
   }, []);
 
   const toggle = () => {
     const next = !dark;
     setDark(next);
-    document.documentElement.classList.toggle("dark", next);
-    try {
-      localStorage.setItem("theme", next ? "dark" : "light");
-    } catch {
-      /* ignore storage failures (private mode, etc.) */
-    }
+    applyThemePref(next ? "dark" : "light");
   };
 
   return (

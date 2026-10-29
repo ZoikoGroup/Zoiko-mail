@@ -84,7 +84,14 @@ test.describe("setting a password from a setup link", () => {
       await page.getByLabel("Password", { exact: true }).fill("short");
       await button.click();
       const rules = page.getByRole("list", { name: "Password requirements" });
-      await expect(rules).toContainText("At least 12 characters (not met yet)");
+      await expect(rules).toContainText("At least 8 characters (not met yet)");
+      // The eye shows and hides what was typed.
+      const passwordField = page.getByLabel("Password", { exact: true });
+      await expect(passwordField).toHaveAttribute("type", "password");
+      await page.getByRole("button", { name: "Show password" }).click();
+      await expect(passwordField).toHaveAttribute("type", "text");
+      await page.getByRole("button", { name: "Hide password" }).click();
+      await expect(passwordField).toHaveAttribute("type", "password");
       await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
       await page.getByLabel("Confirm password").fill(`${PASSWORD}x`);
       await expect(page.getByText("Passwords do not match.")).toBeVisible();
