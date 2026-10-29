@@ -166,7 +166,7 @@ test("Import & Export shows planned sources, real storage and no invented jobs",
   await openWebmail(page);
   await page.goto("/mail/settings/import-export");
   await expect(page.getByTestId("import-sources").getByText("Planned")).toHaveCount(4, { timeout: 60_000 });
-  await expect(page.getByTestId("storage-card")).toContainText("2.4 / 10 GB");
+  await expect(page.getByTestId("storage-card")).toContainText("2.4 GB / 10 GB");
   await expect(page.getByRole("button", { name: /New export/ })).toBeDisabled();
   await page.getByRole("tab", { name: /Job history/ }).click();
   await expect(page.getByTestId("job-history")).toContainText("No transfer jobs yet");

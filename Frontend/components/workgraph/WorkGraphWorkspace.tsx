@@ -1,5 +1,6 @@
 "use client";
 
+import { formatStorageUsage } from "@/lib/storage-api";
 import Link from "next/link";
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, Flag, Network, Plus, Repeat, Target, type LucideIcon } from "lucide-react";
@@ -50,11 +51,6 @@ const rowClass = (active: boolean) =>
       ? "bg-[var(--zm-selected)] font-semibold text-[var(--ink)] before:absolute before:inset-y-1.5 before:left-0 before:w-[3px] before:rounded-full before:bg-[var(--accent)]"
       : "text-[var(--ink2)] hover:bg-[var(--s2)] hover:text-[var(--ink)]"
   }`;
-
-function gb(bytes: number): string {
-  const value = bytes / 1024 ** 3;
-  return value >= 10 ? value.toFixed(0) : value.toFixed(1);
-}
 
 function Badge({ value, hex, label }: { value: number; hex?: string; label: string }) {
   if (value <= 0) return null;
@@ -127,7 +123,7 @@ function Sidebar({ active, actions }: { active: WorkGraphPage; actions: Actions 
       <Link href="/mail/storage" aria-label="Mailbox storage details" className="m-3 block rounded-xl border border-[var(--border)] bg-[var(--s2)] p-3 transition hover:border-[var(--accent)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
         <div className="flex items-center justify-between text-[12px]">
           <span className="font-semibold text-[var(--ink)]">Mailbox storage</span>
-          <span className="font-mono-num text-[var(--ink2)]">{mailboxLoading ? "…" : `${gb(storageUsed)} / ${gb(storageLimit)} GB`}</span>
+          <span className="font-mono-num text-[var(--ink2)]">{mailboxLoading ? "…" : `${formatStorageUsage(storageUsed, storageLimit)}`}</span>
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--s3,var(--border))]">
           <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${pct}%` }} />

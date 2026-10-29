@@ -1,5 +1,6 @@
 "use client";
 
+import { formatStorageUsage } from "@/lib/storage-api";
 import Link from "next/link";
 import { useState } from "react";
 // import Link from "next/link";
@@ -44,11 +45,6 @@ const SHARED_SHOWN = 5;
 
 export function folderLabel(folder: MailListFolder): string {
   return [...PRIMARY, ...MORE].find((row) => row.key === folder)?.label ?? "Mail";
-}
-
-function gb(bytes: number): string {
-  const value = bytes / 1024 ** 3;
-  return value >= 10 ? value.toFixed(0) : value.toFixed(1);
 }
 
 function Count({ value, active }: { value: number; active: boolean }) {
@@ -311,7 +307,7 @@ export function FolderRail({
       >
         <div className="flex items-center justify-between text-[11.5px] text-[var(--ink3)]">
           <span>Mailbox storage</span>
-          <span>{storageLoading ? "…" : `${gb(storageUsed)} of ${gb(storageLimit)} GB`}</span>
+          <span>{storageLoading ? "…" : `${formatStorageUsage(storageUsed, storageLimit)}`}</span>
         </div>
         <div
           className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--s3)]"

@@ -1,5 +1,7 @@
 "use client";
 
+import { formatStorageUsage } from "@/lib/storage-api";
+
 /**
  * "[USED] / [QUOTA] GB" bar shown at the bottom of the folder rail.
  * Pure presentational — the caller (FolderRail) supplies the numbers from
@@ -27,7 +29,7 @@ export function StorageMeter({
       <div className="mb-1 flex items-center justify-between text-[10px] font-medium uppercase tracking-wider text-[var(--ink3)]">
         <span>Storage</span>
         <span className="font-mono-num normal-case tracking-normal">
-          {loading ? "…" : `${usedGb.toFixed(1)} / ${limitGb.toFixed(0)} GB`}
+          {loading ? "…" : formatStorageUsage(usedBytes, limitBytes)}
         </span>
       </div>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--s3)]">

@@ -47,3 +47,8 @@ export function formatBytes(bytes: number): string {
   const value = bytes / 1024 ** index;
   return `${value >= 100 || index === 0 ? Math.round(value) : value.toFixed(1)} ${units[index]}`;
 }
+
+/** "500 KB / 5 GB": the real amount in its own unit, so a small mailbox never reads "0.0 GB". */
+export function formatStorageUsage(usedBytes: number, limitBytes: number): string {
+  return `${formatBytes(usedBytes)} / ${formatBytes(limitBytes)}`;
+}
