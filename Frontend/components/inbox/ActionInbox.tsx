@@ -4,8 +4,9 @@ import React, { useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Inbox, CheckCircle2, XCircle, Clock, Play, Calendar, Plus, X,
-  AlertCircle, Loader2, FileSearch,
+  AlertCircle, FileSearch,
 } from "lucide-react";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import {
   useActions,
   useUpdateAction,
@@ -64,7 +65,7 @@ type FilterKey = "active" | "all" | ActionStatus;
 
 // ===========================================================================
 export function ActionInbox() {
-  const { data: items = [], isLoading, error } = useActions();
+  const { data: items = [], isPending, error, refetch } = useActions();
   const update = useUpdateAction();
   const [filter, setFilter] = useState<FilterKey>("active");
   const [showCreate, setShowCreate] = useState(false);
@@ -146,11 +147,7 @@ export function ActionInbox() {
 
       {/* List */}
       <div className="mt-4 flex-1 space-y-2">
-        {isLoading && (
-          <div className="flex items-center gap-2 py-10 text-sm text-[var(--ink3)]">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading commitments…
-          </div>
-        )}
+        {isPending && <BrandLoader variant="compact" label="Loading commitments" onRetry={() => void refetch()} />}
 
         {error && (
           <div className="flex items-start gap-2 rounded-lg border border-[var(--crit)]/30 bg-[var(--crit-soft)] p-4 text-sm text-[var(--crit)]">
@@ -159,7 +156,7 @@ export function ActionInbox() {
           </div>
         )}
 
-        {!isLoading && !error && visible.length === 0 && (
+        {!isPending && !error && visible.length === 0 && (
           <div className="flex flex-col items-center py-16 text-center text-[var(--ink3)]">
             <CheckCircle2 className="h-10 w-10 text-[var(--ok)]" />
             <p className="mt-3 text-sm font-medium text-[var(--ink2)]">Nothing here</p>

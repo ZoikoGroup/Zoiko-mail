@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
+import { WebmailLoading } from "@/components/mail/WebmailLoading";
 import { useSearchParams } from "next/navigation";
 import { WebmailShell } from "@/components/mail/WebmailShell";
 import { MailClient, type MailClientHandle, type MailLink } from "@/components/mail/MailClient";
@@ -15,7 +16,7 @@ const FOLDERS: MailListFolder[] = ["INBOX", "SENT", "DRAFTS", "ARCHIVE", "TRASH"
  */
 export default function MailPage() {
   return (
-    <Suspense>
+    <Suspense fallback={<WebmailLoading />}>
       <MailPageInner />
     </Suspense>
   );

@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import type { MailListFolder, SharedInbox } from "@/lib/mail-api";
 import { useMailLabels, useSharedInboxes } from "@/lib/mail-hooks";
+import { Spinner } from "@/components/ui/Spinner";
 import { SETTINGS_SECTIONS, type SettingsSectionKey } from "@/components/settings/sections";
 
 interface FolderRow {
@@ -188,7 +189,7 @@ export function FolderRail({
         <div className="mx-3 mt-3 border-t border-[var(--border)]" />
         <SectionTitle>Shared inboxes</SectionTitle>
         {sharedLoading ? (
-          <p className="px-3 py-1 text-xs text-[var(--ink3)]">Loading…</p>
+          <Spinner size="sm" label="Loading shared inboxes" className="px-3 py-1 text-xs" />
         ) : shared.length === 0 ? (
           <p className="px-3 py-1 text-xs text-[var(--ink3)]">None shared with you yet.</p>
         ) : (

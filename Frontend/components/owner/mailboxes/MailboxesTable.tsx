@@ -7,6 +7,7 @@ import { FilterBar } from "@/components/ui/FilterBar";
 import { DropdownMenu, DropdownItem } from "@/components/ui/DropdownMenu";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { StepUpDialog, useStepUp } from "@/components/admin/StepUpDialog";
 import { ApiError } from "@/lib/api-client";
 import { Pause, Play, Trash2, Mail, Eye } from "lucide-react";
@@ -44,7 +45,9 @@ export function MailboxesTable({ onCreateMailbox }: MailboxesTableProps) {
   const [suspendReason, setSuspendReason] = useState("");
   const [detailsMailbox, setDetailsMailbox] = useState<Mailbox | null>(null);
 
-  const { data: mailboxes = [], isLoading } = useAdminMailboxes();
+  const { data, isPending, isError, error, refetch } = useAdminMailboxes();
+  // Memoised so the empty fallback is one array, not a new one each render.
+  const mailboxes = useMemo(() => data ?? [], [data]);
   const can = useCan();
   // The server's two gates for Create Email, retry and resend. Shown only to
   // whoever holds both; the server refuses everyone else regardless.
@@ -188,35 +191,40 @@ export function MailboxesTable({ onCreateMailbox }: MailboxesTableProps) {
         )}
       </div>
 
-      <DataTable
-        columns={columns}
-        data={filtered}
-        keyExtractor={(row) => row.id}
-        pageSize={10}
-        emptyMessage={isLoading ? "Loading mailboxes…" : "No mailboxes match your filters."}
-        onRowClick={(row) => setDetailsMailbox(row)}
-        actions={(row) => (
-          <DropdownMenu>
-            <DropdownItem onClick={() => setDetailsMailbox(row)}>
-              <Eye className="h-3.5 w-3.5" /> View Details
-            </DropdownItem>
-            {!row.sendSuspendedAt ? (
-              <DropdownItem onClick={() => setConfirmSuspend(row)}>
-                <Pause className="h-3.5 w-3.5" /> Suspend Sending
+      {isError && !data ? (
+        <ErrorState message={error?.message} onRetry={() => void refetch()} />
+      ) : (
+        <DataTable
+          columns={columns}
+          data={filtered}
+          keyExtractor={(row) => row.id}
+          pageSize={10}
+          loading={isPending}
+          emptyMessage="No mailboxes match your filters."
+          onRowClick={(row) => setDetailsMailbox(row)}
+          actions={(row) => (
+            <DropdownMenu>
+              <DropdownItem onClick={() => setDetailsMailbox(row)}>
+                <Eye className="h-3.5 w-3.5" /> View Details
               </DropdownItem>
-            ) : (
-              <DropdownItem onClick={() => {
-                updateSending.mutate({ mailboxId: row.id, data: { suspended: false } });
-              }}>
-                <Play className="h-3.5 w-3.5" /> Resume Sending
+              {!row.sendSuspendedAt ? (
+                <DropdownItem onClick={() => setConfirmSuspend(row)}>
+                  <Pause className="h-3.5 w-3.5" /> Suspend Sending
+                </DropdownItem>
+              ) : (
+                <DropdownItem onClick={() => {
+                  updateSending.mutate({ mailboxId: row.id, data: { suspended: false } });
+                }}>
+                  <Play className="h-3.5 w-3.5" /> Resume Sending
+                </DropdownItem>
+              )}
+              <DropdownItem danger onClick={() => setConfirmDelete(row)}>
+                <Trash2 className="h-3.5 w-3.5" /> Delete
               </DropdownItem>
-            )}
-            <DropdownItem danger onClick={() => setConfirmDelete(row)}>
-              <Trash2 className="h-3.5 w-3.5" /> Delete
-            </DropdownItem>
-          </DropdownMenu>
-        )}
-      />
+            </DropdownMenu>
+          )}
+        />
+      )}
 
       <MailboxDetailsDrawer
         mailbox={detailsMailbox}

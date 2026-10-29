@@ -7,6 +7,7 @@ import { DataTable, type Column } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Modal } from "@/components/ui/Modal";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { useLifecycleRequests, useApproveDeletion, useConfirmDeletion, useCancelLifecycleRequest, useTenant } from "@/lib/owner-hooks";
 import { Trash2, X, ShieldCheck } from "lucide-react";
 
@@ -21,7 +22,8 @@ export default function DeletionRequestsPage() {
   const [phase, setPhase] = useState<"approve" | "confirm">("approve");
   const [typedName, setTypedName] = useState("");
 
-  const { data: requests = [], isLoading } = useLifecycleRequests();
+  const { data, isPending, isError, error, refetch } = useLifecycleRequests();
+  const requests = data ?? [];
   const { data: tenant } = useTenant();
   const approveDeletion = useApproveDeletion();
   const confirmDeletion = useConfirmDeletion();
@@ -102,29 +104,33 @@ export default function DeletionRequestsPage() {
           title="Deletion Requests"
           description="Manage data and mailbox deletion requests."
         />
-        <DataTable
-          columns={columns}
-          data={deletionRequests}
-          keyExtractor={(row) => row.id}
-          pageSize={10}
-          loading={isLoading}
-          emptyMessage={isLoading ? "Loading deletion requests…" : "No deletion requests."}
-          actions={(row) => {
-            if (row.status === "REQUESTED") {
-              return (
-                <div className="flex gap-2">
-                  <button onClick={() => setCancelTarget(row)} className="zoiko-btn sm">
-                    <X className="h-3 w-3" /> Cancel
-                  </button>
-                  <button onClick={() => handleProcess(row)} className="zoiko-btn crit sm">
-                    <Trash2 className="h-3 w-3" /> Process
-                  </button>
-                </div>
-              );
-            }
-            return null;
-          }}
-        />
+        {isError && !data ? (
+          <ErrorState message={error?.message} onRetry={() => void refetch()} />
+        ) : (
+          <DataTable
+            columns={columns}
+            data={deletionRequests}
+            keyExtractor={(row) => row.id}
+            pageSize={10}
+            loading={isPending}
+            emptyMessage="No deletion requests."
+            actions={(row) => {
+              if (row.status === "REQUESTED") {
+                return (
+                  <div className="flex gap-2">
+                    <button onClick={() => setCancelTarget(row)} className="zoiko-btn sm">
+                      <X className="h-3 w-3" /> Cancel
+                    </button>
+                    <button onClick={() => handleProcess(row)} className="zoiko-btn crit sm">
+                      <Trash2 className="h-3 w-3" /> Process
+                    </button>
+                  </div>
+                );
+              }
+              return null;
+            }}
+          />
+        )}
 
         {/* Cancel confirmation */}
         <Modal

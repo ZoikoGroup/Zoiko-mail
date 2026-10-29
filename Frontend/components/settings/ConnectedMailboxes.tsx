@@ -14,6 +14,8 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
 import { SettingsNotice } from "@/components/settings/SettingsBits";
 import type { SettingsSection } from "@/components/settings/sections";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { Spinner } from "@/components/ui/Spinner";
 
 /**
  * Settings → Connected Mailboxes: Gmail and Microsoft 365 accounts linked
@@ -180,9 +182,7 @@ export function ConnectedMailboxes({ section }: { section: SettingsSection }) {
           </p>
 
           {isLoading ? (
-            <p className="flex items-center gap-2 py-8 text-[12.5px] text-[var(--ink3)]">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Loading connections…
-            </p>
+            <BrandLoader variant="compact" label="Loading connections" />
           ) : error ? (
             <p role="alert" className="py-6 text-[12.5px] text-[var(--crit)]">Could not load your connections ({(error as Error).message}).</p>
           ) : accounts.length === 0 ? (
@@ -408,7 +408,7 @@ function ScopeRow({ icon: Icon, title, description, granted }: { icon: typeof Ma
 }
 
 function Activity({ events, loading, failed }: { events: ConnectorEvent[] | undefined; loading: boolean; failed: boolean }) {
-  if (loading) return <p className="mt-2 text-[12.5px] text-[var(--ink3)]">Loading activity…</p>;
+  if (loading) return <Spinner size="sm" label="Loading activity" className="mt-2 text-[12.5px]" />;
   if (failed) return <p className="mt-2 text-[12.5px] text-[var(--crit)]">Could not load recent activity.</p>;
   if (!events || events.length === 0) return <p className="mt-2 text-[12.5px] text-[var(--ink3)]">No activity from this account yet.</p>;
   return (

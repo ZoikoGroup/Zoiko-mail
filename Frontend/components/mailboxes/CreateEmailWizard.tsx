@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Modal } from "@/components/ui/Modal";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import { InvitationLinkBox } from "@/components/mailboxes/InvitationLinkBox";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ApiError, newIdempotencyKey } from "@/lib/api-client";
@@ -222,7 +223,7 @@ export function CreateEmailWizard({ onClose, domainsHref }: { onClose: () => voi
       </ol>
 
       {options.isLoading ? (
-        <p className="text-[12.5px] text-[var(--ink3)]">Loading domains and quotas…</p>
+        <BrandLoader variant="compact" label="Loading domains and quotas" onRetry={() => void options.refetch()} />
       ) : options.error ? (
         <Callout tone="crit">Could not load what this workspace can create. {(options.error as Error).message}</Callout>
       ) : step === "form" ? (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
@@ -15,7 +15,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const { data, isError, error } = useMe();
   const me = data as MeResponse | undefined;
-  const { data: actions = [], isLoading } = useActions();
+  const { data: actions = [], isPending: actionsPending } = useActions();
 
   useEffect(() => {
     const checkAuth = () => {
@@ -67,7 +67,11 @@ export default function DashboardPage() {
 
         {/* Live stats */}
         <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <Stat label="Active commitments" value={isLoading ? "—" : String(active)} href="/inbox" />
+          <Stat
+            label="Active commitments"
+            value={actionsPending ? <span className="zoi-skeleton my-1 block h-5 w-10 rounded" aria-hidden="true" /> : String(active)}
+            href="/inbox"
+          />
           <Stat label="Your role" value={me?.membership.role ?? "—"} />
           <Stat label="Workspace" value={me?.tenant.name ?? "—"} />
           <Stat label="Plan" value={me?.tenant.planCode ?? "—"} />
@@ -140,7 +144,7 @@ export default function DashboardPage() {
   );
 }
 
-function Stat({ label, value, href }: { label: string; value: string; href?: string }) {
+function Stat({ label, value, href }: { label: string; value: ReactNode; href?: string }) {
   const inner = (
     <div className="zoiko-stat">
       <div className="font-mono-num text-[10px] font-medium uppercase tracking-wider text-[var(--ink3)]">

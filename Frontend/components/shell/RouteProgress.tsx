@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
+import { useIsFetching, useIsMutating } from "@tanstack/react-query";
 
 type Phase = "idle" | "running" | "finishing";
 
@@ -9,14 +10,41 @@ type Phase = "idle" | "running" | "finishing";
 // the moment the new page renders. A safety timer keeps it from ever hanging.
 const MAX_MS = 8000;
 const FINISH_MS = 350;
+/** API work shorter than this never shows the bar, so quick calls don't flicker it. */
+const BUSY_DELAY_MS = 300;
 
 /**
- * Top loading bar for client-side navigations. Starts on internal link clicks
- * and back/forward, completes when usePathname() reports the new page.
- * Renders nothing until a navigation starts, so SSR/hydration are untouched.
+ * Whether the app is waiting on the API for something the user is waiting
+ * for: a query loading for the first time (no data yet), or a mutation (an
+ * action they took). Background refetches and polling already have data, so
+ * they never count.
+ */
+function useApiBusy(): boolean {
+  const firstLoads = useIsFetching({ predicate: (q) => q.state.data === undefined });
+  const actions = useIsMutating();
+  const busy = firstLoads + actions > 0;
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (!busy) {
+      setShown(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setShown(true), BUSY_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [busy]);
+  return shown;
+}
+
+/**
+ * The top loading bar. For client-side navigations it starts on internal link
+ * clicks and back/forward and completes when usePathname() reports the new
+ * page. Between navigations it shows a slim indeterminate bar while the API is
+ * busy with something the user is waiting for (see useApiBusy). Renders
+ * nothing until one of those starts, so SSR/hydration are untouched.
  */
 export function RouteProgress() {
   const pathname = usePathname();
+  const apiBusy = useApiBusy();
   const [phase, setPhase] = useState<Phase>("idle");
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
@@ -90,7 +118,9 @@ export function RouteProgress() {
     []
   );
 
-  if (phase === "idle") return null;
+  if (phase === "idle") {
+    return apiBusy ? <div className="route-progress" data-phase="busy" data-testid="api-activity" aria-hidden="true" /> : null;
+  }
   return <div className="route-progress" data-phase={phase} aria-hidden="true" />;
 }
 

@@ -9,9 +9,11 @@ import {
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { LayoutMenu } from "@/components/mail/LayoutMenu";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { initials } from "@/lib/useMemberShell";
-import { useLogoutAll, useMe } from "@/lib/auth-hooks";
+import { useLogoutAll, useMe, useSwitchWorkspace } from "@/lib/auth-hooks";
 import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from "@/lib/admin-hooks";
 import { useTaskSearch } from "@/lib/tasks-hooks";
 import type { Task } from "@/lib/tasks-api";
@@ -119,8 +121,9 @@ export function TopBar({
   const [confirmingEverywhere, setConfirmingEverywhere] = useState(false);
   // Switching is offered only when there is another workspace to switch to.
   const canSwitch = (me?.workspaceCount ?? 1) > 1;
+  const { switching, switchWorkspace } = useSwitchWorkspace();
 
-  const { data: notifications } = useNotifications();
+  const { data: notifications, error: notificationsError, refetch: refetchNotifications } = useNotifications();
   const markRead = useMarkNotificationRead();
   const markAll = useMarkAllNotificationsRead();
   const unread = (notifications ?? []).filter((n) => !n.readAt);
@@ -152,7 +155,7 @@ export function TopBar({
       </Link>
 
       {workspaceName && (
-        <WorkspaceCard name={workspaceName} canSwitch={canSwitch} />
+        <WorkspaceCard name={workspaceName} canSwitch={canSwitch} onSwitch={switchWorkspace} />
       )}
 
       <div className="relative mx-auto w-full max-w-xl flex-1">
@@ -298,7 +301,16 @@ export function TopBar({
                 )}
               </div>
               <ul className="max-h-80 overflow-y-auto">
-                {(notifications ?? []).length === 0 ? (
+                {notifications === undefined ? (
+                  // Not "all caught up" before the first answer, or after it failed.
+                  <li>
+                    {notificationsError ? (
+                      <ErrorState compact message="Couldn’t load your notifications." onRetry={refetchNotifications} />
+                    ) : (
+                      <BrandLoader variant="compact" label="Loading notifications" onRetry={refetchNotifications} />
+                    )}
+                  </li>
+                ) : notifications.length === 0 ? (
                   <li className="px-4 py-6 text-center text-sm text-[var(--ink3)]">You&rsquo;re all caught up.</li>
                 ) : (
                   (notifications ?? []).slice(0, 20).map((n) => (
@@ -383,9 +395,18 @@ export function TopBar({
                   Settings
                 </MenuLink>
                 {canSwitch && (
-                  <MenuLink href="/select-workspace" icon={Building2} onClick={() => setMenuOpen(false)}>
-                    Switch workspace
-                  </MenuLink>
+                  // A button, not a link to /select-workspace: switching signs
+                  // out first (see useSwitchWorkspace).
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      switchWorkspace();
+                    }}
+                    className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-[var(--ink2)] hover:bg-[var(--s2)]"
+                  >
+                    <Building2 className="h-3.5 w-3.5" aria-hidden /> Switch workspace
+                  </button>
                 )}
               </div>
               <div className="py-1">
@@ -417,6 +438,12 @@ export function TopBar({
         </div>
       </div>
 
+      {/* Covers the screen while the session ends, until /login takes over. */}
+      {switching && (
+        <div className="fixed inset-0 z-[100]">
+          <BrandLoader className="zm-webmail" label="Signing out to switch workspace" />
+        </div>
+      )}
       <ConfirmDialog
         open={confirmingEverywhere}
         onClose={() => setConfirmingEverywhere(false)}
@@ -457,10 +484,11 @@ function MenuLink({
 }
 
 /**
- * The workspace this session is in. With another workspace to go to it opens
- * the workspace picker; otherwise it is a label, not a button that leads nowhere.
+ * The workspace this session is in. With another workspace to go to it starts
+ * a switch (sign in again, then the picker); otherwise it is a label, not a
+ * button that leads nowhere.
  */
-function WorkspaceCard({ name, canSwitch }: { name: string; canSwitch: boolean }) {
+function WorkspaceCard({ name, canSwitch, onSwitch }: { name: string; canSwitch: boolean; onSwitch: () => void }) {
   const body = (
     <>
       <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--accent)] text-sm font-bold text-white">
@@ -476,14 +504,15 @@ function WorkspaceCard({ name, canSwitch }: { name: string; canSwitch: boolean }
   const box =
     "hidden h-11 min-w-0 max-w-[230px] shrink-0 items-center gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--s2)] px-3 xl:flex";
   return canSwitch ? (
-    <Link
-      href="/select-workspace"
-      className={`${box} transition hover:border-[var(--accent)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]`}
+    <button
+      type="button"
+      onClick={onSwitch}
+      className={`${box} text-left transition hover:border-[var(--accent)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]`}
       title={`Workspace: ${name} — switch workspace`}
       aria-label={`Workspace: ${name}. Switch workspace`}
     >
       {body}
-    </Link>
+    </button>
   ) : (
     <div className={box} title={`Workspace: ${name}`}>
       {body}

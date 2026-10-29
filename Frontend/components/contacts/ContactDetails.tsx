@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import type { Contact, DirectoryPerson, OtherContact } from "@/lib/contacts-api";
 import { useContactActivity } from "@/lib/contacts-hooks";
+import { Spinner } from "@/components/ui/Spinner";
 import { SOURCE_LABEL, colorFor, contactName, initialsOf, roleLine } from "@/lib/contact-format";
 
 /** Whoever is selected: a saved contact, a colleague, or someone from one's mail. */
@@ -265,7 +266,7 @@ export function ContactDetails({
         <div className="mt-5 border-t border-[var(--border)] pt-4">
           <h4 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--ink3)]">Recent communications</h4>
           {activity.isLoading ? (
-            <p className="mt-3 text-[12.5px] text-[var(--ink3)]" role="status">Loading…</p>
+            <Spinner size="sm" label="Loading recent communications" className="mt-3 text-[12.5px]" />
           ) : activity.isError ? (
             <p className="mt-3 text-[12.5px] text-[var(--crit)]">
               Could not load recent communications.{" "}

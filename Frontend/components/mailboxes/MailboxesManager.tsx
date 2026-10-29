@@ -51,7 +51,7 @@ import {
  */
 export function MailboxesManager({ domainsHref }: { domainsHref: string }) {
   const can = useCan();
-  const { data: mailboxes, isLoading, error } = useMailboxes();
+  const { data: mailboxes, isLoading, error, refetch } = useMailboxes();
   const setAi = useSetMailboxAi();
   const setWorkspaces = useUpdateMailboxWorkspaces();
   // Enabling AI on a mailbox is step-up (RBAC §2); restricting it is not, so
@@ -138,7 +138,7 @@ export function MailboxesManager({ domainsHref }: { domainsHref: string }) {
         badge={mailboxes ? <Pill tone="nu">{`${mailboxes.length} provisioned`}</Pill> : undefined}
       >
         {error ? (
-          <InlineError message={error.message} />
+          <InlineError message={error.message} onRetry={refetch} />
         ) : isLoading || !mailboxes ? (
           <LoadingRows rows={5} />
         ) : mailboxes.length === 0 ? (
@@ -377,7 +377,7 @@ export function MailboxesManager({ domainsHref }: { domainsHref: string }) {
  * twice, which is why the server audits its creation by name (Security §9).
  */
 function Routing({ mailboxId, address }: { mailboxId: string; address: string }) {
-  const { data, isLoading, error } = useMailboxRouting(mailboxId);
+  const { data, isLoading, error, refetch } = useMailboxRouting(mailboxId);
   const createAlias = useCreateAlias();
   const deleteAlias = useDeleteAlias();
   const createForwarding = useCreateForwarding();
@@ -392,7 +392,7 @@ function Routing({ mailboxId, address }: { mailboxId: string; address: string })
       | Error
       | undefined;
 
-  if (error) return <InlineError message={error.message} />;
+  if (error) return <InlineError message={error.message} onRetry={refetch} />;
   if (isLoading || !data) return <LoadingRows rows={2} />;
 
   return (

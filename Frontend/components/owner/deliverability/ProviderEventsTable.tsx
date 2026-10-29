@@ -4,6 +4,7 @@ import { useState } from "react";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { DropdownMenu, DropdownItem } from "@/components/ui/DropdownMenu";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { useProviderEvents, useReplayProviderEvent } from "@/lib/owner-hooks";
 import type { ProviderEventRow, ProviderEventStatus, ConnectorProvider } from "@/lib/owner-api";
 import { Radio, RotateCcw } from "lucide-react";
@@ -31,10 +32,11 @@ export function ProviderEventsTable() {
   const [provider, setProvider] = useState<ConnectorProvider | "">("");
   const [confirmReplay, setConfirmReplay] = useState<ProviderEventRow | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const { data: events = [], isLoading } = useProviderEvents({
+  const { data, isPending, isError, error, refetch } = useProviderEvents({
     ...(status ? { status } : {}),
     ...(provider ? { provider } : {}),
   });
+  const events = data ?? [];
   const replayEvent = useReplayProviderEvent();
 
   const handleReplay = () => {
@@ -124,23 +126,27 @@ export function ProviderEventsTable() {
         </div>
       )}
 
-      <DataTable
-        columns={columns}
-        data={events}
-        keyExtractor={(row) => row.id}
-        pageSize={15}
-        loading={isLoading}
-        emptyMessage={isLoading ? "Loading provider events…" : "No provider events recorded."}
-        actions={(row) =>
-          row.processingStatus === "DEAD_LETTER" ? (
-            <DropdownMenu>
-              <DropdownItem onClick={() => setConfirmReplay(row)}>
-                <RotateCcw className="h-3.5 w-3.5" /> Replay
-              </DropdownItem>
-            </DropdownMenu>
-          ) : undefined
-        }
-      />
+      {isError && !data ? (
+        <ErrorState message={error?.message} onRetry={() => void refetch()} />
+      ) : (
+        <DataTable
+          columns={columns}
+          data={events}
+          keyExtractor={(row) => row.id}
+          pageSize={15}
+          loading={isPending}
+          emptyMessage="No provider events recorded."
+          actions={(row) =>
+            row.processingStatus === "DEAD_LETTER" ? (
+              <DropdownMenu>
+                <DropdownItem onClick={() => setConfirmReplay(row)}>
+                  <RotateCcw className="h-3.5 w-3.5" /> Replay
+                </DropdownItem>
+              </DropdownMenu>
+            ) : undefined
+          }
+        />
+      )}
 
       <ConfirmDialog
         open={!!confirmReplay}

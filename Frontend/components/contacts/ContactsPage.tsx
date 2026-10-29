@@ -29,6 +29,9 @@ import {
 import type { Contact, ContactScope, ContactSort } from "@/lib/contacts-api";
 import { roleLine } from "@/lib/contact-format";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { ErrorState } from "@/components/ui/ErrorState";
+import { Spinner } from "@/components/ui/Spinner";
 import { ContactsSidebar, CONTACTS_VIEWS, VIEW_LABEL, viewHref, type ContactsView } from "./ContactsSidebar";
 import { ContactDialog, errorText, type ContactSeed } from "./ContactDialog";
 import {
@@ -251,7 +254,13 @@ export function ContactsPage() {
           ) : view === "duplicates" ? (
             <DuplicatesPanel onNotice={say} />
           ) : pickingGroup ? (
-            <GroupPicker groups={groups} loading={summary.isLoading} onNew={() => openNew()} />
+            <GroupPicker
+              groups={groups}
+              loading={summary.isLoading}
+              failed={summary.isError && !summary.data}
+              onRetry={() => void summary.refetch()}
+              onNew={() => openNew()}
+            />
           ) : (
             <div className="flex min-h-[520px] flex-1 gap-4">
               {/* The list. Below xl it gives way to the details when someone is chosen. */}
@@ -349,13 +358,13 @@ export function ContactsPage() {
 
                 <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2" data-testid="contacts-list">
                   {loading ? (
-                    <ul aria-label="Loading contacts" className="space-y-2 px-2 py-1">
+                    <ul role="status" aria-label="Loading contacts" className="space-y-2 px-2 py-1">
                       {Array.from({ length: 6 }, (_, i) => (
-                        <li key={i} className="flex animate-pulse items-center gap-3 py-2">
-                          <span className="h-9 w-9 rounded-full bg-[var(--s2)]" />
+                        <li key={i} className="flex items-center gap-3 py-2">
+                          <span className="zoi-skeleton h-9 w-9 rounded-full" />
                           <span className="flex-1 space-y-1.5">
-                            <span className="block h-3 w-1/3 rounded bg-[var(--s2)]" />
-                            <span className="block h-2.5 w-1/2 rounded bg-[var(--s2)]" />
+                            <span className="zoi-skeleton block h-3 w-1/3 rounded" />
+                            <span className="zoi-skeleton block h-2.5 w-1/2 rounded" />
                           </span>
                         </li>
                       ))}
@@ -389,7 +398,13 @@ export function ContactsPage() {
                   {contactsQuery.hasNextPage && scope && (
                     <div className="flex justify-center py-3">
                       <button type="button" className="zoiko-btn" onClick={() => contactsQuery.fetchNextPage()} disabled={contactsQuery.isFetchingNextPage}>
-                        {contactsQuery.isFetchingNextPage ? "Loading…" : "Show more contacts"}
+                        {contactsQuery.isFetchingNextPage ? (
+                          <>
+                            <Spinner size="sm" /> Loading more…
+                          </>
+                        ) : (
+                          "Show more contacts"
+                        )}
                       </button>
                     </div>
                   )}
@@ -604,13 +619,27 @@ function EmptyList({ view, query, onNew }: { view: ContactsView; query: string; 
   );
 }
 
-function GroupPicker({ groups, loading, onNew }: { groups: { name: string; count: number }[]; loading: boolean; onNew: () => void }) {
+function GroupPicker({
+  groups,
+  loading,
+  failed,
+  onRetry,
+  onNew,
+}: {
+  groups: { name: string; count: number }[];
+  loading: boolean;
+  failed: boolean;
+  onRetry: () => void;
+  onNew: () => void;
+}) {
   return (
     <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5" aria-label="Contact groups" data-testid="group-picker">
       <h2 className="text-[17px] font-semibold text-[var(--ink)]">Contact Groups</h2>
       <p className="mt-0.5 text-[12.5px] text-[var(--ink3)]">Groups are labels you give contacts when you add or edit them.</p>
       {loading ? (
-        <p className="mt-4 text-[13px] text-[var(--ink3)]" role="status">Loading…</p>
+        <BrandLoader variant="compact" label="Loading groups" onRetry={onRetry} />
+      ) : failed ? (
+        <ErrorState compact message="Couldn’t load your contact groups." onRetry={onRetry} />
       ) : groups.length === 0 ? (
         <div className="flex flex-col items-center py-10 text-center">
           <Tags className="h-9 w-9 text-[var(--ink3)]" aria-hidden />

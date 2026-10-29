@@ -19,7 +19,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 export default function AdminInvitationsPage() {
   const can = useCan();
-  const { data: invitations, isLoading, error } = useInvitations();
+  const { data: invitations, isLoading, error, refetch } = useInvitations();
   const [inviting, setInviting] = useState(false);
   const [revoking, setRevoking] = useState<{ id: string; email: string } | null>(null);
   const cancel = useCancelInvitation();
@@ -69,7 +69,7 @@ export default function AdminInvitationsPage() {
         }
       >
         {error ? (
-          <InlineError message={error.message} />
+          <InlineError message={error.message} onRetry={refetch} />
         ) : isLoading || !invitations ? (
           <LoadingRows rows={3} />
         ) : invitations.length === 0 ? (

@@ -8,6 +8,7 @@ import {AppShell} from "@/components/shell/AppShell";
 import { useThread } from "@/lib/mail-hooks";
 import { downloadAttachment } from "@/lib/mail-api";
 import type { EmailMessage, MailAttachment } from "@/lib/mail-api";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 
 export default function ThreadDetailPage() {
   const params = useParams();
@@ -18,7 +19,7 @@ export default function ThreadDetailPage() {
   useEffect(() => { router.replace("/mail"); }, [router]);
   const threadId = typeof params?.threadId === "string" ? params.threadId : null;
 
-  const { data: thread, isLoading, isError, error } = useThread(threadId);
+  const { data: thread, isPending, isError, error, refetch } = useThread(threadId);
 
   const handleAttachmentClick = useCallback(
     async (message: EmailMessage, attachment: MailAttachment) => {
@@ -43,10 +44,9 @@ export default function ThreadDetailPage() {
           Back to threads
         </button>
 
-        {isLoading && (
-          <div className="flex min-h-[300px] items-center justify-center text-sm text-[var(--ink3)]">
-            Loading thread…
-          </div>
+        {/* No id means a disabled query, which is pending for ever. */}
+        {threadId && isPending && (
+          <BrandLoader variant="panel" label="Loading thread" onRetry={() => void refetch()} />
         )}
 
         {isError && (

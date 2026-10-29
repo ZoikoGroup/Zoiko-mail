@@ -6,6 +6,7 @@ import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 
 import { useJoinWorkspace } from "@/lib/auth-hooks";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 
 // Copy for each state we handle. Add more entries here later without
 // creating new files or routes.
@@ -277,13 +278,15 @@ function AuthStatusInner() {
 
 export default function AuthStatusPage() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4 dark:bg-slate-950">
-      {/* Suspense boundary is required because useSearchParams() suspends
-          during static rendering — without this, next build errors out on
-          this route. */}
-      <Suspense>
+    // Suspense boundary is required because useSearchParams() suspends
+    // during static rendering — without this, next build errors out on
+    // this route. Its fallback is what the server sends until the client
+    // reads the URL: the full-screen loader, outside the padded frame so it
+    // fills the viewport, rather than an empty page.
+    <Suspense fallback={<BrandLoader label="Checking your account" />}>
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4 dark:bg-slate-950">
         <AuthStatusInner />
-      </Suspense>
-    </div>
+      </div>
+    </Suspense>
   );
 }

@@ -9,6 +9,7 @@ import { routeAuthState } from "@/lib/auth-hooks";
 import type { AuthResponse } from "@/lib/auth-api";
 import { resolveWorkspaceHref } from "@/lib/workspace";
 import { setTokens, setPlatformToken, setSignOutNotice } from "@/lib/auth-storage";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 
 // Matches the WorkspaceOption shape the backend returns in the login
 // WORKSPACE_SELECTION response.
@@ -200,8 +201,17 @@ export default function SelectWorkspacePage() {
     [token, acceptingId, clearStash, router]
   );
 
+  // No shell is on screen here, so both waits are the full-screen loader: the
+  // first render (the same on server and client, before the stash is read, and
+  // while a missing stash redirects to /login), and a workspace being opened.
+  // Once a pick goes through, routeAuthState navigates and the destination's
+  // own screen loader takes over without the logo blinking; a failed pick
+  // brings the picker back with its error.
   if (!ready || !workspaces) {
-    return null;
+    return <BrandLoader label="Loading your workspaces" />;
+  }
+  if (submitting || acceptingId) {
+    return <BrandLoader label="Opening your workspace" />;
   }
 
   return (

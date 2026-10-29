@@ -13,6 +13,7 @@ import {
 import { isLoggedIn } from "@/lib/auth-storage";
 import { ApiError } from "@/lib/api-client";
 import { logout } from "@/lib/auth-api";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 
 /**
  * Accepting an invitation, or setting up a new mailbox from its setup link.
@@ -220,178 +221,178 @@ function AcceptInvitationInner() {
   const secondary =
     "mt-6 inline-block rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200";
 
+  // Nothing to show until the server has answered, so the whole screen waits
+  // on the loader, carrying on from the Suspense fallback below.
+  if (phase === "loading" || phase === "accepting") {
+    return <BrandLoader label={phase === "accepting" ? "Accepting your invitation" : "Checking your invitation"} />;
+  }
+
   return (
-    <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-xl dark:border-slate-800 dark:bg-slate-950">
-      <div className="mb-6 text-center">
-        <Image
-          src="/ZoikoMail_Logo_DarkBG_PNG.png"
-          width={400}
-          height={100}
-          className="mx-auto h-12 w-auto"
-          alt="Zoiko Mail"
-          priority
-        />
-      </div>
-
-      {(phase === "loading" || phase === "accepting") && (
-        <div className="text-center" role="status">
-          <div aria-hidden className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-teal-600" />
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            {phase === "accepting" ? "Accepting your invitation…" : "Checking your invitation…"}
-          </p>
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4 dark:bg-slate-950">
+      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-xl dark:border-slate-800 dark:bg-slate-950">
+        <div className="mb-6 text-center">
+          <Image
+            src="/ZoikoMail_Logo_DarkBG_PNG.png"
+            width={400}
+            height={100}
+            className="mx-auto h-12 w-auto"
+            alt="Zoiko Mail"
+            priority
+          />
         </div>
-      )}
 
-      {phase === "set-password" && invite && (
-        <form
-          noValidate
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submit();
-          }}
-        >
-          <h1 className="text-center text-xl font-semibold text-slate-900 dark:text-white">
-            You&apos;re invited to Zoiko Mail
-          </h1>
-          <p className="mt-2 text-center text-sm text-slate-500 dark:text-slate-400">
-            Set a password to start using your account in <strong>{invite.tenantName}</strong>.
-          </p>
+        {phase === "set-password" && invite && (
+          <form
+            noValidate
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submit();
+            }}
+          >
+            <h1 className="text-center text-xl font-semibold text-slate-900 dark:text-white">
+              You&apos;re invited to Zoiko Mail
+            </h1>
+            <p className="mt-2 text-center text-sm text-slate-500 dark:text-slate-400">
+              Set a password to start using your account in <strong>{invite.tenantName}</strong>.
+            </p>
 
-          <div className="mt-6 space-y-4">
-            <div>
-              <label htmlFor="invite-email" className={fieldLabel}>Email address</label>
-              <input id="invite-email" type="email" readOnly value={invite.email} autoComplete="username" className={`${field} bg-slate-50 dark:bg-slate-800`} />
-              <p className="mt-1 text-[11px] text-slate-400">You sign in with this address.</p>
-            </div>
+            <div className="mt-6 space-y-4">
+              <div>
+                <label htmlFor="invite-email" className={fieldLabel}>Email address</label>
+                <input id="invite-email" type="email" readOnly value={invite.email} autoComplete="username" className={`${field} bg-slate-50 dark:bg-slate-800`} />
+                <p className="mt-1 text-[11px] text-slate-400">You sign in with this address.</p>
+              </div>
 
-            <div>
-              <label htmlFor="new-password" className={fieldLabel}>Password</label>
-              <input
-                id="new-password"
-                type="password"
-                autoComplete="new-password"
-                className={field}
-                value={password}
+              <div>
+                <label htmlFor="new-password" className={fieldLabel}>Password</label>
+                <input
+                  id="new-password"
+                  type="password"
+                  autoComplete="new-password"
+                  className={field}
+                  value={password}
+                  disabled={busy}
+                  aria-invalid={touched && failing.length > 0}
+                  aria-describedby="password-rules"
+                  onChange={(event) => setPassword(event.target.value)}
+                />
+                <ul id="password-rules" className="mt-2 space-y-0.5" aria-label="Password requirements">
+                  {RULES.map((rule) => {
+                    const met = rule.test(password);
+                    return (
+                      <li
+                        key={rule.label}
+                        className={`flex items-center gap-1.5 text-[12px] ${met ? "text-green-700 dark:text-green-400" : touched ? "text-red-600 dark:text-red-400" : "text-slate-500 dark:text-slate-400"}`}
+                      >
+                        <span aria-hidden>{met ? "✓" : "•"}</span>
+                        {rule.label}
+                        <span className="sr-only">{met ? " (met)" : " (not met yet)"}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+
+              <div>
+                <label htmlFor="confirm-password" className={fieldLabel}>Confirm password</label>
+                <input
+                  id="confirm-password"
+                  type="password"
+                  autoComplete="new-password"
+                  className={field}
+                  value={confirm}
+                  disabled={busy}
+                  aria-invalid={mismatch || (touched && confirm.length === 0)}
+                  onChange={(event) => setConfirm(event.target.value)}
+                />
+                {mismatch ? (
+                  <p className="mt-1 text-xs text-red-600 dark:text-red-400">Passwords do not match.</p>
+                ) : touched && confirm.length === 0 ? (
+                  <p className="mt-1 text-xs text-red-600 dark:text-red-400">Enter the password again to confirm it.</p>
+                ) : null}
+              </div>
+
+              {errorMsg && <p role="alert" className="text-xs text-red-600 dark:text-red-400">{errorMsg}</p>}
+
+              <button
+                type="submit"
+                className="w-full rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
                 disabled={busy}
-                aria-invalid={touched && failing.length > 0}
-                aria-describedby="password-rules"
-                onChange={(event) => setPassword(event.target.value)}
-              />
-              <ul id="password-rules" className="mt-2 space-y-0.5" aria-label="Password requirements">
-                {RULES.map((rule) => {
-                  const met = rule.test(password);
-                  return (
-                    <li
-                      key={rule.label}
-                      className={`flex items-center gap-1.5 text-[12px] ${met ? "text-green-700 dark:text-green-400" : touched ? "text-red-600 dark:text-red-400" : "text-slate-500 dark:text-slate-400"}`}
-                    >
-                      <span aria-hidden>{met ? "✓" : "•"}</span>
-                      {rule.label}
-                      <span className="sr-only">{met ? " (met)" : " (not met yet)"}</span>
-                    </li>
-                  );
-                })}
-              </ul>
+              >
+                {busy ? "Setting password…" : "Set Password"}
+              </button>
             </div>
+          </form>
+        )}
 
-            <div>
-              <label htmlFor="confirm-password" className={fieldLabel}>Confirm password</label>
-              <input
-                id="confirm-password"
-                type="password"
-                autoComplete="new-password"
-                className={field}
-                value={confirm}
-                disabled={busy}
-                aria-invalid={mismatch || (touched && confirm.length === 0)}
-                onChange={(event) => setConfirm(event.target.value)}
-              />
-              {mismatch ? (
-                <p className="mt-1 text-xs text-red-600 dark:text-red-400">Passwords do not match.</p>
-              ) : touched && confirm.length === 0 ? (
-                <p className="mt-1 text-xs text-red-600 dark:text-red-400">Enter the password again to confirm it.</p>
-              ) : null}
-            </div>
+        {phase === "needs-signin" && (
+          <Notice icon="🔒" tone="info" title="Sign in to accept" action={<Link href={signInHref} className={primary}>Sign in</Link>}>
+            {invite?.email ? (
+              <>
+                <strong className="break-all">{invite.email}</strong> already has an account. Sign in and accept the invitation
+                from there.
+              </>
+            ) : (
+              "Sign in to accept this invitation."
+            )}
+          </Notice>
+        )}
 
-            {errorMsg && <p role="alert" className="text-xs text-red-600 dark:text-red-400">{errorMsg}</p>}
+        {phase === "already-accepted" && (
+          <Notice icon="✓" tone="ok" title="This link has already been used" action={<Link href={signInHref} className={primary}>Sign in</Link>}>
+            {invite ? (
+              <>
+                The password for <strong className="break-all">{invite.email}</strong> is already set. Sign in to continue.
+              </>
+            ) : (
+              "The password for this account is already set. Sign in to continue."
+            )}
+          </Notice>
+        )}
 
-            <button
-              type="submit"
-              className="w-full rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
-              disabled={busy}
-            >
-              {busy ? "Setting password…" : "Set Password"}
-            </button>
-          </div>
-        </form>
-      )}
+        {phase === "done" && (
+          <Notice icon="✓" tone="ok" title="Your password is set" action={<Link href={signInHref} className={primary}>Continue to sign in</Link>}>
+            {invite ? <>Sign in as <strong className="break-all">{invite.email}</strong>. Taking you there now…</> : "Taking you to sign in…"}
+          </Notice>
+        )}
 
-      {phase === "needs-signin" && (
-        <Notice icon="🔒" tone="info" title="Sign in to accept" action={<Link href={signInHref} className={primary}>Sign in</Link>}>
-          {invite?.email ? (
-            <>
-              <strong className="break-all">{invite.email}</strong> already has an account. Sign in and accept the invitation
-              from there.
-            </>
-          ) : (
-            "Sign in to accept this invitation."
-          )}
-        </Notice>
-      )}
+        {phase === "expired" && (
+          <Notice icon="⌛" tone="warn" title="This link has expired" action={<Link href={signInHref} className={secondary}>Back to sign in</Link>}>
+            Setup links stop working after a while, for your security. Ask the administrator who sent it to generate a new link.
+          </Notice>
+        )}
 
-      {phase === "already-accepted" && (
-        <Notice icon="✓" tone="ok" title="This link has already been used" action={<Link href={signInHref} className={primary}>Sign in</Link>}>
-          {invite ? (
-            <>
-              The password for <strong className="break-all">{invite.email}</strong> is already set. Sign in to continue.
-            </>
-          ) : (
-            "The password for this account is already set. Sign in to continue."
-          )}
-        </Notice>
-      )}
+        {phase === "invalid" && (
+          <Notice icon="✗" tone="crit" title="This link is no longer valid" action={<Link href={signInHref} className={secondary}>Back to sign in</Link>}>
+            It may have been replaced by a newer link or withdrawn. Use the most recent link you were sent, or ask your
+            administrator for a new one.
+          </Notice>
+        )}
 
-      {phase === "done" && (
-        <Notice icon="✓" tone="ok" title="Your password is set" action={<Link href={signInHref} className={primary}>Continue to sign in</Link>}>
-          {invite ? <>Sign in as <strong className="break-all">{invite.email}</strong>. Taking you there now…</> : "Taking you to sign in…"}
-        </Notice>
-      )}
+        {phase === "error" && (
+          <Notice icon="!" tone="crit" title="Something went wrong" action={<Link href={signInHref} className={secondary}>Back to sign in</Link>}>
+            {errorMsg || "We could not check this link. Try again in a moment."}
+          </Notice>
+        )}
 
-      {phase === "expired" && (
-        <Notice icon="⌛" tone="warn" title="This link has expired" action={<Link href={signInHref} className={secondary}>Back to sign in</Link>}>
-          Setup links stop working after a while, for your security. Ask the administrator who sent it to generate a new link.
-        </Notice>
-      )}
-
-      {phase === "invalid" && (
-        <Notice icon="✗" tone="crit" title="This link is no longer valid" action={<Link href={signInHref} className={secondary}>Back to sign in</Link>}>
-          It may have been replaced by a newer link or withdrawn. Use the most recent link you were sent, or ask your
-          administrator for a new one.
-        </Notice>
-      )}
-
-      {phase === "error" && (
-        <Notice icon="!" tone="crit" title="Something went wrong" action={<Link href={signInHref} className={secondary}>Back to sign in</Link>}>
-          {errorMsg || "We could not check this link. Try again in a moment."}
-        </Notice>
-      )}
-
-      {phase === "no-token" && (
-        <Notice icon="✗" tone="crit" title="Invalid link" action={<Link href={signInHref} className={secondary}>Back to sign in</Link>}>
-          This link is incomplete. Open the whole link you were sent again — if you reloaded this page, that is
-          why: the link is only read once, for your security.
-        </Notice>
-      )}
+        {phase === "no-token" && (
+          <Notice icon="✗" tone="crit" title="Invalid link" action={<Link href={signInHref} className={secondary}>Back to sign in</Link>}>
+            This link is incomplete. Open the whole link you were sent again — if you reloaded this page, that is
+            why: the link is only read once, for your security.
+          </Notice>
+        )}
+      </div>
     </div>
   );
 }
 
 export function AcceptInvitationScreen() {
+  // useSearchParams() suspends during static rendering, so the fallback is
+  // what the server sends: the full-screen loader the lookup then continues.
+  // The page frame lives inside, so the loader can fill the viewport.
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4 dark:bg-slate-950">
-      <Suspense>
-        <AcceptInvitationInner />
-      </Suspense>
-    </div>
+    <Suspense fallback={<BrandLoader label="Checking your invitation" />}>
+      <AcceptInvitationInner />
+    </Suspense>
   );
 }

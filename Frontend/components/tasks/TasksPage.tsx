@@ -20,6 +20,7 @@ import {
   Users,
   type LucideIcon,
 } from "lucide-react";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import { useMe } from "@/lib/auth-hooks";
 import { useTaskSummary, useTaskTeams, useTasks } from "@/lib/tasks-hooks";
 import { exportCompletedTasks, type ListTasksParams, type Task, type TaskSort, type TaskSummary, type TaskTeam } from "@/lib/tasks-api";
@@ -515,7 +516,7 @@ export function TasksPage({ page, teamId }: { page: TasksPageKey; teamId?: strin
                 Could not load tasks. {(list.error as Error).message}
               </p>
             ) : list.isLoading && !tab.soon ? (
-              <p className="p-5 text-[13px] text-[var(--ink3)]">Loading…</p>
+              <BrandLoader variant="compact" label={debounced ? "Searching…" : "Loading tasks"} onRetry={() => void list.refetch()} />
             ) : tasks.length === 0 ? (
               <div className="flex flex-col items-center px-6 py-14 text-center">
                 <CheckSquare className="h-10 w-10 text-[var(--ink3)]" aria-hidden />
@@ -548,7 +549,8 @@ export function TasksPage({ page, teamId }: { page: TasksPageKey; teamId?: strin
           </div>
         ) : (
           <div className="hidden items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center text-[13px] text-[var(--ink3)] lg:flex">
-            {list.isLoading ? "Loading…" : "Select a task to see its details."}
+            {/* The list beside it shows the loader; one is enough. */}
+            {list.isLoading ? null : "Select a task to see its details."}
           </div>
         )}
       </div>

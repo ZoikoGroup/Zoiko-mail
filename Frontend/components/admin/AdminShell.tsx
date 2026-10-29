@@ -232,7 +232,7 @@ function Rail({ onNavigate }: { onNavigate?: () => void }) {
             up as an empty rail on every load, so show its shape instead. */}
         {isLoading &&
           Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="mx-3 my-2 h-4 animate-pulse rounded bg-[var(--s3)]" />
+            <div key={i} className="zoi-skeleton mx-3 my-2 h-4 rounded" />
           ))}
 
         {/* Failing closed is right, but it must never look like the workspace

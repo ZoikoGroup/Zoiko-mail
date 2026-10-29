@@ -27,6 +27,8 @@ import { MonthGrid } from "./MonthGrid";
 import { MiniMonth } from "./MiniMonth";
 import { EventDialog, type EventDraftSeed } from "./EventDialog";
 import { swatchStyle } from "./palette";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { Spinner } from "@/components/ui/Spinner";
 
 const VIEWS: CalendarView[] = ["day", "week", "month", "agenda"];
 const dayHeading = new Intl.DateTimeFormat(undefined, { weekday: "long", day: "numeric", month: "long" });
@@ -200,6 +202,9 @@ export function MyCalendar() {
             <div className="flex flex-1 items-center justify-center p-8 text-center text-[13px] text-[var(--crit)]" role="alert">
               Could not load your events. {(eventsQuery.error as Error).message}
             </div>
+          ) : eventsQuery.data === undefined ? (
+            // First load only: a new range keeps the previous one's events on screen.
+            <BrandLoader variant="compact" label="Loading your events" onRetry={() => void eventsQuery.refetch()} />
           ) : view === "agenda" ? (
             <AgendaList
               days={range.days}
@@ -244,7 +249,7 @@ export function MyCalendar() {
             <span className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-[var(--ink2)]" aria-hidden />
               {zone.zone} time
-              {eventsQuery.isFetching && <span className="text-[var(--ink3)]">· Updating…</span>}
+              {eventsQuery.isFetching && eventsQuery.data !== undefined && <Spinner size="xs" label="Updating…" />}
             </span>
             <span data-testid="range-count">
               {view === "month" ? rangeLabel(view, anchor) : `Week ${isoWeek(range.days[0]!)}`} · {events.length}{" "}

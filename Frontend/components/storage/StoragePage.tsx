@@ -104,7 +104,7 @@ function StorageBody() {
 
         <section aria-label="Storage used" className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--sh1)]">
           {isLoading || !data ? (
-            <div className="h-20 animate-pulse rounded-lg bg-[var(--s2)]" aria-busy="true" />
+            <div className="zoi-skeleton h-20 rounded-lg" role="status" aria-label="Loading your storage" />
           ) : (
             <>
               <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -146,7 +146,7 @@ function StorageBody() {
           <section aria-label="By folder" className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
             <h2 className="text-sm font-semibold text-[var(--ink)]">By folder</h2>
             {isLoading || !data ? (
-              <div className="mt-3 h-24 animate-pulse rounded-lg bg-[var(--s2)]" />
+              <div className="zoi-skeleton mt-3 h-24 rounded-lg" role="status" aria-label="Loading" />
             ) : data.folders.length === 0 ? (
               <p className="mt-3 text-sm text-[var(--ink3)]">Your mailbox is empty.</p>
             ) : (
@@ -178,7 +178,7 @@ function StorageBody() {
               <Paperclip className="h-4 w-4 text-[var(--ink3)]" aria-hidden /> Attachments
             </h2>
             {isLoading || !data ? (
-              <div className="mt-3 h-24 animate-pulse rounded-lg bg-[var(--s2)]" />
+              <div className="zoi-skeleton mt-3 h-24 rounded-lg" role="status" aria-label="Loading" />
             ) : (
               <>
                 <p className="mt-3 text-2xl font-semibold text-[var(--ink)]">{formatBytes(data.attachments.bytes)}</p>
@@ -194,7 +194,7 @@ function StorageBody() {
         <section aria-label="Largest messages" className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
           <h2 className="text-sm font-semibold text-[var(--ink)]">Largest messages</h2>
           {isLoading || !data ? (
-            <div className="mt-3 h-24 animate-pulse rounded-lg bg-[var(--s2)]" />
+            <div className="zoi-skeleton mt-3 h-24 rounded-lg" role="status" aria-label="Loading" />
           ) : data.largest.length === 0 ? (
             <p className="mt-3 text-sm text-[var(--ink3)]">Nothing to show yet.</p>
           ) : (

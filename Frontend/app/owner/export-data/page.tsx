@@ -5,6 +5,8 @@ import { ProtectedRoute } from "@/components/owner/ProtectedRoute";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { StepUpDialog, useStepUp } from "@/components/admin/StepUpDialog";
 import { useLifecycleRequests, useRequestDataExport } from "@/lib/owner-hooks";
 import { downloadExport } from "@/lib/owner-api";
@@ -23,7 +25,8 @@ const typeIcons: Record<string, typeof Building2> = {
 export default function ExportDataPage() {
   const [confirmExport, setConfirmExport] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { data: requests = [], isLoading } = useLifecycleRequests();
+  const requestsQuery = useLifecycleRequests();
+  const requests = requestsQuery.data ?? [];
   const requestDataExport = useRequestDataExport();
   // Exporting is a STEP_UP capability (RBAC §2): "Request export" and the
   // download both need a fresh sign-in, so the refused-then-retry dance is the
@@ -101,8 +104,18 @@ export default function ExportDataPage() {
             <h3 className="text-sm font-semibold text-[var(--ink)]">Export History</h3>
           </div>
           <div className="divide-y divide-[var(--border)]">
-            {isLoading ? (
-              <div className="px-4 py-8 text-center text-sm text-[var(--ink3)]">Loading…</div>
+            {requestsQuery.isPending ? (
+              <BrandLoader
+                variant="compact"
+                label="Loading export history"
+                onRetry={() => void requestsQuery.refetch()}
+              />
+            ) : requestsQuery.isError && !requestsQuery.data ? (
+              <ErrorState
+                compact
+                message={requestsQuery.error?.message}
+                onRetry={() => void requestsQuery.refetch()}
+              />
             ) : exportRequests.length === 0 ? (
               <div className="px-4 py-8 text-center text-sm text-[var(--ink3)]">No export requests yet.</div>
             ) : (

@@ -20,7 +20,7 @@ const EMPTY_MARKER = "—";
 
 export default function AdminSettingsPage() {
   const can = useCan();
-  const { data: settings, isLoading, error } = useSettings();
+  const { data: settings, isLoading, error, refetch } = useSettings();
   const save = useUpdateWorkspaceSettings();
   const canWrite = can("workspace.settings.write");
 
@@ -90,7 +90,7 @@ export default function AdminSettingsPage() {
       <>
         <PageHeader title="Workspace settings" />
         <Card>
-          <InlineError message={error.message} />
+          <InlineError message={error.message} onRetry={refetch} />
         </Card>
       </>
     );

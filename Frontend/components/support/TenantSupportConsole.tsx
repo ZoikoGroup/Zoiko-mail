@@ -33,7 +33,9 @@ import {
   type TenantListParams,
 } from "@/lib/support-api";
 import { useLiveRefresh, useTenantDomains, useTenantMailboxes } from "@/lib/support-hooks";
-import TicketsPage from "@/components/support/TicketsPage";
+import TicketsPage, { TableSkeleton } from "@/components/support/TicketsPage";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { Spinner } from "@/components/ui/Spinner";
 import { RequestAccessPanel } from "./RequestAccessPanel";
 import { supportStyles } from "@/components/support/support-styles";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
@@ -175,14 +177,6 @@ function LoadErr({ error, onRetry }: { error: string; onRetry: () => void }) {
       <button className="btn sm" onClick={onRetry}>
         Retry
       </button>
-    </div>
-  );
-}
-
-function Spinner() {
-  return (
-    <div className="bd pad" style={{ color: "var(--ink3)", fontSize: "12px" }}>
-      Loading…
     </div>
   );
 }
@@ -426,7 +420,7 @@ export default function TenantSupportConsole() {
               */}
               {tab === "overview" &&
                 (overviewLoading ? (
-                  <Spinner />
+                  <BrandLoader variant="panel" label="Loading the workspace overview" onRetry={loadOverview} />
                 ) : overviewError ? (
                   <LoadErr error={overviewError} onRetry={loadOverview} />
                 ) : (
@@ -445,7 +439,7 @@ export default function TenantSupportConsole() {
 
               {tab === "diagnostics" &&
                 (overviewLoading ? (
-                  <Spinner />
+                  <BrandLoader variant="panel" label="Loading diagnostics" onRetry={loadOverview} />
                 ) : overviewError ? (
                   <LoadErr error={overviewError} onRetry={loadOverview} />
                 ) : (
@@ -667,7 +661,11 @@ function DiagnosticsView({
         </div>
       </div>
 
-      {result?.status === "loading" && <div className="bd pad muted">Running diagnostics…</div>}
+      {result?.status === "loading" && (
+        <div className="bd pad">
+          <Spinner size="sm" label="Running diagnostics…" />
+        </div>
+      )}
       {result?.status === "error" && (
         <LoadErr error={result.message} onRetry={() => onRun(current.id)} />
       )}
@@ -908,7 +906,7 @@ function ListShell<T>({
           <div className="sp"><span className="pill nu">{count}</span></div>
         </div>
         {loading ? (
-          <Spinner />
+          <TableSkeleton cols={headers.length} />
         ) : (
           <div className="bd">
             <Table headers={headers}>{rows.map(render)}</Table>
@@ -965,43 +963,47 @@ function MailboxesPage() {
           <h2>{applied ? `Mailboxes matching "${applied}"` : "All mailboxes"}</h2>
           <div className="sp"><span className="pill nu">{mailboxes.length}</span></div>
         </div>
-        <div className="bd">
-          <Table headers={["Address", "Member", "Type", "Suspended", "Accounts", "Created", ""]}>
-            {mailboxes.map((m) => (
-              <tr key={m.id}>
-                <td className="mo nm">{m.address}</td>
-                <td>{m.memberName}</td>
-                <td>{m.mailboxType}</td>
-                <td><Pill status={m.suspended ? "suspended" : "active"} /></td>
-                <td>{m.connectedAccounts.length}</td>
-                <td className="muted">{ago(m.createdAt)}</td>
-                <td>
-                  {/*
-                    Opens for an invited SUPPORT seat with no grant at all —
-                    the invitation is the authorization. The read is recorded
-                    in the workspace's audit log, which is the note in its
-                    title.
-                  */}
-                  <button className="btn" onClick={() => setReading(m)} title="Read headers — recorded in the audit log">
-                    Open
-                  </button>
-                  {/*
-                    §11.1's one support write, and its own scope — a seat
-                    approved to read is not thereby approved to change. The
-                    server refuses without MAILBOX_ADMIN and the refusal is
-                    shown as it comes.
-                  */}
-                  <button className="btn" onClick={() => setFixing(m)} title="Clear forwarding or lift a send suspension">
-                    Fix setting
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {mailboxes.length === 0 && !loading && (
-              <tr><td colSpan={7} className="muted">No mailboxes found.</td></tr>
-            )}
-          </Table>
-        </div>
+        {loading ? (
+          <TableSkeleton cols={7} />
+        ) : (
+          <div className="bd">
+            <Table headers={["Address", "Member", "Type", "Suspended", "Accounts", "Created", ""]}>
+              {mailboxes.map((m) => (
+                <tr key={m.id}>
+                  <td className="mo nm">{m.address}</td>
+                  <td>{m.memberName}</td>
+                  <td>{m.mailboxType}</td>
+                  <td><Pill status={m.suspended ? "suspended" : "active"} /></td>
+                  <td>{m.connectedAccounts.length}</td>
+                  <td className="muted">{ago(m.createdAt)}</td>
+                  <td>
+                    {/*
+                      Opens for an invited SUPPORT seat with no grant at all —
+                      the invitation is the authorization. The read is recorded
+                      in the workspace's audit log, which is the note in its
+                      title.
+                    */}
+                    <button className="btn" onClick={() => setReading(m)} title="Read headers — recorded in the audit log">
+                      Open
+                    </button>
+                    {/*
+                      §11.1's one support write, and its own scope — a seat
+                      approved to read is not thereby approved to change. The
+                      server refuses without MAILBOX_ADMIN and the refusal is
+                      shown as it comes.
+                    */}
+                    <button className="btn" onClick={() => setFixing(m)} title="Clear forwarding or lift a send suspension">
+                      Fix setting
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {mailboxes.length === 0 && !loading && (
+                <tr><td colSpan={7} className="muted">No mailboxes found.</td></tr>
+              )}
+            </Table>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1034,25 +1036,29 @@ function DomainsPage() {
           <h2>{applied ? `Domains matching "${applied}"` : "All domains"}</h2>
           <div className="sp"><span className="pill nu">{domains.length}</span></div>
         </div>
-        <div className="bd">
-          <Table headers={["Domain", "Verification", "MX", "SPF", "DKIM", "DMARC", "Sending", "Checked"]}>
-            {domains.map((d) => (
-              <tr key={d.id}>
-                <td className="mo nm">{d.domainName}</td>
-                <td><Pill status={d.verificationStatus} /></td>
-                <td><Pill status={d.mxStatus} /></td>
-                <td><Pill status={d.spfStatus} /></td>
-                <td><Pill status={d.dkimStatus} /></td>
-                <td><Pill status={d.dmarcStatus} /></td>
-                <td><Pill status={d.sendingEnabled ? "enabled" : "disabled"} /></td>
-                <td className="muted">{ago(d.lastCheckedAt)}</td>
-              </tr>
-            ))}
-            {domains.length === 0 && !loading && (
-              <tr><td colSpan={8} className="muted">No domains found.</td></tr>
-            )}
-          </Table>
-        </div>
+        {loading ? (
+          <TableSkeleton cols={8} />
+        ) : (
+          <div className="bd">
+            <Table headers={["Domain", "Verification", "MX", "SPF", "DKIM", "DMARC", "Sending", "Checked"]}>
+              {domains.map((d) => (
+                <tr key={d.id}>
+                  <td className="mo nm">{d.domainName}</td>
+                  <td><Pill status={d.verificationStatus} /></td>
+                  <td><Pill status={d.mxStatus} /></td>
+                  <td><Pill status={d.spfStatus} /></td>
+                  <td><Pill status={d.dkimStatus} /></td>
+                  <td><Pill status={d.dmarcStatus} /></td>
+                  <td><Pill status={d.sendingEnabled ? "enabled" : "disabled"} /></td>
+                  <td className="muted">{ago(d.lastCheckedAt)}</td>
+                </tr>
+              ))}
+              {domains.length === 0 && !loading && (
+                <tr><td colSpan={8} className="muted">No domains found.</td></tr>
+              )}
+            </Table>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1376,7 +1382,7 @@ function ConfigurationPage() {
 
   useLiveRefresh(load, 60_000, !loading && !error);
 
-  if (loading && !config) return <Spinner />;
+  if (loading && !config) return <BrandLoader variant="panel" label="Loading configuration" onRetry={load} />;
   if (error) return <LoadErr error={error} onRetry={load} />;
   if (!config) return null;
 
@@ -1578,7 +1584,7 @@ function MailboxMessages({ mailbox, onClose }: { mailbox: TenantMailbox; onClose
         {error ? (
           <LoadErr error={error} onRetry={() => load(q)} />
         ) : loading ? (
-          <Spinner />
+          <TableSkeleton cols={6} />
         ) : data ? (
           <>
             {!data.mailbox.aiEnabled && (

@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
-import { json } from "./admin-harness";
+import { ADMIN_CAPABILITIES, json } from "./admin-harness";
 
 /**
  * The loading screen (components/ui/BrandLoader.tsx), in every workspace.
@@ -18,6 +18,9 @@ const ROLE: Record<Workspace, string> = { MEMBER: "MEMBER", ADMIN: "ADMIN", OWNE
  * `{ items: [], count: 0 }` stub would crash it after the handover.
  */
 const SHAPED: Record<string, unknown> = {
+  // Without it the admin console's permission check fails and retries, which
+  // is real waiting: the activity bar would rightly show.
+  "/users/me/capabilities": { capabilities: ADMIN_CAPABILITIES, decisions: [] },
   "/tenants/onboarding-status": {
     steps: {
       workspaceCreated: true,
@@ -33,10 +36,16 @@ const SHAPED: Record<string, unknown> = {
   },
 };
 
-/** Stubs the API, signs in as `workspace`, and holds /auth/me until released. */
-async function stubSession(page: Page, workspace: Workspace, opts: { theme?: "dark" | "light" } = {}) {
+/**
+ * Stubs the API, signs in as `workspace`, and holds /auth/me until released.
+ * With `holdData`, every other call (the workspace's own data) is held too,
+ * until `releaseData()`.
+ */
+async function stubSession(page: Page, workspace: Workspace, opts: { theme?: "dark" | "light"; holdData?: boolean } = {}) {
   let release!: () => void;
   const released = new Promise<void>((resolve) => (release = resolve));
+  let releaseData!: () => void;
+  const dataReleased = opts.holdData ? new Promise<void>((resolve) => (releaseData = resolve)) : Promise.resolve();
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
 
@@ -66,11 +75,12 @@ async function stubSession(page: Page, workspace: Workspace, opts: { theme?: "da
           })
         );
       }
+      await dataReleased;
       if (path in SHAPED) return route.fulfill(json(SHAPED[path]));
       return route.fulfill(json({ items: [], count: 0 }));
     }
   );
-  return { release, errors };
+  return { release, releaseData: () => releaseData?.(), errors };
 }
 
 const loader = (page: Page) => page.getByTestId("brand-loader");
@@ -93,7 +103,7 @@ async function warm(page: Page, path: string) {
  */
 const WORKSPACES: { name: string; workspace: Workspace; path: string; label: RegExp; landmark: (page: Page) => Locator }[] = [
   { name: "member home", workspace: "MEMBER", path: "/contacts", label: /Loading your workspace/, landmark: (p) => p.getByText("Acme Corp").first() },
-  { name: "member mail", workspace: "MEMBER", path: "/mail", label: /Loading your mail/, landmark: (p) => p.getByText("Work Graph").first() },
+  { name: "member mail", workspace: "MEMBER", path: "/mail", label: /Loading Zoiko Mail/, landmark: (p) => p.getByText("Work Graph").first() },
   { name: "admin", workspace: "ADMIN", path: "/admin", label: /Opening the admin workspace/, landmark: (p) => p.getByText("Admin workspace") },
   { name: "owner", workspace: "OWNER", path: "/owner", label: /Opening the owner workspace/, landmark: (p) => p.getByText("Users & Roles").first() },
   { name: "support", workspace: "SUPPORT", path: "/support", label: /Opening the support workspace/, landmark: (p) => p.getByRole("button", { name: /Workspace Overview/ }) },
@@ -151,6 +161,43 @@ test("a slow session check offers Reload instead of freezing, and recovers once 
   release();
   await expect(loader(page)).toHaveCount(0, { timeout: 60_000 });
   await expect(page.getByText("Admin workspace")).toBeVisible();
+});
+
+test("API calls the user is waiting on show the slim top bar, which leaves when they answer", async ({ page }) => {
+  const { release, releaseData } = await stubSession(page, "ADMIN", { holdData: true });
+  release();
+  await warm(page, "/admin");
+  await page.goto("/admin");
+  await expect(page.getByText("Admin workspace")).toBeVisible({ timeout: 60_000 });
+
+  // The dashboard's first loads are held: the bar shows (after its 300ms grace).
+  const bar = page.getByTestId("api-activity");
+  await expect(bar).toBeVisible();
+  // Not a full-screen loader: the console stays on screen around it.
+  await expect(page.getByText("Admin workspace")).toBeVisible();
+
+  releaseData();
+  await expect(bar).toHaveCount(0, { timeout: 15_000 });
+});
+
+test("quick API calls never show the top bar", async ({ page }) => {
+  const { release } = await stubSession(page, "ADMIN");
+  release();
+  await warm(page, "/admin");
+  await page.goto("/admin");
+  await expect(page.getByText("Admin workspace")).toBeVisible({ timeout: 60_000 });
+  // Watch for a while: every call answers at once, so the bar must never appear.
+  const seen = await page.evaluate(
+    () =>
+      new Promise<boolean>((resolve) => {
+        const observer = new MutationObserver(() => {
+          if (document.querySelector('[data-testid="api-activity"]')) resolve(true);
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+        setTimeout(() => resolve(Boolean(document.querySelector('[data-testid="api-activity"]'))), 2500);
+      })
+  );
+  expect(seen).toBe(false);
 });
 
 test("follows the dark theme: the light wordmark is swapped for the dark one", async ({ page }) => {

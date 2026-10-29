@@ -5,6 +5,7 @@ import { DataTable, type Column } from "@/components/ui/DataTable";
 import { StatusBadge, statusBadge } from "@/components/ui/StatusBadge";
 import { DropdownMenu, DropdownItem } from "@/components/ui/DropdownMenu";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { RefreshCw, Unplug, Mail } from "lucide-react";
 import { useConnectors, useDeleteConnector } from "@/lib/owner-hooks";
 
@@ -24,7 +25,8 @@ function providerLabel(provider: string): string {
 
 export function ConnectedAccountsTable() {
   const [confirmDisconnect, setConfirmDisconnect] = useState<any>(null);
-  const { data: connectors = [], isLoading } = useConnectors();
+  const { data, isPending, isError, error, refetch } = useConnectors();
+  const connectors = data ?? [];
   const deleteConnector = useDeleteConnector();
 
   const columns: Column<any>[] = [
@@ -96,20 +98,25 @@ export function ConnectedAccountsTable() {
 
   return (
     <div className="space-y-4">
-      <DataTable
-        columns={columns}
-        data={connectors}
-        keyExtractor={(row) => row.id}
-        pageSize={10}
-        emptyMessage={isLoading ? "Loading connected accounts…" : "No connected accounts."}
-        actions={(row) => (
-          <DropdownMenu>
-            <DropdownItem danger onClick={() => setConfirmDisconnect(row)}>
-              <Unplug className="h-3.5 w-3.5" /> Disconnect
-            </DropdownItem>
-          </DropdownMenu>
-        )}
-      />
+      {isError && !data ? (
+        <ErrorState message={error?.message} onRetry={() => void refetch()} />
+      ) : (
+        <DataTable
+          columns={columns}
+          data={connectors}
+          keyExtractor={(row) => row.id}
+          pageSize={10}
+          loading={isPending}
+          emptyMessage="No connected accounts."
+          actions={(row) => (
+            <DropdownMenu>
+              <DropdownItem danger onClick={() => setConfirmDisconnect(row)}>
+                <Unplug className="h-3.5 w-3.5" /> Disconnect
+              </DropdownItem>
+            </DropdownMenu>
+          )}
+        />
+      )}
 
       <ConfirmDialog
         open={!!confirmDisconnect}

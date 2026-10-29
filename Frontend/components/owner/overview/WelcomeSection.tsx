@@ -1,5 +1,6 @@
 "use client";
 
+import { Spinner } from "@/components/ui/Spinner";
 import { useMe } from "@/lib/auth-hooks";
 import type { MeResponse } from "@/lib/auth-api";
 
@@ -20,7 +21,7 @@ export function WelcomeSection() {
             <span className="zoiko-pill accent">{me.membership.role}</span>
           </>
         ) : (
-          "Loading your organization…"
+          <Spinner size="sm" label="Loading your organization" />
         )}
       </p>
     </div>

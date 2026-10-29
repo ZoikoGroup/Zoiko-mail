@@ -6,6 +6,8 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal } from "@/components/ui/Modal";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { StepUpDialog, useStepUp } from "@/components/admin/StepUpDialog";
 import { useCan } from "@/lib/admin-capabilities";
 import {
@@ -106,9 +108,11 @@ export default function SupportAccessPage() {
     scopes: ["TENANT_DIAGNOSTICS"] as string[],
   });
 
-  const { data: grants = [], isLoading: grantsLoading } = useSupportGrants();
+  const grantsQuery = useSupportGrants();
+  const grants = grantsQuery.data ?? [];
   const { data: members = [], isLoading: membersLoading } = useMembers();
-  const { data: requestData, isLoading: requestsLoading } = useSupportAccessRequests();
+  const requestsQuery = useSupportAccessRequests();
+  const requestData = requestsQuery.data;
   const createGrant = useCreateSupportGrant();
   const revokeGrant = useRevokeSupportGrant();
   const approve = useApproveSupportAccess();
@@ -223,8 +227,18 @@ export default function SupportAccessPage() {
           )}
 
           <div className="divide-y divide-[var(--border)]">
-            {requestsLoading ? (
-              <div className="px-4 py-8 text-center text-sm text-[var(--ink3)]">Loading…</div>
+            {requestsQuery.isPending ? (
+              <BrandLoader
+                variant="compact"
+                label="Loading access requests"
+                onRetry={() => void requestsQuery.refetch()}
+              />
+            ) : requestsQuery.isError && !requestData ? (
+              <ErrorState
+                compact
+                message={requestsQuery.error?.message}
+                onRetry={() => void requestsQuery.refetch()}
+              />
             ) : pending.length === 0 ? (
               <div className="px-4 py-8 text-center text-sm text-[var(--ink3)]">
                 Nothing waiting. Support will appear here when they ask for access, and you will
@@ -366,8 +380,18 @@ export default function SupportAccessPage() {
             </h3>
           </div>
           <div className="divide-y divide-[var(--border)]">
-            {grantsLoading ? (
-              <div className="px-4 py-8 text-center text-sm text-[var(--ink3)]">Loading…</div>
+            {grantsQuery.isPending ? (
+              <BrandLoader
+                variant="compact"
+                label="Loading support access grants"
+                onRetry={() => void grantsQuery.refetch()}
+              />
+            ) : grantsQuery.isError && !grantsQuery.data ? (
+              <ErrorState
+                compact
+                message={grantsQuery.error?.message}
+                onRetry={() => void grantsQuery.refetch()}
+              />
             ) : grants.length === 0 ? (
               <div className="px-4 py-8 text-center text-sm text-[var(--ink3)]">
                 No support access grants yet. Nobody outside this workspace can read it.

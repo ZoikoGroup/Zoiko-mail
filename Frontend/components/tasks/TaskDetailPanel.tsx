@@ -22,7 +22,9 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { Spinner } from "@/components/ui/Spinner";
 import { DropdownItem, DropdownMenu } from "@/components/ui/DropdownMenu";
 import {
   useAddChecklistItem,
@@ -220,7 +222,7 @@ function Activity({ taskId }: { taskId: string }) {
   return (
     <Section title="Activity" aside={items.length ? `${items.length} ${items.length === 1 ? "event" : "events"}` : undefined}>
       {activity.isLoading ? (
-        <p className="text-[12.5px] text-[var(--ink3)]">Loading…</p>
+        <Spinner size="sm" label="Loading activity" className="text-[12.5px]" />
       ) : activity.isError ? (
         <p className="text-[12.5px] text-[var(--ink3)]">History is not available right now.</p>
       ) : items.length === 0 ? (
@@ -315,7 +317,9 @@ export function TaskDetailPanel({
     </section>
   );
 
-  if (detail.isLoading) return shell(<p className="p-6 text-[13px] text-[var(--ink3)]">Loading…</p>);
+  if (detail.isLoading) {
+    return shell(<BrandLoader variant="compact" label="Loading this task" onRetry={() => void detail.refetch()} />);
+  }
   const task = detail.data;
   if (detail.isError || !task) {
     return shell(

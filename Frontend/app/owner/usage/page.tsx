@@ -86,7 +86,7 @@ export default function UsagePage() {
           ))}
         </div>
 
-        {error ? (
+        {error && !usage ? (
           <ErrorState
             message="Failed to load usage data."
             onRetry={() => refetch()}

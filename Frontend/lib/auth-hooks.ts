@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 import {
   login,
@@ -37,7 +38,7 @@ import {
   type ForgotPasswordInput,
   type ResetPasswordInput,
 } from "./auth-api";
-import { getPlatformToken, isLoggedIn } from "./auth-storage";
+import { getPlatformToken, isLoggedIn, setSignOutNotice } from "./auth-storage";
 import { AuthResponse } from "./auth-api";
 import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { resolveWorkspaceHref } from "./workspace";
@@ -416,6 +417,27 @@ export function useLogoutAll() {
       router.replace("/login");
     },
   });
+}
+
+/**
+ * "Switch workspace": sign out, with a note on the sign-in page saying why.
+ *
+ * Moving to another workspace means signing in again: a session is bound to
+ * the workspace it was opened for, and the workspace picker needs the
+ * selection token that only a sign-in issues. Linking straight to
+ * /select-workspace (as the menus first did) found no token and bounced to
+ * /login with no explanation. `switching` is true from the click until /login
+ * takes over, for the caller to cover the screen with the loader.
+ */
+export function useSwitchWorkspace() {
+  const logout = useLogout();
+  const [switching, setSwitching] = useState(false);
+  const switchWorkspace = () => {
+    setSwitching(true);
+    setSignOutNotice("To open another workspace, sign in again and choose it.");
+    logout.mutate();
+  };
+  return { switching, switchWorkspace };
 }
 
 /* ── second factor, from the account screen ────────────────────────────── */

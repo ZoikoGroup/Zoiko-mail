@@ -10,6 +10,7 @@ import {
   UserCheck,
   ShieldAlert,
 } from "lucide-react";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import { useAuditEvents } from "@/lib/owner-hooks";
 
 const actionIconMap: Record<string, { icon: typeof UserPlus; color: string }> = {
@@ -47,7 +48,7 @@ function timeAgo(ts: string) {
 }
 
 export function RecentActivity() {
-  const { data, isLoading, error } = useAuditEvents({ limit: 10 });
+  const { data, isLoading, error, refetch } = useAuditEvents({ limit: 10 });
   const events = data?.events ?? [];
 
   return (
@@ -56,9 +57,7 @@ export function RecentActivity() {
         <h2 className="text-sm font-semibold text-[var(--ink)]">Recent Activity</h2>
       </div>
       <div className="divide-y divide-[var(--border)]">
-        {isLoading && (
-          <div className="px-4 py-8 text-center text-sm text-[var(--ink3)]">Loading…</div>
-        )}
+        {isLoading && <BrandLoader variant="compact" label="Loading recent activity" onRetry={() => void refetch()} />}
         {!isLoading && error && (
           <div className="px-4 py-6 text-center text-sm text-[var(--crit)]">
             Recent activity could not be loaded.

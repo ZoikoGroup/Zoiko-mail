@@ -1,11 +1,12 @@
 "use client";
 
-import { AtSign, BadgeCheck, Ban, CheckCircle2, Loader2, Plus, ShieldCheck, UserRound, Users } from "lucide-react";
+import { AtSign, BadgeCheck, Ban, CheckCircle2, Plus, ShieldCheck, UserRound, Users } from "lucide-react";
 import { useSendableMailboxes } from "@/lib/mail-hooks";
 import type { SendableMailbox } from "@/lib/mail-api";
 import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
 import { SettingsNotice, SoonBadge } from "@/components/settings/SettingsBits";
 import type { SettingsSection } from "@/components/settings/sections";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 
 /**
  * Settings → Sender Identities: every address you can send from — your own
@@ -52,9 +53,7 @@ export function SenderIdentities({ section }: { section: SettingsSection }) {
           </div>
 
           {isLoading ? (
-            <p className="flex items-center gap-2 px-5 py-8 text-[12.5px] text-[var(--ink3)]">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Loading your addresses…
-            </p>
+            <BrandLoader variant="compact" label="Loading your addresses" />
           ) : error ? (
             <p role="alert" className="px-5 py-8 text-[12.5px] text-[var(--crit)]">Could not load your addresses ({(error as Error).message}).</p>
           ) : mailboxes.length === 0 ? (

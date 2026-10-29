@@ -49,30 +49,60 @@ function continuationStyle(): CSSProperties | null {
  * is identical to the server's HTML, and the loader shows from the first byte
  * of HTML, before any script has loaded.
  *
- * `screen` fills the viewport (shell and session gates). `inline` sits inside
- * a page that already shows its frame (for example the owner console's role
- * check), with a smaller mark and no wordmark.
+ * Which loading indicator to use where (the platform's loading rules):
+ *
+ *   - BrandLoader `screen`: app start, session and workspace checks: no
+ *     shell is on screen yet.
+ *   - BrandLoader `panel` / `compact`: a page's or pane's main content on its
+ *     first load (no data yet), inside the shell. Usually through
+ *     <QueryState>, which also handles errors.
+ *   - Skeletons (components/ui/Skeleton, DataTable `loading`): tables and
+ *     card grids whose layout is known before the data arrives.
+ *   - <Spinner>: buttons, single rows, "load more" and background refreshes.
+ *     Never a full-screen or panel loader for those.
+ *   - The top bar (RouteProgress): page navigation and API calls in flight.
  */
+export type BrandLoaderVariant = "screen" | "panel" | "compact" | "inline";
+
+const MARK: Record<Exclude<BrandLoaderVariant, "inline">, number> = { screen: 64, panel: 44, compact: 30 };
+
 export function BrandLoader({
-  variant = "screen",
+  variant: requested = "screen",
   label = "Loading Zoiko Mail",
   className = "",
+  onRetry,
 }: {
-  variant?: "screen" | "inline";
-  /** Read to assistive technology; also the visible caption on the full screen. */
+  /**
+   * `screen` fills the viewport: app start, session and workspace checks.
+   * `panel` fills a page's content area inside its shell. `compact` fits a
+   * pane or list (the mail list, the reading pane, a preview). `inline` is
+   * the older name for `panel`.
+   */
+  variant?: BrandLoaderVariant;
+  /** The caption, also read to assistive technology. */
   label?: string;
   /** Extra classes on the wrapper, e.g. "zm-webmail" for the mail palette. */
   className?: string;
+  /**
+   * What the slow-load notice's button does. Given (e.g. a query's refetch),
+   * it reads "Try again"; otherwise it reloads the page.
+   */
+  onRetry?: () => void;
 }) {
+  const variant = requested === "inline" ? "panel" : requested;
   const screen = variant === "screen";
-  const mark = screen ? 64 : 44;
+  const mark = MARK[variant];
 
+  // Only full-screen loaders hand over to one another within one load. A
+  // pane's loader always starts fresh: two panes loading at different times
+  // are two loads, and the second must not inherit the first's slow clock.
   // Computed once, when the loader first renders, and never again: the CSS
   // animations keep their start time, so changing these offsets on a later
   // re-render would move the slow notice and make the motion jump.
-  const [continuation] = useState(continuationStyle);
+  const [continuation] = useState(() => (screen ? continuationStyle() : null));
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    if (!screen) return;
     if (sequence.active === 0 && performance.now() - sequence.endedAt >= CONTINUE_MS) {
       // A server-rendered loader has been on screen since before React ran.
       // Its fade-in animation's startTime says since when, on the same clock
@@ -85,6 +115,9 @@ export function BrandLoader({
       sequence.active -= 1;
       sequence.endedAt = performance.now();
     };
+    // `screen` is fixed for a loader's life: callers switch variants by
+    // rendering a different element, never by changing this prop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -130,12 +163,12 @@ export function BrandLoader({
           <span className="brand-loader__bar" />
         </div>
 
-        <span className={screen ? "brand-loader__label" : "sr-only"}>{label}</span>
+        <span className="brand-loader__label">{label}</span>
 
         <div className="brand-loader__slow" data-testid="brand-loader-slow">
           <span>Taking longer than usual.</span>
-          <button type="button" onClick={() => window.location.reload()}>
-            Reload
+          <button type="button" onClick={onRetry ?? (() => window.location.reload())}>
+            {onRetry ? "Try again" : "Reload"}
           </button>
         </div>
       </div>

@@ -49,7 +49,7 @@ const STATUS_TONE: Record<string, Tone> = {
 
 export default function AdminDataPage() {
   const can = useCan();
-  const { data: requests, isLoading, error } = useLifecycleRequests();
+  const { data: requests, isLoading, error, refetch } = useLifecycleRequests();
   const exportReq = useRequestExport();
   const deletionReq = useRequestDeletion();
   const download = useDownloadExport();
@@ -162,7 +162,7 @@ export default function AdminDataPage() {
 
       <Card title="Requests">
         {error ? (
-          <InlineError message={error.message} />
+          <InlineError message={error.message} onRetry={refetch} />
         ) : isLoading || !requests ? (
           <LoadingRows rows={3} />
         ) : requests.length === 0 ? (

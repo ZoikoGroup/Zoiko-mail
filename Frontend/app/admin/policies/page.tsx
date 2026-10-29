@@ -47,7 +47,7 @@ const FIELD_PATTERN = /^[a-zA-Z][a-zA-Z0-9_.]{0,99}$/;
 
 export default function AdminPoliciesPage() {
   const can = useCan();
-  const { data: policies, isLoading, error } = usePolicies();
+  const { data: policies, isLoading, error, refetch } = usePolicies();
   const canWrite = can("policy.write");
 
   return (
@@ -71,7 +71,7 @@ export default function AdminPoliciesPage() {
 
       {error ? (
         <Card>
-          <InlineError message={error.message} />
+          <InlineError message={error.message} onRetry={refetch} />
         </Card>
       ) : isLoading || !policies ? (
         <Card>

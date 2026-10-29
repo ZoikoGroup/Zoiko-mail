@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import VerifyOtpForm from "@/components/auth/forms/VerifyOtpForm";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 
 export default function VerifyEmailPage() {
   const router = useRouter();
@@ -45,9 +46,10 @@ export default function VerifyEmailPage() {
   };
 
   if (!ready || !token || !email) {
-    // Brief flash while sessionStorage reads. Loading spinner isn't
-    // needed — this is <50ms in practice.
-    return null;
+    // While sessionStorage is read, and while a missing stash redirects to
+    // /login. Usually <50ms, which the loader's fade-in delay never shows;
+    // the same on server and client, so hydration matches.
+    return <BrandLoader label="Checking your sign-in" />;
   }
 
   return (

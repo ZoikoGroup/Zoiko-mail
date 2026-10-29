@@ -6,6 +6,7 @@ import { useDuplicates, useImportContacts, useMergeContacts } from "@/lib/contac
 import { listAllContacts, type ContactScope, type ImportResult } from "@/lib/contacts-api";
 import { contactName, contactsToCsv, downloadText, parseContactsCsv, roleLine, type ParsedImport } from "@/lib/contact-format";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import { Avatar } from "./ContactDetails";
 import { errorText } from "./ContactDialog";
 
@@ -197,7 +198,11 @@ export function DuplicatesPanel({ onNotice }: { onNotice: (text: string, kind?: 
   const [confirm, setConfirm] = useState<{ key: string; keepId: string; mergeIds: string[]; name: string } | null>(null);
 
   if (duplicates.isLoading) {
-    return <div className={`${card} text-[13px] text-[var(--ink3)]`} role="status">Looking for duplicates…</div>;
+    return (
+      <div className={card}>
+        <BrandLoader variant="compact" label="Looking for duplicates…" onRetry={() => void duplicates.refetch()} />
+      </div>
+    );
   }
   if (duplicates.isError) {
     return (

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { DropdownMenu, DropdownItem } from "@/components/ui/DropdownMenu";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { ShieldOff, Plus, AlertTriangle } from "lucide-react";
 import {
   useSuppressions,
@@ -32,7 +33,8 @@ function fmtDate(iso: string) {
 }
 
 export function SuppressionsTable() {
-  const { data: entries = [], isLoading } = useSuppressions();
+  const { data, isPending, isError, error, refetch } = useSuppressions();
+  const entries = data ?? [];
   const addSuppression = useAddSuppression();
   const deactivateSuppression = useDeactivateSuppression();
 
@@ -106,21 +108,25 @@ export function SuppressionsTable() {
         </div>
       )}
 
-      <DataTable
-        columns={columns}
-        data={entries}
-        keyExtractor={(row) => row.id}
-        pageSize={10}
-        loading={isLoading}
-        emptyMessage={isLoading ? "Loading suppressions…" : "No active suppressions."}
-        actions={(row) => (
-          <DropdownMenu>
-            <DropdownItem onClick={() => setConfirmDelete(row)}>
-              <ShieldOff className="h-3.5 w-3.5" /> Deactivate
-            </DropdownItem>
-          </DropdownMenu>
-        )}
-      />
+      {isError && !data ? (
+        <ErrorState message={error?.message} onRetry={() => void refetch()} />
+      ) : (
+        <DataTable
+          columns={columns}
+          data={entries}
+          keyExtractor={(row) => row.id}
+          pageSize={10}
+          loading={isPending}
+          emptyMessage="No active suppressions."
+          actions={(row) => (
+            <DropdownMenu>
+              <DropdownItem onClick={() => setConfirmDelete(row)}>
+                <ShieldOff className="h-3.5 w-3.5" /> Deactivate
+              </DropdownItem>
+            </DropdownMenu>
+          )}
+        />
+      )}
 
       <ConfirmDialog
         open={!!confirmDelete}

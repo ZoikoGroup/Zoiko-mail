@@ -15,6 +15,7 @@ import {
   Users,
   type LucideIcon,
 } from "lucide-react";
+import { Spinner } from "@/components/ui/Spinner";
 import { useMyMailbox } from "@/lib/mail-hooks";
 import { useTaskSummary, useTaskTeams } from "@/lib/tasks-hooks";
 import type { TaskSummary } from "@/lib/tasks-api";
@@ -131,7 +132,7 @@ export function TasksSidebar({ active, activeTeamId, onNewTask }: { active: Task
         <div className="mx-3 mt-3 border-t border-[var(--border)]" />
         <SectionTitle>Team workspaces</SectionTitle>
         {teams.isLoading ? (
-          <p className="px-3 py-1 text-xs text-[var(--ink3)]">Loading…</p>
+          <Spinner size="sm" label="Loading team workspaces" className="px-3 py-1 text-xs" />
         ) : (teams.data ?? []).length === 0 ? (
           <p className="px-3 py-1 text-[12px] leading-relaxed text-[var(--ink3)]" data-testid="no-teams">
             No team workspaces yet. A team&rsquo;s tasks appear here once an admin adds you to its shared mailbox.

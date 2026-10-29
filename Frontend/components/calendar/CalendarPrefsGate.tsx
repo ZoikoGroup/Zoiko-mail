@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useCalendarPreferences } from "@/lib/calendar-hooks";
+import { useMe } from "@/lib/auth-hooks";
 import { DEFAULT_CALENDAR_PREFERENCES } from "@/lib/calendar-api";
 import { applyDisplayPrefs } from "@/lib/calendar-dates";
 import { BrandLoader } from "@/components/ui/BrandLoader";
@@ -14,8 +15,14 @@ import { BrandLoader } from "@/components/ui/BrandLoader";
  */
 export function CalendarPrefsGate({ children }: { children: ReactNode }) {
   const prefs = useCalendarPreferences();
+  // Started here, alongside the preferences, rather than by the shell once
+  // this gate opens: the shell's session check reads the same query, so the
+  // two waits overlap instead of running one after the other.
+  useMe();
   if (prefs.isPending) {
-    return <BrandLoader className="zm-webmail" label="Loading your calendar" />;
+    // The same caption as the mail shell's loader that follows it, so a
+    // Calendar or Work Graph load shows one steady loading screen.
+    return <BrandLoader className="zm-webmail" label="Loading Zoiko Mail" />;
   }
   const p = prefs.data ?? DEFAULT_CALENDAR_PREFERENCES;
   applyDisplayPrefs({

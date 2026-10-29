@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { useDashboard } from "@/lib/admin-hooks";
 import { useCan } from "@/lib/admin-capabilities";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import {
   Card,
   InlineError,
-  LoadingRows,
   Notice,
   PageHeader,
   Pill,
@@ -16,26 +16,26 @@ import {
 
 export default function AdminDashboardPage() {
   const can = useCan();
-  const { data, isLoading, error } = useDashboard();
+  const { data, isLoading, error, refetch } = useDashboard();
 
   if (error) {
     return (
       <>
         <PageHeader title="Dashboard" />
         <Card>
-          <InlineError message={error.message} />
+          <InlineError message={error.message} onRetry={refetch} />
         </Card>
       </>
     );
   }
 
+  // The brand loader rather than skeleton rows: this page is tiles and cards,
+  // not a table, and a single card of placeholder rows looked nothing like it.
   if (isLoading || !data) {
     return (
       <>
         <PageHeader title="Dashboard" />
-        <Card>
-          <LoadingRows rows={6} />
-        </Card>
+        <BrandLoader variant="panel" label="Loading the dashboard" onRetry={refetch} />
       </>
     );
   }

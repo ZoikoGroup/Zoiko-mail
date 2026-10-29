@@ -39,7 +39,7 @@ function labelFor(type: SecurityAlertDto["type"]): string {
 }
 
 export default function AdminSecurityAlertsPage() {
-  const { data, isLoading, error } = useSecurityAlerts();
+  const { data, isLoading, error, refetch } = useSecurityAlerts();
   const review = useReviewSecurityAlert();
   const can = useCan();
 
@@ -100,7 +100,7 @@ export default function AdminSecurityAlertsPage() {
         }
       >
         {error ? (
-          <InlineError message={error.message} />
+          <InlineError message={error.message} onRetry={refetch} />
         ) : isLoading || !data ? (
           <LoadingRows rows={6} />
         ) : visible.length === 0 ? (

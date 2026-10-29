@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { Modal } from "@/components/ui/Modal";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import { StepUpDialog, useStepUp } from "@/components/admin/StepUpDialog";
 import {
   useMailboxCredentialStatus,
@@ -147,7 +148,9 @@ export function MailboxCredentialsDialog({
             )}
           </p>
 
-          {status.isLoading && <p className="text-[var(--ink3)]">Checking what can be changed…</p>}
+          {status.isLoading && (
+            <BrandLoader variant="compact" label="Checking what can be changed" onRetry={() => void status.refetch()} />
+          )}
           {status.error && <p className="text-[var(--crit)]">{(status.error as Error).message}</p>}
 
           {done ? (

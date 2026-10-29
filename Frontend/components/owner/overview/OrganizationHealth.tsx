@@ -1,6 +1,7 @@
 "use client";
 
 import { CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import { useDomains, useAdminMailboxes, useConnectorHealth } from "@/lib/owner-hooks";
 
 interface HealthItem {
@@ -16,11 +17,13 @@ const statusConfig: Record<HealthItem["status"], { icon: typeof CheckCircle2; co
 };
 
 export function OrganizationHealth() {
-  const { data: domains = [], error: domainsError } = useDomains();
-  const { data: mailboxes = [], error: mailboxesError } = useAdminMailboxes();
-  const { data: healthData = [], error: healthError } = useConnectorHealth();
+  const { data: domains = [], isPending: domainsPending, error: domainsError } = useDomains();
+  const { data: mailboxes = [], isPending: mailboxesPending, error: mailboxesError } = useAdminMailboxes();
+  const { data: healthData = [], isPending: healthPending, error: healthError } = useConnectorHealth();
 
   const error = domainsError ?? mailboxesError ?? healthError;
+  // Until all three answer, the counts below would read as "0/0" warnings.
+  const loading = domainsPending || mailboxesPending || healthPending;
 
   if (error) {
     return (
@@ -31,6 +34,17 @@ export function OrganizationHealth() {
         <div className="px-4 py-6 text-center text-sm text-[var(--crit)]">
           Health checks could not be loaded.
         </div>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="zoiko-card">
+        <div className="border-b border-[var(--border)] px-4 py-3">
+          <h2 className="text-sm font-semibold text-[var(--ink)]">Organization Health</h2>
+        </div>
+        <BrandLoader variant="compact" label="Checking organization health" />
       </div>
     );
   }

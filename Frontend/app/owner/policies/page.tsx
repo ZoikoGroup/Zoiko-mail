@@ -7,6 +7,8 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Tabs } from "@/components/ui/Tabs";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal } from "@/components/ui/Modal";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { usePolicies, useActivatePolicy, useDeactivatePolicy, useCreatePolicy } from "@/lib/owner-hooks";
 import { ShieldAlert, Sparkles, Mail, Clock, Trash2, Plus, FileText, Check, X } from "lucide-react";
 
@@ -67,7 +69,8 @@ export default function PoliciesPage() {
     conditions: [] as Condition[],
   });
 
-  const { data: policies = [], isLoading } = usePolicies();
+  const { data, isPending, isError, error, refetch } = usePolicies();
+  const policies = data ?? [];
   const activatePolicy = useActivatePolicy();
   const deactivatePolicy = useDeactivatePolicy();
   const createPolicy = useCreatePolicy();
@@ -140,10 +143,9 @@ export default function PoliciesPage() {
         </div>
 
         <div className="space-y-2">
-          {isLoading && (
-            <div className="py-8 text-center text-sm text-[var(--ink3)]">Loading policies…</div>
-          )}
-          {!isLoading && filtered.length === 0 && (
+          {isPending && <BrandLoader variant="panel" label="Loading policies" onRetry={() => void refetch()} />}
+          {isError && !data && <ErrorState message={error?.message} onRetry={() => void refetch()} />}
+          {data && filtered.length === 0 && (
             <div className="py-8 text-center text-sm text-[var(--ink3)]">No policies found.</div>
           )}
           {filtered.map((policy) => {

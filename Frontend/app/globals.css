@@ -318,6 +318,23 @@ body {
   transform-origin: left center;
   animation: route-progress-done 0.35s ease-in both;
 }
+/* API activity between navigations: a thinner bar with a segment sweeping
+   across, since there is no end point to fill towards. */
+.route-progress[data-phase="busy"] {
+  height: 2px;
+  background: rgb(from var(--accent) r g b / 0.16);
+  box-shadow: none;
+  overflow: hidden;
+  animation: zoi-fade 0.2s var(--ease) both;
+}
+.route-progress[data-phase="busy"]::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 35%;
+  background: linear-gradient(90deg, transparent, var(--accent), var(--ai));
+  animation: brand-loader-glide 1.2s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
 @keyframes route-progress-run {
   from { transform: scaleX(0); opacity: 1; }
   55%  { transform: scaleX(0.65); }
@@ -352,9 +369,19 @@ body {
     radial-gradient(28% 22% at 50% 44%, rgb(from var(--accent) r g b / 0.07), rgb(from var(--accent) r g b / 0.025) 55%, transparent),
     var(--ground);
 }
-.brand-loader[data-variant="inline"] {
+/* Inside a shell: a page's content area, or a pane / list. Flex-fill so the
+   mark sits in the middle of whatever space the content will take. */
+.brand-loader[data-variant="panel"] {
   min-height: 16rem;
   width: 100%;
+  flex: 1 1 auto;
+  padding: 24px 16px;
+}
+.brand-loader[data-variant="compact"] {
+  min-height: 8rem;
+  width: 100%;
+  flex: 1 1 auto;
+  padding: 16px 12px;
 }
 .brand-loader__body {
   display: flex;
@@ -363,7 +390,11 @@ body {
   gap: 18px;
   animation: zoi-rise 0.5s var(--ease) 140ms both;
 }
-.brand-loader[data-variant="inline"] .brand-loader__body { gap: 14px; }
+.brand-loader[data-variant="panel"] .brand-loader__body { gap: 14px; }
+.brand-loader[data-variant="compact"] .brand-loader__body { gap: 10px; }
+.brand-loader[data-variant="compact"] .brand-loader__halo { inset: -6px; }
+.brand-loader[data-variant="compact"] .brand-loader__label,
+.brand-loader[data-variant="compact"] .brand-loader__slow { font-size: 12px; }
 
 .brand-loader__mark {
   position: relative;
@@ -400,7 +431,8 @@ body {
   border-radius: 999px;
   background: rgb(from var(--accent) r g b / 0.14);
 }
-.brand-loader[data-variant="inline"] .brand-loader__track { width: 120px; }
+.brand-loader[data-variant="panel"] .brand-loader__track { width: 120px; }
+.brand-loader[data-variant="compact"] .brand-loader__track { width: 88px; height: 2px; }
 .brand-loader__bar {
   position: absolute;
   inset: 0 auto 0 0;

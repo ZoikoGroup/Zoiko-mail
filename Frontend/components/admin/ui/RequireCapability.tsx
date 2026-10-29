@@ -3,7 +3,8 @@
 import type { ReactNode } from "react";
 
 import { useCan, useCapabilities, type Capability } from "@/lib/admin-capabilities";
-import { InlineError, LoadingRows } from "./States";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { InlineError } from "./States";
 import { Card } from "./Card";
 import { Notice } from "./Notice";
 
@@ -33,13 +34,10 @@ export function RequireCapability({
 
   // A capability set that failed to load is not the same as one that came back
   // without this capability. Refusing on a failed read would lock an admin out
-  // of a screen they hold, and blame them for it.
+  // of a screen they hold, and blame them for it. While it loads, the brand
+  // loader holds the whole screen: what renders next is not known yet.
   if (isLoading) {
-    return (
-      <Card>
-        <LoadingRows rows={4} />
-      </Card>
-    );
+    return <BrandLoader variant="panel" label="Checking your access" />;
   }
 
   if (error) {

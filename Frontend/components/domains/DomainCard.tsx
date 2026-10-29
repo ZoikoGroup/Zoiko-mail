@@ -228,8 +228,8 @@ function checkErrors(check: DomainCheck): string[] {
 }
 
 function CheckHistory({ domainId }: { domainId: string }) {
-  const { data: checks, isLoading, error } = useDomainChecks(domainId);
-  if (error) return <InlineError message={error.message} />;
+  const { data: checks, isLoading, error, refetch } = useDomainChecks(domainId);
+  if (error) return <InlineError message={error.message} onRetry={() => void refetch()} />;
   if (isLoading || !checks) return <LoadingRows rows={3} />;
   if (checks.length === 0) return <InlineEmpty title="No checks recorded yet" hint="The first check runs within a minute of adding the domain." />;
   const pill = (value: LegacyDnsStatus | "VERIFIED" | "FAILED") => <Pill tone={LEGACY_TONE[value]}>{LEGACY_LABEL[value]}</Pill>;

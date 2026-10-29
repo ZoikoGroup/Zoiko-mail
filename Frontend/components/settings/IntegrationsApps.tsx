@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import {
-  Activity, ArrowRight, Braces, Cloud, Eye, LayoutGrid, Loader2, Lock, MessageSquare, Plug, Plus,
+  Activity, ArrowRight, Braces, Cloud, Eye, LayoutGrid, Lock, MessageSquare, Plug, Plus,
   ShieldCheck, Trash2, Users, Video,
 } from "lucide-react";
 import { useConnectors } from "@/lib/connectors-hooks";
@@ -11,6 +11,7 @@ import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
 import { SettingsNotice, SettingsTabs, SoonBadge } from "@/components/settings/SettingsBits";
 import { ConnectionDetail, PROVIDER_LABEL, ProviderLogo, StatusPill } from "@/components/settings/ConnectedMailboxes";
 import type { SettingsSection } from "@/components/settings/sections";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 
 /**
  * Settings → Integrations & Apps: the services connected to your mailbox,
@@ -70,9 +71,7 @@ export function IntegrationsApps({ section }: { section: SettingsSection }) {
                 <span className="text-[11.5px] text-[var(--ink3)]">{accounts.length} connected</span>
               </div>
               {isLoading ? (
-                <p className="flex items-center gap-2 py-8 text-[12.5px] text-[var(--ink3)]">
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Loading apps…
-                </p>
+                <BrandLoader variant="compact" label="Loading apps" />
               ) : error ? (
                 <p role="alert" className="py-6 text-[12.5px] text-[var(--crit)]">Could not load your apps ({(error as Error).message}).</p>
               ) : accounts.length === 0 ? (

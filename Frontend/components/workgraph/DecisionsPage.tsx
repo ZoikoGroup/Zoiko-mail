@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowDownUp, Check, ChevronRight, Clock, Filter, Flag, Plus, Repeat, ShieldCheck, Sparkles, Trash2, UserCheck, type LucideIcon } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import type { Decision, Dependency } from "@/lib/workgraph-api";
 import {
   useDecisions,
@@ -179,9 +180,21 @@ function Body({ initialTab }: { initialTab: Tab }) {
       </div>
 
       {tab === "suggested" ? (
-        <SuggestionList suggestions={suggestions.data ?? []} loading={suggestions.isLoading} noun="decision" />
+        <SuggestionList
+          suggestions={suggestions.data ?? []}
+          loading={suggestions.isLoading}
+          loadError={suggestions.data ? null : (suggestions.error as Error | null)}
+          onRetry={() => void suggestions.refetch()}
+          noun="decision"
+        />
       ) : tab === "dependencies" ? (
-        <DependencyTable dependencies={dependencies.data ?? []} loading={dependencies.isLoading} error={dependencies.error as Error | null} onAdd={() => actions.addDependency()} />
+        <DependencyTable
+          dependencies={dependencies.data ?? []}
+          loading={dependencies.isLoading}
+          error={dependencies.error as Error | null}
+          onRetry={() => void dependencies.refetch()}
+          onAdd={() => actions.addDependency()}
+        />
       ) : (
         <div className="grid min-h-[540px] gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
           <section aria-label="Decision register" className="flex min-w-0 flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
@@ -203,7 +216,9 @@ function Body({ initialTab }: { initialTab: Tab }) {
             </div>
             <ul className="min-h-0 flex-1 overflow-y-auto" data-testid="decision-list">
               {data.isLoading ? (
-                <li className="p-4 text-[12.5px] text-[var(--ink3)]">Loading…</li>
+                <li>
+                  <BrandLoader variant="compact" label="Loading decisions" onRetry={() => void data.refetch()} />
+                </li>
               ) : data.isError ? (
                 <li role="alert" className="p-4 text-[12.5px] text-[var(--crit)]">
                   {(data.error as Error).message}
@@ -435,7 +450,19 @@ function DeleteConfirm({ decision, onClose }: { decision: Decision | null; onClo
   );
 }
 
-function DependencyTable({ dependencies, loading, error, onAdd }: { dependencies: Dependency[]; loading: boolean; error: Error | null; onAdd: () => void }) {
+function DependencyTable({
+  dependencies,
+  loading,
+  error,
+  onRetry,
+  onAdd,
+}: {
+  dependencies: Dependency[];
+  loading: boolean;
+  error: Error | null;
+  onRetry: () => void;
+  onAdd: () => void;
+}) {
   const update = useUpdateDependency();
   const remove = useDeleteDependency();
   const failure = (update.error ?? remove.error) as Error | null;
@@ -459,7 +486,7 @@ function DependencyTable({ dependencies, loading, error, onAdd }: { dependencies
         <span className="w-[150px]">Actions</span>
       </div>
       {loading ? (
-        <p className="p-4 text-[12.5px] text-[var(--ink3)]">Loading…</p>
+        <BrandLoader variant="compact" label="Loading dependencies" onRetry={onRetry} />
       ) : error ? (
         <p role="alert" className="p-4 text-[12.5px] text-[var(--crit)]">{error.message}</p>
       ) : dependencies.length === 0 ? (

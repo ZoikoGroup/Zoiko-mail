@@ -41,6 +41,7 @@ import {
 } from "@/lib/mail-api";
 import { DropdownMenu, DropdownItem } from "@/components/ui/DropdownMenu";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import {
   Inbox, Send, FileText, Archive, Trash2, Star, Loader2, AlertCircle,
   ChevronLeft, ChevronRight, Paperclip, ArrowLeft, MailOpen,
@@ -446,7 +447,7 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
       .pop() ?? "";
   const pageSize = view?.pageSize ?? 25;
 
-  const { data, isLoading, error, refetch, isFetching } = useMailList({
+  const { data, error, refetch, isFetching } = useMailList({
     folder,
     page,
     limit: pageSize,
@@ -461,6 +462,9 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
     ...(effectiveDateAfter ? { dateAfter: effectiveDateAfter } : {}),
     ...(dateBefore ? { dateBefore } : {}),
   });
+  // First load of this folder, page or search only: a background refetch
+  // keeps the rows on screen.
+  const listLoading = data === undefined && !error;
   const listed = data?.items ?? [];
   // The send queue reads soonest first, and its tabs split it by due date.
   const queue =
@@ -1005,11 +1009,13 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
             </div>
           )}
 
-          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden" aria-busy={isLoading}>
-            {isLoading && (
-              <div className="flex items-center gap-2 p-6 text-sm text-[var(--ink3)]" role="status">
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Loading…
-              </div>
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
+            {listLoading && (
+              <BrandLoader
+                variant="compact"
+                label={q || advancedActive ? "Searching…" : "Loading messages"}
+                onRetry={() => void refetch()}
+              />
             )}
             {error && (
               <div className="m-3 flex items-start gap-2 rounded-lg border border-[var(--crit)]/30 bg-[var(--crit-soft)] p-4 text-sm text-[var(--crit)]" role="alert">
@@ -1031,7 +1037,7 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
                 </div>
               </div>
             )}
-            {!isLoading && !error && items.length === 0 && (
+            {!listLoading && !error && items.length === 0 && (
               <div className="flex flex-col items-center px-6 py-20 text-center text-[var(--ink3)]">
                 <MailOpen className="h-10 w-10" aria-hidden />
                 <p className="mt-3 text-sm font-medium text-[var(--ink2)]">Nothing here</p>
@@ -1424,7 +1430,7 @@ function ReadingPane({
 }) {
   const router = useRouter();
   const mailboxId = sharedInbox?.id;
-  const { data: item, isLoading, error } = useMessage(messageId, mailboxId);
+  const { data: item, error, refetch } = useMessage(messageId, mailboxId);
   const update = useUpdateMailItem();
   const permanentlyDelete = usePermanentlyDelete();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1478,12 +1484,8 @@ function ReadingPane({
     requestAnimationFrame(() => latestRef.current?.scrollIntoView({ block: "start" }));
   }, [latestId]);
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center gap-2 p-6 text-sm text-[var(--ink3)]" role="status">
-        <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Loading message…
-      </div>
-    );
+  if (item === undefined && !error) {
+    return <BrandLoader variant="compact" label="Loading this email" onRetry={() => void refetch()} />;
   }
   if (error || !item) {
     return (

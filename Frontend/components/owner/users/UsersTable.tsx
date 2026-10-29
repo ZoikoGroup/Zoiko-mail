@@ -8,6 +8,7 @@ import { FilterBar, FilterSelect } from "@/components/ui/FilterBar";
 import { DropdownMenu, DropdownItem } from "@/components/ui/DropdownMenu";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { useMembers, useUpdateMember, useRemoveMember } from "@/lib/owner-hooks";
 import { useMe } from "@/lib/auth-hooks";
 import { Users, ShieldCheck, UserX, UserCheck, Trash2 } from "lucide-react";
@@ -24,7 +25,8 @@ export function UsersTable({ onInvite, onChangeRole }: UsersTableProps) {
   const [confirmRemove, setConfirmRemove] = useState<{ id: string; name: string } | null>(null);
 
   const { data: meData } = useMe();
-  const { data: members = [], isLoading } = useMembers();
+  const { data, isPending, isError, error, refetch } = useMembers();
+  const members = data ?? [];
   const updateMember = useUpdateMember();
   const removeMember = useRemoveMember();
 
@@ -135,46 +137,51 @@ export function UsersTable({ onInvite, onChangeRole }: UsersTableProps) {
         </button>
       </div>
 
-      <DataTable
-        columns={columns}
-        data={filtered}
-        keyExtractor={(row: any) => row.id}
-        pageSize={10}
-        emptyMessage={isLoading ? "Loading users…" : "No users match your search."}
-        actions={(user: any) => {
-          const isOwner = user.role === "OWNER";
-          const isCurrentUser = user.userId === currentUserId;
-          return (
-            <DropdownMenu>
-              {!isOwner && (
-                <DropdownItem onClick={() => onChangeRole({ id: user.id, name: user.displayName, role: user.role })}>
-                  <ShieldCheck className="h-3.5 w-3.5" /> Change Role
-                </DropdownItem>
-              )}
-              {!isOwner && user.status === "ACTIVE" && (
-                <DropdownItem onClick={() => updateMember.mutate({ id: user.id, input: { status: "SUSPENDED" } })}>
-                  <UserX className="h-3.5 w-3.5" /> Suspend
-                </DropdownItem>
-              )}
-              {!isOwner && user.status === "SUSPENDED" && (
-                <DropdownItem onClick={() => updateMember.mutate({ id: user.id, input: { status: "ACTIVE" } })}>
-                  <UserCheck className="h-3.5 w-3.5" /> Activate
-                </DropdownItem>
-              )}
-              {!isOwner && !isCurrentUser && (
-                <DropdownItem danger onClick={() => setConfirmRemove({ id: user.id, name: user.displayName })}>
-                  <Trash2 className="h-3.5 w-3.5" /> Remove
-                </DropdownItem>
-              )}
-              {isOwner && (
-                <DropdownItem disabled>
-                  <ShieldCheck className="h-3.5 w-3.5" /> Primary Owner
-                </DropdownItem>
-              )}
-            </DropdownMenu>
-          );
-        }}
-      />
+      {isError && !data ? (
+        <ErrorState message={error?.message} onRetry={() => void refetch()} />
+      ) : (
+        <DataTable
+          columns={columns}
+          data={filtered}
+          keyExtractor={(row: any) => row.id}
+          pageSize={10}
+          loading={isPending}
+          emptyMessage="No users match your search."
+          actions={(user: any) => {
+            const isOwner = user.role === "OWNER";
+            const isCurrentUser = user.userId === currentUserId;
+            return (
+              <DropdownMenu>
+                {!isOwner && (
+                  <DropdownItem onClick={() => onChangeRole({ id: user.id, name: user.displayName, role: user.role })}>
+                    <ShieldCheck className="h-3.5 w-3.5" /> Change Role
+                  </DropdownItem>
+                )}
+                {!isOwner && user.status === "ACTIVE" && (
+                  <DropdownItem onClick={() => updateMember.mutate({ id: user.id, input: { status: "SUSPENDED" } })}>
+                    <UserX className="h-3.5 w-3.5" /> Suspend
+                  </DropdownItem>
+                )}
+                {!isOwner && user.status === "SUSPENDED" && (
+                  <DropdownItem onClick={() => updateMember.mutate({ id: user.id, input: { status: "ACTIVE" } })}>
+                    <UserCheck className="h-3.5 w-3.5" /> Activate
+                  </DropdownItem>
+                )}
+                {!isOwner && !isCurrentUser && (
+                  <DropdownItem danger onClick={() => setConfirmRemove({ id: user.id, name: user.displayName })}>
+                    <Trash2 className="h-3.5 w-3.5" /> Remove
+                  </DropdownItem>
+                )}
+                {isOwner && (
+                  <DropdownItem disabled>
+                    <ShieldCheck className="h-3.5 w-3.5" /> Primary Owner
+                  </DropdownItem>
+                )}
+              </DropdownMenu>
+            );
+          }}
+        />
+      )}
 
       <ConfirmDialog
         open={!!confirmRemove}

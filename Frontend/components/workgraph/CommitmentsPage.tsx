@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowDownUp, CalendarPlus, Check, ChevronRight, Clock, CornerDownRight, Filter, Plus, ShieldCheck, Sparkles, Target, Trash2, TriangleAlert, UserCheck, type LucideIcon } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { BrandLoader } from "@/components/ui/BrandLoader";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { EventDialog } from "@/components/calendar/EventDialog";
 import { useCalendars } from "@/lib/calendar-hooks";
 import type { Commitment, Suggestion } from "@/lib/workgraph-api";
@@ -175,7 +177,12 @@ function Body() {
       </div>
 
       {tab === "suggested" ? (
-        <SuggestionList suggestions={suggestions.data ?? []} loading={suggestions.isLoading} />
+        <SuggestionList
+          suggestions={suggestions.data ?? []}
+          loading={suggestions.isLoading}
+          loadError={suggestions.data ? null : (suggestions.error as Error | null)}
+          onRetry={() => void suggestions.refetch()}
+        />
       ) : (
         <div className="grid min-h-[540px] gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
           <section aria-label="Commitment register" className="flex min-w-0 flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
@@ -197,7 +204,9 @@ function Body() {
             </div>
             <ul className="min-h-0 flex-1 overflow-y-auto" data-testid="commitment-list">
               {data.isLoading ? (
-                <li className="p-4 text-[12.5px] text-[var(--ink3)]">Loading…</li>
+                <li>
+                  <BrandLoader variant="compact" label="Loading commitments" onRetry={() => void data.refetch()} />
+                </li>
               ) : data.isError ? (
                 <li role="alert" className="p-4 text-[12.5px] text-[var(--crit)]">
                   {(data.error as Error).message}
@@ -466,7 +475,20 @@ function DeleteConfirm({ commitment, onClose }: { commitment: Commitment | null;
   );
 }
 
-export function SuggestionList({ suggestions, loading, noun = "commitment" }: { suggestions: Suggestion[]; loading: boolean; noun?: "commitment" | "decision" }) {
+export function SuggestionList({
+  suggestions,
+  loading,
+  loadError = null,
+  onRetry,
+  noun = "commitment",
+}: {
+  suggestions: Suggestion[];
+  loading: boolean;
+  /** The first load failed: there is nothing to show. */
+  loadError?: Error | null;
+  onRetry?: () => void;
+  noun?: "commitment" | "decision";
+}) {
   const confirm = useConfirmSuggestion();
   const dismiss = useDismissSuggestion();
   const error = (confirm.error ?? dismiss.error) as Error | null;
@@ -476,8 +498,10 @@ export function SuggestionList({ suggestions, loading, noun = "commitment" }: { 
         <h2 className="text-[16px] font-semibold text-[var(--ink)]">Suggested by Alet</h2>
         <p className="text-[12px] text-[var(--ink3)]">Found in your mail. Nothing becomes {noun === "decision" ? "a decision" : "a commitment"} until you confirm it, and the email becomes its evidence.{noun === "decision" ? " An approval it spotted is recorded as pending — only the authorized approver can grant it." : ""}</p>
       </div>
-      {loading ? (
-        <p className="p-4 text-[13px] text-[var(--ink3)]">Loading…</p>
+      {loadError ? (
+        <ErrorState compact message={loadError.message || undefined} onRetry={onRetry} />
+      ) : loading ? (
+        <BrandLoader variant="compact" label="Loading suggestions" onRetry={onRetry} />
       ) : suggestions.length === 0 ? (
         <p className="p-8 text-center text-[13px] text-[var(--ink3)]">No suggestions waiting. When Alet finds {noun === "decision" ? "an approval needed" : "a promise or a reply owed"} in your mail, it will appear here for you to confirm or dismiss.</p>
       ) : (

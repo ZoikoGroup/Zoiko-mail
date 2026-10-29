@@ -33,7 +33,7 @@ const STATUS: Record<string, { label: string; tone: Tone }> = {
 
 export default function AdminProviderSyncPage() {
   const can = useCan();
-  const { data: connectors, isLoading, error } = useConnectors();
+  const { data: connectors, isLoading, error, refetch } = useConnectors();
   const { data: syncErrors } = useSyncErrors();
   const replay = useReplayDeadLetter();
   const rotate = useRotateConnector();
@@ -94,7 +94,7 @@ export default function AdminProviderSyncPage() {
 
       <Card title="Connections">
         {error ? (
-          <InlineError message={error.message} />
+          <InlineError message={error.message} onRetry={refetch} />
         ) : isLoading || !connectors ? (
           <LoadingRows rows={4} />
         ) : connectors.length === 0 ? (

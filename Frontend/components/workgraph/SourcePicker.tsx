@@ -6,6 +6,7 @@ import { CalendarDays, FileText, Mail, StickyNote } from "lucide-react";
 import { listMail, type MailListFolder } from "@/lib/mail-api";
 import { useCalendarEvents } from "@/lib/calendar-hooks";
 import type { EvidenceInput } from "@/lib/workgraph-api";
+import { Spinner } from "@/components/ui/Spinner";
 import { label } from "./shared";
 
 /** A source chosen for evidence, with the name to show for it until the server names it. */
@@ -88,7 +89,9 @@ export function SourcePicker({ onPick, chosen = [] }: { onPick: (source: PickedS
           <ul className="max-h-48 space-y-1 overflow-y-auto" data-testid="source-results">
             {tab === "EMAIL" ? (
               mail.isLoading ? (
-                <li className="p-2 text-[12px] text-[var(--ink3)]">Searching…</li>
+                <li className="p-2">
+                  <Spinner size="sm" label="Searching…" className="text-[12px]" />
+                </li>
               ) : (mail.data?.items ?? []).length === 0 ? (
                 <li className="p-2 text-[12px] text-[var(--ink3)]">No messages found.</li>
               ) : (
@@ -113,7 +116,9 @@ export function SourcePicker({ onPick, chosen = [] }: { onPick: (source: PickedS
                 ))
               )
             ) : events.isLoading ? (
-              <li className="p-2 text-[12px] text-[var(--ink3)]">Loading…</li>
+              <li className="p-2">
+                <Spinner size="sm" label="Loading meetings" className="text-[12px]" />
+              </li>
             ) : meetings.length === 0 ? (
               <li className="p-2 text-[12px] text-[var(--ink3)]">No meetings found in the last and next 45 days.</li>
             ) : (

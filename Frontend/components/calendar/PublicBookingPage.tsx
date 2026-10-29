@@ -6,6 +6,7 @@ import { ArrowLeft, CalendarCheck, CalendarX, Clock, Globe, MapPin, Phone, Video
 import { bookPublicSlot, getPublicBookingPage, type Slot } from "@/lib/calendar-api";
 import { ApiError } from "@/lib/api-client";
 import { addMonths, formatTime, localZone, startOfMonth } from "@/lib/calendar-dates";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import { SlotPicker } from "./SlotPicker";
 
 const LOCATION = {
@@ -83,7 +84,7 @@ export function PublicBookingPage({ slug }: { slug: string }) {
   if (!data) {
     return (
       <Shell>
-        <p className="p-10 text-center text-[13px] text-[var(--ink3)]">Loading…</p>
+        <BrandLoader variant="panel" label="Loading booking page" onRetry={() => void page.refetch()} />
       </Shell>
     );
   }
