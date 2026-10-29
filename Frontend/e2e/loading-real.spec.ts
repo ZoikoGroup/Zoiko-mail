@@ -70,14 +70,17 @@ test("member: first load, inbox, an open email, search and an attachment preview
   await expect(page.getByText(SUBJECT).first()).toBeVisible({ timeout: 60_000 });
   await page.unrouteAll({ behavior: "wait" });
 
-  // 2. Inbox loading: the list is slow. The list pane shows its own loader
-  //    inside the shell, and the top bar says the app is waiting.
+  // 2. Inbox loading: the list is slow. The full-screen loading screen stays
+  //    until the messages are in, rather than handing over to a smaller
+  //    loader inside the shell; there is no top bar.
   await slow(page, (p, _u, m) => p === "/mail" && m === "GET", 3000);
   await page.reload();
-  await expect(loader(page, /Loading messages/)).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByRole("navigation", { name: "Workspace sections" })).toBeVisible();
-  await expect(page.getByTestId("api-activity")).toBeVisible();
+  const navLoader = page.getByTestId("navigation-loader");
+  await expect(navLoader.getByTestId("brand-loader")).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator(".route-progress")).toHaveCount(0);
   await expect(page.getByText(SUBJECT).first()).toBeVisible({ timeout: 60_000 });
+  await expect(navLoader).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByRole("navigation", { name: "Workspace sections" })).toBeVisible();
   await expect(loader(page, /Loading messages/)).toHaveCount(0);
   await page.unrouteAll({ behavior: "wait" });
 
@@ -123,12 +126,13 @@ test("member: moving between sections keeps the shell and shows each section's l
   const sections = page.getByRole("navigation", { name: "Workspace sections" });
   for (const href of ["/mail/calendar", "/mail/tasks", "/mail/contacts", "/mail/work-graph"]) {
     await sections.locator(`a[href="${href}"]`).first().click();
+    // The branded loading screen covers the move from the click...
+    await expect(page.getByTestId("navigation-loader").getByTestId("brand-loader")).toBeVisible({ timeout: 10_000 });
     await expect(page).toHaveURL(new RegExp(`${href}(\\?|$)`), { timeout: 60_000 });
-    // Something says it is loading, inside the shell: the brand loader, a
-    // status, or a known layout's shimmer skeleton.
-    await expect(page.locator('[data-testid="brand-loader"]:visible, [role="status"]:visible, .zoi-skeleton:visible').first()).toBeVisible({ timeout: 30_000 });
+    // ...and leaves only once the section's data has arrived: the shell is
+    // there and no loader is left behind.
+    await expect(page.getByTestId("navigation-loader")).toHaveCount(0, { timeout: 60_000 });
     await expect(sections).toBeVisible();
-    // And the section finishes: no loader is left behind.
     await expect(loader(page)).toHaveCount(0, { timeout: 60_000 });
   }
 
@@ -174,7 +178,7 @@ test("slow and failed requests: the slow notice offers Try again, and a failed l
 });
 
 const CONSOLES = [
-  { role: "ADMIN", path: "/admin", label: /Opening the admin workspace/, landmark: (p: Page) => p.getByText("Admin workspace"), next: "/admin/audit" },
+  { role: "ADMIN", path: "/admin", label: /Opening the admin workspace/, landmark: (p: Page) => p.getByText("Admin workspace").first(), next: "/admin/audit" },
   { role: "OWNER", path: "/owner", label: /Opening the owner workspace/, landmark: (p: Page) => p.getByText("Users & Roles").first(), next: "/owner/usage" },
   { role: "SUPPORT", path: "/support", label: /Opening the support workspace/, landmark: (p: Page) => p.getByRole("button", { name: /Workspace Overview/ }), next: null },
 ] as const;
@@ -193,12 +197,13 @@ for (const c of CONSOLES) {
     await page.unrouteAll({ behavior: "wait" });
 
     if (c.next) {
-      // A page transition with slow data: the console's frame stays, the
-      // content area says it is loading, then the page arrives.
+      // A page transition with slow data: the branded loading screen covers
+      // it from the click until the page and its data are ready.
       await slow(page, (p, _u, m) => m === "GET" && p !== "/auth/me" && p !== "/events/stream", 2000);
       await page.locator(`a[href="${c.next}"]`).first().click();
+      await expect(page.getByTestId("navigation-loader").getByTestId("brand-loader")).toBeVisible({ timeout: 10_000 });
       await expect(page).toHaveURL(new RegExp(`${c.next}$`), { timeout: 60_000 });
-      await expect(page.locator('[data-testid="brand-loader"]:visible, [role="status"]:visible, .zoi-skeleton:visible').first()).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByTestId("navigation-loader")).toHaveCount(0, { timeout: 60_000 });
       await expect(c.landmark(page)).toBeVisible();
       await expect(loader(page)).toHaveCount(0, { timeout: 60_000 });
     }

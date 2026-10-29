@@ -114,13 +114,15 @@ export async function answerMfa(page: Page, secret: string) {
   const code = page.getByPlaceholder("000000").first();
   // Confirmed by leaving the screen. On a busy dev server the field can take
   // the code before the form responds; then a new code (the server refuses a
-  // code twice) is entered again.
+  // code twice) is entered again. Each try waits long enough for a slow,
+  // successful submission to finish first: a second submission on top of one
+  // still in flight is what left the address stuck on /verify-mfa.
   await expect(async () => {
     if (!page.url().includes("/verify-mfa")) return;
     await code.fill(await freshCode(secret));
     await code.press("Enter");
-    await expect(page).not.toHaveURL(/\/verify-mfa/, { timeout: 15_000 });
-  }).toPass({ timeout: 120_000 });
+    await expect(page).not.toHaveURL(/\/verify-mfa/, { timeout: 45_000 });
+  }).toPass({ timeout: 150_000 });
 }
 
 /**

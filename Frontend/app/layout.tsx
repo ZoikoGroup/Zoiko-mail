@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
-import { RouteProgress } from "@/components/shell/RouteProgress";
+import { NavigationLoader } from "@/components/shell/NavigationLoader";
 
 export const metadata: Metadata = {
   title: {
@@ -29,8 +29,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <Providers>
-          <RouteProgress />
           {children}
+          <NavigationLoader />
         </Providers>
       </body>
     </html>
