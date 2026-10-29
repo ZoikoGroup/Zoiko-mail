@@ -49,6 +49,9 @@ export interface MailboxDto extends MailboxStatusRow {
   status: MailboxDisplayStatus;
   storageUsedGb: number;
   storageLimitGb: number;
+  /** Exact bytes, for display; the Gb fields are rounded to whole gigabytes. */
+  storageUsedBytes: number;
+  storageLimitBytes: number;
   aiEnabled: boolean;
   sendSuspensionReason: string | null;
   /** Null for a mailbox that exists only in Zoiko (created before hosted provisioning). */
@@ -191,6 +194,9 @@ export interface DashboardDto {
     domainsTotal: number;
     storageUsedGb: number;
     storageLimitGb: number;
+    /** Absent from older API builds; the Gb fields are whole gigabytes. */
+    storageUsedBytes?: number;
+    storageLimitBytes?: number;
   };
   /**
    * MFA state, reported rather than inferred.

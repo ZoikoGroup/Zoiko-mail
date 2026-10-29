@@ -129,11 +129,12 @@ export function AssistantPage() {
   const shownPending = pending && pending.conversationId === conversationId ? pending : null;
   const title = conversationId ? conversation.data?.title ?? "Conversation" : "New chat";
 
+  const welcome = messages.length === 0 && !shownPending;
   useEffect(() => {
     // The welcome screen stays at the top; only a real conversation follows its end.
-    const top = messages.length === 0 && !shownPending ? 0 : scroller.current?.scrollHeight ?? 0;
+    const top = welcome ? 0 : scroller.current?.scrollHeight ?? 0;
     scroller.current?.scrollTo({ top, behavior: "smooth" });
-  }, [messages.length, shownPending?.content, shownPending?.error]);
+  }, [welcome, messages.length, shownPending?.content, shownPending?.error]);
   useEffect(() => {
     if (!notice) return;
     const t = setTimeout(() => setNotice(null), 3500);

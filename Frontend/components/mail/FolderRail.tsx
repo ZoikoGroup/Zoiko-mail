@@ -6,7 +6,7 @@ import { useState } from "react";
 // import Link from "next/link";
 import {
   Pencil, Inbox, Star, Clock, Send, CalendarClock, FileText, Archive,
-  Ban, Trash2, MoreHorizontal, ChevronRight, Folder, Tag, Users, UserRound,
+  Ban, Trash2, MoreHorizontal, ChevronRight, Folder, Tag, Users, UserRound, Network, HelpCircle,
 } from "lucide-react";
 import type { MailListFolder, SharedInbox } from "@/lib/mail-api";
 import { useMailLabels, useSharedInboxes } from "@/lib/mail-hooks";
@@ -297,6 +297,28 @@ export function FolderRail({
             );
           })}
         </ul>
+
+        {/* Phone drawer only: Work Graph and Help have no bottom-nav tab or rail on a phone. */}
+        {onNavigate && (
+          <>
+            <div className="mx-3 mt-3 border-t border-[var(--border)]" />
+            <SectionTitle>More</SectionTitle>
+            <ul className="space-y-0.5" data-testid="more-nav">
+              <li>
+                <Link href="/mail/work-graph" onClick={onNavigate} className={rowClass(false)}>
+                  <Network className="h-4 w-4 shrink-0" aria-hidden />
+                  <span className="truncate">Work Graph</span>
+                </Link>
+              </li>
+              <li>
+                <Link href="/mail/help" onClick={onNavigate} className={rowClass(false)}>
+                  <HelpCircle className="h-4 w-4 shrink-0" aria-hidden />
+                  <span className="truncate">Help centre</span>
+                </Link>
+              </li>
+            </ul>
+          </>
+        )}
       </nav>
 
       <Link

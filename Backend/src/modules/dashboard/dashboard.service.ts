@@ -228,6 +228,9 @@ export class DashboardService {
         domainsTotal,
         storageUsedGb: toGb(storage._sum.storageUsed),
         storageLimitGb: toGb(storage._sum.storageLimit),
+        // Exact totals, so a small mailbox does not read as "0 GB".
+        storageUsedBytes: Number(storage._sum.storageUsed ?? 0n),
+        storageLimitBytes: Number(storage._sum.storageLimit ?? 0n),
       },
       mfa: (() => {
         const [covered, requiredTotal, requiredCovered] = values.mfa ?? [0, 0, 0];

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { formatStorageUsage } from "@/lib/storage-api";
 
 import {
   useCreateAlias,
@@ -195,7 +196,7 @@ export function MailboxesManager({ domainsHref }: { domainsHref: string }) {
                       {mailbox.type === "SHARED" ? "Shared" : "Individual"}
                     </Td>
                     <Td mono muted nowrap>
-                      {mailbox.storageUsedGb} / {mailbox.storageLimitGb} GB
+                      {formatStorageUsage(mailbox.storageUsedBytes, mailbox.storageLimitBytes)}
                     </Td>
                     <Td>
                       {/*

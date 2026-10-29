@@ -220,6 +220,8 @@ export async function fetchMailboxes(): Promise<MailboxDto[]> {
     workspaces: m.workspaces?.length ? m.workspaces : ["MEMBER"],
     storageUsedGb: gb(m.storageUsed),
     storageLimitGb: gb(m.storageLimit),
+    storageUsedBytes: Number(m.storageUsed) || 0,
+    storageLimitBytes: Number(m.storageLimit) || 0,
     // The real column now (AC-008). A mailbox with this off is what the
     // security spec calls restricted: AI is refused on it server-side.
     aiEnabled: m.aiEnabled ?? true,
@@ -860,6 +862,8 @@ async function composeDashboard(windowHours: number): Promise<DashboardDto> {
       domainsTotal: doms.length,
       storageUsedGb: boxes.reduce((sum, m) => sum + m.storageUsedGb, 0),
       storageLimitGb: boxes.reduce((sum, m) => sum + m.storageLimitGb, 0),
+      storageUsedBytes: boxes.reduce((sum, m) => sum + m.storageUsedBytes, 0),
+      storageLimitBytes: boxes.reduce((sum, m) => sum + m.storageLimitBytes, 0),
     },
     // The fallback composes the dashboard from individual reads, and none of
     // them counts enrolment. Unsupported is still the honest answer here —
