@@ -1,5 +1,5 @@
 import {
-  SlidersHorizontal, Mail, BadgeCheck, Plug, ArrowLeftRight, UserCircle, type LucideIcon,
+  SlidersHorizontal, Mail, BadgeCheck, UserCircle, type LucideIcon,
 } from "lucide-react";
 
 /** The member's personal Settings, listed under SETTINGS in the folder column. */
@@ -7,8 +7,6 @@ export type SettingsSectionKey =
   | "mailbox-preferences"
   | "connected-mailboxes"
   | "sender-identities"
-  | "integrations"
-  | "import-export"
   | "profile";
 
 export interface SettingsSection {
@@ -50,22 +48,6 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     subtitle: "The addresses you can send mail from.",
     eyebrow: "Sending",
     icon: BadgeCheck,
-  }),
-  section({
-    key: "integrations",
-    label: "Integrations & Apps",
-    title: "Integrations & Connected Apps",
-    subtitle: "Connect the tools you use. Review permissions, data flows, and connection health.",
-    eyebrow: "Connected services",
-    icon: Plug,
-  }),
-  section({
-    key: "import-export",
-    label: "Import & Export",
-    title: "Mail Import & Export",
-    subtitle: "Transfer mail safely, create controlled exports, and review every migration job.",
-    eyebrow: "Data portability",
-    icon: ArrowLeftRight,
   }),
   section({
     key: "profile",

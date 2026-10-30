@@ -6,16 +6,12 @@ import { ProfileSettings } from "@/components/settings/ProfileSettings";
 import { MailboxPreferences } from "@/components/settings/MailboxPreferences";
 import { ConnectedMailboxes } from "@/components/settings/ConnectedMailboxes";
 import { SenderIdentities } from "@/components/settings/SenderIdentities";
-import { IntegrationsApps } from "@/components/settings/IntegrationsApps";
-import { ImportExport } from "@/components/settings/ImportExport";
 import { settingsSection, type SettingsSection, type SettingsSectionKey } from "@/components/settings/sections";
 
 const PAGES: Record<SettingsSectionKey, (props: { section: SettingsSection }) => JSX.Element> = {
   "mailbox-preferences": MailboxPreferences,
   "connected-mailboxes": ConnectedMailboxes,
   "sender-identities": SenderIdentities,
-  integrations: IntegrationsApps,
-  "import-export": ImportExport,
   profile: ProfileSettings,
 };
 

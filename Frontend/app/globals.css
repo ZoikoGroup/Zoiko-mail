@@ -299,7 +299,7 @@ body {
 
 /* ---- Brand loader -------------------------------------------------------------
    The loading screen (components/ui/BrandLoader.tsx). CSS alone decides when
-   each part shows: the loader fades in after 140ms, so quick loads never
+   each part shows: the loader fades in after 400ms, so quick loads never
    flash it, and the "taking longer than usual" line with its Reload button
    appears at 10s. With no timers, the server-rendered HTML already shows it
    while scripts download. */
@@ -308,7 +308,7 @@ body {
   align-items: center;
   justify-content: center;
   color: var(--ink3);
-  animation: zoi-fade 0.32s var(--ease-in-out) 140ms both;
+  animation: zoi-fade 0.25s var(--ease-in-out) 400ms both;
 }
 .brand-loader[data-variant="screen"] {
   min-height: 100vh;
@@ -339,7 +339,7 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 18px;
-  animation: zoi-rise 0.5s var(--ease) 140ms both;
+  animation: zoi-rise 0.4s var(--ease) 400ms both;
 }
 .brand-loader[data-variant="panel"] .brand-loader__body { gap: 14px; }
 .brand-loader[data-variant="compact"] .brand-loader__body { gap: 10px; }
@@ -423,7 +423,7 @@ body {
   position: fixed;
   inset: 0;
   z-index: 90;
-  transition: opacity 0.18s var(--ease-in-out);
+  transition: opacity 0.12s var(--ease-in-out);
 }
 .nav-loader[data-deferred] {
   visibility: hidden;
@@ -440,7 +440,7 @@ body {
    is already shown; the motion carries on mid-cycle; and the slow notice
    keeps counting from the start of the whole sequence. */
 .brand-loader[data-continued],
-.brand-loader[data-continued] .brand-loader__body { animation-delay: calc(140ms + var(--bl-elapsed, 0ms)); }
+.brand-loader[data-continued] .brand-loader__body { animation-delay: calc(400ms + var(--bl-elapsed, 0ms)); }
 .brand-loader[data-continued] .brand-loader__icon,
 .brand-loader[data-continued] .brand-loader__halo,
 .brand-loader[data-continued] .brand-loader__bar { animation-delay: var(--bl-elapsed, 0ms); }
@@ -625,3 +625,8 @@ body {
   --accent: #3B7BF6;
   --accent-soft: #15315C;
 }
+
+/* Page-to-page navigation: the logo only shows when the next page is really
+   slow to arrive (over ~0.8s), so ordinary clicks never flash it. */
+.nav-loader .brand-loader,
+.nav-loader .brand-loader__body { animation-delay: 800ms; }

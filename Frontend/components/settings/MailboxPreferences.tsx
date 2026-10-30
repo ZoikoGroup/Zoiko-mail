@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  Accessibility, BellRing, CheckCircle2, Clock, Columns2, Eye, FileSignature, Globe, Image as ImageIcon,
-  Inbox, Info, Keyboard, Languages, Loader2, Mail, Rows3, Send, ShieldCheck, Users,
+  CheckCircle2, Clock, Columns2, Eye, FileSignature, Globe,
+  Inbox, Info, Languages, Loader2, Mail, Rows3, Send, ShieldCheck,
 } from "lucide-react";
 import {
   useMailPreferences,
@@ -203,7 +203,7 @@ export function MailboxPreferences({ section }: { section: SettingsSection }) {
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
         <div className="flex min-w-0 flex-col gap-4">
-          <Card title="Inbox experience" count={4}>
+          <Card title="Inbox experience" count={3}>
             <Row icon={Inbox} title="Default inbox view" description="The messages shown when you open Mail.">
               <select aria-label="Default inbox view" className={select} value={v.defaultView} disabled={!loaded}
                 onChange={(e) => setPref("defaultView", e.target.value as InboxView)}>
@@ -216,13 +216,12 @@ export function MailboxPreferences({ section }: { section: SettingsSection }) {
                 {PANE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </Row>
-            <Row icon={Users} title="Conversation grouping" description="Keep replies and related messages together in one row." soon />
             <Row icon={Eye} title="Message preview text" description="Show a short excerpt below each subject line.">
               <Toggle label="Message preview text" checked={v.showPreview} disabled={!loaded} onChange={(on) => setPref("showPreview", on)} />
             </Row>
           </Card>
 
-          <Card title="Reading behavior" count={4}>
+          <Card title="Reading behavior" count={2}>
             <Row icon={Rows3} title="Message density" description="How much space each message takes in the list.">
               <Segmented<MessageDensity>
                 label="Message density"
@@ -238,8 +237,6 @@ export function MailboxPreferences({ section }: { section: SettingsSection }) {
                 {DELAY_OPTIONS.map((o) => <option key={String(o.value)} value={String(o.value)}>{o.label}</option>)}
               </select>
             </Row>
-            <Row icon={ImageIcon} title="External images and links" description="Ask before loading images from outside senders." soon />
-            <Row icon={Keyboard} title="Keyboard shortcuts" description="Move through Mail with keyboard commands." soon />
           </Card>
 
           <Card title="Compose & signature" count={1}>
@@ -283,9 +280,6 @@ export function MailboxPreferences({ section }: { section: SettingsSection }) {
 
           <NotificationsCard />
 
-          <Card title="Accessibility" count={1}>
-            <Row icon={Accessibility} title="Accessibility" description="Reduced motion, larger text and higher contrast." soon />
-          </Card>
         </div>
 
         <aside className="flex flex-col gap-4">
@@ -413,7 +407,7 @@ function NotificationsCard() {
   }, [note]);
 
   return (
-    <Card title="Notifications" count={3}>
+    <Card title="Notifications" count={2}>
       <Row icon={Send} title="Send a digest now" description={note ?? "An on-demand summary of what needs your attention, added to your notifications."}>
         <button
           type="button"
@@ -430,7 +424,6 @@ function NotificationsCard() {
           Send digest
         </button>
       </Row>
-      <Row icon={BellRing} title="Desktop notifications" description="Browser notifications for new mail and activity." soon />
       <Row
         icon={Mail}
         title="Daily digest"

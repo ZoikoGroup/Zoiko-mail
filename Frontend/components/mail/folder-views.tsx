@@ -223,12 +223,7 @@ export function CountPill({ view, total }: { view: FolderView; total: number }) 
   );
 }
 
-const BANNERS: Record<Exclude<ViewFolder, "SCHEDULED">, { icon: LucideIcon; title: string; body: string }> = {
-  ARCHIVE: {
-    icon: Archive,
-    title: "Organized. Not deleted.",
-    body: "Archive removes conversations from Inbox while keeping them searchable.",
-  },
+const BANNERS: Record<Exclude<ViewFolder, "SCHEDULED" | "ARCHIVE">, { icon: LucideIcon; title: string; body: string }> = {
   SPAM: {
     icon: ShieldCheck,
     title: "Protection-first preview",
@@ -269,6 +264,8 @@ export function FolderBanner({ view, nextSendAt }: { view: FolderView; nextSendA
       </div>
     );
   }
+  // Archive has no strip: the header already says what the folder is.
+  if (view.folder === "ARCHIVE") return null;
   const banner = BANNERS[view.folder];
   return (
     <div className="flex items-center gap-3 border-y border-[var(--border)] bg-[var(--s2)] px-5 py-3">

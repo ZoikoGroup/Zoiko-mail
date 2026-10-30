@@ -16,7 +16,7 @@
 // why and lets Next start anyway. Skipped for a remote API (a tunnel, staging)
 // and when ZOIKO_SKIP_API_CHECK=1.
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,6 +46,22 @@ async function answers(base) {
   try {
     await fetch(`${base}/auth/me`, { signal: AbortSignal.timeout(4000) });
     return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True when Backend/.env's DATABASE_URL targets a local Postgres other than the Docker dev container (55432). */
+function usesLocalPostgres() {
+  const envFile = path.resolve(frontend, "../Backend/.env");
+  if (!existsSync(envFile)) return false;
+  const line = readFileSync(envFile, "utf8")
+    .split(/\r?\n/)
+    .find((l) => /^\s*DATABASE_URL\s*=/.test(l));
+  if (!line) return false;
+  try {
+    const url = new URL(line.split("=").slice(1).join("=").trim().replace(/^["']|["']$/g, ""));
+    return ["localhost", "127.0.0.1", "::1", "[::1]"].includes(url.hostname) && url.port !== "55432";
   } catch {
     return false;
   }
@@ -84,8 +100,24 @@ async function main() {
     return;
   }
 
-  say("Starting it with Backend/scripts/dev-up.ps1 -NoFrontend (database, schema, API)...");
-  spawnSync(ps, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", devUp, "-NoFrontend"], { stdio: "inherit" });
+  if (usesLocalPostgres()) {
+    // DATABASE_URL points at a Postgres installed on this machine, not the
+    // Docker dev container (port 55432), so dev-up and Docker are not needed.
+    say("Backend/.env uses a local Postgres; starting the API from source (no Docker)...");
+    // Node runs tsx directly: going through npm needs a shell (cmd.exe), and a
+    // detached cmd opens a console window of its own.
+    const backend = path.resolve(frontend, "../Backend");
+    const child = spawn(process.execPath, [path.join(backend, "node_modules/tsx/dist/cli.mjs"), "watch", "src/server.ts"], {
+      cwd: backend,
+      stdio: "ignore",
+      detached: true,
+      windowsHide: true,
+    });
+    child.unref();
+  } else {
+    say("Starting it with Backend/scripts/dev-up.ps1 -NoFrontend (database, schema, API)...");
+    spawnSync(ps,["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", devUp, "-NoFrontend"], { stdio: "inherit" });
+  }
 
   // dev-up waits for the port; the API may still be finishing its own start.
   for (let attempt = 0; attempt < 20; attempt += 1) {

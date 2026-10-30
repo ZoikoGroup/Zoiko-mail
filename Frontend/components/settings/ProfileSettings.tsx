@@ -3,7 +3,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import {
-  Building2, CheckCircle2, ChevronRight, Fingerprint, KeyRound, Loader2, Monitor,
+  Building2, CheckCircle2, ChevronRight, KeyRound, Loader2,
   MonitorSmartphone, ShieldCheck,
 } from "lucide-react";
 import { ApiError } from "@/lib/api-client";
@@ -13,7 +13,7 @@ import { MfaSettings } from "@/components/account/MfaSettings";
 import { PasswordRequirements } from "@/components/auth";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
-import { SaveActions, SettingsNotice, SoonBadge, SoonRow } from "@/components/settings/SettingsBits";
+import { SaveActions, SettingsNotice } from "@/components/settings/SettingsBits";
 import type { SettingsSection } from "@/components/settings/sections";
 
 /**
@@ -136,9 +136,6 @@ export function ProfileSettings({ section }: { section: SettingsSection }) {
                     </span>
                   )}
                 </div>
-                <span className="flex items-center gap-2 text-[12px] text-[var(--ink3)]" title="Uploading a photo is coming soon">
-                  Profile photo <SoonBadge />
-                </span>
               </div>
 
               {profile.isError && (
@@ -217,8 +214,6 @@ export function ProfileSettings({ section }: { section: SettingsSection }) {
               <MfaSettings />
               <PasswordRow />
               <SignOutEverywhereRow />
-              <SoonRow icon={Monitor} title="Active sessions" description="See every browser and device you are signed in on, and end one at a time." />
-              <SoonRow icon={Fingerprint} title="ZoikoID" description="Link your ZoikoID for single sign-on across Zoiko." />
             </div>
           </Card>
         </div>
