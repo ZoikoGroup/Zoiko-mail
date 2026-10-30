@@ -1,5 +1,6 @@
 "use client";
 
+import { SHOW_COMING_SOON } from "@/lib/feature-flags";
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import Image from "next/image";
@@ -306,6 +307,7 @@ function RailRow({
   );
 
   if (item.soon) {
+    if (!SHOW_COMING_SOON) return null;
     return (
       <div className={`${base} cursor-default text-[var(--ink3)]`}>
         <Icon className="h-4 w-4 shrink-0" aria-hidden />

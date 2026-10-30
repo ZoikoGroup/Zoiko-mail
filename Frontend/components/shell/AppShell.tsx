@@ -1,5 +1,6 @@
 "use client";
 
+import { SHOW_COMING_SOON } from "@/lib/feature-flags";
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import Image from "next/image";
@@ -127,6 +128,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   }) => {
     const base = "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition";
     if (!live) {
+      if (!SHOW_COMING_SOON) return null;
       return (
         <div className={`${base} cursor-default text-[var(--ink3)]`}>
           <Icon className="h-4 w-4 shrink-0" />

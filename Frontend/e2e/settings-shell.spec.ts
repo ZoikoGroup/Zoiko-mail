@@ -149,3 +149,25 @@ test("the signature saves to the account with the rest of the page", async ({ pa
   await expect(page.getByTestId("save-state")).toContainText("Your preferences were saved.");
   expect(patches).toEqual([{ signature: "Michael" }]);
 });
+
+test("Integrations shows the real connections and marks the catalogue as concepts", async ({ page }) => {
+  await openWebmail(page);
+  await page.goto("/mail/settings/integrations");
+  await expect(page.getByTestId("settings-page").getByRole("heading", { name: "Integrations & Connected Apps" })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole("tab", { name: /Connected apps/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByText("No apps connected")).toBeVisible();
+  await page.getByRole("tab", { name: "Discover integrations" }).click();
+  await expect(page.getByTestId("concept-connectors").getByText("Concept")).toHaveCount(6);
+  await page.getByRole("tab", { name: "Activity & audit" }).click();
+  await expect(page.getByTestId("activity-soon")).toContainText("Integration audit log");
+});
+
+test("Import & Export shows planned sources, real storage and no invented jobs", async ({ page }) => {
+  await openWebmail(page);
+  await page.goto("/mail/settings/import-export");
+  await expect(page.getByTestId("import-sources").getByText("Planned")).toHaveCount(4, { timeout: 60_000 });
+  await expect(page.getByTestId("storage-card")).toContainText("2.4 GB / 10 GB");
+  await expect(page.getByRole("button", { name: /New export/ })).toBeDisabled();
+  await page.getByRole("tab", { name: /Job history/ }).click();
+  await expect(page.getByTestId("job-history")).toContainText("No transfer jobs yet");
+});

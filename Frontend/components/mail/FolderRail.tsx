@@ -1,12 +1,13 @@
 "use client";
 
+import { SHOW_COMING_SOON } from "@/lib/feature-flags";
 import { formatStorageUsage } from "@/lib/storage-api";
 import Link from "next/link";
 import { useLayoutEffect, useRef, useState } from "react";
 // import Link from "next/link";
 import {
   Pencil, Inbox, Star, Clock, Send, CalendarClock, FileText, Archive,
-  Ban, Trash2, MoreHorizontal, ChevronRight, Tag, Users, UserRound, Network, HelpCircle,
+  Ban, Trash2, MoreHorizontal, ChevronRight, Folder, Tag, Users, UserRound, Network, HelpCircle,
 } from "lucide-react";
 import type { MailListFolder, SharedInbox } from "@/lib/mail-api";
 import { useMailLabels, useSharedInboxes } from "@/lib/mail-hooks";
@@ -239,6 +240,19 @@ export function FolderRail({
         <div className="mx-3 mt-3 border-t border-[var(--border)]" />
         <SectionTitle>Organize</SectionTitle>
         <ul className="space-y-0.5">
+          {SHOW_COMING_SOON && (
+            <li>
+              <span
+                className="flex w-full cursor-default items-center gap-3 rounded-lg px-3 py-2 text-[13.5px] text-[var(--ink3)]"
+                title="Custom folders are coming soon"
+              >
+                <Folder className="h-4 w-4 shrink-0" aria-hidden /> Folders
+                <span className="ml-auto rounded-full border border-[var(--border)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide">
+                  Soon
+                </span>
+              </span>
+            </li>
+          )}
           <li>
             <button
               type="button"

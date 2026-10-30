@@ -1,10 +1,11 @@
 "use client";
 
-import { AtSign, BadgeCheck, Ban, CheckCircle2, ShieldCheck, UserRound, Users } from "lucide-react";
+import { AtSign, BadgeCheck, Ban, CheckCircle2, Plus, ShieldCheck, UserRound, Users } from "lucide-react";
 import { useSendableMailboxes } from "@/lib/mail-hooks";
 import type { SendableMailbox } from "@/lib/mail-api";
 import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
-import { SettingsNotice } from "@/components/settings/SettingsBits";
+import { SHOW_COMING_SOON } from "@/lib/feature-flags";
+import { SettingsNotice, SoonBadge } from "@/components/settings/SettingsBits";
 import type { SettingsSection } from "@/components/settings/sections";
 import { BrandLoader } from "@/components/ui/BrandLoader";
 
@@ -31,6 +32,13 @@ export function SenderIdentities({ section }: { section: SettingsSection }) {
   return (
     <SettingsWorkspace
       section={section}
+      actions={
+        SHOW_COMING_SOON ? (
+        <button type="button" className="zoiko-btn" disabled title="Adding your own identities is coming soon">
+          <Plus className="h-4 w-4" aria-hidden /> Add identity <SoonBadge />
+        </button>
+        ) : undefined
+      }
     >
       <SettingsNotice lead="Who your mail comes from." icon={ShieldCheck}>
         Choose any of these in the From menu when you write a message. Shared addresses appear when your administrator gives you permission to send from them.
