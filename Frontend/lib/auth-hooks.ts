@@ -42,6 +42,7 @@ import { getPlatformToken, isLoggedIn, setSignOutNotice } from "./auth-storage";
 import { AuthResponse } from "./auth-api";
 import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { resolveWorkspaceHref } from "./workspace";
+import { toast } from "@/components/ui/Toast";
 
 // Server state (the logged-in user) lives in TanStack Query, keyed by ['me'].
 export function useMe() {
@@ -184,7 +185,20 @@ export function routeAuthState(
     href = "/login";
   }
 
+  if (data.state === "STAFF_CONSOLE" || data.state === "SIGNED_IN") announceSignIn();
   router.replace(href);
+}
+
+/**
+ * "Login Successful", for the two states that mean a session now exists:
+ * every way in (password, Google, the workspace picker, the second factor)
+ * reaches one of them only here, and only once the server has issued the
+ * session. A challenge, a picker or a suspended account is not a sign-in and
+ * says nothing. One id for all of them, so the toast can never stack. It shows
+ * for 2 seconds once the workspace it leads to is on screen (see Toaster).
+ */
+function announceSignIn(): void {
+  toast.show({ id: "login-success", type: "success", title: "Login Successful", duration: 2000 });
 }
 
 export function useLogin() {

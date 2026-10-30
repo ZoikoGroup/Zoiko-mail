@@ -64,7 +64,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* Main column */}
       <div className="flex min-w-0 flex-1 flex-col">
         <NetworkBanner />
-        <header className="flex items-center gap-3 border-b border-[var(--border)] bg-[var(--surface)] px-4 py-3 sm:px-6">
+        <header data-app-header className="flex items-center gap-3 border-b border-[var(--border)] bg-[var(--surface)] px-4 py-3 sm:px-6">
           <button
             onClick={() => setMobileOpen(true)}
             className="rounded-md p-1.5 text-[var(--ink2)] hover:bg-[var(--s2)] md:hidden"

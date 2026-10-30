@@ -69,8 +69,17 @@ export function useRealWorkspace(options: { staff?: boolean } = {}): () => Fixtu
   };
 }
 
-export async function signIn(browser: Browser, address: string, password: string): Promise<{ context: BrowserContext; page: Page }> {
+/** Run on a sign-in's fresh browser context before its first page loads, e.g. to install an init script. */
+export type ContextSetup = (context: BrowserContext) => Promise<void>;
+
+export async function signIn(
+  browser: Browser,
+  address: string,
+  password: string,
+  setup?: ContextSetup
+): Promise<{ context: BrowserContext; page: Page }> {
   const context = await browser.newContext();
+  await setup?.(context);
   const page = await context.newPage();
   await page.goto("/login/member");
   await page.getByPlaceholder("john@example.com").fill(address);
@@ -131,10 +140,16 @@ export async function answerMfa(page: Page, secret: string) {
  * administers a second workspace, so it passes the workspace picker and
  * chooses the one it owns.
  */
-export async function signInStaff(browser: Browser, fixture: Fixture, role: StaffRole): Promise<{ context: BrowserContext; page: Page }> {
+export async function signInStaff(
+  browser: Browser,
+  fixture: Fixture,
+  role: StaffRole,
+  setup?: ContextSetup
+): Promise<{ context: BrowserContext; page: Page }> {
   const account = fixture.staff?.[role];
   if (!account) throw new Error("This fixture was created without staff accounts");
   const context = await browser.newContext();
+  await setup?.(context);
   const page = await context.newPage();
   await page.goto("/login");
   await page.getByPlaceholder("john@example.com").fill(account.email);
