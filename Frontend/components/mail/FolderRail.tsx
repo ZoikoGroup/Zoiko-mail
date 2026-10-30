@@ -1,8 +1,9 @@
 "use client";
 
+import { SHOW_COMING_SOON } from "@/lib/feature-flags";
 import { formatStorageUsage } from "@/lib/storage-api";
 import Link from "next/link";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 // import Link from "next/link";
 import {
   Pencil, Inbox, Star, Clock, Send, CalendarClock, FileText, Archive,
@@ -42,6 +43,9 @@ const MORE: FolderRow[] = [
 ];
 
 const SHARED_SHOWN = 5;
+
+/** Where the folder column was last scrolled to, kept across the remounts above. */
+let railScroll = 0;
 
 export function folderLabel(folder: MailListFolder): string {
   return [...PRIMARY, ...MORE].find((row) => row.key === folder)?.label ?? "Mail";
@@ -109,6 +113,12 @@ export function FolderRail({
   /** Called when a Settings link is followed (the phone drawer closes). */
   onNavigate?: () => void;
 }) {
+  // Each Settings page renders its own shell, so this column is rebuilt on every
+  // click there; keeping its scroll position stops it jumping back to the top.
+  const navRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    if (navRef.current) navRef.current.scrollTop = railScroll;
+  }, []);
   const inMore = MORE.some((row) => row.key === folder);
   const [moreOpen, setMoreOpen] = useState(inMore);
   const [labelsOpen, setLabelsOpen] = useState(Boolean(labelId));
@@ -160,7 +170,7 @@ export function FolderRail({
         </button>
       </div>
 
-      <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+      <nav ref={navRef} onScroll={(e) => { railScroll = e.currentTarget.scrollTop; }} className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
         <SectionTitle>Mail</SectionTitle>
         <ul className="space-y-0.5">
           {PRIMARY.map(folderButton)}
@@ -230,17 +240,19 @@ export function FolderRail({
         <div className="mx-3 mt-3 border-t border-[var(--border)]" />
         <SectionTitle>Organize</SectionTitle>
         <ul className="space-y-0.5">
-          <li>
-            <span
-              className="flex w-full cursor-default items-center gap-3 rounded-lg px-3 py-2 text-[13.5px] text-[var(--ink3)]"
-              title="Custom folders are coming soon"
-            >
-              <Folder className="h-4 w-4 shrink-0" aria-hidden /> Folders
-              <span className="ml-auto rounded-full border border-[var(--border)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide">
-                Soon
+          {SHOW_COMING_SOON && (
+            <li>
+              <span
+                className="flex w-full cursor-default items-center gap-3 rounded-lg px-3 py-2 text-[13.5px] text-[var(--ink3)]"
+                title="Custom folders are coming soon"
+              >
+                <Folder className="h-4 w-4 shrink-0" aria-hidden /> Folders
+                <span className="ml-auto rounded-full border border-[var(--border)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide">
+                  Soon
+                </span>
               </span>
-            </span>
-          </li>
+            </li>
+          )}
           <li>
             <button
               type="button"

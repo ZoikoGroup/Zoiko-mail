@@ -1,5 +1,6 @@
 "use client";
 
+import { SHOW_COMING_SOON } from "@/lib/feature-flags";
 import { useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -84,7 +85,7 @@ export default function DashboardPage() {
               {section}
             </h2>
             <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {MEMBER_NAV.filter((n) => n.section === section).map((n) => {
+              {MEMBER_NAV.filter((n) => n.section === section && (SHOW_COMING_SOON || n.status === "live")).map((n) => {
                 const Icon = n.icon;
                 const live = n.status === "live";
                 const card = (

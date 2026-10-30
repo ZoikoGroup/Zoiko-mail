@@ -1,5 +1,6 @@
 "use client";
 
+import { SHOW_COMING_SOON } from "@/lib/feature-flags";
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import {
@@ -449,7 +450,7 @@ export function TaskDetailPanel({
 
         <Checklist task={task} />
 
-        {showNextStep && !completed && (
+        {SHOW_COMING_SOON && showNextStep && !completed && (
           <Section title="Recommended next step" aside="Human review">
             <div className="flex items-center gap-3 rounded-xl border border-dashed border-[var(--border)] p-3 text-[12.5px] text-[var(--ink3)]">
               <Sparkles className="h-4 w-4 shrink-0 text-[var(--ai)]" aria-hidden />

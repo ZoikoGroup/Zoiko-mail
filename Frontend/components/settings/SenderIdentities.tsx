@@ -4,6 +4,7 @@ import { AtSign, BadgeCheck, Ban, CheckCircle2, Plus, ShieldCheck, UserRound, Us
 import { useSendableMailboxes } from "@/lib/mail-hooks";
 import type { SendableMailbox } from "@/lib/mail-api";
 import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
+import { SHOW_COMING_SOON } from "@/lib/feature-flags";
 import { SettingsNotice, SoonBadge } from "@/components/settings/SettingsBits";
 import type { SettingsSection } from "@/components/settings/sections";
 import { BrandLoader } from "@/components/ui/BrandLoader";
@@ -32,9 +33,11 @@ export function SenderIdentities({ section }: { section: SettingsSection }) {
     <SettingsWorkspace
       section={section}
       actions={
+        SHOW_COMING_SOON ? (
         <button type="button" className="zoiko-btn" disabled title="Adding your own identities is coming soon">
           <Plus className="h-4 w-4" aria-hidden /> Add identity <SoonBadge />
         </button>
+        ) : undefined
       }
     >
       <SettingsNotice lead="Who your mail comes from." icon={ShieldCheck}>

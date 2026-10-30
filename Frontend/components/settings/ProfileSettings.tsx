@@ -13,6 +13,7 @@ import { MfaSettings } from "@/components/account/MfaSettings";
 import { PasswordRequirements } from "@/components/auth";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
+import { SHOW_COMING_SOON } from "@/lib/feature-flags";
 import { SaveActions, SettingsNotice, SoonBadge, SoonRow } from "@/components/settings/SettingsBits";
 import type { SettingsSection } from "@/components/settings/sections";
 
@@ -136,9 +137,11 @@ export function ProfileSettings({ section }: { section: SettingsSection }) {
                     </span>
                   )}
                 </div>
-                <span className="flex items-center gap-2 text-[12px] text-[var(--ink3)]" title="Uploading a photo is coming soon">
+                {SHOW_COMING_SOON && (
+                  <span className="flex items-center gap-2 text-[12px] text-[var(--ink3)]" title="Uploading a photo is coming soon">
                   Profile photo <SoonBadge />
                 </span>
+                )}
               </div>
 
               {profile.isError && (

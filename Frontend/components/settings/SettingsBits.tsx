@@ -1,5 +1,6 @@
 "use client";
 
+import { SHOW_COMING_SOON } from "@/lib/feature-flags";
 import type { ReactNode } from "react";
 import { Check, Info, Loader2, type LucideIcon } from "lucide-react";
 import type { SettingsSection } from "@/components/settings/sections";
@@ -74,6 +75,7 @@ export function SoonRow({
   description: string;
   badge?: string;
 }) {
+  if (!SHOW_COMING_SOON) return null;
   return (
     <div className="flex items-center gap-4 px-5 py-4 opacity-70" aria-disabled="true">
       <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--s2)] text-[var(--ink3)]">

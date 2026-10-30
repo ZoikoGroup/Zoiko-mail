@@ -13,6 +13,7 @@
  * list; those need backend fields that do not exist yet.
  */
 
+import { SHOW_COMING_SOON } from "@/lib/feature-flags";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Archive, CalendarClock, Clock, FileWarning, RotateCcw, ShieldAlert, ShieldCheck, Sparkles, Trash2,
@@ -223,12 +224,7 @@ export function CountPill({ view, total }: { view: FolderView; total: number }) 
   );
 }
 
-const BANNERS: Record<Exclude<ViewFolder, "SCHEDULED">, { icon: LucideIcon; title: string; body: string }> = {
-  ARCHIVE: {
-    icon: Archive,
-    title: "Organized. Not deleted.",
-    body: "Archive removes conversations from Inbox while keeping them searchable.",
-  },
+const BANNERS: Record<Exclude<ViewFolder, "SCHEDULED" | "ARCHIVE">, { icon: LucideIcon; title: string; body: string }> = {
   SPAM: {
     icon: ShieldCheck,
     title: "Protection-first preview",
@@ -269,6 +265,8 @@ export function FolderBanner({ view, nextSendAt }: { view: FolderView; nextSendA
       </div>
     );
   }
+  // Archive has no strip: the header already says what the folder is.
+  if (view.folder === "ARCHIVE") return null;
   const banner = BANNERS[view.folder];
   return (
     <div className="flex items-center gap-3 border-y border-[var(--border)] bg-[var(--s2)] px-5 py-3">
@@ -480,6 +478,7 @@ export function BlockedAttachments({ attachments }: { attachments: MailAttachmen
 
 /** Placeholder for the Alet assistant until it lands. */
 export function AletCard({ hint }: { hint: string }) {
+  if (!SHOW_COMING_SOON) return null;
   return (
     <div className="mt-6 flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--s2)] px-4 py-3" title="Alet is coming soon">
       <Sparkles className="h-4 w-4 shrink-0 text-[var(--accent)]" aria-hidden />

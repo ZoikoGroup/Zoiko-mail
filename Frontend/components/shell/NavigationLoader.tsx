@@ -8,10 +8,10 @@ import { BrandLoader } from "@/components/ui/BrandLoader";
 /** How long the loader keeps a navigation covered at most, so a stuck one can never lock the screen. */
 const MAX_MS = 15_000;
 /** The new page must be quiet this long before the loader leaves, so it does not drop between two requests. */
-const SETTLE_MS = 150;
+const SETTLE_MS = 80;
 /** Once seen, it stays at least this long, so it never flashes. */
-const MIN_VISIBLE_MS = 300;
-const FADE_OUT_MS = 180;
+const MIN_VISIBLE_MS = 120;
+const FADE_OUT_MS = 120;
 
 /**
  * Whether the page under the loading screen still shows a loader of its own:
@@ -69,8 +69,8 @@ const WRAPPED = Symbol("navigation-loader");
  *   loader (BrandLoader continues the same animation, so nothing blinks) and
  *   stays until the page's content is in, instead of handing over to the
  *   smaller loaders inside the page.
- * - BrandLoader fades in after 140ms, so a quick navigation never shows it;
- *   once shown it stays at least 300ms and fades out, so it never flashes.
+ * - BrandLoader fades in after 400ms, so a quick navigation never shows it;
+ *   once shown it stays at least 120ms and fades out, so it never flashes.
  * - After 10s BrandLoader offers Reload; at 15s it steps aside regardless.
  */
 export function NavigationLoader() {
@@ -153,7 +153,11 @@ export function NavigationLoader() {
         seenAt = now;
       }
       if (!arrived) return;
-      if (firstLoadsRef.current > 0 || pageIsLoading()) {
+      // Only the first load of the app waits for the page's data. Moving
+      // between pages leaves as soon as the new page is on screen: the page
+      // shows its own panel loader or skeleton for its data, and a full-screen
+      // logo for that would appear after nearly every click.
+      if (nav.from === null && (firstLoadsRef.current > 0 || pageIsLoading())) {
         quietSince = null;
         return;
       }

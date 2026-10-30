@@ -14,6 +14,7 @@ import { useSignature, useUpdateSignature } from "@/lib/mail-hooks";
 import { useProfile, useUpdateProfile } from "@/lib/auth-hooks";
 import { useSendDigest } from "@/lib/notifications-hooks";
 import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
+import { SHOW_COMING_SOON } from "@/lib/feature-flags";
 import { SaveActions, SettingsNotice, SoonBadge } from "@/components/settings/SettingsBits";
 import type { SettingsSection } from "@/components/settings/sections";
 
@@ -203,7 +204,7 @@ export function MailboxPreferences({ section }: { section: SettingsSection }) {
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
         <div className="flex min-w-0 flex-col gap-4">
-          <Card title="Inbox experience" count={4}>
+          <Card title="Inbox experience" count={4} soonCount={1}>
             <Row icon={Inbox} title="Default inbox view" description="The messages shown when you open Mail.">
               <select aria-label="Default inbox view" className={select} value={v.defaultView} disabled={!loaded}
                 onChange={(e) => setPref("defaultView", e.target.value as InboxView)}>
@@ -222,7 +223,7 @@ export function MailboxPreferences({ section }: { section: SettingsSection }) {
             </Row>
           </Card>
 
-          <Card title="Reading behavior" count={4}>
+          <Card title="Reading behavior" count={4} soonCount={2}>
             <Row icon={Rows3} title="Message density" description="How much space each message takes in the list.">
               <Segmented<MessageDensity>
                 label="Message density"
@@ -283,7 +284,7 @@ export function MailboxPreferences({ section }: { section: SettingsSection }) {
 
           <NotificationsCard />
 
-          <Card title="Accessibility" count={1}>
+          <Card title="Accessibility" count={1} soonCount={1}>
             <Row icon={Accessibility} title="Accessibility" description="Reduced motion, larger text and higher contrast." soon />
           </Card>
         </div>
@@ -307,7 +308,9 @@ export function MailboxPreferences({ section }: { section: SettingsSection }) {
   );
 }
 
-function Card({ title, count, children }: { title: string; count: number; children: ReactNode }) {
+function Card({ title, count, soonCount = 0, children }: { title: string; count: number; /** How many of `count` are Soon rows, hidden unless SHOW_COMING_SOON. */ soonCount?: number; children: ReactNode }) {
+  if (!SHOW_COMING_SOON) count -= soonCount;
+  if (count <= 0) return null;
   return (
     <section className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]" aria-label={title}>
       <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-3.5">
@@ -337,6 +340,7 @@ function Row({ icon, title, description, soon = false, children }: {
   soon?: boolean;
   children?: ReactNode;
 }) {
+  if (soon && !SHOW_COMING_SOON) return null;
   return (
     <div className={`flex flex-wrap items-center gap-x-4 gap-y-3 px-5 py-4 ${soon ? "opacity-70" : ""}`} aria-disabled={soon || undefined}>
       <RowIcon icon={icon} />
@@ -413,7 +417,7 @@ function NotificationsCard() {
   }, [note]);
 
   return (
-    <Card title="Notifications" count={3}>
+    <Card title="Notifications" count={3} soonCount={1}>
       <Row icon={Send} title="Send a digest now" description={note ?? "An on-demand summary of what needs your attention, added to your notifications."}>
         <button
           type="button"

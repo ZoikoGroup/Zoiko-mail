@@ -24,6 +24,7 @@ import { BrandLoader } from "@/components/ui/BrandLoader";
 import { useMe } from "@/lib/auth-hooks";
 import { useTaskSummary, useTaskTeams, useTasks } from "@/lib/tasks-hooks";
 import { exportCompletedTasks, type ListTasksParams, type Task, type TaskSort, type TaskSummary, type TaskTeam } from "@/lib/tasks-api";
+import { SHOW_COMING_SOON } from "@/lib/feature-flags";
 import { SummaryCards, TasksPageHeader, TasksWorkspace, type SummaryCard } from "./TasksWorkspace";
 import type { TasksPageKey } from "./TasksSidebar";
 import { CompletedTable, GroupedTaskList, OverdueTable, TeamTable } from "./TaskList";
@@ -392,8 +393,8 @@ export function TasksPage({ page, teamId }: { page: TasksPageKey; teamId?: strin
         subtitle={def.subtitle()}
         actions={
           <>
-            {def.focusView && <SoonButton icon={Crosshair} label="Focus view" />}
-            {page === "team" && <SoonButton icon={Users} label="Review workload" />}
+            {SHOW_COMING_SOON && def.focusView && <SoonButton icon={Crosshair} label="Focus view" />}
+            {SHOW_COMING_SOON && page === "team" && <SoonButton icon={Users} label="Review workload" />}
             {page === "completed" ? (
               <button type="button" className="zoiko-btn" onClick={exportHistory} disabled={exporting || tasks.length === 0} title={`Download the ${tab.params.scope === "team" ? "team's" : "your"} completed tasks as CSV`}>
                 <Download className="h-4 w-4" aria-hidden /> {exporting ? "Exporting…" : "Export history"}
@@ -419,7 +420,7 @@ export function TasksPage({ page, teamId }: { page: TasksPageKey; teamId?: strin
         </div>
       ) : (
       <>
-      <SummaryCards cards={def.cards(summary.data, base.data?.items, extra.data?.items)} />
+      <SummaryCards cards={def.cards(summary.data, base.data?.items, extra.data?.items).filter((c) => SHOW_COMING_SOON || !c.soon)} />
 
       <div className="grid min-h-[560px] flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(340px,420px)]">
         <section aria-label={def.panelTitle} className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
@@ -442,7 +443,7 @@ export function TasksPage({ page, teamId }: { page: TasksPageKey; teamId?: strin
 
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <div role="tablist" aria-label={def.panelTitle} className="flex flex-wrap gap-1">
-                {def.tabs.map((t) => {
+                {def.tabs.filter((t) => SHOW_COMING_SOON || !t.soon).map((t) => {
                   const current = t.key === tab.key;
                   const n = t.count && summary.data ? t.count(summary.data) : null;
                   return (

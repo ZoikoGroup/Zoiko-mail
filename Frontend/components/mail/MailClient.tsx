@@ -988,7 +988,7 @@ export const MailClient = forwardRef<MailClientHandle, MailClientProps>(function
                 <button onClick={() => runBulk("MARK_UNREAD")} disabled={bulk.isPending} className="zoiko-btn sm">Unread</button>
                 <button onClick={() => runBulk("STAR")} disabled={bulk.isPending} className="zoiko-btn sm" aria-label="Star"><Star className="h-3 w-3" /></button>
                 <button onClick={() => runBulk("UNSTAR")} disabled={bulk.isPending} className="zoiko-btn sm">Unstar</button>
-                {folder === "INBOX" && (
+                {(folder === "INBOX" || folder === "STARRED" || folder === "SNOOZED") && (
                   <button onClick={() => runBulk("ARCHIVE")} disabled={bulk.isPending} className="zoiko-btn sm"><Archive className="h-3 w-3" /> Archive</button>
                 )}
                 {(folder === "INBOX" || folder === "ARCHIVE") && (
