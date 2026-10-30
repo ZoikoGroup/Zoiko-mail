@@ -145,7 +145,7 @@ export function TopBar({
     "relative inline-flex h-9 w-9 items-center justify-center rounded-lg text-[var(--ink2)] transition hover:bg-[var(--s2)] hover:text-[var(--ink)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]";
 
   return (
-    <header className="flex h-[68px] items-center gap-4 border-b border-[var(--border)] bg-[var(--surface)] px-5">
+    <header data-app-header className="flex h-[68px] items-center gap-4 border-b border-[var(--border)] bg-[var(--surface)] px-5">
       <Link
         href="/mail"
         aria-label="Zoiko Mail — Inbox"

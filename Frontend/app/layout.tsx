@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
 import { NavigationLoader } from "@/components/shell/NavigationLoader";
+import { Toaster } from "@/components/ui/Toast";
 
 export const metadata: Metadata = {
   title: {
@@ -31,6 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Providers>
           {children}
           <NavigationLoader />
+          <Toaster />
         </Providers>
       </body>
     </html>

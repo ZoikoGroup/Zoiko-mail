@@ -1553,7 +1553,7 @@ export default function PlatformConsole() {
         </nav>
 
         <div className="body">
-          <div className="topbar">
+          <div className="topbar" data-app-header>
             <button className="menubtn" onClick={() => setMobileOpen(true)} aria-label="Open menu">
               ☰
             </button>
