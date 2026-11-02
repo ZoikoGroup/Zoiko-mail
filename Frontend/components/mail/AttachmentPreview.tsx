@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Download,
   X,
@@ -35,7 +36,8 @@ import { Spinner } from "@/components/ui/Spinner";
  *
  * Every attachment is a tile showing the file itself — the image, the PDF's
  * first page, the Word document's first page, the opening lines of a text
- * file — and opens a full-window viewer with zoom, fit and scrolling.
+ * file — and opens a centred viewer (86% × 82% of the screen) with zoom, fit
+ * and scrolling.
  *
  * How each format is drawn:
  *   image, video, audio, PDF  the browser, from an object URL (PDF in its own
@@ -724,9 +726,10 @@ function ViewerBody({
 }
 
 /**
- * The full-window viewer. Zoom −/+ (and Ctrl/⌘ +/−, 0), Fit and 100% for
- * images, Word documents and text; the PDF viewer brings its own. Arrow keys
- * move between files; Escape closes.
+ * The viewer: a centred window, 86% of the screen wide and 82% high, for every
+ * format. Zoom −/+ (and Ctrl/⌘ +/−, 0), Fit and 100% for images, Word
+ * documents and text; the PDF viewer brings its own. Arrow keys move between
+ * files; Escape, the close button or a click outside closes.
  */
 export function FilePreview({
   items,
@@ -802,86 +805,111 @@ export function FilePreview({
   const control =
     "inline-flex h-9 min-w-9 items-center justify-center rounded-lg px-2 text-white/75 transition hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60 disabled:opacity-40";
 
-  return (
-    <div className="fixed inset-0 z-[70] flex flex-col bg-[#0b1120]/95 backdrop-blur-sm" role="dialog" aria-label={`Preview of ${item.fileName}`}>
-      {/* Top bar: what it is, zoom, download, close */}
-      <div className="flex h-14 shrink-0 items-center gap-3 border-b border-white/10 px-4">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <FileTypeBadge kind={kind} />
-            <div className="truncate text-sm font-medium text-white">{item.fileName}</div>
+  return createPortal(
+    // A centred window 86% of the screen wide and 82% high, the same for every
+    // format: large enough to read a page, with the app still in view around it.
+    // dvh, so a phone's collapsing address bar never pushes it off screen.
+    // In <body>, not inside the composer or chat that opened it, so its z-index
+    // is the page's: above the app-wide toasts (z-100), none can sit over its controls.
+    <div
+      className="fixed inset-0 z-[110] flex items-center justify-center bg-black/70 backdrop-blur-sm"
+      onClick={(e) => {
+        // React carries a portal's clicks to the composer or chat that opened
+        // it: closing the viewer must not also reach them.
+        e.stopPropagation();
+        onClose();
+      }}
+      data-testid="file-preview-backdrop"
+    >
+      <div
+        className="flex h-[82dvh] w-[86vw] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1120] shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Preview of ${item.fileName}`}
+        data-testid="file-preview"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Top bar: what it is, zoom, download, close. On a phone, the name has
+            a row of its own and the controls go beneath it. */}
+        <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-white/10 px-3 py-2 sm:h-14 sm:flex-nowrap sm:gap-3 sm:px-4 sm:py-0">
+          <div className="min-w-0 flex-1 basis-full sm:basis-auto">
+            <div className="flex items-center gap-2">
+              <FileTypeBadge kind={kind} />
+              <div className="truncate text-sm font-medium text-white">{item.fileName}</div>
+            </div>
+            <div className="text-xs text-white/55">
+              {formatBytes(item.sizeBytes)} · {index + 1} of {items.length}
+            </div>
           </div>
-          <div className="text-xs text-white/55">
-            {formatBytes(item.sizeBytes)} · {index + 1} of {items.length}
+
+          {zoomable && (
+            <div className="flex items-center gap-0.5 rounded-lg bg-white/5 p-0.5" role="group" aria-label="Zoom">
+              <button className={control} onClick={() => step(-1)} aria-label="Zoom out" title="Zoom out (−)">
+                <ZoomOut className="h-4 w-4" />
+              </button>
+              <button
+                className={`${control} w-16 text-xs tabular-nums`}
+                onClick={() => {
+                  setFit(false);
+                  setZoom(1);
+                }}
+                aria-label="Actual size"
+                title="Actual size (100%)"
+                data-testid="zoom-level"
+              >
+                {Math.round(scale * 100)}%
+              </button>
+              <button className={control} onClick={() => step(1)} aria-label="Zoom in" title="Zoom in (+)">
+                <ZoomIn className="h-4 w-4" />
+              </button>
+              <button
+                className={`${control} ${fit ? "bg-white/15 text-white" : ""}`}
+                onClick={() => setFit(true)}
+                aria-label="Fit to screen"
+                aria-pressed={fit}
+                title="Fit to screen (0)"
+              >
+                <Maximize2 className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+          {kind.preview === "pdf" && <span className="hidden text-xs text-white/50 md:inline">Zoom and fit with the PDF toolbar</span>}
+
+          <div className="ml-auto flex items-center gap-1">
+            <button onClick={item.download} className={control} title="Download" aria-label={`Download ${item.fileName}`}>
+              <Download className="h-5 w-5" />
+            </button>
+            <button onClick={onClose} className={control} title="Close (Esc)" aria-label="Close preview">
+              <X className="h-5 w-5" />
+            </button>
           </div>
         </div>
 
-        {zoomable && (
-          <div className="flex items-center gap-0.5 rounded-lg bg-white/5 p-0.5" role="group" aria-label="Zoom">
-            <button className={control} onClick={() => step(-1)} aria-label="Zoom out" title="Zoom out (−)">
-              <ZoomOut className="h-4 w-4" />
-            </button>
-            <button
-              className={`${control} w-16 text-xs tabular-nums`}
-              onClick={() => {
-                setFit(false);
-                setZoom(1);
-              }}
-              aria-label="Actual size"
-              title="Actual size (100%)"
-              data-testid="zoom-level"
-            >
-              {Math.round(scale * 100)}%
-            </button>
-            <button className={control} onClick={() => step(1)} aria-label="Zoom in" title="Zoom in (+)">
-              <ZoomIn className="h-4 w-4" />
-            </button>
-            <button
-              className={`${control} ${fit ? "bg-white/15 text-white" : ""}`}
-              onClick={() => setFit(true)}
-              aria-label="Fit to screen"
-              aria-pressed={fit}
-              title="Fit to screen (0)"
-            >
-              <Maximize2 className="h-4 w-4" />
-            </button>
-          </div>
-        )}
-        {kind.preview === "pdf" && <span className="hidden text-xs text-white/50 md:inline">Zoom and fit with the PDF toolbar</span>}
-
-        <div className="flex items-center gap-1">
-          <button onClick={item.download} className={control} title="Download" aria-label={`Download ${item.fileName}`}>
-            <Download className="h-5 w-5" />
-          </button>
-          <button onClick={onClose} className={control} title="Close (Esc)" aria-label="Close preview">
-            <X className="h-5 w-5" />
-          </button>
+        {/* The file, filling the rest of the window; it scrolls inside, never past the edges */}
+        <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+          <ViewerBody key={item.key} item={item} kind={kind} zoom={scale} fit={fit} onFitScale={setFitScale} />
+          {items.length > 1 && (
+            <>
+              <button
+                onClick={prev}
+                aria-label="Previous attachment"
+                className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white/85 shadow-lg hover:bg-black/70"
+              >
+                <ChevronLeft className="h-6 w-6" />
+              </button>
+              <button
+                onClick={next}
+                aria-label="Next attachment"
+                className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white/85 shadow-lg hover:bg-black/70"
+              >
+                <ChevronRight className="h-6 w-6" />
+              </button>
+            </>
+          )}
         </div>
       </div>
-
-      {/* The file, as large as the window allows */}
-      <div className="relative min-h-0 flex-1">
-        <ViewerBody key={item.key} item={item} kind={kind} zoom={scale} fit={fit} onFitScale={setFitScale} />
-        {items.length > 1 && (
-          <>
-            <button
-              onClick={prev}
-              aria-label="Previous attachment"
-              className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white/85 shadow-lg hover:bg-black/70"
-            >
-              <ChevronLeft className="h-6 w-6" />
-            </button>
-            <button
-              onClick={next}
-              aria-label="Next attachment"
-              className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white/85 shadow-lg hover:bg-black/70"
-            >
-              <ChevronRight className="h-6 w-6" />
-            </button>
-          </>
-        )}
-      </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

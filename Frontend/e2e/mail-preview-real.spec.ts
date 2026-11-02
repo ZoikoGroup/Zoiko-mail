@@ -2,6 +2,7 @@ import { test, expect, type Browser, type Locator, type Page } from "@playwright
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { signIn as signInAs, useRealWorkspace } from "./real-harness";
+import { expectViewerLayout, expectPdfFills } from "./viewer-layout";
 
 /**
  * Attachment previews for every supported document and image format, in the
@@ -59,7 +60,7 @@ async function expectViewer(page: Page, scope: Locator, name: string) {
   return viewer;
 }
 
-test("every format previews in the composer the moment it is attached, at full size with zoom", async ({ browser }) => {
+test("every format previews in the composer the moment it is attached, large, with zoom",async ({ browser }) => {
   const { page, context } = await signIn(browser, getFixture().sender.address);
   await page.setViewportSize({ width: 1600, height: 960 });
   const dialog = await openComposer(page, getFixture().recipient.address, `Formats ${Date.now()}`);
@@ -83,10 +84,8 @@ test("every format previews in the composer the moment it is attached, at full s
   await viewer.getByRole("button", { name: "Fit to screen" }).click();
   await expect(viewer.getByRole("button", { name: "Fit to screen" })).toHaveAttribute("aria-pressed", "true");
   await shot(page, "p2-docx-viewer");
-  // The viewer is large: most of the window.
-  const box = (await viewer.boundingBox())!;
-  expect(box.width).toBeGreaterThan(1500);
-  expect(box.height).toBeGreaterThan(900);
+  // The viewer: centred, 86% of the window wide and 82% high.
+  await expectViewerLayout(page, viewer, { zoomable: true });
   await page.keyboard.press("Escape");
 
   // Legacy .doc: its text.
@@ -95,11 +94,10 @@ test("every format previews in the composer the moment it is attached, at full s
   await shot(page, "p3-doc-viewer");
   await page.keyboard.press("Escape");
 
-  // PDF: the browser's viewer, filling the window.
+  // PDF: the browser's viewer, filling the viewer's window.
   viewer = await expectViewer(page, dialog, PDF.name);
-  const pdf = viewer.locator("iframe");
-  await expect(pdf).toBeVisible();
-  expect((await pdf.boundingBox())!.height).toBeGreaterThan(800);
+  await expectViewerLayout(page, viewer, { zoomable: false });
+  await expectPdfFills(viewer);
   await shot(page, "p4-pdf-viewer");
   await page.keyboard.press("Escape");
 
