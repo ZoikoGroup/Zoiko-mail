@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { APIError, APIConnectionError, APIConnectionTimeoutError } from "openai/error";
 import { env } from "../../config/env.js";
 import { AppError } from "../../common/errors/AppError.js";
+import { logger } from "../../config/logger.js";
 
 /**
  * The language model behind the assistant (Alet).
@@ -114,9 +115,23 @@ function rewrap(error: unknown): AppError {
     return new AppError("The AI assistant is unavailable right now. Try again shortly.", 502, ASSISTANT_UNAVAILABLE);
   }
   if (error instanceof APIConnectionError) {
+    // The member sees a plain message; the log keeps why the model couldn't
+    // be reached (DNS, refused, reset, TLS), as a code and never the request.
+    logger.warn({ cause: networkCause(error) }, "AI assistant: the model could not be reached");
     return new AppError("The AI assistant could not be reached. Try again shortly.", 502, ASSISTANT_UNAVAILABLE);
   }
   return new AppError("The AI assistant could not answer. Try again.", 502, ASSISTANT_UNAVAILABLE);
+}
+
+/** The innermost network error code (ENOTFOUND, ECONNRESET, …) behind a connection failure. */
+function networkCause(error: Error): string {
+  let code: string | undefined;
+  for (let cause: unknown = error.cause, depth = 0; cause && depth < 5; depth++) {
+    const c = cause as { code?: unknown; cause?: unknown };
+    if (typeof c.code === "string") code = c.code;
+    cause = c.cause;
+  }
+  return code ?? error.constructor.name;
 }
 
 let current: AssistantModel = new OpenAIAssistantModel();
