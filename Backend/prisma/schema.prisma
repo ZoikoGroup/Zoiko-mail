@@ -285,11 +285,21 @@ model RefreshToken {
   ipAddress   String?   @map("ip_address")
   userAgent   String?   @map("user_agent")
   lastUsedAt  DateTime? @map("last_used_at")
+  /// The sign-in this row belongs to: the `sid` both tokens of the pair carry,
+  /// kept across rotations. Every request checks that its session still has a
+  /// live row, which is what lets one device be signed out without the rest
+  /// (P1, ZMT-18). Null only on rows written before session binding existed.
+  sessionId     String?   @map("session_id")
+  /// Why the row was revoked. A rotated token presented again is the theft
+  /// signal; a token ended on purpose (sign-out, a revoked device, an admin
+  /// containing an account) is just a stale tab and must not be read as one.
+  revokedReason String?   @map("revoked_reason")
   createdAt   DateTime  @default(now()) @map("created_at")
   tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user        AppUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, tenantId])
+  @@index([sessionId])
   @@map("refresh_tokens")
 }
 
@@ -2339,6 +2349,10 @@ enum SecurityAlertType {
   REFRESH_TOKEN_REUSE
   PASSWORD_CHANGED
   PASSWORD_RESET
+  /// A mailbox began forwarding to an address outside the workspace's domains.
+  FORWARDING_EXTERNAL
+  /// Someone was given send, manage or delegated access to a mailbox not theirs.
+  MAILBOX_ACCESS_GRANTED
 }
 
 // ─── Calendar ────────────────────────────────────────────────────────────────

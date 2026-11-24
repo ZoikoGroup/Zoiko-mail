@@ -157,7 +157,8 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
     req.body,
     tenant.userId,
     tenant.tenantId,
-    getRequestContext(req)
+    getRequestContext(req),
+    tenant.sessionId
   );
   sendSuccess(res, 200, { message: "Password changed successfully" }, req.requestId);
 });

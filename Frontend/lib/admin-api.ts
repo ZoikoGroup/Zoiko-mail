@@ -6,6 +6,7 @@
  * guardrails (which have no backend endpoint yet) remain here.
  */
 
+import type { RemediationAction } from "./account-security-api";
 import type {
   InvitationStatus,
   MailboxDisplayStatus,
@@ -455,7 +456,9 @@ export type SecurityAlertType =
   | "FAILED_LOGIN_BURST"
   | "REFRESH_TOKEN_REUSE"
   | "PASSWORD_CHANGED"
-  | "PASSWORD_RESET";
+  | "PASSWORD_RESET"
+  | "FORWARDING_EXTERNAL"
+  | "MAILBOX_ACCESS_GRANTED";
 
 export type AlertSeverity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type AlertStatus = "OPEN" | "ACKNOWLEDGED" | "RESOLVED" | "DISMISSED";
@@ -477,6 +480,8 @@ export interface SecurityAlertDto {
   createdAt: string;
   actor: { id: string; email: string; displayName: string | null } | null;
   resolvedBy: { id: string; email: string; displayName: string | null } | null;
+  /** Containment the server will accept for this alert now; empty once closed. */
+  remediations?: RemediationAction[];
 }
 
 export interface SecurityAlertListResponse {

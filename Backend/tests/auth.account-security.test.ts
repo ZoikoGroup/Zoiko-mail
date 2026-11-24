@@ -23,10 +23,22 @@ describe("Account security", () => {
       .send({ currentPassword: user.password, newPassword: "NewPassword123!" })
       .expect(200);
 
-    const activeTokens = await prisma.refreshToken.count({
+    // Every other session ends; the one that changed the password stays signed
+    // in (P1): the profile screen carries on with it afterwards, and the
+    // per-request session check would otherwise sign the person out the
+    // moment they finished.
+    const decode = (token: string) =>
+      JSON.parse(Buffer.from(token.split(".")[1]!, "base64url").toString()) as { sid: string };
+    const live = await prisma.refreshToken.findMany({
       where: { userId: user.userId, revokedAt: null },
+      select: { sessionId: true },
     });
-    expect(activeTokens).toBe(0);
+    expect(live.map((row) => row.sessionId)).toEqual([decode(user.accessToken).sid]);
+    await request(app)
+      .get("/api/v1/auth/me")
+      .set(authHeader(secondLogin.accessToken as string))
+      .expect(401);
+    await request(app).get("/api/v1/auth/me").set(authHeader(user.accessToken)).expect(200);
 
     await request(app)
       .post("/api/v1/auth/login")

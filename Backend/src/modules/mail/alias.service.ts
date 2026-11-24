@@ -3,6 +3,7 @@ import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
+import { securityAlertService } from "../security-alert/security-alert.service.js";
 
 /**
  * Aliases and forwarding rules — Data Model §6.17, §6.18, Security §9.
@@ -174,15 +175,61 @@ export class AliasService {
       );
     }
 
-    const rule = await prisma.forwardingRule
-      .create({
-        data: {
+    const external = await this.isOutsideWorkspace(tenantId, destination);
+
+    // The rule, its audit row and — for an outside destination — its security
+    // alert commit together: a forwarding rule nobody was told about is the
+    // exact thing S2 §06 / ZMT-19 exists to prevent.
+    const rule = await prisma
+      .$transaction(async (tx) => {
+        const created = await tx.forwardingRule.create({
+          data: {
+            tenantId,
+            mailboxId,
+            forwardToAddress: destination,
+            keepCopy: input.keepCopy ?? true,
+          },
+          select: forwardingSelect,
+        });
+
+        // Security §9 singles this out: "forwarding creation must be audited".
+        await auditService.record({
           tenantId,
-          mailboxId,
-          forwardToAddress: destination,
-          keepCopy: input.keepCopy ?? true,
-        },
-        select: forwardingSelect,
+          actorUserId: context.userId,
+          eventType: "MAILBOX_FORWARDING_CREATED",
+          targetType: "Mailbox",
+          targetId: mailboxId,
+          requestId: context.requestId,
+          ipAddress: context.ipAddress,
+          userAgent: context.userAgent,
+          metadata: {
+            mailbox: mailbox.address,
+            forwardTo: created.forwardToAddress,
+            keepCopy: created.keepCopy,
+            external,
+          },
+        }, tx);
+
+        if (external) {
+          await securityAlertService.recordExternalForwarding(
+            tenantId,
+            {
+              ruleId: created.id,
+              mailboxId,
+              mailboxAddress: mailbox.address,
+              destination: created.forwardToAddress,
+              keepCopy: created.keepCopy,
+            },
+            {
+              actorUserId: context.userId,
+              requestId: context.requestId,
+              ipAddress: context.ipAddress,
+              userAgent: context.userAgent,
+            },
+            tx
+          );
+        }
+        return created;
       })
       .catch((error: unknown) => {
         if (
@@ -198,24 +245,32 @@ export class AliasService {
         throw error;
       });
 
-    // Security §9 singles this out: "forwarding creation must be audited".
-    await auditService.record({
-      tenantId,
-      actorUserId: context.userId,
-      eventType: "MAILBOX_FORWARDING_CREATED",
-      targetType: "Mailbox",
-      targetId: mailboxId,
-      requestId: context.requestId,
-      ipAddress: context.ipAddress,
-      userAgent: context.userAgent,
-      metadata: {
-        mailbox: mailbox.address,
-        forwardTo: rule.forwardToAddress,
-        keepCopy: rule.keepCopy,
-      },
-    });
-
     return rule;
+  }
+
+  /**
+   * Whether an address leaves the organisation: not a domain this workspace
+   * has verified, and not one of its own mailboxes or aliases. A domain the
+   * workspace merely added does not count — adding an unverified domain is
+   * something an attacker holding an admin session could do first.
+   */
+  private async isOutsideWorkspace(tenantId: string, address: string): Promise<boolean> {
+    const domain = address.slice(address.lastIndexOf("@") + 1);
+    const [verifiedDomain, mailbox, alias] = await Promise.all([
+      prisma.mailDomain.findFirst({
+        where: { tenantId, domainName: { equals: domain, mode: "insensitive" }, verificationStatus: "VERIFIED" },
+        select: { id: true },
+      }),
+      prisma.mailbox.findFirst({
+        where: { tenantId, address: { equals: address, mode: "insensitive" }, deletionRequestedAt: null },
+        select: { id: true },
+      }),
+      prisma.alias.findFirst({
+        where: { tenantId, address: { equals: address, mode: "insensitive" }, status: "ACTIVE" },
+        select: { id: true },
+      }),
+    ]);
+    return !verifiedDomain && !mailbox && !alias;
   }
 
   async deleteForwarding(

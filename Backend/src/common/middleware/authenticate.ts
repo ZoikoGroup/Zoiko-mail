@@ -97,7 +97,10 @@ export function authenticate(
       platformRole: decoded.platformRole ?? "NONE",
       // Guaranteed present by isAccessTokenPayload above.
       workspace: decoded.workspace as WorkspaceScope,
-      sessionId: (decoded as any).sessionId ?? null,
+      // The claim is `sid` (see buildAccessToken). Reading `sessionId` here
+      // left every workspace request with a null session, so no request could
+      // be tied to — or refused for — the session it belonged to.
+      sessionId: decoded.sid ?? null,
       type: decoded.type,
     };
 

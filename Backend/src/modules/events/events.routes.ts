@@ -33,7 +33,8 @@ eventsRouter.get(
     res.flushHeaders(); // flush immediately so browser gets 200 + headers
 
     // ── Register client ────────────────────────────────────────────────────
-    const cleanup = sseManager.addClient(userId, tenantId, res);
+    // With its session, so signing that session out closes this stream too.
+    const cleanup = sseManager.addClient(userId, tenantId, res, req.tenantContext!.sessionId ?? null);
 
     // ── Initial "connected" event so client knows the stream is live ───────
     res.write(

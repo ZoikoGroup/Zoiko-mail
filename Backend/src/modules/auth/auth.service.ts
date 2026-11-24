@@ -8,6 +8,8 @@ import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { hashPassword, verifyPassword } from "../../common/utils/password.js";
 import { hashToken } from "../../common/utils/tokenHash.js";
+import { RevokedReason, revokedDeliberately } from "../../common/auth/sessions.js";
+import { sseManager } from "../../common/sse/sse.manager.js";
 import { actingRole, consoleAuthorized, signInWorkspace } from "../../common/utils/workspaceScope.js";
 import type {
   AccessTokenPayload,
@@ -507,7 +509,8 @@ async function persistRefreshToken(
   refreshToken: string,
   expiresAt: Date,
   tx: Prisma.TransactionClient | typeof prisma = prisma,
-  device?: SessionDeviceMetadata
+  device?: SessionDeviceMetadata,
+  sessionId?: string
 ): Promise<void> {
   await tx.refreshToken.create({
     data: {
@@ -515,6 +518,8 @@ async function persistRefreshToken(
       tenantId: membership.tenantId,
       tokenHash: hashToken(refreshToken),
       expiresAt,
+      // The session both tokens name; every request is checked against it.
+      sessionId: sessionId ?? null,
       deviceLabel: device?.deviceLabel ?? null,
       ipAddress: device?.ipAddress ?? null,
       userAgent: device?.userAgent ?? null,
@@ -589,7 +594,7 @@ async function issueSession(
   const refresh = buildRefreshToken(membership, workspace, continueSessionId);
   const accessToken = buildAccessToken(membership, workspace, refresh.sessionId);
 
-  await persistRefreshToken(membership, refresh.token, refresh.expiresAt, tx, device);
+  await persistRefreshToken(membership, refresh.token, refresh.expiresAt, tx, device, refresh.sessionId);
   // After the new token is stored, so a failure here cannot leave the account
   // pointing at a workspace it holds no session for.
   await claimActiveWorkspace(membership, tx);
@@ -2105,6 +2110,17 @@ export class AuthService {
     }
 
     if (storedToken.revokedAt) {
+      // A session ended on purpose — this device signed out, another device
+      // or an administrator ended it — leaves stale tabs holding its token.
+      // Presenting one is not theft, and treating it as theft would end every
+      // other session and raise a critical alert each time it happened.
+      if (revokedDeliberately(storedToken.revokedReason)) {
+        throw new AppError(
+          "This session was signed out. Sign in again to continue.",
+          401,
+          ErrorCodes.SESSION_REVOKED
+        );
+      }
       await this.handleRefreshTokenReuse(storedToken, context);
     }
 
@@ -2161,7 +2177,7 @@ export class AuthService {
     const session = await prisma.$transaction(async (tx) => {
       const claimed = await tx.refreshToken.updateMany({
         where: { id: storedToken.id, revokedAt: null },
-        data: { revokedAt: new Date() },
+        data: { revokedAt: new Date(), revokedReason: RevokedReason.ROTATED },
       });
 
       if (claimed.count !== 1) return null;
@@ -2230,7 +2246,7 @@ export class AuthService {
     if (storedToken && !storedToken.revokedAt) {
       await prisma.refreshToken.update({
         where: { id: storedToken.id },
-        data: { revokedAt: new Date() },
+        data: { revokedAt: new Date(), revokedReason: RevokedReason.LOGOUT },
       });
 
       await releaseActiveWorkspace(storedToken.userId, storedToken.tenantId);
@@ -2311,7 +2327,12 @@ export class AuthService {
     input: ChangePasswordInput,
     userId: string,
     tenantId: string,
-    context: RequestContext
+    context: RequestContext,
+    /**
+     * The session making the change. It stays signed in; every other session
+     * of the account ends. Without one, all sessions end, as before.
+     */
+    currentSessionId?: string | null
   ): Promise<void> {
     const user = await userRepository.findById(userId);
     if (!user) {
@@ -2339,9 +2360,23 @@ export class AuthService {
     const passwordHash = await hashPassword(input.newPassword);
     await prisma.$transaction(async (tx) => {
       await tx.appUser.update({ where: { id: userId }, data: { passwordHash } });
+      // Every other session ends: whoever knew the old password is out. The
+      // one making the change stays signed in — ending it too (as the
+      // per-request session check now would) signed the person out the moment
+      // they finished, and left their tab holding a revoked token that a later
+      // refresh would have reported as stolen.
       await tx.refreshToken.updateMany({
-        where: { userId, revokedAt: null },
-        data: { revokedAt: new Date() },
+        where: {
+          userId,
+          revokedAt: null,
+          // Spelled as an OR, not NOT(tenant AND session): SQL's NOT over a
+          // NULL session id is NULL, which would quietly spare every sign-in
+          // recorded before sessions were.
+          ...(currentSessionId
+            ? { OR: [{ tenantId: { not: tenantId } }, { sessionId: null }, { sessionId: { not: currentSessionId } }] }
+            : {}),
+        },
+        data: { revokedAt: new Date(), revokedReason: RevokedReason.PASSWORD_CHANGED },
       });
       await auditService.record(
         {
@@ -2357,6 +2392,8 @@ export class AuthService {
         tx
       );
     });
+    // The other devices' live streams close with their sessions.
+    sseManager.endSessions({ userId, tenantId, exceptSessionId: currentSessionId ?? null });
     await securityAlertService.recordPasswordChanged(tenantId, userId, user.email, {
       ipAddress: context.ipAddress ?? null,
       userAgent: context.userAgent ?? null,
@@ -2369,10 +2406,10 @@ export class AuthService {
     tenantId: string,
     context: RequestContext
   ): Promise<number> {
-    return prisma.$transaction(async (tx) => {
+    const count = await prisma.$transaction(async (tx) => {
       const revoked = await tx.refreshToken.updateMany({
         where: { userId, tenantId, revokedAt: null },
-        data: { revokedAt: new Date() },
+        data: { revokedAt: new Date(), revokedReason: RevokedReason.LOGOUT_ALL },
       });
 
       await releaseActiveWorkspace(userId, tenantId, tx);
@@ -2393,6 +2430,8 @@ export class AuthService {
       );
       return revoked.count;
     });
+    sseManager.endSessions({ userId, tenantId });
+    return count;
   }
 
   async getCurrentUser(req: Request): Promise<AuthSessionResponse["user"] & {

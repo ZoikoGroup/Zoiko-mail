@@ -274,7 +274,10 @@ export async function apiRequest<T = unknown>(
     const errorCode: string | undefined = json?.error?.code;
 
     if (res.status === 401 && auth && !_retried) {
-        if (errorCode === "SESSION_SUPERSEDED") {
+        // SESSION_REVOKED is the same situation by a different route: this
+        // device was signed out from another one, or by an administrator. Its
+        // refresh token was revoked too, so refreshing cannot help either.
+        if (errorCode === "SESSION_SUPERSEDED" || errorCode === "SESSION_REVOKED") {
             // The user signed into another workspace, which ends this one.
             // Refreshing is not just futile — this session's refresh token was
             // revoked on purpose, and presenting a revoked token puts the

@@ -133,11 +133,18 @@ export class IngestService {
         ownerUserId: chosen.membership.userId,
       };
     }
-    // A shared mailbox has no owner; the copy is attributed to a workspace owner.
+    // A shared mailbox has no owner; the copy is attributed to a workspace
+    // Owner, or — in a workspace that has none — its earliest active Admin.
+    // Self-service workspaces start with an Admin and no Owner (the G0 role
+    // fix), and requiring an Owner here refused every message sent to their
+    // shared mailboxes as an unknown recipient. Attribution only: access to
+    // the mailbox is still decided by its grants. Provisional until decision
+    // D-04 settles how Ownership is provisioned.
     const owner = await prisma.tenantMembership.findFirst({
-      where: { tenantId: chosen.tenantId, role: "OWNER", status: "ACTIVE" },
+      where: { tenantId: chosen.tenantId, role: { in: ["OWNER", "ADMIN"] }, status: "ACTIVE" },
       select: { userId: true },
-      orderBy: { createdAt: "asc" },
+      // OWNER sorts before ADMIN in the enum, so an Owner always wins.
+      orderBy: [{ role: "asc" }, { createdAt: "asc" }],
     });
     if (!owner) return null;
     return { address, mailbox: { id: chosen.id, tenantId: chosen.tenantId, address: chosen.address }, authorUserId: owner.userId, ownerUserId: null };

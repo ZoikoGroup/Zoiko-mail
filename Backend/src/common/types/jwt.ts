@@ -65,9 +65,10 @@ export interface AccessTokenPayload {
    * id forward rather than minting a new one, because the person did not
    * start a new session by staying signed in.
    *
-   * Optional only for tokens minted before this existed. Those resolve to a
-   * null session id rather than being refused, since refusing them would sign
-   * every active user out to add a field to an audit row.
+   * Optional in the type only for tokens minted before this existed. Since
+   * P1 every workspace request checks that its session is still live
+   * (tenantContext), so a token without one is answered as an invalid token:
+   * the client refreshes, and the refreshed token carries a session.
    */
   sid?: string;
   type: "access";
