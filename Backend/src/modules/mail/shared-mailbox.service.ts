@@ -4,6 +4,7 @@ import { AppError } from "../../common/errors/AppError.js";
 import { ErrorCodes } from "../../common/errors/errorCodes.js";
 import { auditService } from "../audit/audit.service.js";
 import { policyService } from "../policy/policy.service.js";
+import { securityAlertService } from "../security-alert/security-alert.service.js";
 import { mailboxNotInWorkspace } from "./mailbox-workspace.guard.js";
 
 /**
@@ -193,39 +194,64 @@ export class SharedMailboxService {
       select: { canRead: true, canSend: true, canManage: true, canAssign: true },
     });
 
-    const access = await prisma.mailboxAccess.upsert({
-      where: { mailboxId_membershipId: { mailboxId, membershipId: input.membershipId } },
-      create: {
+    // Read on a team inbox is routine; being able to send as it, manage it or
+    // hand it on is the kind of widening S2 §06 asks to be told about.
+    const widened = (["canSend", "canManage", "canAssign"] as const).some(
+      (permission) => permissions[permission] && !existing?.[permission]
+    );
+
+    return prisma.$transaction(async (tx) => {
+      const access = await tx.mailboxAccess.upsert({
+        where: { mailboxId_membershipId: { mailboxId, membershipId: input.membershipId } },
+        create: {
+          tenantId,
+          mailboxId,
+          membershipId: input.membershipId,
+          grantedByUserId: context.userId,
+          ...permissions,
+        },
+        update: permissions,
+        select: assigneeSelect,
+      });
+
+      // §10 requires assignment creation and removal to be audited. The previous
+      // permissions go in too, so a widening is legible as one.
+      await auditService.record({
         tenantId,
-        mailboxId,
-        membershipId: input.membershipId,
-        grantedByUserId: context.userId,
-        ...permissions,
-      },
-      update: permissions,
-      select: assigneeSelect,
-    });
+        actorUserId: context.userId,
+        eventType: existing ? "SHARED_MAILBOX_ACCESS_CHANGED" : "SHARED_MAILBOX_ACCESS_GRANTED",
+        targetType: "Mailbox",
+        targetId: mailboxId,
+        requestId: context.requestId,
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+        metadata: {
+          address: mailbox.address,
+          assignee: membership.user.email,
+          before: existing ?? null,
+          after: permissions,
+        },
+      }, tx);
 
-    // §10 requires assignment creation and removal to be audited. The previous
-    // permissions go in too, so a widening is legible as one.
-    await auditService.record({
-      tenantId,
-      actorUserId: context.userId,
-      eventType: existing ? "SHARED_MAILBOX_ACCESS_CHANGED" : "SHARED_MAILBOX_ACCESS_GRANTED",
-      targetType: "Mailbox",
-      targetId: mailboxId,
-      requestId: context.requestId,
-      ipAddress: context.ipAddress,
-      userAgent: context.userAgent,
-      metadata: {
-        address: mailbox.address,
-        assignee: membership.user.email,
-        before: existing ?? null,
-        after: permissions,
-      },
+      if (widened) {
+        await securityAlertService.recordMailboxAccessGranted(
+          tenantId,
+          {
+            kind: "SHARED_MAILBOX",
+            accessId: access.id,
+            mailboxId,
+            mailboxAddress: mailbox.address,
+            granteeMembershipId: input.membershipId,
+            granteeEmail: membership.user.email,
+            before: existing ?? null,
+            after: permissions,
+          },
+          { actorUserId: context.userId, requestId: context.requestId, ipAddress: context.ipAddress, userAgent: context.userAgent },
+          tx
+        );
+      }
+      return access;
     });
-
-    return access;
   }
 
   async unassign(
@@ -462,37 +488,61 @@ export class SharedMailboxService {
       select: { canRead: true, canSend: true, canManage: true, canAssign: true },
     });
 
-    const access = await prisma.mailboxAccess.upsert({
-      where: { mailboxId_membershipId: { mailboxId, membershipId: input.membershipId } },
-      create: {
+    // Any new or wider way into somebody else's own mailbox is reported.
+    const widened = (["canRead", "canSend", "canManage"] as const).some(
+      (permission) => permissions[permission] && !existing?.[permission]
+    );
+
+    return prisma.$transaction(async (tx) => {
+      const access = await tx.mailboxAccess.upsert({
+        where: { mailboxId_membershipId: { mailboxId, membershipId: input.membershipId } },
+        create: {
+          tenantId,
+          mailboxId,
+          membershipId: input.membershipId,
+          grantedByUserId: context.userId,
+          ...permissions,
+        },
+        update: permissions,
+        select: assigneeSelect,
+      });
+
+      await auditService.record({
         tenantId,
-        mailboxId,
-        membershipId: input.membershipId,
-        grantedByUserId: context.userId,
-        ...permissions,
-      },
-      update: permissions,
-      select: assigneeSelect,
-    });
+        actorUserId: context.userId,
+        eventType: existing ? "MAILBOX_DELEGATION_CHANGED" : "MAILBOX_DELEGATION_GRANTED",
+        targetType: "Mailbox",
+        targetId: mailboxId,
+        requestId: context.requestId,
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+        metadata: {
+          address: mailbox.address,
+          delegate: membership.user.email,
+          before: existing ?? null,
+          after: permissions,
+        },
+      }, tx);
 
-    await auditService.record({
-      tenantId,
-      actorUserId: context.userId,
-      eventType: existing ? "MAILBOX_DELEGATION_CHANGED" : "MAILBOX_DELEGATION_GRANTED",
-      targetType: "Mailbox",
-      targetId: mailboxId,
-      requestId: context.requestId,
-      ipAddress: context.ipAddress,
-      userAgent: context.userAgent,
-      metadata: {
-        address: mailbox.address,
-        delegate: membership.user.email,
-        before: existing ?? null,
-        after: permissions,
-      },
+      if (widened) {
+        await securityAlertService.recordMailboxAccessGranted(
+          tenantId,
+          {
+            kind: "DELEGATION",
+            accessId: access.id,
+            mailboxId,
+            mailboxAddress: mailbox.address,
+            granteeMembershipId: input.membershipId,
+            granteeEmail: membership.user.email,
+            before: existing ?? null,
+            after: permissions,
+          },
+          { actorUserId: context.userId, requestId: context.requestId, ipAddress: context.ipAddress, userAgent: context.userAgent },
+          tx
+        );
+      }
+      return access;
     });
-
-    return access;
   }
 
   /** Take delegated access away. The next request fails the lookup. */

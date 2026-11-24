@@ -28,3 +28,18 @@ export const reviewAlert = asyncHandler(async (req: Request, res: Response) => {
   });
   sendSuccess(res, 200, result, req.requestId);
 });
+
+export const remediateAlert = asyncHandler(async (req: Request, res: Response) => {
+  const tenant = req.tenantContext!;
+  const alertId = String(req.params.alertId);
+  const result = await securityAlertService.remediate(tenant.tenantId, alertId, req.body, {
+    userId: tenant.userId,
+    // The role this session acts in, not the membership's ceiling: an Owner
+    // working in the Admin console contains accounts as an Admin.
+    role: tenant.role,
+    requestId: req.requestId,
+    ipAddress: req.ip ?? null,
+    userAgent: req.header("user-agent") ?? null,
+  });
+  sendSuccess(res, 200, result, req.requestId);
+});

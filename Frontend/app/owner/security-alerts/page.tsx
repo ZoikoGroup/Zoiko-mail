@@ -9,7 +9,10 @@ import {
   KeyRound,
   Smartphone,
   RotateCcw,
+  Forward,
+  UserPlus,
 } from "lucide-react";
+import { AlertRemediation } from "@/components/account/AlertRemediation";
 
 import { ProtectedRoute } from "@/components/owner/ProtectedRoute";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -60,6 +63,8 @@ const TYPE_ICON: Record<SecurityAlertType, typeof ShieldAlert> = {
   REFRESH_TOKEN_REUSE: RotateCcw,
   PASSWORD_CHANGED: KeyRound,
   PASSWORD_RESET: KeyRound,
+  FORWARDING_EXTERNAL: Forward,
+  MAILBOX_ACCESS_GRANTED: UserPlus,
 };
 
 const FILTERS: Array<{ label: string; status: AlertStatus | "ALL" }> = [
@@ -261,6 +266,9 @@ export default function SecurityAlertsPage() {
                                 Add a note
                               </button>
                             )}
+                          </div>
+                          <div className="mt-2">
+                            <AlertRemediation alertId={alert.id} remediations={alert.remediations} />
                           </div>
                         </div>
                       )}

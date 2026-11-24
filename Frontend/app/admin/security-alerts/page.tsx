@@ -3,6 +3,7 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { useReviewSecurityAlert, useSecurityAlerts } from "@/lib/admin-hooks";
 import { useCan } from "@/lib/admin-capabilities";
+import { AlertRemediation } from "@/components/account/AlertRemediation";
 import { ago } from "@/lib/admin-queries";
 import type { AlertSeverity, AlertReviewAction, AlertStatus, SecurityAlertDto } from "@/lib/admin-api";
 import {
@@ -203,6 +204,11 @@ export default function AdminSecurityAlertsPage() {
                     Dismiss
                   </button>
                 </form>
+              )}
+              {canReview && (alert.status === "OPEN" || alert.status === "ACKNOWLEDGED") && (
+                <div className="border-b border-[var(--border)] bg-[var(--s2)] px-4 pb-2.5">
+                  <AlertRemediation alertId={alert.id} remediations={alert.remediations} />
+                </div>
               )}
             </div>
           ))

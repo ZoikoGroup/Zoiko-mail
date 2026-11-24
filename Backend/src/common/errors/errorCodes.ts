@@ -12,6 +12,10 @@ export const ErrorCodes = {
   // for the previous one. Distinct from UNAUTHORIZED so the client can say
   // what happened instead of showing an unexplained sign-out.
   SESSION_SUPERSEDED: "SESSION_SUPERSEDED",
+  // This session was ended on purpose — signed out on this or another device,
+  // or contained by an administrator. Like SESSION_SUPERSEDED, the client must
+  // not try to refresh it: its refresh token is revoked too.
+  SESSION_REVOKED: "SESSION_REVOKED",
   // The session belongs to a different console than the one being used. A
   // fresh sign-in aimed at that console is the only way in; the client shows
   // this as "sign in again" rather than as a permissions failure.

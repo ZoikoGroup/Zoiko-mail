@@ -26,6 +26,8 @@ export interface SSEEvent {
 interface SSEClient {
   userId: string;
   tenantId: string;
+  /** The sign-in that opened this stream, so ending that session can end it. */
+  sessionId: string | null;
   res: Response;
   connectedAt: Date;
 }
@@ -43,8 +45,8 @@ class SSEManager {
    * Register a new SSE client connection.
    * Returns a cleanup function — call it when the connection closes.
    */
-  addClient(userId: string, tenantId: string, res: Response): () => void {
-    const client: SSEClient = { userId, tenantId, res, connectedAt: new Date() };
+  addClient(userId: string, tenantId: string, res: Response, sessionId: string | null = null): () => void {
+    const client: SSEClient = { userId, tenantId, sessionId, res, connectedAt: new Date() };
 
     if (!this.clients.has(userId)) {
       this.clients.set(userId, new Set());
@@ -109,6 +111,40 @@ class SSEManager {
         this.writeToClient(client, message);
       }
     }
+  }
+
+  /**
+   * Close the open streams of sessions that were just ended (P1, ZMT-18).
+   *
+   * A stream is authorised once, when it opens, so without this a signed-out
+   * device kept receiving new-mail notifications for as long as the tab
+   * stayed open. Closing it makes the browser reconnect, and the reconnect is
+   * checked like any request: a live session gets its stream back, an ended
+   * one is refused.
+   *
+   * `sessionId` ends one session's streams; `exceptSessionId` ends all but
+   * one (a password change keeps the device that made it). This instance's
+   * streams only: with several API instances each must be told.
+   */
+  endSessions(match: { userId: string; tenantId: string; sessionId?: string | null; exceptSessionId?: string | null }): number {
+    const set = this.clients.get(match.userId);
+    if (!set) return 0;
+    let ended = 0;
+    for (const client of [...set]) {
+      if (client.tenantId !== match.tenantId) continue;
+      if (match.sessionId && client.sessionId !== match.sessionId) continue;
+      if (match.exceptSessionId && client.sessionId === match.exceptSessionId) continue;
+      set.delete(client);
+      ended++;
+      try {
+        client.res.end();
+      } catch {
+        // Already gone; nothing to close.
+      }
+    }
+    if (set.size === 0) this.clients.delete(match.userId);
+    if (ended) logger.info({ userId: match.userId, ended }, "SSE streams closed for ended sessions");
+    return ended;
   }
 
   totalConnections(): number {

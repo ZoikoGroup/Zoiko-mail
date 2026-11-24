@@ -20,6 +20,7 @@ import { supportPlatformRouter, supportRouter } from "../modules/support/support
 import { ticketPlatformRouter, ticketRouter } from "../modules/ticket/ticket.routes.js";
 import { connectorRouter } from "../modules/connector/connector.routes.js";
 import { deliveryProtectionRouter } from "../modules/delivery-protection/delivery-protection.routes.js";
+import { accountSecurityRouter } from "../modules/account-security/account-security.routes.js";
 import { billingRouter } from "../modules/billing/billing.routes.js";
 import { contactRouter } from "../modules/contact/contact.routes.js";
 import { assistantRouter } from "../modules/assistant/assistant.routes.js";
@@ -74,6 +75,7 @@ apiRouter.use("/workgraph", authenticate, tenantContext, workGraphRouter);
 // Public booking pages: no sign-in (see booking-public.routes.ts).
 apiRouter.use("/public/booking", bookingPublicRouter);
 apiRouter.use("/delivery-protection", deliveryProtectionRouter);
+apiRouter.use("/account-security", accountSecurityRouter);
 apiRouter.use("/billing", billingRouter);
 apiRouter.use("/events", eventsRouter);
 

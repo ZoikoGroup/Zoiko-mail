@@ -3,13 +3,14 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import {
-  Building2, CheckCircle2, ChevronRight, Fingerprint, KeyRound, Loader2, Monitor,
+  Building2, CheckCircle2, ChevronRight, Fingerprint, KeyRound, Loader2,
   MonitorSmartphone, ShieldCheck,
 } from "lucide-react";
 import { ApiError } from "@/lib/api-client";
 import { useChangePassword, useLogoutAll, useMe, useProfile, useUpdateProfile } from "@/lib/auth-hooks";
 import { initials } from "@/lib/useMemberShell";
 import { MfaSettings } from "@/components/account/MfaSettings";
+import { ActiveSessionsRow } from "@/components/account/ActiveSessions";
 import { PasswordRequirements } from "@/components/auth";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
@@ -217,7 +218,7 @@ export function ProfileSettings({ section }: { section: SettingsSection }) {
               <MfaSettings />
               <PasswordRow />
               <SignOutEverywhereRow />
-              <SoonRow icon={Monitor} title="Active sessions" description="See every browser and device you are signed in on, and end one at a time." />
+              <ActiveSessionsRow />
               <SoonRow icon={Fingerprint} title="ZoikoID" description="Link your ZoikoID for single sign-on across Zoiko." />
             </div>
           </Card>

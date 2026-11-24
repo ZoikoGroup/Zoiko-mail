@@ -5,6 +5,7 @@ import { AppError } from "../errors/AppError.js";
 import { ErrorCodes } from "../errors/errorCodes.js";
 import { actingRole, consoleAuthorized } from "../utils/workspaceScope.js";
 import { withCrossTenant, withTenant } from "../../config/tenantScope.js";
+import { sessionState } from "../auth/sessions.js";
 
 export async function tenantContext(
   req: Request,
@@ -98,6 +99,31 @@ export async function tenantContext(
   // Narrow the authority to this session's console before anything downstream
   // reads it, so requireRole and every capability check see the acting role
   // rather than the most the membership could ever do.
+  // The session this token belongs to must still be live (P1, S2 §06). An
+  // access token is otherwise valid until it expires, so without this check
+  // signing a device out, an administrator containing an account, or an MFA
+  // reset would leave every token already issued working for hours.
+  const sessionId = req.auth.sessionId;
+  const state = sessionId ? await sessionState(sessionId, userId, tenantId) : "UNKNOWN";
+  if (state === "REVOKED") {
+    next(
+      new AppError(
+        "This session was signed out. Sign in again to continue.",
+        401,
+        ErrorCodes.SESSION_REVOKED
+      )
+    );
+    return;
+  }
+  if (state === "UNKNOWN") {
+    // Not "revoked": a token issued before sessions were recorded lands here
+    // too, and the client's refresh gives it a recorded session. A session
+    // whose records were deleted (removal, MFA reset) cannot be refreshed, so
+    // it ends there.
+    next(new AppError("This session is not recognised", 401, ErrorCodes.TOKEN_INVALID));
+    return;
+  }
+
   const acting = actingRole(membership.role, workspace);
   if (!acting) {
     next(
